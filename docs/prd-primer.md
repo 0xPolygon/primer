@@ -1,7 +1,7 @@
 # PRD: Primer
 
 **Author:** Taylan Pince
-**Status:** Draft
+**Status:** Refined draft (open questions resolved; ready for sub-project specs)
 **Last updated:** May 12, 2026
 
 > *"The Primer was a book in appearance only. Its interior was a tissue of paper, but each page was a separate flat-panel display, which formed itself into pictures, words, and animations responsive to the reader."* — Neal Stephenson, *The Diamond Age*
@@ -45,7 +45,7 @@ User signs in via Okta. From the home page or a dedicated "New Document" action,
 
 ### Upload a new version of an existing document
 
-From either the home page or an existing document's detail page, the user explicitly selects "Add version to existing document." A typeahead lets them pick from their own existing documents (only the document's original uploader can add versions — see open questions). They drop the new HTML and optionally add a version note ("fixed Y-axis scale," "added Q2 numbers"). The system creates a new version under the same document container. The document's canonical URL (`/d/{docId}`) now serves the latest version; previous versions remain accessible at version-specific URLs (`/d/{docId}/v/{versionNumber}`).
+From either the home page or an existing document's detail page, the user explicitly selects "Add version to existing document." A typeahead lets them pick from their own existing documents (only the document's original uploader can add versions). They drop the new HTML and optionally add a version note ("fixed Y-axis scale," "added Q2 numbers"). The system creates a new version under the same document container. The document's canonical URL (`/d/{docId}`) now serves the latest version; previous versions remain accessible at version-specific URLs (`/d/{docId}/v/{versionNumber}`).
 
 No filename matching, no implicit version detection. Adding a version is always an explicit user action on a chosen document.
 
@@ -65,9 +65,9 @@ The user selects text within the iframe using native browser selection, or click
 
 ### Reply, resolve, reopen
 
-Anyone with access can reply to any thread. Anyone can resolve a thread (it dims the anchor marker and moves under a "resolved" filter). Anyone can reopen a resolved thread. Replies in a thread you participated in trigger a Slack DM to other thread participants who are not the new commenter.
+Anyone with access can reply to any thread. Anyone can resolve a thread (it dims the anchor marker and moves under a "resolved" filter). Anyone can reopen a resolved thread. **Replying to a resolved thread auto-reopens it** — discussion resuming implies the thread isn't actually resolved. Replies in a thread you participated in trigger a Slack DM to other thread participants who are not the new commenter.
 
-Comment edits and deletes are restricted to the comment author. Edits are unlimited (with an "edited" indicator after the fact); deletes leave a tombstone ("deleted by author") so reply context isn't broken.
+Comment edits and deletes are restricted to the comment author. Edits are unlimited (with an "edited" indicator after the fact); deletes leave a tombstone ("deleted by author") so reply context isn't broken. **Editing a comment to add a new @mention fires a Slack DM to the newly-mentioned user; removing a mention via edit does not notify the removed user. Self-mentions never notify.**
 
 ### Versions and old threads
 
@@ -75,9 +75,13 @@ When viewing the latest version of a document, you can drop new threads, reply, 
 
 ### Manage your documents
 
-The user's home page shows two lists: **My documents** (everything they uploaded, sorted by most recent activity) and **Recently viewed or commented** (anything they opened or interacted with in the last N days). There is no global index, no cross-Polygon document feed, no search. Documents not in either list are reachable only by direct URL.
+The user's home page shows two lists: **My documents** (everything they uploaded, sorted by most recent activity) and **Recently viewed or commented** (anything they opened or interacted with in the last 30 days, uncapped). There is no global index, no cross-Polygon document feed, no search. Documents not in either list are reachable only by direct URL.
 
-A document can be deleted only by its original uploader. Delete is soft-delete with a 30-day reversible window; after that, all versions, threads, comments, and storage objects are hard-purged.
+A document can be deleted only by its original uploader. Delete is soft-delete with a 30-day reversible window; after that, all versions, threads, comments, and storage objects are hard-purged. The uploader's home page includes a collapsed **Recently deleted** section listing their soft-deleted documents within the window, with a "Restore" action.
+
+### Edit document and version metadata
+
+The original uploader can edit the document's title and description at any time, and can edit any version's note. No edit history is retained and no notifications fire — these are owner-only metadata corrections, not collaborative content.
 
 ## Data Model (sketch)
 
@@ -153,19 +157,40 @@ Anchor (embedded JSON in Thread.anchor)
 Even though Railway isolation removes the cross-contamination risk with other Polygon infrastructure, uploaded HTML is rendered inside a sandboxed iframe to prevent LLM-generated JS from faking the app's chrome (e.g., a fake "session expired, log in again" overlay). The iframe sandbox attributes:
 
 ```
-sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
+sandbox="allow-scripts allow-forms"
 ```
 
-Notably *not* `allow-same-origin`. This prevents the iframe from accessing the parent's cookies, localStorage, or DOM. CSP on the iframe response permits inline scripts (most LLM artifacts use them) and explicitly allowlisted CDNs. Initial proposed allowlist: `cdn.tailwindcss.com`, `cdnjs.cloudflare.com`, `unpkg.com`, `cdn.jsdelivr.net`, `fonts.googleapis.com`, `fonts.gstatic.com`. Tightened or expanded as we see real usage.
+Notably *not* `allow-same-origin` (prevents iframe access to parent cookies, localStorage, or DOM) and notably *not* `allow-popups` or `allow-popups-to-escape-sandbox` (prevents the in-iframe fake-SSO-popup phishing vector). External links from artifacts are handled instead by the companion script forwarding `<a target="_blank">` clicks and `window.open()` calls to the parent via postMessage, which validates and opens the new tab from the trusted parent context.
+
+### Iframe CSP
+
+Set on the iframe document response:
+
+| Directive | Value | Purpose |
+|---|---|---|
+| `script-src` | `'unsafe-inline' <CDN allowlist>` | Permits inline `<script>` blocks (the LLM-artifact norm) and scripts from the allowlist. |
+| `style-src` | `'unsafe-inline' <CDN allowlist>` | Permits inline styles and stylesheets from the allowlist. |
+| `connect-src` | `'none'` | Blocks `fetch`/XHR/WebSocket. LLM artifacts almost always embed data inline; revisit if real cases emerge. |
+| `img-src` | `data: blob: 'self' https:` | Covers base64-embedded images (common), Primer-hosted assets, and external images (graceful for the few artifacts that link out). |
+| `font-src` | `'self' fonts.gstatic.com` | Web fonts via the allowlist. |
+| `form-action` | `'none'` | Native HTML form submission is dead, fully neutering in-iframe phishing forms. JS-driven forms (`preventDefault()` + custom handler) still work, which is how most artifact forms operate anyway. |
+| `frame-src` | `'none'` | No nested iframes (also stripped at upload — see Upload sanitization). |
+
+**CDN allowlist (script-src / style-src):** `cdn.tailwindcss.com`, `cdnjs.cloudflare.com`, `unpkg.com`, `cdn.jsdelivr.net`, `fonts.googleapis.com`, `fonts.gstatic.com`, `esm.sh`, `cdn.skypack.dev`. The last two cover the modern ESM-module pattern that Claude artifacts default to. Tightened or expanded as we see real usage.
+
+### Upload sanitization
+
+Sanitization is deliberately minimal — the iframe sandbox + CSP are the primary defense. At upload time the pipeline strips exactly two element types: nested `<iframe>` and `<meta http-equiv="refresh">`. Both have no legitimate use in a Primer artifact (nested embeds, auto-redirect respectively) and both expand the attack surface inside the sandbox. Everything else, including `<form>`, `<script>`, and inline event handlers, is preserved.
 
 ### Companion script
 
-A single signed script served from the app's domain at `/companion/v1.js` is injected by the upload pipeline immediately before the closing `</body>` tag of every uploaded HTML file. This is the **only** mutation the system makes to uploaded content. Its responsibilities:
+A single signed script served from the app's domain at `/companion/v1.js` is injected by the upload pipeline immediately before the closing `</body>` tag of every uploaded HTML file (alongside the `<iframe>` / `<meta refresh>` strip — the only two mutations the system makes to uploaded content). Its responsibilities:
 
 1. Capture text selections (`selectionchange` event) and report them to the parent via `postMessage` with normalized anchor data (selected text + prefix + suffix + container path).
 2. When the parent enters element-pick mode, capture the next clicked element and report its element path and inner-content hash.
 3. Render in-iframe comment markers (highlights on text ranges, badges next to elements) based on anchor data the parent sends down via postMessage.
 4. Resolve anchors on initial load: given anchors from the parent, find their current positions in the live DOM and report pixel coordinates back, used by the parent to align sidebar entries with their in-iframe positions.
+5. Forward external navigation to the parent: intercept clicks on `<a target="_blank">` and calls to `window.open()`; postMessage the URL to the parent, which validates (`https:` only) and opens a new tab from the trusted parent context. Required because the sandbox drops `allow-popups`.
 
 The companion script makes no network requests, accesses no parent state, and stores nothing. It is pure DOM + postMessage. Every byte added to it is attack surface inside the iframe, so we resist scope creep aggressively.
 
@@ -182,6 +207,7 @@ The companion script makes no network requests, accesses no parent state, and st
 - `element_picked(anchorData)` — user clicked an element in pick mode
 - `anchor_positions(positions[])` — response to position request
 - `resize(height)` — iframe content height changed, parent adjusts container
+- `open_external(url)` — user clicked `<a target="_blank">` or artifact called `window.open()`; parent validates `https:` and opens a new tab
 
 All messages include a shared token established at iframe initialization to reject cross-document interference.
 
@@ -191,13 +217,22 @@ When a user makes a selection, the companion script generates an anchor with bot
 
 Because anchors are bound to specific immutable versions, drift should be rare in practice. The fallback exists as a safety net for content that legitimately moves at render time (e.g., charts that animate into place).
 
+### Known anchoring limitations
+
+- **`<canvas>` content.** A canvas has no DOM children and no selectable text, only rendered pixels. Users can anchor a comment to a `<canvas>` element as a whole (via element-path), but cannot mark regions inside it. This is surfaced in product copy where canvas content is detected (or noted in general help) so users aren't surprised.
+- **SVG content.** SVG works with the element-path anchor because each shape is a real DOM node — `["body", "div:nth-child(2)", "svg", "g:nth-child(3)", "rect:nth-child(1)"]` resolves the same as any other element. No special handling.
+
 ### Notifications
 
-When a comment is created, the API:
+When a comment is created or edited, the API:
 
-1. Parses @mentions from the body. For each mentioned user, enqueues a Slack DM job.
-2. Looks up the parent thread. For each unique prior participant who is not the new commenter, enqueues a Slack DM job ("X replied to your thread on [document title]").
+1. Parses @mentions from the body. For each *newly* mentioned user (present in the current body, absent from the previous body in the edit case), enqueues a Slack DM job. Self-mentions are skipped. Removing a mention via edit does not notify the removed user.
+2. On comment creation (not edits), looks up the parent thread. For each unique prior participant who is not the new commenter, enqueues a Slack DM job ("X replied to your thread on [document title]").
 3. Each Slack message includes a deep link back to the document at the right version and thread.
+
+No rate limiting or batching in v1 — every qualifying event fires a DM. Revisit reactively if a chatty thread produces real complaints.
+
+**Polling cadence for new comments and replies:** 10s interval on the active document view, foreground-only (pause when the tab is blurred, resume on focus). Polls use conditional requests (`If-None-Match` / `304`) so steady-state checks are cheap on the server.
 
 Slack `user_id` lookup happens lazily on first sign-in by matching email against the Slack Web API.
 
@@ -205,8 +240,8 @@ Slack `user_id` lookup happens lazily on first sign-in by matching email against
 
 - Okta OIDC, restricted to the Polygon Okta org. Any signed-in user has read and comment access to every document.
 - Sessions via signed cookies. CSRF protection on mutating endpoints.
-- Only a document's original uploader can delete that document and can upload new versions to it.
-- Comment edit and delete: only by the comment author. Thread resolve and reopen: anyone.
+- **Document ownership is uploader-only** for the mutating actions on the document container itself: only the original uploader can add new versions, delete the document, edit the title or description, or edit a version note. The stranded-doc edge case (uploader leaves Polygon or hands a project off) is handled out-of-band by a manual DB poke if it actually arises; a co-owner or admin model is a deliberate v2 escape hatch.
+- Comment edit and delete: only by the comment author. Thread resolve, reopen, and reply: anyone with access.
 
 ## Storage & Limits
 
@@ -214,22 +249,59 @@ Slack `user_id` lookup happens lazily on first sign-in by matching email against
 - File type: a single `.html` file. No zip uploads, no folder uploads.
 - Per-document version count: no enforced limit at launch; monitor and revisit.
 
-## Open Questions
+### Upload-time validation
 
-1. **HTML sanitization scope.** What, if anything, do we strip from uploaded HTML before serving? Options range from "nothing — iframe sandbox is the defense" to "strip nested `<iframe>` and `<form>` elements that could phish inside the sandbox" to "full DOMPurify pass." Recommendation: minimal stripping, lean on the sandbox. Add server-side scrubbing if specific abuses emerge.
-2. **External resource allowlist.** Final CDN list for the iframe CSP. Proposal above is a starting point; we'll refine based on what real uploads need.
-3. **Comment edit window.** Unlimited edits with "edited" indicator is the proposed default. Alternative is a short edit window (e.g., 5 minutes) to reduce post-hoc rewriting of contentious threads. Recommend unlimited unless someone has a strong objection.
-4. **Canvas elements.** Text-range and element-path both struggle with `<canvas>` content. For v1, you can comment on a canvas element as a whole but not on regions within it. Flag as a known limitation in product copy.
-5. **Comment sync model.** Polling interval for new comments and replies. Proposing 10s polling on the active document view, no WebSocket in v1.
-6. **Version permissions.** Should only the document's original uploader be able to add new versions, or should anyone be able to (with the doc still belonging to the original uploader)? Proposing uploader-only for v1 to keep ownership clean.
+Each upload must pass before persistence:
+1. Single file with `.html` extension and `text/html` content type.
+2. Under the 10 MB cap.
+3. Parses as HTML via a tolerant parser (`parse5` or equivalent). If the parse produces a usable document tree, it ships; minor brokenness is tolerated since browsers are forgiving renderers, but a file that fails to parse at all is rejected at upload with an actionable error message.
 
-## Rough Milestones
+At render time, no further validation — we trust the browser to handle partial brokenness gracefully.
 
-- **Week 1–2:** Auth (Okta), basic upload + storage, iframe rendering, no commenting yet.
-- **Week 3–4:** Companion script, text-range anchoring, comment creation and display.
-- **Week 5:** Threading, replies, resolve / reopen.
-- **Week 6:** @mentions, Slack DM notifications, Okta-to-Slack user resolution.
-- **Week 7:** Versioning UI — add new version, version selector, cross-version threads.
-- **Week 8:** Element-path fallback anchoring, polish, internal alpha to a small group.
+### Viewer layout
 
-Total: roughly 8 weeks to a usable internal alpha. Aggressive but doable for a focused two-person build.
+Desktop-only (per non-goals). Document view places the iframe on the left at remaining width and a fixed **360px** comment sidebar on the right, collapsible to a thin rail when the user wants more horizontal space for the artifact. The iframe expands vertically based on `resize(height)` postMessage from the companion script.
+
+## Resolved Decisions
+
+The six open questions originally listed here were resolved in the refinement pass on 2026-05-12. All decisions are now incorporated into the body of this PRD. For traceability:
+
+| # | Topic | Decision | Where it lives in this doc |
+|---|---|---|---|
+| 1 | HTML sanitization scope | Strip nested `<iframe>` and `<meta http-equiv="refresh">` only. | Upload sanitization |
+| 2 | External resource allowlist | PRD list + `esm.sh` + `cdn.skypack.dev`. | Iframe CSP |
+| 3 | Comment edit window | Unlimited with "edited" indicator. | Reply, resolve, reopen |
+| 4 | Canvas elements | Comment on the canvas as a whole; no in-canvas regions. | Known anchoring limitations |
+| 5 | Comment sync model | 10s polling, foreground-only, conditional requests. | Notifications |
+| 6 | Version permissions | Uploader-only for add-version, delete, and metadata edits. | Authentication & Access |
+
+Additional gaps surfaced during refinement and resolved inline:
+
+- Iframe popups dropped from sandbox; external navigation forwarded to the parent via the companion script.
+- Replying to a resolved thread auto-reopens it.
+- @mention-on-edit fires a DM for newly-added mentions; removed mentions and self-mentions do not notify.
+- No rate limiting on notifications in v1.
+- Uploader can edit document title, description, and version notes at any time; no edit history.
+- Recently-viewed window is the last 30 days, uncapped.
+- A collapsed "Recently deleted" section on the uploader's home page exposes the 30-day restore window.
+- Viewer layout: 360px right sidebar, collapsible; iframe takes remaining width.
+- Upload validation: single `.html` file ≤10 MB that parses with a tolerant HTML parser.
+
+## Build Phases
+
+The build is split into two phases. Phase 1 produces a fully working **local** application with no real auth and no Slack notifications, exercised against a single mock user identity. Phase 2 wires in the real-world integrations (existing Polygon Okta work, Slack DM notifier) and ships internally.
+
+This local-first split exists because there is already Polygon work for Okta auth that will be plugged in once the local app is solid; trying to wire Okta during early development would consume time without changing the feature set being designed and tested.
+
+**Phase 1 — Local app:**
+1. **Local foundation.** Repo scaffold, local dev server, Postgres + local object storage, upload pipeline (validation + companion-script injection + storage write), iframe sandbox + CSP, viewer shell, empty home page, single mock user.
+2. **Anchoring + companion script.** Companion script, postMessage protocol, text-range anchor capture and rendering, anchor positioning, external-nav forwarding. No comment storage yet — substrate only.
+3. **Comments + threading + dashboard.** Thread + Comment data model, comment creation, sidebar, replies, resolve/reopen (auto-reopen-on-reply), 10s polling, edit/delete by author, dashboard ("my docs" + "recently viewed").
+4. **Versioning + soft-delete.** Add-new-version, version selector, per-version threads, cross-version continuity, version notes, metadata editing, recently-deleted section + 30-day restore.
+
+**Phase 2 — Connect to the real world:**
+5. **Auth + ownership.** Replace mock user with existing Polygon Okta integration; enforce uploader-only rules; session cookies; CSRF.
+6. **Slack notifications.** Slack notifier worker, @mention typeahead, mention parsing (initial + edit-add), Okta→Slack ID resolution, deep links.
+7. **Element-path fallback + polish.** Element-path anchor as resolution fallback, drift indicator, real-usage CSP/sandbox refinement, internal alpha launch.
+
+Each sub-project will be designed and planned independently. See `docs/superpowers/specs/2026-05-12-primer-decomposition-design.md` for the full decomposition.
