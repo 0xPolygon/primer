@@ -1,0 +1,15 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Supply-chain hardening (see design spec, Section "Supply-chain hardening")
+minimumReleaseAge: 20160 # 14 days, in minutes
+blockExoticSubdeps: true
+# Packages allowed to run postinstall/preinstall scripts.
+# Each entry is reviewed individually. NEVER approve sight-unseen.
+allowBuilds:
+  # esbuild downloads a platform-specific native binary from npm under
+  # the @esbuild scope. Required transitively by drizzle-kit.
+  esbuild: true
+strictPeerDependencies: true
+engineStrict: true

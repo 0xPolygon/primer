@@ -1,0 +1,21 @@
+{
+  "name": "primer",
+  "private": true,
+  "packageManager": "pnpm@11.1.0",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "verify": "pnpm typecheck && pnpm test && pnpm audit --audit-level=high",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d --wait postgres && pnpm db:migrate",
+    "db:migrate": "pnpm --filter @primer/api run db:migrate",
+    "db:migrate:test": "DATABASE_URL=$DATABASE_URL_TEST pnpm --filter @primer/api run db:migrate",
+    "db:generate": "pnpm --filter @primer/api run db:generate"
+  }
+}
