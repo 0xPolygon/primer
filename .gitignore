@@ -7,3 +7,4 @@ dist/
 /storage/
 coverage/
 .vitest-tmp/
+.vite/
