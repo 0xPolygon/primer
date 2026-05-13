@@ -15,7 +15,7 @@
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d --wait postgres && pnpm db:migrate",
     "db:migrate": "pnpm --filter @primer/api run db:migrate",
-    "db:migrate:test": "DATABASE_URL=$DATABASE_URL_TEST pnpm --filter @primer/api run db:migrate",
+    "db:migrate:test": "pnpm --filter @primer/api run db:migrate:test",
     "db:generate": "pnpm --filter @primer/api run db:generate"
   }
 }
