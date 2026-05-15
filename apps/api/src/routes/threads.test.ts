@@ -1,0 +1,277 @@
+import { describe, it, expect } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { v7 as uuidv7 } from 'uuid';
+import { eq } from 'drizzle-orm';
+import { createApp } from '../app.ts';
+import { FilesystemStorage } from '../storage/filesystem.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
+import { db } from '../db/client.ts';
+import { documents, versions, threads, comments } from '@primer/shared/schema';
+import type { ThreadsListResponse } from '@primer/shared';
+import type { ThreadDTO, CreateThreadRequest } from '@primer/shared';
+
+async function seedDocument() {
+  const documentId = uuidv7();
+  const versionId = uuidv7();
+  await db.insert(documents).values({
+    id: documentId,
+    title: 'Seed Doc',
+    description: null,
+    uploaderId: 'mock-user-1',
+  });
+  await db.insert(versions).values({
+    id: versionId,
+    documentId,
+    versionNumber: 1,
+    storageKey: `v1/${versionId}.html`,
+    sizeBytes: 0,
+    versionNote: null,
+  });
+  return { documentId, versionId };
+}
+
+async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'primer-threads-test-'));
+  try {
+    const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+    return await fn(app);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+describe('GET /api/versions/:versionId/threads — happy path', () => {
+  it('returns empty list with 200 when no threads exist', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const res = await app.request(`/api/versions/${versionId}/threads`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as ThreadsListResponse;
+      expect(body.threads).toEqual([]);
+      expect(typeof body.asOf).toBe('string');
+      expect(res.headers.get('etag')).toBeTruthy();
+    });
+  });
+
+  it('returns existing threads + comments inlined', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const threadId = uuidv7();
+      const commentId = uuidv7();
+      await db.insert(threads).values({
+        id: threadId,
+        versionId,
+        anchor: { type: 'text-range', selectorText: 't', prefix: '', suffix: '', containerPath: 'body' },
+      });
+      await db.insert(comments).values({
+        id: commentId,
+        threadId,
+        authorId: 'mock-user-1',
+        body: 'first comment',
+        mentions: [],
+      });
+
+      const res = await app.request(`/api/versions/${versionId}/threads`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as ThreadsListResponse;
+      expect(body.threads).toHaveLength(1);
+      expect(body.threads[0].id).toBe(threadId);
+      expect(body.threads[0].comments).toHaveLength(1);
+      expect(body.threads[0].comments[0].body).toBe('first comment');
+      expect(body.threads[0].comments[0].authorDisplayName).toBe('Mock User');
+    });
+  });
+});
+
+describe('GET /api/versions/:versionId/threads — ETag/304', () => {
+  it('returns 304 when If-None-Match matches the current ETag', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const r1 = await app.request(`/api/versions/${versionId}/threads`);
+      expect(r1.status).toBe(200);
+      const etag = r1.headers.get('etag');
+      expect(etag).toBeTruthy();
+
+      const r2 = await app.request(`/api/versions/${versionId}/threads`, {
+        headers: { 'if-none-match': etag! },
+      });
+      expect(r2.status).toBe(304);
+      expect(r2.headers.get('etag')).toBe(etag);
+    });
+  });
+
+  it('returns a fresh ETag and 200 after any thread/comment change', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const r1 = await app.request(`/api/versions/${versionId}/threads`);
+      const etag1 = r1.headers.get('etag');
+
+      const threadId = uuidv7();
+      await db.insert(threads).values({
+        id: threadId,
+        versionId,
+        anchor: { type: 'text-range', selectorText: 't', prefix: '', suffix: '', containerPath: 'body' },
+      });
+      await db.insert(comments).values({
+        id: uuidv7(),
+        threadId,
+        authorId: 'mock-user-1',
+        body: 'fresh',
+        mentions: [],
+      });
+
+      const r2 = await app.request(`/api/versions/${versionId}/threads`, {
+        headers: { 'if-none-match': etag1! },
+      });
+      expect(r2.status).toBe(200);
+      const etag2 = r2.headers.get('etag');
+      expect(etag2).toBeTruthy();
+      expect(etag2).not.toBe(etag1);
+    });
+  });
+});
+
+describe('POST /api/versions/:versionId/threads', () => {
+  it('creates a thread + first comment in one transaction', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const body: CreateThreadRequest = {
+        anchor: {
+          type: 'text-range',
+          selectorText: 'churn jumped',
+          prefix: 'see how ',
+          suffix: ' last week',
+          containerPath: 'body > p:nth-of-type(2)',
+        },
+        body: 'is this the same metric as before?',
+      };
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(201);
+      const thread = (await res.json()) as ThreadDTO;
+      expect(thread.id).toBeTruthy();
+      expect(thread.versionId).toBe(versionId);
+      expect(thread.anchor).toEqual(body.anchor);
+      expect(thread.comments).toHaveLength(1);
+      expect(thread.comments[0].body).toBe(body.body);
+      expect(thread.comments[0].authorId).toBe('mock-user-1');
+      expect(thread.comments[0].mentions).toEqual([]);
+
+      const threadRows = await db.select().from(threads).where(eq(threads.id, thread.id));
+      expect(threadRows).toHaveLength(1);
+      const commentRows = await db.select().from(comments).where(eq(comments.threadId, thread.id));
+      expect(commentRows).toHaveLength(1);
+    });
+  });
+
+  it('rejects invalid_body for empty body', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 't', prefix: '', suffix: '', containerPath: 'body' },
+          body: '   ',
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('invalid_body');
+    });
+  });
+
+  it('rejects invalid_body for body over 5000 chars', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 't', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'x'.repeat(5001),
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_body');
+    });
+  });
+
+  it('rejects invalid_anchor for malformed anchor', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x' /* missing fields */ },
+          body: 'hi',
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_anchor');
+    });
+  });
+});
+
+async function seedThread(versionId: string) {
+  const threadId = uuidv7();
+  await db.insert(threads).values({
+    id: threadId,
+    versionId,
+    anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+  });
+  await db.insert(comments).values({
+    id: uuidv7(),
+    threadId,
+    authorId: 'mock-user-1',
+    body: 'seed',
+    mentions: [],
+  });
+  return threadId;
+}
+
+describe('POST /api/threads/:tid/resolve', () => {
+  it('sets resolvedAt + resolvedBy and is idempotent', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const threadId = await seedThread(versionId);
+      const r1 = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      expect(r1.status).toBe(200);
+      const t1 = (await r1.json()) as ThreadDTO;
+      expect(t1.resolvedAt).not.toBeNull();
+      expect(t1.resolvedBy).toBe('mock-user-1');
+      expect(t1.resolvedByDisplayName).toBe('Mock User');
+
+      const r2 = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      expect(r2.status).toBe(200);
+      const t2 = (await r2.json()) as ThreadDTO;
+      expect(t2.resolvedAt).not.toBeNull();
+    });
+  });
+});
+
+describe('POST /api/threads/:tid/reopen', () => {
+  it('clears resolvedAt + resolvedBy and is idempotent', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const threadId = await seedThread(versionId);
+      await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+
+      const r1 = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST' });
+      expect(r1.status).toBe(200);
+      const t1 = (await r1.json()) as ThreadDTO;
+      expect(t1.resolvedAt).toBeNull();
+      expect(t1.resolvedBy).toBeNull();
+
+      const r2 = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST' });
+      expect(r2.status).toBe(200);
+      expect(((await r2.json()) as ThreadDTO).resolvedAt).toBeNull();
+    });
+  });
+});

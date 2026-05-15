@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
 import { ARTIFACT_CSP } from './versionContent.ts';
 
 async function upload(app: ReturnType<typeof createApp>): Promise<string> {
@@ -23,7 +24,7 @@ describe('GET /api/versions/:versionId/content', () => {
   it('serves the stored HTML with the locked CSP, frame-ancestors, and content-type', async () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-vc-test-'));
     try {
-      const app = createApp({ storage: new FilesystemStorage(root) });
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
       const versionId = await upload(app);
 
       const res = await app.request(`/api/versions/${versionId}/content`);
@@ -45,7 +46,7 @@ describe('GET /api/versions/:versionId/content', () => {
   it('returns 404 for an unknown version id', async () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-vc-test-'));
     try {
-      const app = createApp({ storage: new FilesystemStorage(root) });
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
       const res = await app.request('/api/versions/01234567-89ab-cdef-0123-456789abcdef/content');
       expect(res.status).toBe(404);
     } finally {

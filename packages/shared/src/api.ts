@@ -1,3 +1,5 @@
+import type { AnchorData } from './companion-protocol.ts';
+
 export interface UploadResponse {
   documentId: string;
   versionId: string;
@@ -38,4 +40,61 @@ export interface VersionSummary {
 export interface DocumentDetailResponse {
   document: DocumentSummary;
   latestVersion: VersionSummary;
+}
+
+export interface CommentDTO {
+  id: string;
+  threadId: string;
+  authorId: string;
+  authorDisplayName: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string | null;
+  deletedAt: string | null;
+  mentions: string[];
+}
+
+export interface ThreadDTO {
+  id: string;
+  versionId: string;
+  anchor: AnchorData;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolvedByDisplayName: string | null;
+  createdAt: string;
+  comments: CommentDTO[];
+}
+
+export interface ThreadsListResponse {
+  threads: ThreadDTO[];
+  asOf: string;
+}
+
+export interface CreateThreadRequest {
+  anchor: AnchorData;
+  body: string;
+}
+
+export interface CommentBodyRequest {
+  body: string;
+}
+
+export interface DashboardDocumentSummary {
+  id: string;
+  title: string;
+  description: string | null;
+  uploaderDisplayName: string;
+  threadCount: number;
+  activeThreadCount: number;
+  lastActivityAt: string;
+}
+
+export interface DashboardActivityEntry extends DashboardDocumentSummary {
+  signal: 'viewed' | 'commented';
+  signalAt: string;
+}
+
+export interface DashboardResponse {
+  myDocuments: DashboardDocumentSummary[];
+  recentlyViewedOrCommented: DashboardActivityEntry[];
 }

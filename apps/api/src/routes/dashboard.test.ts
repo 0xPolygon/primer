@@ -1,0 +1,161 @@
+import { describe, it, expect } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { v7 as uuidv7 } from 'uuid';
+import { createApp } from '../app.ts';
+import { FilesystemStorage } from '../storage/filesystem.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
+import { db } from '../db/client.ts';
+import { documents, versions, threads, comments, documentViews, users } from '@primer/shared/schema';
+import type { DashboardResponse } from '@primer/shared';
+
+async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'primer-dashboard-test-'));
+  try {
+    const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+    return await fn(app);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function seedDoc(uploaderId: string, title: string) {
+  const documentId = uuidv7();
+  const versionId = uuidv7();
+  await db.insert(documents).values({
+    id: documentId,
+    title,
+    description: null,
+    uploaderId,
+  });
+  await db.insert(versions).values({
+    id: versionId,
+    documentId,
+    versionNumber: 1,
+    storageKey: `v1/${versionId}.html`,
+    sizeBytes: 0,
+    versionNote: null,
+  });
+  return { documentId, versionId };
+}
+
+describe('GET /api/dashboard', () => {
+  it('returns empty lists when nothing exists', async () => {
+    await withApp(async (app) => {
+      const res = await app.request('/api/dashboard');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as DashboardResponse;
+      expect(body.myDocuments).toEqual([]);
+      expect(body.recentlyViewedOrCommented).toEqual([]);
+    });
+  });
+
+  it('lists my documents ordered by activity', async () => {
+    await withApp(async (app) => {
+      const a = await seedDoc('mock-user-1', 'A doc');
+      // Wait a tick so b is genuinely later.
+      await new Promise((r) => setTimeout(r, 10));
+      const b = await seedDoc('mock-user-1', 'B doc');
+      await db.insert(threads).values({
+        id: uuidv7(),
+        versionId: b.versionId,
+        anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+      });
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      expect(body.myDocuments).toHaveLength(2);
+      // b has a thread → newer activity than a.
+      expect(body.myDocuments[0].id).toBe(b.documentId);
+      expect(body.myDocuments[1].id).toBe(a.documentId);
+      expect(body.myDocuments[0].threadCount).toBe(1);
+      expect(body.myDocuments[0].activeThreadCount).toBe(1);
+    });
+  });
+
+  it("lists another user's viewed doc in recentlyViewedOrCommented with viewed signal", async () => {
+    await withApp(async (app) => {
+      const otherUserId = 'other-user-dash';
+      await db
+        .insert(users)
+        .values({ id: otherUserId, email: 'o@p.t', displayName: 'Other' })
+        .onConflictDoNothing();
+      const o = await seedDoc(otherUserId, 'Other Doc');
+      await db.insert(documentViews).values({
+        userId: 'mock-user-1',
+        documentId: o.documentId,
+      });
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      expect(body.recentlyViewedOrCommented).toHaveLength(1);
+      expect(body.recentlyViewedOrCommented[0].id).toBe(o.documentId);
+      expect(body.recentlyViewedOrCommented[0].signal).toBe('viewed');
+    });
+  });
+
+  it('lists docs the user commented on with commented signal', async () => {
+    await withApp(async (app) => {
+      const otherUserId = 'other-user-dash2';
+      await db
+        .insert(users)
+        .values({ id: otherUserId, email: 'o2@p.t', displayName: 'Other2' })
+        .onConflictDoNothing();
+      const o = await seedDoc(otherUserId, 'Their Doc');
+      const threadId = uuidv7();
+      await db.insert(threads).values({
+        id: threadId,
+        versionId: o.versionId,
+        anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+      });
+      await db.insert(comments).values({
+        id: uuidv7(),
+        threadId,
+        authorId: 'mock-user-1',
+        body: 'my reply on their doc',
+        mentions: [],
+      });
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      const entry = body.recentlyViewedOrCommented.find((e) => e.id === o.documentId);
+      expect(entry).toBeDefined();
+      expect(entry!.signal).toBe('commented');
+    });
+  });
+
+  it('takes the most recent signal when both viewed and commented exist', async () => {
+    await withApp(async (app) => {
+      const otherUserId = 'other-user-dash3';
+      await db
+        .insert(users)
+        .values({ id: otherUserId, email: 'o3@p.t', displayName: 'Other3' })
+        .onConflictDoNothing();
+      const o = await seedDoc(otherUserId, 'Both signals');
+      await db.insert(documentViews).values({
+        userId: 'mock-user-1',
+        documentId: o.documentId,
+        viewedAt: new Date(Date.now() - 60_000),
+      });
+      const threadId = uuidv7();
+      await db.insert(threads).values({
+        id: threadId,
+        versionId: o.versionId,
+        anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+      });
+      await db.insert(comments).values({
+        id: uuidv7(),
+        threadId,
+        authorId: 'mock-user-1',
+        body: 'newer',
+        mentions: [],
+      });
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      const entry = body.recentlyViewedOrCommented.find((e) => e.id === o.documentId);
+      expect(entry!.signal).toBe('commented');
+    });
+  });
+});

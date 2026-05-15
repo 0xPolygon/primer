@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
 import { documents, versions } from '@primer/shared/schema';
 import type { UploadResponse } from '@primer/shared/api';
@@ -31,7 +32,7 @@ function buildFormData(html: string, title: string, description?: string): FormD
 describe('POST /api/upload — happy path', () => {
   it('persists doc + version and stores the transformed HTML', async () => {
     await withTmpStorage(async (storage) => {
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = buildFormData(
         '<html><body><h1>Hi</h1><iframe src="x"></iframe></body></html>',
         'My Report'
@@ -74,7 +75,7 @@ describe('POST /api/upload — happy path', () => {
 describe('POST /api/upload — error paths', () => {
   it('rejects oversize file with too_large', async () => {
     await withTmpStorage(async (storage) => {
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
       const big = 'x'.repeat(10 * 1024 * 1024 + 1);
       const fd = buildFormData(big, 't');
       const res = await app.request('/api/upload', { method: 'POST', body: fd });
@@ -85,7 +86,7 @@ describe('POST /api/upload — error paths', () => {
 
   it('rejects missing title', async () => {
     await withTmpStorage(async (storage) => {
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = buildFormData('<html></html>', '   ');
       const res = await app.request('/api/upload', { method: 'POST', body: fd });
       expect(res.status).toBe(400);
@@ -95,7 +96,7 @@ describe('POST /api/upload — error paths', () => {
 
   it('rejects bad extension', async () => {
     await withTmpStorage(async (storage) => {
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = new FormData();
       fd.append('file', new Blob(['<html></html>'], { type: 'text/html' }), 'report.txt');
       fd.append('title', 't');
@@ -107,7 +108,7 @@ describe('POST /api/upload — error paths', () => {
 
   it('rejects bad content-type', async () => {
     await withTmpStorage(async (storage) => {
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = new FormData();
       fd.append('file', new Blob(['<html></html>'], { type: 'application/pdf' }), 'r.html');
       fd.append('title', 't');
@@ -119,7 +120,7 @@ describe('POST /api/upload — error paths', () => {
 
   it('rejects missing file', async () => {
     await withTmpStorage(async (storage) => {
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = new FormData();
       fd.append('title', 't');
       const res = await app.request('/api/upload', { method: 'POST', body: fd });
@@ -130,7 +131,7 @@ describe('POST /api/upload — error paths', () => {
 
   it('rejects empty (unparseable) HTML', async () => {
     await withTmpStorage(async (storage) => {
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = buildFormData('', 't');
       const res = await app.request('/api/upload', { method: 'POST', body: fd });
       expect(res.status).toBe(400);

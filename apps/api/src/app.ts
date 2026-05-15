@@ -6,7 +6,11 @@ import { registerDocumentRoutes } from './routes/documents.ts';
 import { registerVersionContentRoute } from './routes/versionContent.ts';
 import { registerCompanionRoute } from './routes/companion.ts';
 import { registerDevFixtureRoute } from './routes/devFixture.ts';
+import { registerThreadRoutes } from './routes/threads.ts';
+import { registerCommentRoutes } from './routes/comments.ts';
+import { registerDashboardRoute } from './routes/dashboard.ts';
 import type { Storage } from '@primer/shared/storage';
+import type { Notifier } from './notifications/notifier.ts';
 
 export type AppVariables = {
   user: { id: string; email: string; displayName: string };
@@ -14,6 +18,7 @@ export type AppVariables = {
 
 export interface AppDeps {
   storage: Storage;
+  notifier: Notifier;
 }
 
 export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
@@ -42,6 +47,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerDocumentRoutes(app);
   registerVersionContentRoute(app, deps);
   registerCompanionRoute(app);
+  registerThreadRoutes(app, deps);
+  registerCommentRoutes(app, deps);
+  registerDashboardRoute(app);
 
   if (process.env.NODE_ENV !== 'production') {
     registerDevFixtureRoute(app);

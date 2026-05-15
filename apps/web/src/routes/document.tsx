@@ -1,30 +1,55 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type {
-  Anchor,
+  AnchorData,
   InboundProtocolMessage,
   OutboundProtocolMessage,
   TextRangeAnchor,
+  ElementPathAnchor,
   SerializableRect,
 } from '@primer/shared';
 import { useDocument } from '../queries/documents.ts';
+import { useThreadsQuery } from '../queries/threads.ts';
+import { useCreateThread } from '../queries/mutations.ts';
 import { ArtifactIframe } from '../components/ArtifactIframe.tsx';
+import { CommentSidebar } from '../components/CommentSidebar.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
+
+const MOCK_USER_ID = 'mock-user-1';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
   clientRects: SerializableRect[];
 }
 
+interface PendingPick {
+  anchor: ElementPathAnchor;
+  clientRect: SerializableRect;
+}
+
 export function DocumentPage() {
   const { docId } = useParams();
-  const q = useDocument(docId ?? '');
+  const docQuery = useDocument(docId ?? '');
+  const latestVersionId = docQuery.data?.latestVersion.id ?? '';
 
-  const [anchors, setAnchors] = useState<Anchor[]>([]);
-  const [pending, setPending] = useState<PendingSelection | null>(null);
+  const threadsQuery = useThreadsQuery(latestVersionId);
+  const threads = threadsQuery.data?.data.threads ?? [];
+  const createThread = useCreateThread(latestVersionId);
+
+  const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
+  const [pendingPick, setPendingPick] = useState<PendingPick | null>(null);
   const [pickMode, setPickMode] = useState(false);
+  const [positionsByAnchorId, setPositionsByAnchorId] = useState<
+    Map<string, { y: number; drifted: boolean }>
+  >(new Map());
+
   const senderRef = useRef<((m: OutboundProtocolMessage) => void) | null>(null);
   const iframeWrapperRef = useRef<HTMLDivElement>(null);
+
+  const anchorsForCompanion = useMemo(
+    () => threads.map((t) => ({ id: t.id, data: t.anchor })),
+    [threads]
+  );
 
   const send = useCallback((msg: OutboundProtocolMessage) => {
     senderRef.current?.(msg);
@@ -33,58 +58,60 @@ export function DocumentPage() {
   const registerSender = useCallback(
     (s: ((m: OutboundProtocolMessage) => void) | null) => {
       senderRef.current = s;
+      if (s) {
+        s({ type: 'update_anchors', anchors: anchorsForCompanion });
+        s({ type: 'request_anchor_positions' });
+      }
     },
-    []
+    [anchorsForCompanion]
   );
+
+  // Push fresh anchors whenever the threads set changes (after initial mount).
+  useEffect(() => {
+    const s = senderRef.current;
+    if (!s) return;
+    s({ type: 'update_anchors', anchors: anchorsForCompanion });
+    s({ type: 'request_anchor_positions' });
+  }, [anchorsForCompanion]);
 
   const onMessage = useCallback(
     (msg: InboundProtocolMessage) => {
       switch (msg.type) {
         case 'selection_captured':
-          setPending({ anchor: msg.anchor, clientRects: msg.clientRects });
+          setPendingSelection({ anchor: msg.anchor, clientRects: msg.clientRects });
+          setPendingPick(null);
           break;
-        case 'element_picked': {
-          const id = crypto.randomUUID();
-          setAnchors((cur) => {
-            const next = [...cur, { id, data: msg.anchor }];
-            // Same-tick send so the companion gets the updated list.
-            queueMicrotask(() =>
-              senderRef.current?.({ type: 'update_anchors', anchors: next })
-            );
-            return next;
-          });
+        case 'element_picked':
+          setPendingPick({ anchor: msg.anchor, clientRect: msg.clientRect });
+          setPendingSelection(null);
           setPickMode(false);
           break;
-        }
         case 'pick_mode_exited':
           setPickMode(false);
+          break;
+        case 'anchor_positions':
+          setPositionsByAnchorId(
+            new Map(
+              msg.positions.map((p) => [
+                p.anchorId,
+                {
+                  y: p.rects[0]?.y ?? Number.POSITIVE_INFINITY,
+                  drifted: p.drifted ?? false,
+                },
+              ])
+            )
+          );
           break;
         case 'open_external':
           if (isSafeExternalUrl(msg.url)) handleOpenExternal(msg);
           break;
         case 'resize':
-        case 'anchor_positions':
-          // No UI consequence in this proto.
+          senderRef.current?.({ type: 'request_anchor_positions' });
           break;
       }
     },
     []
   );
-
-  const saveSelection = () => {
-    if (!pending) return;
-    const id = crypto.randomUUID();
-    const next = [...anchors, { id, data: pending.anchor }];
-    setAnchors(next);
-    setPending(null);
-    send({ type: 'update_anchors', anchors: next });
-  };
-
-  const dropAnchor = (id: string) => {
-    const next = anchors.filter((a) => a.id !== id);
-    setAnchors(next);
-    send({ type: 'update_anchors', anchors: next });
-  };
 
   const togglePickMode = () => {
     if (pickMode) {
@@ -96,33 +123,55 @@ export function DocumentPage() {
     }
   };
 
-  if (q.isLoading) return <div className="text-neutral-500">Loading…</div>;
-  if (q.error) {
+  const onHighlight = useCallback((anchorId: string) => {
+    senderRef.current?.({ type: 'highlight_anchor', anchorId });
+  }, []);
+
+  const submitPending = async (body: string) => {
+    const anchor: AnchorData | null = pendingSelection
+      ? pendingSelection.anchor
+      : pendingPick
+      ? pendingPick.anchor
+      : null;
+    if (!anchor) return;
+    await createThread.mutateAsync({ anchor, body });
+    setPendingSelection(null);
+    setPendingPick(null);
+  };
+
+  if (docQuery.isLoading) return <div className="text-neutral-500">Loading…</div>;
+  if (docQuery.error) {
     return (
       <div className="text-red-600">
-        Could not load document: {(q.error as Error).message}
+        Could not load document: {(docQuery.error as Error).message}
       </div>
     );
   }
-  if (!q.data) return null;
+  if (!docQuery.data) return null;
 
-  const { document, latestVersion } = q.data;
+  const { document, latestVersion } = docQuery.data;
 
-  // Compute floating-button position from the pending selection's first rect.
-  let buttonPos: { left: number; top: number } | null = null;
-  if (pending && pending.clientRects.length > 0) {
+  // Floating "Add comment" pill near the selection rect.
+  let pillPos: { left: number; top: number } | null = null;
+  if (pendingSelection && pendingSelection.clientRects.length > 0) {
     const iframeEl = iframeWrapperRef.current?.querySelector('iframe');
     const iframeRect = iframeEl?.getBoundingClientRect();
-    const r = pending.clientRects[0];
-    buttonPos = {
+    const r = pendingSelection.clientRects[0];
+    pillPos = {
       left: (iframeRect?.left ?? 0) + r.x,
       top: (iframeRect?.top ?? 0) + r.y + r.height + 4,
     };
   }
 
+  const composerPending = pendingSelection
+    ? { anchor: pendingSelection.anchor as AnchorData }
+    : pendingPick
+    ? { anchor: pendingPick.anchor as AnchorData }
+    : null;
+
   return (
-    <div className="space-y-4">
-      <header className="flex items-baseline justify-between border-b border-neutral-200 pb-2">
+    <div className="flex flex-col h-[calc(100vh-60px)]">
+      <header className="flex items-baseline justify-between border-b border-neutral-200 px-4 pb-2 pt-1">
         <div>
           <h1 className="text-xl font-semibold">{document.title}</h1>
           {document.description && (
@@ -133,7 +182,9 @@ export function DocumentPage() {
           <button
             onClick={togglePickMode}
             className={`rounded px-3 py-1 text-sm ${
-              pickMode ? 'bg-red-600 text-white' : 'border border-neutral-300 hover:bg-neutral-100'
+              pickMode
+                ? 'bg-red-600 text-white'
+                : 'border border-neutral-300 hover:bg-neutral-100'
             }`}
           >
             {pickMode ? 'Exit pick mode' : 'Pick element'}
@@ -145,63 +196,39 @@ export function DocumentPage() {
         </div>
       </header>
 
-      <div ref={iframeWrapperRef}>
-        <ArtifactIframe
-          src={`/api/versions/${latestVersion.id}/content`}
-          anchors={anchors}
-          onMessage={onMessage}
-          registerSender={registerSender}
+      <div className="flex flex-1 overflow-hidden">
+        <div ref={iframeWrapperRef} className="flex-1 overflow-hidden">
+          <ArtifactIframe
+            src={`/api/versions/${latestVersion.id}/content`}
+            anchors={anchorsForCompanion}
+            onMessage={onMessage}
+            registerSender={registerSender}
+          />
+        </div>
+        <CommentSidebar
+          versionId={latestVersion.id}
+          currentUserId={MOCK_USER_ID}
+          pending={composerPending}
+          onCancelPending={() => {
+            setPendingSelection(null);
+            setPendingPick(null);
+          }}
+          onSubmitPending={submitPending}
+          onHighlight={onHighlight}
+          positionsByAnchorId={positionsByAnchorId}
         />
       </div>
 
-      {anchors.length > 0 && (
-        <div className="rounded border border-neutral-200 bg-neutral-50 p-2 text-xs">
-          <div className="mb-1 text-neutral-600">
-            {anchors.length} ephemeral anchor{anchors.length === 1 ? '' : 's'} (in-memory only)
-          </div>
-          <ul className="space-y-1">
-            {anchors.map((a) => (
-              <li key={a.id} className="flex items-center justify-between gap-2">
-                <span className="truncate font-mono text-neutral-700">
-                  {a.data.type === 'text-range'
-                    ? `"${a.data.selectorText.slice(0, 80)}"`
-                    : a.data.path}
-                </span>
-                <span className="flex shrink-0 gap-1">
-                  <button
-                    onClick={() => send({ type: 'highlight_anchor', anchorId: a.id })}
-                    className="rounded border border-neutral-300 px-2 hover:bg-white"
-                  >
-                    Highlight
-                  </button>
-                  <button
-                    onClick={() => dropAnchor(a.id)}
-                    className="rounded border border-neutral-300 px-2 hover:bg-white"
-                  >
-                    Drop
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {buttonPos && pending && (
+      {pillPos && pendingSelection && composerPending && (
         <div
-          style={{ position: 'fixed', left: buttonPos.left, top: buttonPos.top, zIndex: 1000 }}
-          className="rounded-md bg-neutral-900 text-white shadow-lg"
+          style={{ position: 'fixed', left: pillPos.left, top: pillPos.top, zIndex: 1000 }}
+          className="flex items-center gap-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs text-white shadow-lg"
         >
+          <span>Add comment in sidebar →</span>
           <button
-            onClick={saveSelection}
-            className="px-3 py-1.5 text-sm hover:bg-neutral-800 rounded-l-md"
-          >
-            Add comment
-          </button>
-          <button
-            onClick={() => setPending(null)}
-            aria-label="Dismiss"
-            className="px-2 py-1.5 text-sm border-l border-neutral-700 hover:bg-neutral-800 rounded-r-md"
+            type="button"
+            onClick={() => setPendingSelection(null)}
+            className="rounded border border-neutral-700 px-1 text-neutral-300 hover:bg-neutral-800"
           >
             ×
           </button>

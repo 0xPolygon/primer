@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
 
 vi.mock('../db/client.ts', async (importOriginal) => {
   const orig = await importOriginal<typeof import('../db/client.ts')>();
@@ -23,7 +24,7 @@ describe('POST /api/upload — DB failure triggers compensating delete', () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-comp-test-'));
     try {
       const storage = new FilesystemStorage(root);
-      const app = createApp({ storage });
+      const app = createApp({ storage, notifier: new NoopNotifier() });
 
       const fd = new FormData();
       fd.append('file', new Blob(['<html><body></body></html>'], { type: 'text/html' }), 'r.html');

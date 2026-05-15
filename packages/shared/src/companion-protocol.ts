@@ -116,7 +116,7 @@ function isRect(v: unknown): v is SerializableRect {
   );
 }
 
-function isTextRangeAnchor(v: unknown): v is TextRangeAnchor {
+export function isTextRangeAnchor(v: unknown): v is TextRangeAnchor {
   return (
     isObject(v) &&
     v.type === 'text-range' &&
@@ -127,7 +127,7 @@ function isTextRangeAnchor(v: unknown): v is TextRangeAnchor {
   );
 }
 
-function isElementPathAnchor(v: unknown): v is ElementPathAnchor {
+export function isElementPathAnchor(v: unknown): v is ElementPathAnchor {
   return (
     isObject(v) &&
     v.type === 'element-path' &&

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
 import { ARTIFACT_CSP } from './versionContent.ts';
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
@@ -23,7 +24,7 @@ afterEach(async () => {
 describe('GET /dev/fixtures/anchoring.html', () => {
   it('serves the fixture with the locked artifact CSP when NODE_ENV is not production', async () => {
     delete process.env.NODE_ENV;
-    const app = createApp({ storage: new FilesystemStorage(root) });
+    const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
     const res = await app.request('/dev/fixtures/anchoring.html');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
@@ -37,7 +38,7 @@ describe('GET /dev/fixtures/anchoring.html', () => {
 
   it('is NOT registered when NODE_ENV=production', async () => {
     process.env.NODE_ENV = 'production';
-    const app = createApp({ storage: new FilesystemStorage(root) });
+    const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
     const res = await app.request('/dev/fixtures/anchoring.html');
     expect(res.status).toBe(404);
   });

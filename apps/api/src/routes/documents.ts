@@ -1,9 +1,10 @@
 import type { Hono } from 'hono';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
 import type { DocumentDetailResponse } from '@primer/shared/api';
 import { documents, versions, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
+import { logger } from '../logger.ts';
 
 export function registerDocumentRoutes(app: Hono<{ Variables: AppVariables }>): void {
   app.get('/api/documents/:docId', async (c) => {
@@ -56,6 +57,16 @@ export function registerDocumentRoutes(app: Hono<{ Variables: AppVariables }>): 
         createdAt: v.createdAt.toISOString(),
       },
     };
+    try {
+      await db.execute(sql`
+        INSERT INTO document_views (user_id, document_id)
+        VALUES (${c.get('user').id}, ${docId})
+        ON CONFLICT (user_id, document_id) DO UPDATE SET viewed_at = excluded.viewed_at
+      `);
+    } catch (err) {
+      logger.warn({ err, docId, userId: c.get('user').id }, 'failed to upsert document_views');
+    }
+
     return c.json(body, 200);
   });
 }

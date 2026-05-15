@@ -7,7 +7,9 @@ import {
   jsonb,
   bigint,
   uniqueIndex,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
+import type { AnchorData } from './companion-protocol.ts';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),                                       // Okta sub (Phase 2) or "mock-user-1" (Phase 1)
@@ -52,7 +54,7 @@ export const threads = pgTable('threads', {
   versionId: uuid('version_id')
     .notNull()
     .references(() => versions.id, { onDelete: 'cascade' }),
-  anchor: jsonb('anchor').notNull(),
+  anchor: jsonb('anchor').$type<AnchorData>().notNull(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   resolvedBy: text('resolved_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -70,3 +72,19 @@ export const comments = pgTable('comments', {
   updatedAt: timestamp('updated_at', { withTimezone: true }),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
+
+export const documentViews = pgTable(
+  'document_views',
+  {
+    userId: text('user_id').notNull().references(() => users.id),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    viewedAt: timestamp('viewed_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.documentId] }),
+  })
+);

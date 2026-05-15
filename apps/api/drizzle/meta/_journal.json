@@ -15,6 +15,13 @@
       "when": 1778674204428,
       "tag": "0001_seed_mock_user",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778886651857,
+      "tag": "0002_bumpy_mathemanic",
+      "breakpoints": true
     }
   ]
 }
