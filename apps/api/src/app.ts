@@ -5,6 +5,7 @@ import { registerUploadRoute } from './routes/upload.ts';
 import { registerDocumentRoutes } from './routes/documents.ts';
 import { registerVersionContentRoute } from './routes/versionContent.ts';
 import { registerCompanionRoute } from './routes/companion.ts';
+import { registerDevFixtureRoute } from './routes/devFixture.ts';
 import type { Storage } from '@primer/shared/storage';
 
 export type AppVariables = {
@@ -41,6 +42,10 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerDocumentRoutes(app);
   registerVersionContentRoute(app, deps);
   registerCompanionRoute(app);
+
+  if (process.env.NODE_ENV !== 'production') {
+    registerDevFixtureRoute(app);
+  }
 
   return app;
 }

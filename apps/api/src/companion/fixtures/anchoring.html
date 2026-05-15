@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Primer anchoring fixture</title>
+    <style>
+      body { font-family: system-ui, sans-serif; line-height: 1.5; padding: 24px; max-width: 720px; }
+      h1 { margin-top: 0; }
+      .row { display: flex; gap: 16px; align-items: center; margin: 16px 0; }
+      .row > * + * { margin-left: 8px; }
+      button { padding: 4px 10px; font: inherit; }
+      canvas { border: 1px solid #ccc; }
+      svg { display: block; }
+    </style>
+  </head>
+  <body>
+    <h1>Primer anchoring fixture</h1>
+    <p>
+      Lorem ipsum dolor sit amet, consectetur adipiscing elit. The quick brown
+      fox jumps over the lazy dog. Select any of this text to capture an
+      anchor. The harness should echo the captured anchor and let you save it.
+    </p>
+    <p>
+      Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium
+      doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore
+      veritatis et quasi architecto beatae vitae dicta sunt explicabo. Highlight a
+      saved anchor to see the focused style.
+    </p>
+
+    <div class="row">
+      <a href="https://example.com/external" target="_blank" rel="noopener">External link (target=_blank)</a>
+      <button onclick="window.open('https://example.com/popup')">Open https popup</button>
+      <button onclick="window.open('http://example.com/bad')">Open http popup (should be rejected)</button>
+    </div>
+
+    <canvas id="demo-canvas" width="240" height="80"></canvas>
+
+    <svg width="240" height="60" viewBox="0 0 240 60">
+      <rect x="0"   y="0" width="40" height="40" fill="#fca5a5" />
+      <rect x="60"  y="0" width="40" height="40" fill="#86efac" />
+      <rect x="120" y="0" width="40" height="40" fill="#93c5fd" />
+      <rect x="180" y="0" width="40" height="40" fill="#fde68a" />
+    </svg>
+
+    <button id="grow-btn" onclick="setTimeout(() => {
+      const p = document.createElement('p');
+      p.textContent = 'A paragraph appended 1s after the click.';
+      document.body.appendChild(p);
+    }, 1000);">Append a paragraph in 1 second</button>
+  </body>
+</html>

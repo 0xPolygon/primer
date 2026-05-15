@@ -1,0 +1,185 @@
+export interface SerializableRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface TextRangeAnchor {
+  type: 'text-range';
+  selectorText: string;
+  prefix: string;
+  suffix: string;
+  containerPath: string;
+}
+
+export interface ElementPathAnchor {
+  type: 'element-path';
+  path: string;
+  innerHash: string;
+}
+
+export type AnchorData = TextRangeAnchor | ElementPathAnchor;
+
+export interface Anchor {
+  id: string;
+  data: AnchorData;
+}
+
+// Parent → Iframe
+export interface MsgInit {
+  type: 'init';
+  anchors: Anchor[];
+}
+export interface MsgUpdateAnchors {
+  type: 'update_anchors';
+  anchors: Anchor[];
+}
+export interface MsgEnterPickMode {
+  type: 'enter_pick_mode';
+}
+export interface MsgExitPickMode {
+  type: 'exit_pick_mode';
+}
+export interface MsgHighlightAnchor {
+  type: 'highlight_anchor';
+  anchorId: string;
+}
+export interface MsgRequestAnchorPositions {
+  type: 'request_anchor_positions';
+}
+
+export type OutboundProtocolMessage =
+  | MsgInit
+  | MsgUpdateAnchors
+  | MsgEnterPickMode
+  | MsgExitPickMode
+  | MsgHighlightAnchor
+  | MsgRequestAnchorPositions;
+
+// Iframe → Parent
+export interface MsgSelectionCaptured {
+  type: 'selection_captured';
+  anchor: TextRangeAnchor;
+  clientRects: SerializableRect[];
+}
+export interface MsgElementPicked {
+  type: 'element_picked';
+  anchor: ElementPathAnchor;
+  clientRect: SerializableRect;
+}
+export interface MsgPickModeExited {
+  type: 'pick_mode_exited';
+}
+export interface MsgAnchorPositions {
+  type: 'anchor_positions';
+  positions: { anchorId: string; rects: SerializableRect[]; drifted?: boolean }[];
+}
+export interface MsgResize {
+  type: 'resize';
+  height: number;
+}
+export interface MsgOpenExternal {
+  type: 'open_external';
+  url: string;
+}
+
+export type InboundProtocolMessage =
+  | MsgSelectionCaptured
+  | MsgElementPicked
+  | MsgPickModeExited
+  | MsgAnchorPositions
+  | MsgResize
+  | MsgOpenExternal;
+
+// ───────────────────── Validation helpers ─────────────────────
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function isString(v: unknown): v is string {
+  return typeof v === 'string';
+}
+
+function isNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function isRect(v: unknown): v is SerializableRect {
+  return (
+    isObject(v) &&
+    isNumber(v.x) &&
+    isNumber(v.y) &&
+    isNumber(v.width) &&
+    isNumber(v.height)
+  );
+}
+
+function isTextRangeAnchor(v: unknown): v is TextRangeAnchor {
+  return (
+    isObject(v) &&
+    v.type === 'text-range' &&
+    isString(v.selectorText) &&
+    isString(v.prefix) &&
+    isString(v.suffix) &&
+    isString(v.containerPath)
+  );
+}
+
+function isElementPathAnchor(v: unknown): v is ElementPathAnchor {
+  return (
+    isObject(v) &&
+    v.type === 'element-path' &&
+    isString(v.path) &&
+    isString(v.innerHash)
+  );
+}
+
+export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null {
+  if (!isObject(raw) || !isString(raw.type)) return null;
+
+  switch (raw.type) {
+    case 'selection_captured': {
+      if (!isTextRangeAnchor(raw.anchor)) return null;
+      if (!Array.isArray(raw.clientRects) || !raw.clientRects.every(isRect)) return null;
+      return {
+        type: 'selection_captured',
+        anchor: raw.anchor,
+        clientRects: raw.clientRects,
+      };
+    }
+    case 'element_picked': {
+      if (!isElementPathAnchor(raw.anchor)) return null;
+      if (!isRect(raw.clientRect)) return null;
+      return { type: 'element_picked', anchor: raw.anchor, clientRect: raw.clientRect };
+    }
+    case 'pick_mode_exited':
+      return { type: 'pick_mode_exited' };
+    case 'anchor_positions': {
+      if (!Array.isArray(raw.positions)) return null;
+      const positions: MsgAnchorPositions['positions'] = [];
+      for (const p of raw.positions) {
+        if (!isObject(p) || !isString(p.anchorId)) return null;
+        if (!Array.isArray(p.rects) || !p.rects.every(isRect)) return null;
+        const entry: MsgAnchorPositions['positions'][number] = {
+          anchorId: p.anchorId,
+          rects: p.rects,
+        };
+        if (p.drifted === true) entry.drifted = true;
+        positions.push(entry);
+      }
+      return { type: 'anchor_positions', positions };
+    }
+    case 'resize': {
+      if (!isNumber(raw.height)) return null;
+      return { type: 'resize', height: raw.height };
+    }
+    case 'open_external': {
+      if (!isString(raw.url)) return null;
+      return { type: 'open_external', url: raw.url };
+    }
+    default:
+      return null;
+  }
+}

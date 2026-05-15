@@ -15,7 +15,7 @@ describe('GET /companion/v1.js', () => {
       expect(res.headers.get('content-type')).toBe('application/javascript; charset=utf-8');
       expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
       const body = await res.text();
-      expect(body).toContain('companion v1 loaded');
+      expect(body).toContain('[primer/companion]'); // tag emitted by the v1 IIFE
     } finally {
       await rm(root, { recursive: true, force: true });
     }
