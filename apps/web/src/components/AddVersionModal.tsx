@@ -9,6 +9,8 @@ interface Props {
   open: boolean;
   /** If provided, the doc combobox is pre-filled and the user can swap via the change-doc link. */
   preselectedDocId?: string;
+  /** Title to show while the dashboard query hasn't (yet) confirmed the preselected doc. */
+  preselectedDocTitle?: string;
   onClose: () => void;
 }
 
@@ -24,7 +26,7 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hr / 24)}d ago`;
 }
 
-export function AddVersionModal({ open, preselectedDocId, onClose }: Props) {
+export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, onClose }: Props) {
   const navigate = useNavigate();
   const dashboard = useDashboardQuery();
   const myDocs = dashboard.data?.myDocuments ?? [];
@@ -128,7 +130,7 @@ export function AddVersionModal({ open, preselectedDocId, onClose }: Props) {
             {preselectedDocId && selectedDocId === preselectedDocId ? (
               <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
                 <div className="font-medium text-neutral-800">
-                  {selectedDoc?.title ?? '(loading)'}
+                  {selectedDoc?.title ?? preselectedDocTitle ?? '(loading)'}
                 </div>
                 <button
                   type="button"

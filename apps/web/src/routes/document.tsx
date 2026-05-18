@@ -67,7 +67,9 @@ export function DocumentPage() {
   const deleteDoc = useDeleteDocument(docId ?? '');
 
   const [showAddVersion, setShowAddVersion] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [actionsMenuState, setActionsMenuState] = useState<'closed' | 'menu' | 'confirm'>(
+    'closed',
+  );
 
   const isUploader = docQuery.data?.document.uploaderDisplayName === 'Mock User';
   // In SP4 with the single mock user, every uploader check is effectively "is this the
@@ -297,13 +299,32 @@ export function DocumentPage() {
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setShowDeleteConfirm((s) => !s)}
+                onClick={() =>
+                  setActionsMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))
+                }
                 aria-label="More actions"
+                aria-haspopup="menu"
+                aria-expanded={actionsMenuState !== 'closed'}
                 className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-50"
               >
                 ⋯
               </button>
-              {showDeleteConfirm && (
+              {actionsMenuState === 'menu' && (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-10 mt-1 w-44 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setActionsMenuState('confirm')}
+                    className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50"
+                  >
+                    Delete document…
+                  </button>
+                </div>
+              )}
+              {actionsMenuState === 'confirm' && (
                 <div className="absolute right-0 z-10 mt-1 w-64 rounded border border-neutral-200 bg-white p-3 shadow-md">
                   <p className="text-xs text-neutral-700">
                     Delete this document? You can restore it within 30 days from the home page.
@@ -311,7 +332,7 @@ export function DocumentPage() {
                   <div className="mt-2 flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowDeleteConfirm(false)}
+                      onClick={() => setActionsMenuState('closed')}
                       className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-700"
                     >
                       Cancel
@@ -320,7 +341,7 @@ export function DocumentPage() {
                       type="button"
                       onClick={async () => {
                         await deleteDoc.mutateAsync();
-                        setShowDeleteConfirm(false);
+                        setActionsMenuState('closed');
                         navigate('/');
                       }}
                       className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-700"
@@ -396,6 +417,7 @@ export function DocumentPage() {
       <AddVersionModal
         open={showAddVersion}
         preselectedDocId={docId}
+        preselectedDocTitle={document.title}
         onClose={() => setShowAddVersion(false)}
       />
     </div>
