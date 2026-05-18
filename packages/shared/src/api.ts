@@ -94,7 +94,42 @@ export interface DashboardActivityEntry extends DashboardDocumentSummary {
   signalAt: string;
 }
 
+export interface DeletedDocumentEntry {
+  id: string;
+  title: string;
+  deletedAt: string;
+  daysRemaining: number;
+}
+
 export interface DashboardResponse {
   myDocuments: DashboardDocumentSummary[];
   recentlyViewedOrCommented: DashboardActivityEntry[];
+  recentlyDeleted: DeletedDocumentEntry[];   // NEW in SP4
+}
+
+export interface VersionSummaryDTO {
+  id: string;
+  versionNumber: number;
+  versionNote: string | null;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface VersionsListResponse {
+  versions: VersionSummaryDTO[];
+}
+
+export interface DocumentPatchRequest {
+  title?: string;
+  description?: string | null;
+}
+
+export interface VersionPatchRequest {
+  versionNote: string | null;
+}
+
+export interface AddVersionResponse {
+  versionId: string;
+  versionNumber: number;
+  url: string;
 }

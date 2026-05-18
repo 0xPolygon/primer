@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import { versions } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
@@ -24,6 +24,18 @@ export function registerVersionContentRoute(
 ): void {
   app.get('/api/versions/:versionId/content', async (c) => {
     const versionId = c.req.param('versionId');
+
+    // Enforce soft-delete: a deleted doc's content must not be served.
+    const [versionWithDoc] = (await db.execute(sql`
+      SELECT v.storage_key, d.deleted_at FROM versions v
+      INNER JOIN documents d ON d.id = v.document_id
+      WHERE v.id = ${versionId}
+      LIMIT 1
+    `)) as unknown as { storage_key: string; deleted_at: Date | null }[];
+    if (!versionWithDoc || versionWithDoc.deleted_at !== null) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+
     const rows = await db.select().from(versions).where(eq(versions.id, versionId)).limit(1);
     if (rows.length === 0) {
       return c.json({ error: 'not_found' }, 404);

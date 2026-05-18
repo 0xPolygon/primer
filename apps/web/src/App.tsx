@@ -13,6 +13,7 @@ const router = createBrowserRouter([
       { path: '/', element: <HomePage /> },
       { path: '/upload', element: <UploadPage /> },
       { path: '/d/:docId', element: <DocumentPage /> },
+      { path: '/d/:docId/v/:versionNumber', element: <DocumentPage /> },
       { path: '/dev/harness', element: <DevHarnessPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],

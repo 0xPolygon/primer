@@ -6,6 +6,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { documents, versions, threads, comments, documentViews, users } from '@primer/shared/schema';
 import type { DashboardResponse } from '@primer/shared';
@@ -156,6 +157,58 @@ describe('GET /api/dashboard', () => {
       const body = (await res.json()) as DashboardResponse;
       const entry = body.recentlyViewedOrCommented.find((e) => e.id === o.documentId);
       expect(entry!.signal).toBe('commented');
+    });
+  });
+});
+
+describe('GET /api/dashboard — recentlyDeleted', () => {
+  it('lists my soft-deleted docs within 30 days', async () => {
+    await withApp(async (app) => {
+      const d1 = await seedDoc('mock-user-1', 'Recently deleted A');
+      await db.update(documents).set({ deletedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) }).where(eq(documents.id, d1.documentId));
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      expect(body.recentlyDeleted).toHaveLength(1);
+      expect(body.recentlyDeleted[0].id).toBe(d1.documentId);
+      expect(body.recentlyDeleted[0].title).toBe('Recently deleted A');
+      expect(body.recentlyDeleted[0].daysRemaining).toBeGreaterThan(20);
+      expect(body.recentlyDeleted[0].daysRemaining).toBeLessThanOrEqual(25);
+    });
+  });
+
+  it('excludes my soft-deleted docs older than 30 days', async () => {
+    await withApp(async (app) => {
+      const d1 = await seedDoc('mock-user-1', 'Old delete');
+      await db.update(documents).set({ deletedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) }).where(eq(documents.id, d1.documentId));
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      expect(body.recentlyDeleted).toHaveLength(0);
+    });
+  });
+
+  it("does not include other users' soft-deleted docs", async () => {
+    await withApp(async (app) => {
+      const otherUserId = 'other-user-recently-deleted';
+      await db.insert(users).values({ id: otherUserId, email: 'ord@p.t', displayName: 'OtherRD' }).onConflictDoNothing();
+      const d = await seedDoc(otherUserId, 'Their delete');
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, d.documentId));
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      expect(body.recentlyDeleted.find((e) => e.id === d.documentId)).toBeUndefined();
+    });
+  });
+
+  it("excludes soft-deleted docs from myDocuments", async () => {
+    await withApp(async (app) => {
+      const d = await seedDoc('mock-user-1', 'Soft deleted');
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, d.documentId));
+
+      const res = await app.request('/api/dashboard');
+      const body = (await res.json()) as DashboardResponse;
+      expect(body.myDocuments.find((m) => m.id === d.documentId)).toBeUndefined();
     });
   });
 });

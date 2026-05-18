@@ -181,6 +181,51 @@ describe('PATCH /api/comments/:cid', () => {
   });
 });
 
+describe('comment endpoints respect soft-delete', () => {
+  it('POST /api/threads/:tid/comments returns 404 on soft-deleted doc', async () => {
+    await withApp(async (app) => {
+      const { documentId, threadId } = await seedDocVersionThread();
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+      const res = await app.request(`/api/threads/${threadId}/comments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'attempted reply' }),
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('PATCH /api/comments/:cid returns 404 on soft-deleted doc', async () => {
+    await withApp(async (app) => {
+      const { documentId, threadId } = await seedDocVersionThread();
+      const firstCommentId = (await db
+        .select({ id: comments.id })
+        .from(comments)
+        .where(eq(comments.threadId, threadId)))[0].id;
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+      const res = await app.request(`/api/comments/${firstCommentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'edit attempt' }),
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('DELETE /api/comments/:cid returns 404 on soft-deleted doc', async () => {
+    await withApp(async (app) => {
+      const { documentId, threadId } = await seedDocVersionThread();
+      const firstCommentId = (await db
+        .select({ id: comments.id })
+        .from(comments)
+        .where(eq(comments.threadId, threadId)))[0].id;
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+      const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE' });
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
 describe('DELETE /api/comments/:cid', () => {
   it('soft-deletes by author and returns tombstone', async () => {
     await withApp(async (app) => {

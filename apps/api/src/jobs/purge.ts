@@ -1,0 +1,94 @@
+import { sql, eq } from 'drizzle-orm';
+import { db } from '../db/client.ts';
+import { documents, versions } from '@primer/shared/schema';
+import { logger } from '../logger.ts';
+import type { Storage } from '@primer/shared';
+
+export const RESTORE_WINDOW_DAYS = 30;
+
+export interface PurgeReport {
+  purgedDocumentIds: string[];
+  purgedStorageKeys: string[];
+  failedStorageKeys: { key: string; error: string }[];
+  durationMs: number;
+}
+
+export async function purgeExpiredDocuments(deps: { storage: Storage }): Promise<PurgeReport> {
+  const startedAt = Date.now();
+  const report: PurgeReport = {
+    purgedDocumentIds: [],
+    purgedStorageKeys: [],
+    failedStorageKeys: [],
+    durationMs: 0,
+  };
+
+  const candidates = (await db.execute(sql`
+    SELECT id FROM documents
+    WHERE deleted_at IS NOT NULL
+      AND deleted_at < now() - make_interval(days => ${RESTORE_WINDOW_DAYS})
+    ORDER BY deleted_at ASC
+  `)) as unknown as { id: string }[];
+
+  for (const { id: docId } of candidates) {
+    const versionRows = await db
+      .select({ id: versions.id, storageKey: versions.storageKey })
+      .from(versions)
+      .where(eq(versions.documentId, docId));
+
+    // Delete storage files first.
+    for (const v of versionRows) {
+      try {
+        await deps.storage.delete(v.storageKey);
+        report.purgedStorageKeys.push(v.storageKey);
+      } catch (err) {
+        report.failedStorageKeys.push({
+          key: v.storageKey,
+          error: (err as Error).message,
+        });
+        logger.warn({ docId, storageKey: v.storageKey, err }, 'purge: storage delete failed');
+      }
+    }
+
+    // Delete the doc row; FK cascade removes versions / threads / comments / document_views.
+    await db.delete(documents).where(eq(documents.id, docId));
+    report.purgedDocumentIds.push(docId);
+    logger.info({ docId }, 'purge: document hard-deleted');
+  }
+
+  report.durationMs = Date.now() - startedAt;
+  return report;
+}
+
+export function startPurgeInterval(deps: {
+  storage: Storage;
+  intervalMs?: number;
+}): () => Promise<void> {
+  const intervalMs = deps.intervalMs ?? 60 * 60 * 1000;
+  let stopped = false;
+  let inFlight: Promise<void> | null = null;
+
+  const tick = async () => {
+    if (stopped) return;
+    inFlight = (async () => {
+      try {
+        const report = await purgeExpiredDocuments({ storage: deps.storage });
+        if (report.purgedDocumentIds.length > 0 || report.failedStorageKeys.length > 0) {
+          logger.info({ report }, 'purge interval: complete');
+        }
+      } catch (err) {
+        logger.error({ err }, 'purge interval: unexpected failure');
+      } finally {
+        inFlight = null;
+      }
+    })();
+    await inFlight;
+  };
+
+  const timer = setInterval(() => { void tick(); }, intervalMs);
+
+  return async () => {
+    stopped = true;
+    clearInterval(timer);
+    if (inFlight) await inFlight;
+  };
+}

@@ -3,12 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
+import { v7 as uuidv7 } from 'uuid';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { documentViews } from '@primer/shared/schema';
+import { documents, documentViews, versions, users } from '@primer/shared/schema';
 import type { DocumentDetailResponse, UploadResponse } from '@primer/shared/api';
+import type { DocumentPatchRequest } from '@primer/shared';
 
 async function uploadFixture(app: ReturnType<typeof createApp>): Promise<UploadResponse> {
   const fd = new FormData();
@@ -78,6 +80,501 @@ describe('GET /api/documents/:docId — view tracking', () => {
         .where(eq(documentViews.documentId, upload.documentId));
       expect(rows2).toHaveLength(1);
       expect(rows2[0].viewedAt.getTime()).toBeGreaterThan(firstViewedAt.getTime());
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('GET /api/documents/:docId — soft-delete visibility', () => {
+  it('returns 404 when the document is soft-deleted, even for the uploader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-softdelete-test-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      // Soft-delete via direct DB write.
+      await db
+        .update(documents)
+        .set({ deletedAt: new Date() })
+        .where(eq(documents.id, upload.documentId));
+
+      const res = await app.request(`/api/documents/${upload.documentId}`);
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('not_found');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not upsert document_views for a soft-deleted doc', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-softdelete-views-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      await db
+        .update(documents)
+        .set({ deletedAt: new Date() })
+        .where(eq(documents.id, upload.documentId));
+
+      await app.request(`/api/documents/${upload.documentId}`);
+
+      const rows = await db
+        .select()
+        .from(documentViews)
+        .where(eq(documentViews.documentId, upload.documentId));
+      expect(rows).toHaveLength(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('PATCH /api/documents/:docId', () => {
+  it('updates title by uploader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-patch-doc-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const body: DocumentPatchRequest = { title: 'New Title' };
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(200);
+      const out = (await res.json()) as { id: string; title: string };
+      expect(out.title).toBe('New Title');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('updates description (including null to clear)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-patch-desc-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const r1 = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ description: 'Updated desc' }),
+      });
+      expect(r1.status).toBe(200);
+      expect(((await r1.json()) as { description: string | null }).description).toBe('Updated desc');
+
+      const r2 = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ description: null }),
+      });
+      expect(r2.status).toBe(200);
+      expect(((await r2.json()) as { description: string | null }).description).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 400 when body is empty (no fields)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-patch-empty-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_body');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 400 for empty title after trim', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-patch-empty-title-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: '   ' }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 403 when not uploader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-patch-403-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const otherUserId = 'other-user-patch';
+      await db
+        .insert(users)
+        .values({ id: otherUserId, email: 'op@p.t', displayName: 'OtherP' })
+        .onConflictDoNothing();
+      const docId = uuidv7();
+      const versionId = uuidv7();
+      await db.insert(documents).values({
+        id: docId,
+        title: 'Theirs',
+        description: null,
+        uploaderId: otherUserId,
+      });
+      await db.insert(versions).values({
+        id: versionId,
+        documentId: docId,
+        versionNumber: 1,
+        storageKey: `v1/${versionId}.html`,
+        sizeBytes: 0,
+        versionNote: null,
+      });
+
+      const res = await app.request(`/api/documents/${docId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Sneaky' }),
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 404 when soft-deleted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-patch-404-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+      await db
+        .update(documents)
+        .set({ deletedAt: new Date() })
+        .where(eq(documents.id, upload.documentId));
+
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Cant edit' }),
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('DELETE /api/documents/:docId', () => {
+  it('soft-deletes by uploader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-delete-doc-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const res = await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE' });
+      expect(res.status).toBe(200);
+      const out = (await res.json()) as { id: string; deletedAt: string };
+      expect(out.id).toBe(upload.documentId);
+      expect(typeof out.deletedAt).toBe('string');
+
+      const [row] = await db
+        .select({ deletedAt: documents.deletedAt })
+        .from(documents)
+        .where(eq(documents.id, upload.documentId));
+      expect(row.deletedAt).not.toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('is idempotent on already-deleted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-delete-idempotent-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE' });
+      const res = await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE' });
+      expect(res.status).toBe(200);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 403 when not uploader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-delete-403-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const otherUserId = 'other-user-delete';
+      await db.insert(users).values({ id: otherUserId, email: 'od@p.t', displayName: 'OtherD' }).onConflictDoNothing();
+      const docId = uuidv7();
+      await db.insert(documents).values({
+        id: docId,
+        title: 'Theirs',
+        description: null,
+        uploaderId: otherUserId,
+      });
+
+      const res = await app.request(`/api/documents/${docId}`, { method: 'DELETE' });
+      expect(res.status).toBe(403);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+import type { AddVersionResponse, VersionsListResponse } from '@primer/shared';
+
+function buildVersionFormData(html: string, versionNote?: string): FormData {
+  const fd = new FormData();
+  fd.append('file', new Blob([html], { type: 'text/html' }), 'v2.html');
+  if (versionNote !== undefined) fd.append('versionNote', versionNote);
+  return fd;
+}
+
+describe('POST /api/documents/:docId/versions', () => {
+  it('adds a new version with version_number incremented', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-addver-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const fd = buildVersionFormData(
+        '<html><body><h1>V2</h1></body></html>',
+        'second version'
+      );
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        body: fd,
+      });
+      expect(res.status).toBe(201);
+      const out = (await res.json()) as AddVersionResponse;
+      expect(out.versionNumber).toBe(2);
+      expect(out.url).toBe(`/d/${upload.documentId}`);
+
+      const allVersions = await db
+        .select()
+        .from(versions)
+        .where(eq(versions.documentId, upload.documentId));
+      expect(allVersions).toHaveLength(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 404 when doc is soft-deleted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-addver-404-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, upload.documentId));
+
+      const fd = buildVersionFormData('<html><body></body></html>');
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        body: fd,
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 403 when not uploader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-addver-403-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const otherUserId = 'other-user-addver';
+      await db.insert(users).values({ id: otherUserId, email: 'oa@p.t', displayName: 'OtherA' }).onConflictDoNothing();
+      const docId = uuidv7();
+      const versionId = uuidv7();
+      await db.insert(documents).values({
+        id: docId,
+        title: 'Theirs',
+        description: null,
+        uploaderId: otherUserId,
+      });
+      await db.insert(versions).values({
+        id: versionId,
+        documentId: docId,
+        versionNumber: 1,
+        storageKey: `v1/${versionId}.html`,
+        sizeBytes: 0,
+        versionNote: null,
+      });
+
+      const fd = buildVersionFormData('<html><body></body></html>');
+      const res = await app.request(`/api/documents/${docId}/versions`, {
+        method: 'POST',
+        body: fd,
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects too_large / bad_extension via the existing upload validators', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-addver-bad-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const big = 'x'.repeat(10 * 1024 * 1024 + 1);
+      const fd = new FormData();
+      fd.append('file', new Blob([big], { type: 'text/html' }), 'big.html');
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        body: fd,
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('too_large');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('GET /api/documents/:docId/versions', () => {
+  it('returns all versions ordered by versionNumber DESC', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-listver-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      // Add v2 + v3 via direct DB inserts so this test doesn't depend on
+      // the POST endpoint.
+      const v2Id = uuidv7();
+      const v3Id = uuidv7();
+      await db.insert(versions).values([
+        {
+          id: v2Id,
+          documentId: upload.documentId,
+          versionNumber: 2,
+          storageKey: `v1/${v2Id}.html`,
+          sizeBytes: 100,
+          versionNote: 'second',
+        },
+        {
+          id: v3Id,
+          documentId: upload.documentId,
+          versionNumber: 3,
+          storageKey: `v1/${v3Id}.html`,
+          sizeBytes: 200,
+          versionNote: null,
+        },
+      ]);
+
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`);
+      expect(res.status).toBe(200);
+      const out = (await res.json()) as VersionsListResponse;
+      expect(out.versions.map((v) => v.versionNumber)).toEqual([3, 2, 1]);
+      expect(out.versions[1].versionNote).toBe('second');
+      expect(out.versions[0].versionNote).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 404 when doc is soft-deleted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-listver-404-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, upload.documentId));
+
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`);
+      expect(res.status).toBe(404);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('POST /api/documents/:docId/restore', () => {
+  it('clears deletedAt when called within 30 days', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-restore-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      await db
+        .update(documents)
+        .set({ deletedAt: new Date() })
+        .where(eq(documents.id, upload.documentId));
+
+      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST' });
+      expect(res.status).toBe(200);
+
+      const [row] = await db
+        .select({ deletedAt: documents.deletedAt })
+        .from(documents)
+        .where(eq(documents.id, upload.documentId));
+      expect(row.deletedAt).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 409 when deleted more than 30 days ago', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-restore-expired-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const thirtyOneDaysAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+      await db
+        .update(documents)
+        .set({ deletedAt: thirtyOneDaysAgo })
+        .where(eq(documents.id, upload.documentId));
+
+      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST' });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toBe('restore_window_expired');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('is idempotent on live doc (200, no change)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-restore-live-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST' });
+      expect(res.status).toBe(200);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 403 when not uploader', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-restore-403-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const otherUserId = 'other-user-restore';
+      await db.insert(users).values({ id: otherUserId, email: 'or@p.t', displayName: 'OtherR' }).onConflictDoNothing();
+      const docId = uuidv7();
+      await db.insert(documents).values({
+        id: docId,
+        title: 'Theirs',
+        description: null,
+        uploaderId: otherUserId,
+        deletedAt: new Date(),
+      });
+
+      const res = await app.request(`/api/documents/${docId}/restore`, { method: 'POST' });
+      expect(res.status).toBe(403);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -8,6 +8,29 @@ import type { CommentDTO, CreateThreadRequest, ThreadDTO, ThreadsListResponse } 
 import { threads, comments, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 
+async function ensureLiveDocumentForVersion(versionId: string): Promise<{ ok: true } | { ok: false }> {
+  const [r] = (await db.execute(sql`
+    SELECT d.deleted_at FROM versions v
+    INNER JOIN documents d ON d.id = v.document_id
+    WHERE v.id = ${versionId}
+    LIMIT 1
+  `)) as unknown as { deleted_at: Date | null }[];
+  if (!r) return { ok: false };
+  return r.deleted_at === null ? { ok: true } : { ok: false };
+}
+
+async function ensureLiveDocumentForThread(threadId: string): Promise<{ ok: true } | { ok: false }> {
+  const [r] = (await db.execute(sql`
+    SELECT d.deleted_at FROM threads t
+    INNER JOIN versions v ON v.id = t.version_id
+    INNER JOIN documents d ON d.id = v.document_id
+    WHERE t.id = ${threadId}
+    LIMIT 1
+  `)) as unknown as { deleted_at: Date | null }[];
+  if (!r) return { ok: false };
+  return r.deleted_at === null ? { ok: true } : { ok: false };
+}
+
 interface ThreadRow {
   id: string;
   versionId: string;
@@ -136,6 +159,9 @@ export function registerThreadRoutes(
   app.get('/api/versions/:versionId/threads', async (c) => {
     const versionId = c.req.param('versionId');
 
+    const live = await ensureLiveDocumentForVersion(versionId);
+    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+
     const currentEtag = await computeVersionEtag(versionId);
     const ifNoneMatch = c.req.header('if-none-match');
     if (ifNoneMatch && ifNoneMatch === currentEtag) {
@@ -208,6 +234,10 @@ export function registerThreadRoutes(
 
   app.post('/api/versions/:versionId/threads', async (c) => {
     const versionId = c.req.param('versionId');
+
+    const live = await ensureLiveDocumentForVersion(versionId);
+    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+
     let payload: Partial<CreateThreadRequest>;
     try {
       payload = (await c.req.json()) as Partial<CreateThreadRequest>;
@@ -228,6 +258,21 @@ export function registerThreadRoutes(
         { error: 'invalid_body', message: `Body must be 1–${MAX_BODY} chars after trim.` },
         400
       );
+    }
+
+    // Reject posting to a non-latest version.
+    const [latestRow] = (await db.execute(sql`
+      SELECT MAX(version_number)::int AS max_n,
+             (SELECT version_number FROM versions WHERE id = ${versionId}) AS this_n
+      FROM versions
+      WHERE document_id = (SELECT document_id FROM versions WHERE id = ${versionId})
+    `)) as unknown as { max_n: number | null; this_n: number | null }[];
+
+    if (!latestRow || latestRow.this_n === null) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    if (latestRow.this_n !== latestRow.max_n) {
+      return c.json({ error: 'not_latest_version', message: 'Cannot post to a non-latest version.' }, 409);
     }
 
     const threadId = uuidv7();
@@ -263,6 +308,10 @@ export function registerThreadRoutes(
 
   app.post('/api/threads/:threadId/resolve', async (c) => {
     const threadId = c.req.param('threadId');
+
+    const live = await ensureLiveDocumentForThread(threadId);
+    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+
     const user = c.get('user');
     await db
       .update(threads)
@@ -275,6 +324,10 @@ export function registerThreadRoutes(
 
   app.post('/api/threads/:threadId/reopen', async (c) => {
     const threadId = c.req.param('threadId');
+
+    const live = await ensureLiveDocumentForThread(threadId);
+    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+
     await db
       .update(threads)
       .set({ resolvedAt: null, resolvedBy: null })

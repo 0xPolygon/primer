@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DocumentDetailResponse } from '@primer/shared/api';
+import type { DocumentPatchRequest } from '@primer/shared';
 
 export function useDocument(docId: string) {
   return useQuery({
@@ -13,6 +14,61 @@ export function useDocument(docId: string) {
         throw new Error(`fetch failed: ${res.status}`);
       }
       return res.json();
+    },
+  });
+}
+
+export function useEditDocument(docId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DocumentPatchRequest) => {
+      const res = await fetch(`/api/documents/${docId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`edit doc failed: ${res.status} ${text}`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['document', docId] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useDeleteDocument(docId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<{ id: string; deletedAt: string }> => {
+      const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['document', docId] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useRestoreDocument(docId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/documents/${docId}/restore`, { method: 'POST' });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`restore failed: ${res.status} ${text}`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['document', docId] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }

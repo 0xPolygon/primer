@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { UploadErrorResponse, UploadResponse } from '@primer/shared/api';
+import { FileDropZone } from '../components/FileDropZone.tsx';
 
 export function UploadPage() {
   const navigate = useNavigate();
@@ -39,52 +40,55 @@ export function UploadPage() {
     }
   }
 
+  const canSubmit = file !== null && title.trim().length > 0 && !submitting;
+
   return (
-    <form onSubmit={onSubmit} className="max-w-xl space-y-4">
+    <form onSubmit={onSubmit} className="mx-auto max-w-xl space-y-5">
       <h1 className="text-2xl font-semibold">Upload a document</h1>
 
-      <label className="block">
-        <span className="block text-sm font-medium">HTML file</span>
-        <input
-          type="file"
-          accept=".html,text/html"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="mt-1 block w-full"
-        />
-      </label>
+      <FileDropZone file={file} onChange={setFile} />
 
       <label className="block">
-        <span className="block text-sm font-medium">Title</span>
+        <span className="mb-1 block text-sm font-medium">Title *</span>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={200}
           required
-          className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2"
+          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
         />
       </label>
 
       <label className="block">
-        <span className="block text-sm font-medium">Description (optional)</span>
+        <span className="mb-1 block text-sm font-medium">Description (optional)</span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           maxLength={2000}
           rows={3}
-          className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2"
+          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
         />
       </label>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="rounded-md bg-neutral-900 px-4 py-2 text-white hover:bg-neutral-800 disabled:opacity-50"
-      >
-        {submitting ? 'Uploading…' : 'Upload'}
-      </button>
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => navigate('/')}
+          className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {submitting ? 'Uploading…' : 'Upload'}
+        </button>
+      </div>
     </form>
   );
 }

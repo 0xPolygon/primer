@@ -9,6 +9,7 @@ import { registerDevFixtureRoute } from './routes/devFixture.ts';
 import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
 import { registerDashboardRoute } from './routes/dashboard.ts';
+import { registerVersionRoutes } from './routes/versions.ts';
 import type { Storage } from '@primer/shared/storage';
 import type { Notifier } from './notifications/notifier.ts';
 
@@ -44,12 +45,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   app.get('/api/health', (c) => c.json({ ok: true }));
   registerUploadRoute(app, deps);
-  registerDocumentRoutes(app);
+  registerDocumentRoutes(app, deps);
   registerVersionContentRoute(app, deps);
   registerCompanionRoute(app);
   registerThreadRoutes(app, deps);
   registerCommentRoutes(app, deps);
   registerDashboardRoute(app);
+  registerVersionRoutes(app);
 
   if (process.env.NODE_ENV !== 'production') {
     registerDevFixtureRoute(app);

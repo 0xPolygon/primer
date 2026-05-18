@@ -144,7 +144,34 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
       signalAt: toIso(r.signalAt),
     }));
 
-    const body: DashboardResponse = { myDocuments, recentlyViewedOrCommented };
+    // ── Recently deleted (mine, within 30 days) ────────────────
+    interface DeletedRow {
+      id: string;
+      title: string;
+      deletedAt: string | Date;
+    }
+    const deletedRows = (await db.execute(sql`
+      SELECT id, title, deleted_at AS "deletedAt"
+      FROM documents
+      WHERE uploader_id = ${userId}
+        AND deleted_at IS NOT NULL
+        AND deleted_at > now() - interval '30 days'
+      ORDER BY deleted_at DESC
+    `)) as unknown as DeletedRow[];
+
+    const recentlyDeleted = deletedRows.map((r) => {
+      const deletedDate = r.deletedAt instanceof Date ? r.deletedAt : new Date(r.deletedAt);
+      const ageDays = (Date.now() - deletedDate.getTime()) / (24 * 60 * 60 * 1000);
+      const daysRemaining = Math.max(0, Math.min(30, Math.ceil(30 - ageDays)));
+      return {
+        id: r.id,
+        title: r.title,
+        deletedAt: deletedDate.toISOString(),
+        daysRemaining,
+      };
+    });
+
+    const body: DashboardResponse = { myDocuments, recentlyViewedOrCommented, recentlyDeleted };
     return c.json(body, 200);
   });
 }

@@ -1,10 +1,35 @@
 import type { Hono } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@primer/shared';
 import { threads, comments, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
+
+async function ensureLiveDocumentForThread(threadId: string): Promise<{ ok: true } | { ok: false }> {
+  const [r] = (await db.execute(sql`
+    SELECT d.deleted_at FROM threads t
+    INNER JOIN versions v ON v.id = t.version_id
+    INNER JOIN documents d ON d.id = v.document_id
+    WHERE t.id = ${threadId}
+    LIMIT 1
+  `)) as unknown as { deleted_at: Date | null }[];
+  if (!r) return { ok: false };
+  return r.deleted_at === null ? { ok: true } : { ok: false };
+}
+
+async function ensureLiveDocumentForComment(commentId: string): Promise<{ ok: true } | { ok: false }> {
+  const [r] = (await db.execute(sql`
+    SELECT d.deleted_at FROM comments c
+    INNER JOIN threads t ON t.id = c.thread_id
+    INNER JOIN versions v ON v.id = t.version_id
+    INNER JOIN documents d ON d.id = v.document_id
+    WHERE c.id = ${commentId}
+    LIMIT 1
+  `)) as unknown as { deleted_at: Date | null }[];
+  if (!r) return { ok: false };
+  return r.deleted_at === null ? { ok: true } : { ok: false };
+}
 
 const MAX_BODY = 5000;
 
@@ -103,6 +128,10 @@ export function registerCommentRoutes(
 ): void {
   app.post('/api/threads/:threadId/comments', async (c) => {
     const threadId = c.req.param('threadId');
+
+    const live = await ensureLiveDocumentForThread(threadId);
+    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+
     let payload: Partial<CommentBodyRequest>;
     try {
       payload = (await c.req.json()) as Partial<CommentBodyRequest>;
@@ -171,6 +200,10 @@ export function registerCommentRoutes(
 
   app.patch('/api/comments/:commentId', async (c) => {
     const commentId = c.req.param('commentId');
+
+    const live = await ensureLiveDocumentForComment(commentId);
+    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+
     let payload: Partial<CommentBodyRequest>;
     try {
       payload = (await c.req.json()) as Partial<CommentBodyRequest>;
@@ -220,6 +253,10 @@ export function registerCommentRoutes(
 
   app.delete('/api/comments/:commentId', async (c) => {
     const commentId = c.req.param('commentId');
+
+    const live = await ensureLiveDocumentForComment(commentId);
+    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+
     const user = c.get('user');
     const [existing] = await db.select().from(comments).where(eq(comments.id, commentId));
     if (!existing) return c.json({ error: 'not_found' }, 404);

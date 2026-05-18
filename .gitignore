@@ -5,6 +5,7 @@ dist/
 *.log
 .DS_Store
 /storage/
+apps/api/storage/
 coverage/
 .vitest-tmp/
 .vite/

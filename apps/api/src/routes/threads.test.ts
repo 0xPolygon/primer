@@ -275,3 +275,80 @@ describe('POST /api/threads/:tid/reopen', () => {
     });
   });
 });
+
+describe('POST /api/versions/:vid/threads — non-latest guard', () => {
+  it('returns 409 not_latest_version when posting to a non-latest version', async () => {
+    await withApp(async (app) => {
+      const { documentId, versionId: v1Id } = await seedDocument();
+
+      // Insert a second version so v1 becomes non-latest.
+      const v2Id = uuidv7();
+      await db.insert(versions).values({
+        id: v2Id,
+        documentId,
+        versionNumber: 2,
+        storageKey: `v1/${v2Id}.html`,
+        sizeBytes: 0,
+        versionNote: null,
+      });
+
+      const res = await app.request(`/api/versions/${v1Id}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'late comment',
+        }),
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toBe('not_latest_version');
+    });
+  });
+});
+
+describe('threads endpoints respect soft-delete', () => {
+  it('GET /api/versions/:vid/threads returns 404 on soft-deleted doc', async () => {
+    await withApp(async (app) => {
+      const { documentId, versionId } = await seedDocument();
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+      const res = await app.request(`/api/versions/${versionId}/threads`);
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('POST /api/versions/:vid/threads returns 404 on soft-deleted doc', async () => {
+    await withApp(async (app) => {
+      const { documentId, versionId } = await seedDocument();
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'attempt',
+        }),
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('POST /api/threads/:tid/resolve returns 404 on soft-deleted doc', async () => {
+    await withApp(async (app) => {
+      const { documentId, versionId } = await seedDocument();
+      const threadId = await seedThread(versionId);
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+      const res = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('POST /api/threads/:tid/reopen returns 404 on soft-deleted doc', async () => {
+    await withApp(async (app) => {
+      const { documentId, versionId } = await seedDocument();
+      const threadId = await seedThread(versionId);
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+      const res = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST' });
+      expect(res.status).toBe(404);
+    });
+  });
+});
