@@ -9,6 +9,7 @@ import type {
   SerializableRect,
 } from '@primer/shared';
 import { useDocument, useDeleteDocument, useEditDocument } from '../queries/documents.ts';
+import { useMe } from '../queries/me.ts';
 import { useVersionsQuery } from '../queries/versions.ts';
 import { useThreadsQuery } from '../queries/threads.ts';
 import { useCreateThread } from '../queries/mutations.ts';
@@ -18,8 +19,6 @@ import { VersionSelector } from '../components/VersionSelector.tsx';
 import { EditableField } from '../components/EditableField.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
-
-const MOCK_USER_ID = 'mock-user-1';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -71,10 +70,8 @@ export function DocumentPage() {
     'closed',
   );
 
-  const isUploader = docQuery.data?.document.uploaderDisplayName === 'Mock User';
-  // In SP4 with the single mock user, every uploader check is effectively "is this the
-  // mock user". SP5 will swap this for `docQuery.data?.document.uploaderId === user.id`
-  // when the doc DTO exposes uploaderId.
+  const me = useMe();
+  const isUploader = !!me.data && me.data.id === docQuery.data?.document.uploaderId;
 
   const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
   const [pendingPick, setPendingPick] = useState<PendingPick | null>(null);
@@ -387,7 +384,7 @@ export function DocumentPage() {
         </div>
         <CommentSidebar
           versionId={currentVersionId}
-          currentUserId={MOCK_USER_ID}
+          currentUserId={me.data?.id ?? ''}
           pending={composerPending}
           onCancelPending={() => {
             setPendingSelection(null);

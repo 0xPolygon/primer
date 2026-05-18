@@ -25,8 +25,15 @@ export interface DocumentSummary {
   id: string;
   title: string;
   description: string | null;
+  uploaderId: string;             // NEW in SP5
   uploaderDisplayName: string;
   createdAt: string;          // ISO timestamp
+}
+
+export interface UserDTO {
+  id: string;
+  email: string;
+  displayName: string;
 }
 
 export interface VersionSummary {

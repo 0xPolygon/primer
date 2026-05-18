@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { ThreadsListResponse } from '@primer/shared/api';
+import { api } from '../lib/fetch.ts';
 
 // Module-level ETag cache keyed by versionId so re-renders don't lose it.
 const etagByVersion = new Map<string, string>();
@@ -19,7 +20,7 @@ async function fetchConditional(
   const cachedEtag = etagByVersion.get(versionId);
   if (cachedEtag) headers['if-none-match'] = cachedEtag;
 
-  const res = await fetch(`/api/versions/${versionId}/threads`, { headers, signal });
+  const res = await api(`/api/versions/${versionId}/threads`, { headers, signal });
 
   if (res.status === 304) {
     if (previous) return previous;

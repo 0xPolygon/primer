@@ -1,4 +1,5 @@
 import { Outlet, Link } from 'react-router-dom';
+import { UserMenu } from './components/UserMenu.tsx';
 
 export function AppShell() {
   return (
@@ -7,6 +8,7 @@ export function AppShell() {
         <Link to="/" className="font-semibold">
           Primer
         </Link>
+        <UserMenu />
       </header>
       <main className="flex-1 p-6">
         <Outlet />

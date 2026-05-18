@@ -5,12 +5,13 @@ import type {
   VersionSummaryDTO,
   VersionsListResponse,
 } from '@primer/shared';
+import { api } from '../lib/fetch.ts';
 
 export function useVersionsQuery(docId: string) {
   return useQuery({
     queryKey: ['versions', docId],
     queryFn: async ({ signal }): Promise<VersionsListResponse> => {
-      const res = await fetch(`/api/documents/${docId}/versions`, { signal });
+      const res = await api(`/api/documents/${docId}/versions`, { signal });
       if (!res.ok) throw new Error(`versions fetch failed: ${res.status}`);
       return res.json();
     },
@@ -26,7 +27,7 @@ export function useAddVersion(docId: string) {
       const fd = new FormData();
       fd.append('file', input.file);
       if (input.versionNote !== null) fd.append('versionNote', input.versionNote);
-      const res = await fetch(`/api/documents/${docId}/versions`, {
+      const res = await api(`/api/documents/${docId}/versions`, {
         method: 'POST',
         body: fd,
       });
@@ -49,7 +50,7 @@ export function useEditVersionNote(versionId: string) {
   return useMutation({
     mutationFn: async (versionNote: string | null): Promise<VersionSummaryDTO> => {
       const payload: VersionPatchRequest = { versionNote };
-      const res = await fetch(`/api/versions/${versionId}`, {
+      const res = await api(`/api/versions/${versionId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),

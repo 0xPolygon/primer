@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { DocumentDetailResponse } from '@primer/shared/api';
 import type { DocumentPatchRequest } from '@primer/shared';
+import { api } from '../lib/fetch.ts';
 
 export function useDocument(docId: string) {
   return useQuery({
     queryKey: ['document', docId],
     queryFn: async (): Promise<DocumentDetailResponse> => {
-      const res = await fetch(`/api/documents/${docId}`);
+      const res = await api(`/api/documents/${docId}`);
       if (res.status === 404) {
         throw new Error('not_found');
       }
@@ -22,7 +23,7 @@ export function useEditDocument(docId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: DocumentPatchRequest) => {
-      const res = await fetch(`/api/documents/${docId}`, {
+      const res = await api(`/api/documents/${docId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(input),
@@ -44,7 +45,7 @@ export function useDeleteDocument(docId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (): Promise<{ id: string; deletedAt: string }> => {
-      const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+      const res = await api(`/api/documents/${docId}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`delete failed: ${res.status}`);
       return res.json();
     },
@@ -59,7 +60,7 @@ export function useRestoreDocument(docId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/documents/${docId}/restore`, { method: 'POST' });
+      const res = await api(`/api/documents/${docId}/restore`, { method: 'POST' });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
         throw new Error(`restore failed: ${res.status} ${text}`);

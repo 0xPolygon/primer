@@ -8,6 +8,7 @@ import {
   bigint,
   uniqueIndex,
   primaryKey,
+  index,
 } from 'drizzle-orm/pg-core';
 import type { AnchorData } from './companion-protocol.ts';
 
@@ -86,5 +87,23 @@ export const documentViews = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.documentId] }),
+  })
+);
+
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    userAgent: text('user_agent'),
+  },
+  (t) => ({
+    byUser: index('sessions_user_id_idx').on(t.userId),
+    byExpiry: index('sessions_expires_at_idx').on(t.expiresAt),
   })
 );

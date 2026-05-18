@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { UploadErrorResponse, UploadResponse } from '@primer/shared/api';
 import { FileDropZone } from '../components/FileDropZone.tsx';
+import { api } from '../lib/fetch.ts';
 
 export function UploadPage() {
   const navigate = useNavigate();
@@ -25,7 +26,7 @@ export function UploadPage() {
       fd.append('title', title);
       if (description) fd.append('description', description);
 
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
+      const res = await api('/api/upload', { method: 'POST', body: fd });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as Partial<UploadErrorResponse>;
         setError(body.message ?? `Upload failed (${res.status}).`);

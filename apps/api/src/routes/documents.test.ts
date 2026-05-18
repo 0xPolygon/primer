@@ -11,13 +11,14 @@ import { db } from '../db/client.ts';
 import { documents, documentViews, versions, users } from '@primer/shared/schema';
 import type { DocumentDetailResponse, UploadResponse } from '@primer/shared/api';
 import type { DocumentPatchRequest } from '@primer/shared';
+import { CSRF_HEADERS } from '../test/harness.ts';
 
 async function uploadFixture(app: ReturnType<typeof createApp>): Promise<UploadResponse> {
   const fd = new FormData();
   fd.append('file', new Blob(['<html><body><p>x</p></body></html>'], { type: 'text/html' }), 'r.html');
   fd.append('title', 'Fixture');
   fd.append('description', 'desc');
-  const res = await app.request('/api/upload', { method: 'POST', body: fd });
+  const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
   return (await res.json()) as UploadResponse;
 }
 
@@ -142,7 +143,7 @@ describe('PATCH /api/documents/:docId', () => {
       const body: DocumentPatchRequest = { title: 'New Title' };
       const res = await app.request(`/api/documents/${upload.documentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
       expect(res.status).toBe(200);
@@ -161,7 +162,7 @@ describe('PATCH /api/documents/:docId', () => {
 
       const r1 = await app.request(`/api/documents/${upload.documentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ description: 'Updated desc' }),
       });
       expect(r1.status).toBe(200);
@@ -169,7 +170,7 @@ describe('PATCH /api/documents/:docId', () => {
 
       const r2 = await app.request(`/api/documents/${upload.documentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ description: null }),
       });
       expect(r2.status).toBe(200);
@@ -187,7 +188,7 @@ describe('PATCH /api/documents/:docId', () => {
 
       const res = await app.request(`/api/documents/${upload.documentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({}),
       });
       expect(res.status).toBe(400);
@@ -205,7 +206,7 @@ describe('PATCH /api/documents/:docId', () => {
 
       const res = await app.request(`/api/documents/${upload.documentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ title: '   ' }),
       });
       expect(res.status).toBe(400);
@@ -242,7 +243,7 @@ describe('PATCH /api/documents/:docId', () => {
 
       const res = await app.request(`/api/documents/${docId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ title: 'Sneaky' }),
       });
       expect(res.status).toBe(403);
@@ -263,7 +264,7 @@ describe('PATCH /api/documents/:docId', () => {
 
       const res = await app.request(`/api/documents/${upload.documentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ title: 'Cant edit' }),
       });
       expect(res.status).toBe(404);
@@ -280,7 +281,7 @@ describe('DELETE /api/documents/:docId', () => {
       const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
       const upload = await uploadFixture(app);
 
-      const res = await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE' });
+      const res = await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(200);
       const out = (await res.json()) as { id: string; deletedAt: string };
       expect(out.id).toBe(upload.documentId);
@@ -302,8 +303,8 @@ describe('DELETE /api/documents/:docId', () => {
       const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
       const upload = await uploadFixture(app);
 
-      await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE' });
-      const res = await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE' });
+      await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
+      const res = await app.request(`/api/documents/${upload.documentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(200);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -324,7 +325,7 @@ describe('DELETE /api/documents/:docId', () => {
         uploaderId: otherUserId,
       });
 
-      const res = await app.request(`/api/documents/${docId}`, { method: 'DELETE' });
+      const res = await app.request(`/api/documents/${docId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(403);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -354,6 +355,7 @@ describe('POST /api/documents/:docId/versions', () => {
       );
       const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
         method: 'POST',
+        headers: CSRF_HEADERS,
         body: fd,
       });
       expect(res.status).toBe(201);
@@ -381,6 +383,7 @@ describe('POST /api/documents/:docId/versions', () => {
       const fd = buildVersionFormData('<html><body></body></html>');
       const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
         method: 'POST',
+        headers: CSRF_HEADERS,
         body: fd,
       });
       expect(res.status).toBe(404);
@@ -415,6 +418,7 @@ describe('POST /api/documents/:docId/versions', () => {
       const fd = buildVersionFormData('<html><body></body></html>');
       const res = await app.request(`/api/documents/${docId}/versions`, {
         method: 'POST',
+        headers: CSRF_HEADERS,
         body: fd,
       });
       expect(res.status).toBe(403);
@@ -434,6 +438,7 @@ describe('POST /api/documents/:docId/versions', () => {
       fd.append('file', new Blob([big], { type: 'text/html' }), 'big.html');
       const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
         method: 'POST',
+        headers: CSRF_HEADERS,
         body: fd,
       });
       expect(res.status).toBe(400);
@@ -500,6 +505,22 @@ describe('GET /api/documents/:docId/versions', () => {
   });
 });
 
+describe('GET /api/documents/:docId — uploaderId in response', () => {
+  it('includes uploaderId in the document detail body', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-uploaderid-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+      const res = await app.request(`/api/documents/${upload.documentId}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { document: { uploaderId: string } };
+      expect(body.document.uploaderId).toBe('mock-user-1');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('POST /api/documents/:docId/restore', () => {
   it('clears deletedAt when called within 30 days', async () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-restore-'));
@@ -512,7 +533,7 @@ describe('POST /api/documents/:docId/restore', () => {
         .set({ deletedAt: new Date() })
         .where(eq(documents.id, upload.documentId));
 
-      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST' });
+      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST', headers: CSRF_HEADERS });
       expect(res.status).toBe(200);
 
       const [row] = await db
@@ -537,7 +558,7 @@ describe('POST /api/documents/:docId/restore', () => {
         .set({ deletedAt: thirtyOneDaysAgo })
         .where(eq(documents.id, upload.documentId));
 
-      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST' });
+      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST', headers: CSRF_HEADERS });
       expect(res.status).toBe(409);
       expect(((await res.json()) as { error: string }).error).toBe('restore_window_expired');
     } finally {
@@ -551,7 +572,7 @@ describe('POST /api/documents/:docId/restore', () => {
       const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
       const upload = await uploadFixture(app);
 
-      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST' });
+      const res = await app.request(`/api/documents/${upload.documentId}/restore`, { method: 'POST', headers: CSRF_HEADERS });
       expect(res.status).toBe(200);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -573,7 +594,7 @@ describe('POST /api/documents/:docId/restore', () => {
         deletedAt: new Date(),
       });
 
-      const res = await app.request(`/api/documents/${docId}/restore`, { method: 'POST' });
+      const res = await app.request(`/api/documents/${docId}/restore`, { method: 'POST', headers: CSRF_HEADERS });
       expect(res.status).toBe(403);
     } finally {
       await rm(root, { recursive: true, force: true });

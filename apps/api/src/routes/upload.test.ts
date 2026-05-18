@@ -9,6 +9,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
 import { documents, versions } from '@primer/shared/schema';
 import type { UploadResponse } from '@primer/shared/api';
+import { CSRF_HEADERS } from '../test/harness.ts';
 
 async function withTmpStorage<T>(
   fn: (storage: FilesystemStorage, root: string) => Promise<T>
@@ -38,7 +39,7 @@ describe('POST /api/upload — happy path', () => {
         'My Report'
       );
 
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(200);
       const body = (await res.json()) as UploadResponse;
       expect(body.url).toBe(`/d/${body.documentId}`);
@@ -78,7 +79,7 @@ describe('POST /api/upload — error paths', () => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
       const big = 'x'.repeat(10 * 1024 * 1024 + 1);
       const fd = buildFormData(big, 't');
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ error: 'too_large' });
     });
@@ -88,7 +89,7 @@ describe('POST /api/upload — error paths', () => {
     await withTmpStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = buildFormData('<html></html>', '   ');
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ error: 'missing_title' });
     });
@@ -100,7 +101,7 @@ describe('POST /api/upload — error paths', () => {
       const fd = new FormData();
       fd.append('file', new Blob(['<html></html>'], { type: 'text/html' }), 'report.txt');
       fd.append('title', 't');
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ error: 'bad_extension' });
     });
@@ -112,7 +113,7 @@ describe('POST /api/upload — error paths', () => {
       const fd = new FormData();
       fd.append('file', new Blob(['<html></html>'], { type: 'application/pdf' }), 'r.html');
       fd.append('title', 't');
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ error: 'bad_content_type' });
     });
@@ -123,7 +124,7 @@ describe('POST /api/upload — error paths', () => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = new FormData();
       fd.append('title', 't');
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ error: 'missing_file' });
     });
@@ -133,7 +134,7 @@ describe('POST /api/upload — error paths', () => {
     await withTmpStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = buildFormData('', 't');
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({ error: 'parse_failed' });
     });

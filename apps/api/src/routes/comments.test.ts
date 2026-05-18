@@ -10,6 +10,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
 import { documents, versions, threads, comments, users } from '@primer/shared/schema';
 import type { CommentDTO, ThreadDTO } from '@primer/shared';
+import { CSRF_HEADERS } from '../test/harness.ts';
 
 async function seedDocVersionThread() {
   const documentId = uuidv7();
@@ -60,7 +61,7 @@ describe('POST /api/threads/:tid/comments — reply', () => {
       const { threadId } = await seedDocVersionThread();
       const res = await app.request(`/api/threads/${threadId}/comments`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'a reply' }),
       });
       expect(res.status).toBe(201);
@@ -81,7 +82,7 @@ describe('POST /api/threads/:tid/comments — reply', () => {
 
       const res = await app.request(`/api/threads/${threadId}/comments`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'I have more thoughts' }),
       });
       expect(res.status).toBe(201);
@@ -97,7 +98,7 @@ describe('POST /api/threads/:tid/comments — reply', () => {
       const { threadId } = await seedDocVersionThread();
       const res = await app.request(`/api/threads/${threadId}/comments`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: '  ' }),
       });
       expect(res.status).toBe(400);
@@ -110,7 +111,7 @@ describe('POST /api/threads/:tid/comments — reply', () => {
       const fakeId = uuidv7();
       const res = await app.request(`/api/threads/${fakeId}/comments`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'orphan reply' }),
       });
       expect(res.status).toBe(404);
@@ -129,7 +130,7 @@ describe('PATCH /api/comments/:cid', () => {
 
       const res = await app.request(`/api/comments/${firstCommentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'edited body' }),
       });
       expect(res.status).toBe(200);
@@ -155,7 +156,7 @@ describe('PATCH /api/comments/:cid', () => {
 
       const res = await app.request(`/api/comments/${otherCommentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'sneaky edit' }),
       });
       expect(res.status).toBe(403);
@@ -173,7 +174,7 @@ describe('PATCH /api/comments/:cid', () => {
 
       const res = await app.request(`/api/comments/${firstCommentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'too late' }),
       });
       expect(res.status).toBe(409);
@@ -188,7 +189,7 @@ describe('comment endpoints respect soft-delete', () => {
       await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
       const res = await app.request(`/api/threads/${threadId}/comments`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'attempted reply' }),
       });
       expect(res.status).toBe(404);
@@ -205,7 +206,7 @@ describe('comment endpoints respect soft-delete', () => {
       await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
       const res = await app.request(`/api/comments/${firstCommentId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ body: 'edit attempt' }),
       });
       expect(res.status).toBe(404);
@@ -220,7 +221,7 @@ describe('comment endpoints respect soft-delete', () => {
         .from(comments)
         .where(eq(comments.threadId, threadId)))[0].id;
       await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
-      const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE' });
+      const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(404);
     });
   });
@@ -234,7 +235,7 @@ describe('DELETE /api/comments/:cid', () => {
         .select({ id: comments.id })
         .from(comments)
         .where(eq(comments.threadId, threadId)))[0].id;
-      const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE' });
+      const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(200);
       const cm = (await res.json()) as CommentDTO;
       expect(cm.body).toBe('');
@@ -259,7 +260,7 @@ describe('DELETE /api/comments/:cid', () => {
         body: 'theirs',
         mentions: [],
       });
-      const res = await app.request(`/api/comments/${otherCommentId}`, { method: 'DELETE' });
+      const res = await app.request(`/api/comments/${otherCommentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(403);
     });
   });
@@ -271,8 +272,8 @@ describe('DELETE /api/comments/:cid', () => {
         .select({ id: comments.id })
         .from(comments)
         .where(eq(comments.threadId, threadId)))[0].id;
-      await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE' });
-      const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE' });
+      await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
+      const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(200);
       expect(((await res.json()) as CommentDTO).deletedAt).not.toBeNull();
     });

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
+import { CSRF_HEADERS } from '../test/harness.ts';
 
 vi.mock('../db/client.ts', async (importOriginal) => {
   const orig = await importOriginal<typeof import('../db/client.ts')>();
@@ -30,7 +31,7 @@ describe('POST /api/upload — DB failure triggers compensating delete', () => {
       fd.append('file', new Blob(['<html><body></body></html>'], { type: 'text/html' }), 'r.html');
       fd.append('title', 't');
 
-      const res = await app.request('/api/upload', { method: 'POST', body: fd });
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(500);
 
       // The v1/ directory may exist (mkdir was called) but must contain no files —

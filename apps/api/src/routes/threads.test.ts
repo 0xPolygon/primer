@@ -11,6 +11,7 @@ import { db } from '../db/client.ts';
 import { documents, versions, threads, comments } from '@primer/shared/schema';
 import type { ThreadsListResponse } from '@primer/shared';
 import type { ThreadDTO, CreateThreadRequest } from '@primer/shared';
+import { CSRF_HEADERS } from '../test/harness.ts';
 
 async function seedDocument() {
   const documentId = uuidv7();
@@ -149,7 +150,7 @@ describe('POST /api/versions/:versionId/threads', () => {
       };
       const res = await app.request(`/api/versions/${versionId}/threads`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
       expect(res.status).toBe(201);
@@ -174,7 +175,7 @@ describe('POST /api/versions/:versionId/threads', () => {
       const { versionId } = await seedDocument();
       const res = await app.request(`/api/versions/${versionId}/threads`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({
           anchor: { type: 'text-range', selectorText: 't', prefix: '', suffix: '', containerPath: 'body' },
           body: '   ',
@@ -191,7 +192,7 @@ describe('POST /api/versions/:versionId/threads', () => {
       const { versionId } = await seedDocument();
       const res = await app.request(`/api/versions/${versionId}/threads`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({
           anchor: { type: 'text-range', selectorText: 't', prefix: '', suffix: '', containerPath: 'body' },
           body: 'x'.repeat(5001),
@@ -207,7 +208,7 @@ describe('POST /api/versions/:versionId/threads', () => {
       const { versionId } = await seedDocument();
       const res = await app.request(`/api/versions/${versionId}/threads`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({
           anchor: { type: 'text-range', selectorText: 'x' /* missing fields */ },
           body: 'hi',
@@ -241,14 +242,14 @@ describe('POST /api/threads/:tid/resolve', () => {
     await withApp(async (app) => {
       const { versionId } = await seedDocument();
       const threadId = await seedThread(versionId);
-      const r1 = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      const r1 = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST', headers: CSRF_HEADERS });
       expect(r1.status).toBe(200);
       const t1 = (await r1.json()) as ThreadDTO;
       expect(t1.resolvedAt).not.toBeNull();
       expect(t1.resolvedBy).toBe('mock-user-1');
       expect(t1.resolvedByDisplayName).toBe('Mock User');
 
-      const r2 = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      const r2 = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST', headers: CSRF_HEADERS });
       expect(r2.status).toBe(200);
       const t2 = (await r2.json()) as ThreadDTO;
       expect(t2.resolvedAt).not.toBeNull();
@@ -261,15 +262,15 @@ describe('POST /api/threads/:tid/reopen', () => {
     await withApp(async (app) => {
       const { versionId } = await seedDocument();
       const threadId = await seedThread(versionId);
-      await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST', headers: CSRF_HEADERS });
 
-      const r1 = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST' });
+      const r1 = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST', headers: CSRF_HEADERS });
       expect(r1.status).toBe(200);
       const t1 = (await r1.json()) as ThreadDTO;
       expect(t1.resolvedAt).toBeNull();
       expect(t1.resolvedBy).toBeNull();
 
-      const r2 = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST' });
+      const r2 = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST', headers: CSRF_HEADERS });
       expect(r2.status).toBe(200);
       expect(((await r2.json()) as ThreadDTO).resolvedAt).toBeNull();
     });
@@ -294,7 +295,7 @@ describe('POST /api/versions/:vid/threads — non-latest guard', () => {
 
       const res = await app.request(`/api/versions/${v1Id}/threads`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({
           anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
           body: 'late comment',
@@ -322,7 +323,7 @@ describe('threads endpoints respect soft-delete', () => {
       await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
       const res = await app.request(`/api/versions/${versionId}/threads`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({
           anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
           body: 'attempt',
@@ -337,7 +338,7 @@ describe('threads endpoints respect soft-delete', () => {
       const { documentId, versionId } = await seedDocument();
       const threadId = await seedThread(versionId);
       await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
-      const res = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      const res = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST', headers: CSRF_HEADERS });
       expect(res.status).toBe(404);
     });
   });
@@ -347,7 +348,7 @@ describe('threads endpoints respect soft-delete', () => {
       const { documentId, versionId } = await seedDocument();
       const threadId = await seedThread(versionId);
       await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
-      const res = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST' });
+      const res = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST', headers: CSRF_HEADERS });
       expect(res.status).toBe(404);
     });
   });

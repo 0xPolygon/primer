@@ -59,6 +59,29 @@ export async function purgeExpiredDocuments(deps: { storage: Storage }): Promise
   return report;
 }
 
+export interface SessionPurgeReport {
+  deletedCount: number;
+  durationMs: number;
+}
+
+const SESSION_GRACE_DAYS = 7;
+
+export async function purgeExpiredSessions(): Promise<SessionPurgeReport> {
+  const startedAt = Date.now();
+  const result = (await db.execute(sql`
+    DELETE FROM sessions
+    WHERE expires_at < now() - make_interval(days => ${SESSION_GRACE_DAYS})
+  `)) as unknown as { count?: number; rowCount?: number } | unknown;
+  // Drizzle's underlying driver may surface rowCount via different keys.
+  let deletedCount = 0;
+  if (result && typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    if (typeof obj.count === 'number') deletedCount = obj.count;
+    else if (typeof obj.rowCount === 'number') deletedCount = obj.rowCount;
+  }
+  return { deletedCount, durationMs: Date.now() - startedAt };
+}
+
 export function startPurgeInterval(deps: {
   storage: Storage;
   intervalMs?: number;
@@ -71,9 +94,14 @@ export function startPurgeInterval(deps: {
     if (stopped) return;
     inFlight = (async () => {
       try {
-        const report = await purgeExpiredDocuments({ storage: deps.storage });
-        if (report.purgedDocumentIds.length > 0 || report.failedStorageKeys.length > 0) {
-          logger.info({ report }, 'purge interval: complete');
+        const docReport = await purgeExpiredDocuments({ storage: deps.storage });
+        const sessionReport = await purgeExpiredSessions();
+        if (
+          docReport.purgedDocumentIds.length > 0 ||
+          docReport.failedStorageKeys.length > 0 ||
+          sessionReport.deletedCount > 0
+        ) {
+          logger.info({ docReport, sessionReport }, 'purge interval: complete');
         }
       } catch (err) {
         logger.error({ err }, 'purge interval: unexpected failure');

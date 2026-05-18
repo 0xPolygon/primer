@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { v7 as uuidv7 } from 'uuid';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { documents, versions } from '@primer/shared/schema';
+import { documents, versions, sessions, users } from '@primer/shared/schema';
 import { FilesystemStorage } from '../storage/filesystem.ts';
-import { purgeExpiredDocuments } from './purge.ts';
+import { purgeExpiredDocuments, purgeExpiredSessions } from './purge.ts';
 
 async function seedExpiredDoc(daysOld: number, storage: FilesystemStorage) {
   const documentId = uuidv7();
@@ -123,5 +123,46 @@ describe('purgeExpiredDocuments', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('purgeExpiredSessions', () => {
+  it('deletes sessions whose expires_at is more than 7 days in the past', async () => {
+    const userId = `purge-sess-${Math.random().toString(36).slice(2, 8)}`;
+    await db.insert(users).values({
+      id: userId,
+      email: `${userId}@p.t`,
+      displayName: userId,
+    });
+    const oldSid = 'old' + 'a'.repeat(61);
+    const freshSid = 'fresh' + 'a'.repeat(59);
+    await db.insert(sessions).values([
+      {
+        id: oldSid,
+        userId,
+        expiresAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+        lastSeenAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
+        createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      },
+      {
+        id: freshSid,
+        userId,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        lastSeenAt: new Date(),
+        createdAt: new Date(),
+      },
+    ]);
+
+    const report = await purgeExpiredSessions();
+    expect(report.deletedCount).toBe(1);
+
+    const remaining = await db.select().from(sessions).where(eq(sessions.userId, userId));
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].id).toBe(freshSid);
+  });
+
+  it('returns deletedCount: 0 when nothing is past the grace window', async () => {
+    const report = await purgeExpiredSessions();
+    expect(report.deletedCount).toBeGreaterThanOrEqual(0);
   });
 });

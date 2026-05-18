@@ -10,6 +10,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
 import { documents, versions, users } from '@primer/shared/schema';
 import type { VersionSummaryDTO } from '@primer/shared';
+import { CSRF_HEADERS } from '../test/harness.ts';
 
 async function seedDocAndVersion(uploaderId: string = 'mock-user-1') {
   const documentId = uuidv7();
@@ -47,7 +48,7 @@ describe('PATCH /api/versions/:vid', () => {
       const { versionId } = await seedDocAndVersion();
       const res = await app.request(`/api/versions/${versionId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ versionNote: 'fixed Y-axis scale' }),
       });
       expect(res.status).toBe(200);
@@ -61,7 +62,7 @@ describe('PATCH /api/versions/:vid', () => {
       const { versionId } = await seedDocAndVersion();
       const res = await app.request(`/api/versions/${versionId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ versionNote: null }),
       });
       expect(res.status).toBe(200);
@@ -74,7 +75,7 @@ describe('PATCH /api/versions/:vid', () => {
       const { versionId } = await seedDocAndVersion();
       const res = await app.request(`/api/versions/${versionId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ versionNote: '   ' }),
       });
       expect(res.status).toBe(200);
@@ -90,7 +91,7 @@ describe('PATCH /api/versions/:vid', () => {
 
       const res = await app.request(`/api/versions/${versionId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ versionNote: 'sneaky' }),
       });
       expect(res.status).toBe(403);
@@ -104,7 +105,7 @@ describe('PATCH /api/versions/:vid', () => {
 
       const res = await app.request(`/api/versions/${versionId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ versionNote: 'cant' }),
       });
       expect(res.status).toBe(404);
@@ -116,7 +117,7 @@ describe('PATCH /api/versions/:vid', () => {
       const { versionId } = await seedDocAndVersion();
       const res = await app.request(`/api/versions/${versionId}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
         body: JSON.stringify({ versionNote: 'x'.repeat(501) }),
       });
       expect(res.status).toBe(400);

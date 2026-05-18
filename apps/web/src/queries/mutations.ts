@@ -6,6 +6,7 @@ import type {
   ThreadDTO,
 } from '@primer/shared';
 import { clearThreadsEtag, type ThreadsQueryShape } from './threads.ts';
+import { api } from '../lib/fetch.ts';
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -56,7 +57,7 @@ export function useCreateThread(versionId: string) {
   return useMutation({
     mutationFn: async (input: { anchor: AnchorData; body: string }) => {
       const payload: CreateThreadRequest = { anchor: input.anchor, body: input.body };
-      const res = await fetch(`/api/versions/${versionId}/threads`, {
+      const res = await api(`/api/versions/${versionId}/threads`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
@@ -75,7 +76,7 @@ export function useReply(versionId: string, threadId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (body: string) => {
-      const res = await fetch(`/api/threads/${threadId}/comments`, {
+      const res = await api(`/api/threads/${threadId}/comments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ body }),
@@ -94,7 +95,7 @@ export function useResolveThread(versionId: string, threadId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/threads/${threadId}/resolve`, { method: 'POST' });
+      const res = await api(`/api/threads/${threadId}/resolve`, { method: 'POST' });
       return jsonOrThrow<ThreadDTO>(res);
     },
     onSuccess: (thread) => {
@@ -109,7 +110,7 @@ export function useReopenThread(versionId: string, threadId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/threads/${threadId}/reopen`, { method: 'POST' });
+      const res = await api(`/api/threads/${threadId}/reopen`, { method: 'POST' });
       return jsonOrThrow<ThreadDTO>(res);
     },
     onSuccess: (thread) => {
@@ -124,7 +125,7 @@ export function useEditComment(versionId: string, commentId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (body: string) => {
-      const res = await fetch(`/api/comments/${commentId}`, {
+      const res = await api(`/api/comments/${commentId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ body }),
@@ -143,7 +144,7 @@ export function useDeleteComment(versionId: string, commentId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/comments/${commentId}`, { method: 'DELETE' });
+      const res = await api(`/api/comments/${commentId}`, { method: 'DELETE' });
       return jsonOrThrow<CommentDTO>(res);
     },
     onSuccess: (tombstone) => {

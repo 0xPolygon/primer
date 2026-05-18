@@ -9,6 +9,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { ARTIFACT_CSP } from './versionContent.ts';
 import { db } from '../db/client.ts';
 import { documents, versions as versionsTable } from '@primer/shared/schema';
+import { CSRF_HEADERS } from '../test/harness.ts';
 
 async function upload(app: ReturnType<typeof createApp>): Promise<string> {
   const fd = new FormData();
@@ -18,7 +19,7 @@ async function upload(app: ReturnType<typeof createApp>): Promise<string> {
     'r.html'
   );
   fd.append('title', 'Sample');
-  const res = await app.request('/api/upload', { method: 'POST', body: fd });
+  const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
   const body = (await res.json()) as { versionId: string };
   return body.versionId;
 }
