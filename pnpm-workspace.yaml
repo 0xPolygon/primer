@@ -4,12 +4,29 @@ packages:
 
 # Supply-chain hardening (see design spec, Section "Supply-chain hardening")
 minimumReleaseAge: 20160 # 14 days, in minutes
+# Packages allowed to bypass the minimumReleaseAge gate. Use sparingly and
+# only for well-established packages with active security maintenance — the
+# point of the gate is to catch malicious publishes during their first two
+# weeks of life. Each entry needs a one-line justification.
+minimumReleaseAgeExclude:
+  # Hono ships frequent security patches; 4.12.18 (May 6) clears three audit
+  # findings affecting features we don't use (cache middleware, JSX SSR, JWT
+  # verify). 14-day gate clears May 20; this excludes hono only.
+  - hono
 blockExoticSubdeps: true
 # Packages allowed to run postinstall/preinstall scripts.
 # Each entry is reviewed individually. NEVER approve sight-unseen.
 allowBuilds:
   # esbuild downloads a platform-specific native binary from npm under
-  # the @esbuild scope. Required transitively by drizzle-kit.
+  # the @esbuild scope. Required transitively by drizzle-kit, and used
+  # directly by apps/api for its production build.
   esbuild: true
+# Transitive override: drizzle-kit pulls esbuild via @esbuild-kit/core-utils
+# (deprecated), which pins esbuild <=0.24.2 — vulnerable to GHSA-67mh-4wv8-2f99
+# (dev-server CSRF). The CVE only affects esbuild's dev server, which we never
+# start — drizzle-kit only invokes esbuild as a CLI bundler. Force the
+# transitive copy to a patched version to clear the audit noise.
+overrides:
+  esbuild: '^0.25.0'
 strictPeerDependencies: true
 engineStrict: true
