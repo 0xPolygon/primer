@@ -1,4 +1,8 @@
 import { Hono } from 'hono';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { logger as appLogger } from './logger.ts';
 import { authMiddleware } from './middleware/auth.ts';
 import { csrfMiddleware } from './auth/csrf.ts';
@@ -68,6 +72,32 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   if (process.env.NODE_ENV !== 'production') {
     registerDevFixtureRoute(app);
+  }
+
+  // Production: serve the built SPA. Dev: Vite handles this at :5173, skip.
+  if (process.env.SERVE_STATIC === '1') {
+    // Default: resolve relative to this source file so the path is correct
+    // regardless of cwd (Railway runs `pnpm --filter @primer/api start` from
+    // either the repo root or the package dir depending on workspace settings).
+    const here = dirname(fileURLToPath(import.meta.url));
+    const staticRoot = process.env.STATIC_ROOT ?? resolvePath(here, '../../web/dist');
+    app.use('/*', serveStatic({ root: staticRoot }));
+    app.get('/*', async (c) => {
+      const p = c.req.path;
+      if (p.startsWith('/api/') || p.startsWith('/auth/') || p.startsWith('/companion/')) {
+        return c.notFound();
+      }
+      // Only fall back to index.html for routes (no file extension after the last /).
+      // Missing assets like /assets/foo.js stay as 404 so we don't mask bad bundle paths.
+      const last = p.slice(p.lastIndexOf('/') + 1);
+      if (last.includes('.')) return c.notFound();
+      try {
+        const html = await readFile(resolvePath(staticRoot, 'index.html'), 'utf-8');
+        return c.html(html);
+      } catch {
+        return c.text('SPA build missing', 500);
+      }
+    });
   }
 
   return app;
