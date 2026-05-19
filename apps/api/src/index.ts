@@ -13,10 +13,28 @@ const storageRoot = process.env.STORAGE_ROOT ?? './storage';
 const storage = new FilesystemStorage(storageRoot);
 const notifier = new NoopNotifier();
 
-const authMode = (process.env.AUTH_MODE ?? 'mock').toLowerCase();
-if (authMode !== 'mock' && authMode !== 'okta') {
-  throw new Error(`AUTH_MODE must be 'mock' or 'okta'; got '${authMode}'`);
+const rawAuthMode = process.env.AUTH_MODE;
+if (!rawAuthMode || !['mock', 'okta'].includes(rawAuthMode.toLowerCase())) {
+  throw new Error(
+    "AUTH_MODE must be explicitly set to 'mock' or 'okta'. " +
+      "Refusing to start with an implicit default. " +
+      'For local dev, set AUTH_MODE=mock in your .env file.',
+  );
 }
+const authMode = rawAuthMode.toLowerCase();
+
+if (authMode === 'mock' && process.env.NODE_ENV === 'production') {
+  throw new Error(
+    'AUTH_MODE=mock is not permitted when NODE_ENV=production. ' +
+      'Set AUTH_MODE=okta and provide OKTA_ISSUER, OKTA_CLIENT_ID, OKTA_CLIENT_SECRET, AUTH_BASE_URL.',
+  );
+}
+if (authMode === 'mock') {
+  logger.warn(
+    'AUTH_MODE=mock — every request is authenticated as mock-user-1. Do not deploy this to any shared environment.',
+  );
+}
+
 const sessionCookieName = process.env.SESSION_COOKIE_NAME ?? 'primer_sid';
 
 let userResolver: UserResolver;

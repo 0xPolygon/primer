@@ -1,10 +1,16 @@
+# LOCAL DEVELOPMENT ONLY.
+# Production Primer runs on Railway with a managed Postgres service whose
+# credentials are auto-generated and injected via DATABASE_URL. The defaults
+# below exist so `pnpm db:up` just works for a developer on their laptop.
+# Override POSTGRES_PASSWORD via an environment variable if you ever expose
+# this container outside localhost.
 services:
   postgres:
     image: postgres:17.9
     restart: unless-stopped
     environment:
       POSTGRES_USER: primer
-      POSTGRES_PASSWORD: primer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-primer_local_dev}
       POSTGRES_DB: primer
     ports:
       - "5432:5432"

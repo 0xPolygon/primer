@@ -57,7 +57,12 @@ export function registerAuthRoutes(
   const adapter: OktaAdapter = deps.oktaAdapter ?? makeDisabledOktaAdapter();
   const sessionCookieName = deps.authCookieName ?? DEFAULT_SESSION_COOKIE;
   const stateCookieName = deps.authStateCookieName ?? DEFAULT_STATE_COOKIE;
-  const secure = process.env.NODE_ENV === 'production';
+  // Secure flag: prefer explicit COOKIE_SECURE, else derive from AUTH_BASE_URL.
+  // Decoupled from NODE_ENV so an HTTPS deploy that forgets to set NODE_ENV
+  // doesn't silently drop the Secure flag.
+  const secure =
+    process.env.COOKIE_SECURE === 'true' ||
+    (process.env.AUTH_BASE_URL ?? '').startsWith('https://');
 
   app.get('/auth/login', async (c) => {
     try {
