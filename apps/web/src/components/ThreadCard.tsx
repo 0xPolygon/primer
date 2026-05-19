@@ -35,6 +35,12 @@ function anchorPreview(t: ThreadDTO): string {
     const text = t.anchor.selectorText;
     return `"${text.slice(0, 60)}${text.length > 60 ? '…' : ''}"`;
   }
+  // element-path: prefer the captured innerText; fall back to the CSS path
+  // for legacy rows that pre-date innerText capture.
+  const inner = t.anchor.innerText;
+  if (inner && inner.length > 0) {
+    return `"${inner.slice(0, 60)}${inner.length > 60 ? '…' : ''}"`;
+  }
   return t.anchor.path;
 }
 

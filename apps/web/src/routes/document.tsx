@@ -283,7 +283,7 @@ export function DocumentPage() {
                   : 'border border-neutral-300 hover:bg-neutral-100'
               }`}
             >
-              {pickMode ? 'Exit pick mode' : 'Pick element'}
+              {pickMode ? 'Cancel' : 'Add Comment'}
             </button>
           )}
           {isUploader && !readMostly && (

@@ -12,6 +12,10 @@ function anchorPreview(a: AnchorData): string {
   if (a.type === 'text-range') {
     return `"…${a.selectorText.slice(0, 80)}${a.selectorText.length > 80 ? '…' : ''}"`;
   }
+  const inner = a.innerText;
+  if (inner && inner.length > 0) {
+    return `"${inner.slice(0, 80)}${inner.length > 80 ? '…' : ''}"`;
+  }
   return a.path;
 }
 

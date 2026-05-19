@@ -17,6 +17,10 @@ export interface ElementPathAnchor {
   type: 'element-path';
   path: string;
   innerHash: string;
+  /** Captured text content of the picked element at the moment it was picked.
+   * Used for human-readable previews in the comment sidebar. Optional for
+   * backward-compat with rows created before this field existed. */
+  innerText?: string;
 }
 
 export type AnchorData = TextRangeAnchor | ElementPathAnchor;

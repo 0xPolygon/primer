@@ -87,7 +87,13 @@ export function CommentSidebar({
             <button
               key={t.id}
               type="button"
-              title={t.anchor.type === 'text-range' ? t.anchor.selectorText : t.anchor.path}
+              title={
+                t.anchor.type === 'text-range'
+                  ? t.anchor.selectorText
+                  : (t.anchor.innerText && t.anchor.innerText.length > 0
+                      ? t.anchor.innerText
+                      : t.anchor.path)
+              }
               onClick={() => {
                 setCollapsed(false);
                 onHighlight(t.id);

@@ -294,8 +294,10 @@
     style.id = STYLE_TAG_ID;
     style.setAttribute('data-primer', '1');
     style.textContent = `
-      ::highlight(primer-mark)         { background: rgba(254, 240, 138, 0.6); }
-      ::highlight(primer-mark-focused) { background: rgba(252, 211, 77, 0.9); }
+      /* Force dark text on the yellow highlight so it stays readable when
+         the artifact's own text color is light (e.g. dark-mode artifacts). */
+      ::highlight(primer-mark)         { background: rgba(254, 240, 138, 0.85); color: #111827; }
+      ::highlight(primer-mark-focused) { background: rgba(252, 211, 77, 0.95);  color: #111827; }
       .__primer_badge__ {
         position: absolute;
         background: rgba(254, 240, 138, 0.95);
@@ -597,7 +599,11 @@
     e.stopImmediatePropagation();
 
     const path = cssPath(target);
-    const innerHash = (await sha256Hex(normalize(target.textContent ?? ''))).slice(0, 16);
+    const rawText = normalize(target.textContent ?? '');
+    const innerHash = (await sha256Hex(rawText)).slice(0, 16);
+    // Trim + cap the human-readable label so the JSON payload stays small
+    // and the sidebar preview is uncluttered.
+    const innerText = rawText.length > 160 ? `${rawText.slice(0, 160)}…` : rawText;
     const clientRect = serializeRect(target.getBoundingClientRect());
 
     exitPickMode('click');
@@ -605,7 +611,7 @@
     if (port) {
       port.postMessage({
         type: 'element_picked',
-        anchor: { type: 'element-path', path, innerHash },
+        anchor: { type: 'element-path', path, innerHash, innerText },
         clientRect,
       });
     }
