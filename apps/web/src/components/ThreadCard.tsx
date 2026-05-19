@@ -44,6 +44,54 @@ function anchorPreview(t: ThreadDTO): string {
   return t.anchor.path;
 }
 
+// Inline icons (Lucide-style outline marks). Stroke uses currentColor.
+function PencilIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
+  );
+}
+function TrashIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    </svg>
+  );
+}
+function ReplyIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9 10 4 15 9 20" />
+      <path d="M20 4v7a4 4 0 0 1-4 4H4" />
+    </svg>
+  );
+}
+function CheckIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+function ReopenIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  );
+}
+
+const iconButtonClass =
+  'inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-40';
+
+const footerButtonClass =
+  'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50';
+
 function CommentRow({
   comment,
   isReply,
@@ -60,22 +108,46 @@ function CommentRow({
   const edit = useEditComment(versionId, comment.id);
   const del = useDeleteComment(versionId, comment.id);
   const isTombstoned = comment.deletedAt !== null;
+  const canShowAuthorActions = !isTombstoned && !editing && isAuthor;
 
   return (
-    <div className={isReply ? 'mt-1 ml-3 border-t border-dashed border-neutral-200 pt-1' : ''}>
-      <div className="flex justify-between text-[10px] text-neutral-500">
-        <span className="font-semibold text-neutral-800">{comment.authorDisplayName}</span>
-        <span>
-          {relativeTime(comment.createdAt)}
-          {comment.updatedAt && !isTombstoned && (
-            <span className="ml-1 italic text-neutral-400">(edited)</span>
+    <div className={isReply ? 'mt-1.5 ml-3 border-t border-dashed border-neutral-200 pt-1.5' : ''}>
+      <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500">
+        <span className="truncate font-semibold text-neutral-800">{comment.authorDisplayName}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          {canShowAuthorActions && (
+            <>
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                aria-label="Edit comment"
+                className={iconButtonClass}
+              >
+                <PencilIcon />
+              </button>
+              <button
+                type="button"
+                onClick={() => del.mutate()}
+                disabled={del.isPending}
+                aria-label="Delete comment"
+                className={iconButtonClass}
+              >
+                <TrashIcon />
+              </button>
+            </>
           )}
-        </span>
+          <span className="whitespace-nowrap">
+            {relativeTime(comment.createdAt)}
+            {comment.updatedAt && !isTombstoned && (
+              <span className="ml-1 italic text-neutral-400">(edited)</span>
+            )}
+          </span>
+        </div>
       </div>
       {isTombstoned ? (
         <div className="italic text-neutral-400">deleted by author</div>
       ) : editing ? (
-        <div>
+        <div className="mt-1">
           <textarea
             autoFocus
             value={draft}
@@ -91,7 +163,7 @@ function CommentRow({
                 setEditing(false);
                 setDraft(comment.body);
               }}
-              className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-[10px] text-neutral-700"
+              className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
             >
               Cancel
             </button>
@@ -101,29 +173,14 @@ function CommentRow({
               onClick={() => {
                 edit.mutate(draft.trim(), { onSuccess: () => setEditing(false) });
               }}
-              className="rounded bg-neutral-900 px-2 py-0.5 text-[10px] text-white disabled:opacity-50"
+              className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50"
             >
               Save
             </button>
           </div>
         </div>
       ) : (
-        <div className="leading-tight text-neutral-900">{comment.body}</div>
-      )}
-      {!isTombstoned && !editing && isAuthor && (
-        <div className="mt-0.5 flex gap-2 text-[9px] text-neutral-500">
-          <button type="button" onClick={() => setEditing(true)} className="underline">
-            Edit
-          </button>
-          <button
-            type="button"
-            disabled={del.isPending}
-            onClick={() => del.mutate()}
-            className="underline"
-          >
-            Delete
-          </button>
-        </div>
+        <div className="mt-0.5 leading-snug text-neutral-900">{comment.body}</div>
       )}
     </div>
   );
@@ -140,7 +197,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
 
   return (
     <article
-      className={`border-b border-neutral-100 px-3 py-2 text-xs ${
+      className={`border-b border-neutral-100 px-3 py-2.5 text-xs ${
         isResolved ? 'opacity-55' : ''
       } ${drifted ? 'opacity-60' : ''}`}
       onClick={(e) => {
@@ -148,7 +205,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
         onHighlight(thread.id);
       }}
     >
-      <div className="mb-1 flex items-start gap-1 border-l-2 border-yellow-300 pl-2 italic leading-tight text-neutral-600">
+      <div className="mb-1.5 flex items-start gap-1 border-l-2 border-yellow-300 pl-2 italic leading-snug text-neutral-600">
         {drifted && <span title="Could not place anchor" className="not-italic">📍?</span>}
         <span className="truncate">{anchorPreview(thread)}</span>
       </div>
@@ -187,7 +244,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
                 setReplying(false);
                 setReplyDraft('');
               }}
-              className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-[10px] text-neutral-700"
+              className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
             >
               Cancel
             </button>
@@ -202,29 +259,32 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
                   },
                 })
               }
-              className="rounded bg-neutral-900 px-2 py-0.5 text-[10px] text-white disabled:opacity-50"
+              className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50"
             >
               Reply
             </button>
           </div>
         </div>
       )}
-      <div className="mt-1 flex gap-2 text-[10px] text-neutral-600">
-        {!replying && (
-          <button type="button" onClick={() => setReplying(true)} className="underline">
+      {!replying && (
+        <div className="mt-1.5 flex items-center gap-1 border-t border-neutral-100 pt-1.5">
+          <button type="button" onClick={() => setReplying(true)} className={footerButtonClass}>
+            <ReplyIcon />
             Reply
           </button>
-        )}
-        {isResolved ? (
-          <button type="button" onClick={() => reopen.mutate()} className="underline">
-            Reopen
-          </button>
-        ) : (
-          <button type="button" onClick={() => resolve.mutate()} className="underline">
-            Resolve
-          </button>
-        )}
-      </div>
+          {isResolved ? (
+            <button type="button" onClick={() => reopen.mutate()} className={footerButtonClass}>
+              <ReopenIcon />
+              Reopen
+            </button>
+          ) : (
+            <button type="button" onClick={() => resolve.mutate()} className={footerButtonClass}>
+              <CheckIcon />
+              Resolve
+            </button>
+          )}
+        </div>
+      )}
     </article>
   );
 }
