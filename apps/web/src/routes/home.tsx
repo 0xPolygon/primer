@@ -54,8 +54,22 @@ export function HomePage() {
               </span>
             </div>
             {q.data.myDocuments.length === 0 ? (
-              <div className="px-1 py-4 text-sm italic text-neutral-500">
-                No documents yet. Upload your first one.
+              <div className="px-2 py-8 text-center">
+                <blockquote className="mx-auto max-w-lg text-sm italic leading-relaxed text-neutral-600">
+                  &ldquo;The Primer was a book in appearance only. Its interior was a tissue of
+                  paper, but each page was a separate flat-panel display, which formed itself into
+                  pictures, words, and animations responsive to the reader.&rdquo;
+                </blockquote>
+                <p className="mt-2 text-xs text-neutral-400">
+                  — Neal Stephenson, <em>The Diamond Age</em>
+                </p>
+                <p className="mt-6 text-sm text-neutral-500">
+                  No documents yet.{' '}
+                  <Link to="/upload" className="font-medium text-neutral-700 underline hover:text-neutral-900">
+                    Upload your first one
+                  </Link>
+                  .
+                </p>
               </div>
             ) : (
               q.data.myDocuments.map((doc) => <MyDocumentRow key={doc.id} doc={doc} />)

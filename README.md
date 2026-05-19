@@ -1,8 +1,11 @@
 # Primer
 
+> *"The Primer was a book in appearance only. Its interior was a tissue of paper, but each page was a separate flat-panel display, which formed itself into pictures, words, and animations responsive to the reader."*
+> — Neal Stephenson, *The Diamond Age*
+
 Internal Polygon tool for hosting and collaborating on LLM-generated HTML artifacts.
 
-This repo is sub-project 1 (Local foundation). See:
+See:
 - Product: `docs/prd-primer.md`
 - Decomposition: `docs/superpowers/specs/2026-05-12-primer-decomposition-design.md`
 - This sub-project's design spec: `docs/superpowers/specs/2026-05-13-primer-local-foundation-design.md`
