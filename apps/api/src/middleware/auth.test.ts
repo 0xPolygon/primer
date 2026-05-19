@@ -57,4 +57,11 @@ describe('authMiddleware', () => {
     const res = await app.request('/auth/logout', { method: 'POST' });
     expect(res.status).toBe(401);
   });
+
+  it('bypasses /companion/* for unauthenticated requests (sandboxed iframes have no cookies)', async () => {
+    const app = makeApp(async () => null);
+    app.get('/companion/v1.js', (c) => c.text('// companion'));
+    const res = await app.request('/companion/v1.js');
+    expect(res.status).toBe(200);
+  });
 });
