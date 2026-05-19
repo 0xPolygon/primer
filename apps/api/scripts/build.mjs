@@ -10,7 +10,7 @@
 // external so they load from the installed node_modules at runtime.
 
 import { build } from 'esbuild';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, copyFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,4 +57,15 @@ await build({
   outfile: resolve(apiRoot, 'dist/jobs/purge-cli.js'),
 });
 
-console.log('api build complete: dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js');
+// Copy static assets that the runtime reads directly from disk.
+// The companion script is served byte-for-byte by /companion/v1.js — esbuild
+// won't bundle it because nothing imports it as a module.
+await mkdir(resolve(apiRoot, 'dist/companion'), { recursive: true });
+await copyFile(
+  resolve(apiRoot, 'src/companion/v1.js'),
+  resolve(apiRoot, 'dist/companion/v1.js'),
+);
+
+console.log(
+  'api build complete: dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js',
+);
