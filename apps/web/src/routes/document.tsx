@@ -19,6 +19,7 @@ import { VersionSelector } from '../components/VersionSelector.tsx';
 import { EditableField } from '../components/EditableField.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
+import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -36,6 +37,8 @@ export function DocumentPage() {
   const docQuery = useDocument(docId ?? '');
   const versionsQuery = useVersionsQuery(docId ?? '');
   const versions = versionsQuery.data?.versions ?? [];
+
+  useDocumentTitle(docQuery.data?.document.title);
 
   const requestedNumber = versionNumberParam ? Number(versionNumberParam) : undefined;
   const latestVersion = versions[0];
