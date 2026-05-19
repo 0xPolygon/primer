@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
+    "start": "pnpm --filter @primer/api start",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "verify": "pnpm typecheck && pnpm test && pnpm audit --audit-level=high",
