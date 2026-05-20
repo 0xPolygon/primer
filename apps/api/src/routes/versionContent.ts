@@ -6,11 +6,16 @@ import { db } from '../db/client.ts';
 
 export const ARTIFACT_CSP = [
   "default-src 'none'",
-  "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
-  "style-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net fonts.googleapis.com",
+  // blob: required for self-bundled artifacts that decode JS/CSS/fonts from
+  // an embedded base64 manifest into blob: URLs at runtime. Blob URLs are
+  // origin-bound to the creator (the sandboxed opaque-origin iframe) so this
+  // does not expand the exfil surface — connect-src 'none' still blocks all
+  // outbound network from the artifact.
+  "script-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
+  "style-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net fonts.googleapis.com",
   "connect-src 'none'",
   "img-src data: blob: 'self' https:",
-  "font-src 'self' fonts.gstatic.com",
+  "font-src 'self' blob: data: fonts.gstatic.com",
   "form-action 'none'",
   "frame-src 'none'",
   "frame-ancestors 'self'",
