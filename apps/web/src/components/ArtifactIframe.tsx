@@ -24,6 +24,20 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
 
+  // Latest-value refs so `handleLoad` (which only registers on src change) sees
+  // the current prop values when the iframe finishes loading the artifact
+  // bytes — not the stale values from when the effect first ran. This matters
+  // because threads usually resolve AFTER the iframe is mounted but BEFORE its
+  // content finishes loading; without these refs, init would post empty
+  // anchors and the companion would never paint until something else triggered
+  // an update.
+  const anchorsRef = useRef(anchors);
+  const onMessageRef = useRef(onMessage);
+  const registerSenderRef = useRef(registerSender);
+  useEffect(() => { anchorsRef.current = anchors; }, [anchors]);
+  useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
+  useEffect(() => { registerSenderRef.current = registerSender; }, [registerSender]);
+
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
@@ -35,17 +49,17 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
 
       port.onmessage = (event) => {
         const parsed = parseInboundMessage(event.data);
-        if (parsed) onMessage(parsed);
+        if (parsed) onMessageRef.current(parsed);
       };
       port.start();
 
       iframe.contentWindow?.postMessage(
-        { type: 'init', anchors } satisfies OutboundProtocolMessage,
+        { type: 'init', anchors: anchorsRef.current } satisfies OutboundProtocolMessage,
         '*',
         [channel.port2]
       );
 
-      registerSender?.((msg) => port.postMessage(msg));
+      registerSenderRef.current?.((msg) => port.postMessage(msg));
     };
 
     iframe.addEventListener('load', handleLoad);
@@ -53,11 +67,8 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
       iframe.removeEventListener('load', handleLoad);
       portRef.current?.close();
       portRef.current = null;
-      registerSender?.(null);
+      registerSenderRef.current?.(null);
     };
-    // We intentionally don't reset on `anchors` changes — anchors after init
-    // travel through `update_anchors` via the imperative sender (see Task 14).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
 
   return (

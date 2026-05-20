@@ -91,6 +91,13 @@ export interface MsgOpenExternal {
   type: 'open_external';
   url: string;
 }
+/** Fired when the user clicks on a highlighted anchor inside the iframe.
+ *  The parent uses this to focus the matching thread + scroll the sidebar
+ *  to its card. */
+export interface MsgAnchorClicked {
+  type: 'anchor_clicked';
+  anchorId: string;
+}
 
 export type InboundProtocolMessage =
   | MsgSelectionCaptured
@@ -98,7 +105,8 @@ export type InboundProtocolMessage =
   | MsgPickModeExited
   | MsgAnchorPositions
   | MsgResize
-  | MsgOpenExternal;
+  | MsgOpenExternal
+  | MsgAnchorClicked;
 
 // ───────────────────── Validation helpers ─────────────────────
 
@@ -186,6 +194,10 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
     case 'open_external': {
       if (!isString(raw.url)) return null;
       return { type: 'open_external', url: raw.url };
+    }
+    case 'anchor_clicked': {
+      if (!isString(raw.anchorId)) return null;
+      return { type: 'anchor_clicked', anchorId: raw.anchorId };
     }
     default:
       return null;

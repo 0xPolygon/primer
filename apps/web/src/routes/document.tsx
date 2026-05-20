@@ -167,6 +167,16 @@ export function DocumentPage() {
         case 'resize':
           senderRef.current?.({ type: 'request_anchor_positions' });
           break;
+        case 'anchor_clicked':
+          setFocusedThreadId(msg.anchorId);
+          setSidebarCollapsed(false);
+          requestAnimationFrame(() => {
+            window.document.getElementById(`thread-${msg.anchorId}`)?.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+            });
+          });
+          break;
       }
     },
     [readMostly]

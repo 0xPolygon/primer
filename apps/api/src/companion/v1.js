@@ -284,16 +284,21 @@
     style.id = STYLE_TAG_ID;
     style.setAttribute('data-primer', '1');
     style.textContent = `
-      /* Force dark text on the yellow highlight so it stays readable when
-         the artifact's own text color is light (e.g. dark-mode artifacts). */
-      ::highlight(primer-mark)         { background: rgba(254, 240, 138, 0.85); color: #111827; }
-      /* Focused (sticky) — more saturated + a soft amber underline for pop. */
-      ::highlight(primer-mark-focused) {
-        background: rgba(251, 191, 36, 0.95);
+      /* Default (unfocused) — subtle yellow wash. Forces dark text so it
+         stays readable on dark-mode artifacts. */
+      ::highlight(primer-mark) {
+        background: rgba(253, 224, 71, 0.45);
         color: #111827;
+      }
+      /* Focused (sticky) — dramatically more saturated + thick amber
+         underline. Designed to be unambiguous against any artifact
+         background, light or dark. */
+      ::highlight(primer-mark-focused) {
+        background: rgba(217, 119, 6, 0.95);
+        color: #ffffff;
         text-decoration: underline;
-        text-decoration-color: rgba(180, 83, 9, 0.7);
-        text-decoration-thickness: 2px;
+        text-decoration-color: rgba(120, 53, 15, 1);
+        text-decoration-thickness: 3px;
         text-underline-offset: 3px;
       }
       .__primer_badge__ {
@@ -303,7 +308,8 @@
         border-radius: 9999px;
         padding: 0 6px;
         font: 11px/16px system-ui;
-        pointer-events: none;
+        pointer-events: auto;
+        cursor: pointer;
       }
       .__primer_badge__.focused {
         background: rgba(252, 211, 77, 1);
@@ -501,6 +507,56 @@
       }
     }
   }
+
+  // ── Click-to-focus ───────────────────────────────────────────────
+  // Clicking on a highlighted span (text-range) or a tracked element
+  // (element-path) tells the parent to focus the matching thread.
+  // No preventDefault — the artifact's own click handlers still run.
+
+  function findAnchorAtClick(event) {
+    // If the user just selected text by dragging, treat as selection capture,
+    // not focus. (selection_captured fires on the same mouseup.)
+    const sel = window.getSelection();
+    if (sel && sel.toString().trim().length > 0) return null;
+
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return null;
+
+    // Pinned 💬 badge: matches its own data-anchor-id directly.
+    const badge = target.closest('.__primer_badge__');
+    if (badge instanceof HTMLElement && badge.dataset.anchorId) {
+      return badge.dataset.anchorId;
+    }
+
+    // Element-path: check whether the click target is inside any tracked element.
+    // Iterate the map; first match wins.
+    for (const [anchorId, entry] of elementByAnchorId) {
+      if (entry.el.contains(target)) return anchorId;
+    }
+
+    // Text-range: check whether the click point falls inside any range's rects.
+    const x = event.clientX;
+    const y = event.clientY;
+    for (const [anchorId, range] of rangeByAnchorId) {
+      const rects = range.getClientRects();
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          return anchorId;
+        }
+      }
+    }
+    return null;
+  }
+
+  document.addEventListener('click', (event) => {
+    // Pick mode owns clicks while active.
+    if (pickActive) return;
+    if (!port) return;
+    const anchorId = findAnchorAtClick(event);
+    if (!anchorId) return;
+    port.postMessage({ type: 'anchor_clicked', anchorId });
+  });
 
   // ── Overlay layer + element-pick badges ──────────────────────────
 
