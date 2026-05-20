@@ -4,9 +4,11 @@ import { createHash } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
 import { isTextRangeAnchor, isElementPathAnchor } from '@primer/shared';
 import type { AppVariables, AppDeps } from '../app.ts';
+import { logger } from '../logger.ts';
 import type { CommentDTO, CreateThreadRequest, ThreadDTO, ThreadsListResponse } from '@primer/shared';
 import { threads, comments, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
+import { validateAndCleanMentions } from '../notifications/mentions.ts';
 
 async function ensureLiveDocumentForVersion(versionId: string): Promise<{ ok: true } | { ok: false }> {
   const [r] = (await db.execute(sql`
@@ -260,13 +262,25 @@ export function registerThreadRoutes(
       );
     }
 
-    // Reject posting to a non-latest version.
+    // Reject posting to a non-latest version, and fetch doc/version context for notifier.
     const [latestRow] = (await db.execute(sql`
-      SELECT MAX(version_number)::int AS max_n,
-             (SELECT version_number FROM versions WHERE id = ${versionId}) AS this_n
-      FROM versions
-      WHERE document_id = (SELECT document_id FROM versions WHERE id = ${versionId})
-    `)) as unknown as { max_n: number | null; this_n: number | null }[];
+      SELECT MAX(v2.version_number)::int AS max_n,
+             v.version_number::int AS this_n,
+             v.id AS version_id,
+             d.id AS doc_id,
+             d.title AS doc_title
+      FROM versions v
+      INNER JOIN documents d ON d.id = v.document_id
+      INNER JOIN versions v2 ON v2.document_id = d.id
+      WHERE v.id = ${versionId}
+      GROUP BY v.version_number, v.id, d.id, d.title
+    `)) as unknown as {
+      max_n: number | null;
+      this_n: number | null;
+      version_id: string;
+      doc_id: string;
+      doc_title: string;
+    }[];
 
     if (!latestRow || latestRow.this_n === null) {
       return c.json({ error: 'not_found' }, 404);
@@ -275,9 +289,26 @@ export function registerThreadRoutes(
       return c.json({ error: 'not_latest_version', message: 'Cannot post to a non-latest version.' }, 409);
     }
 
+    const user = c.get('user');
+
+    // Validate mentions before touching the DB.
+    const rawMentions = (payload as { mentions?: unknown }).mentions;
+    let validated;
+    if (rawMentions === undefined || (Array.isArray(rawMentions) && rawMentions.length === 0)) {
+      validated = { ok: true as const, mentions: [] };
+    } else {
+      const userRows = await db.select({ id: users.id }).from(users);
+      const knownUserIds = new Set(userRows.map((r) => r.id));
+      validated = validateAndCleanMentions(rawMentions as string[], user.id, knownUserIds);
+    }
+    if (!validated.ok) {
+      return c.json({ error: validated.error, message: validated.message }, 400);
+    }
+    const cleanedMentions = validated.mentions;
+
     const threadId = uuidv7();
     const commentId = uuidv7();
-    const user = c.get('user');
+    const insertedAt = new Date();
 
     await db.transaction(async (tx) => {
       await tx.insert(threads).values({
@@ -290,20 +321,25 @@ export function registerThreadRoutes(
         threadId,
         authorId: user.id,
         body: bodyValidation.body,
-        mentions: [],
+        mentions: cleanedMentions,
       });
     });
 
-    await deps.notifier.notifyMentions({
-      mentions: [],
-      threadId,
-      commentId,
-      actorUserId: user.id,
-    });
+    void deps.notifier
+      .notifyComment({
+        doc: { id: latestRow.doc_id, title: latestRow.doc_title },
+        version: { id: latestRow.version_id, versionNumber: latestRow.this_n },
+        thread: { id: threadId },
+        comment: { id: commentId, body: bodyValidation.body, createdAt: insertedAt },
+        mentionedUserIds: cleanedMentions,
+        participantUserIds: [],
+        actorUserId: user.id,
+      })
+      .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
 
     const dto = await loadThreadDTO(threadId);
     if (!dto) return c.json({ error: 'internal' }, 500);
-    return c.json(dto, 201);
+    return c.json({ ...dto, commentId }, 201);
   });
 
   app.post('/api/threads/:threadId/resolve', async (c) => {

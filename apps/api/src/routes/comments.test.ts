@@ -12,10 +12,14 @@ import { documents, versions, threads, comments, users } from '@primer/shared/sc
 import type { CommentDTO, ThreadDTO } from '@primer/shared';
 import { CSRF_HEADERS } from '../test/harness.ts';
 
-async function seedDocVersionThread() {
+async function seedDocVersionThread({
+  authorId = 'mock-user-1',
+  mentions = [],
+}: { authorId?: string; mentions?: string[] } = {}) {
   const documentId = uuidv7();
   const versionId = uuidv7();
   const threadId = uuidv7();
+  const commentId = uuidv7();
   await db.insert(documents).values({
     id: documentId,
     title: 'Seed',
@@ -36,13 +40,13 @@ async function seedDocVersionThread() {
     anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
   });
   await db.insert(comments).values({
-    id: uuidv7(),
+    id: commentId,
     threadId,
-    authorId: 'mock-user-1',
+    authorId,
     body: 'first',
-    mentions: [],
+    mentions,
   });
-  return { documentId, versionId, threadId };
+  return { documentId, versionId, threadId, commentId };
 }
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
@@ -119,6 +123,60 @@ describe('POST /api/threads/:tid/comments — reply', () => {
   });
 });
 
+describe('POST /api/threads/:tid/comments — mentions', () => {
+  it('persists mentions[] on a reply and fires notifyComment with mention+participant sets', async () => {
+    await db
+      .insert(users)
+      .values([
+        { id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' },
+        { id: 'mock-user-3', email: 'three@p.t', displayName: 'Three' },
+      ])
+      .onConflictDoNothing();
+    // Seed a thread with a first comment authored by mock-user-2.
+    const { threadId } = await seedDocVersionThread({ authorId: 'mock-user-2' });
+
+    const captured: { mentionedUserIds: string[]; participantUserIds: string[]; actorUserId: string }[] = [];
+    const spyApp = createApp({
+      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-reply-spy-'))),
+      notifier: {
+        async notifyComment(args: unknown) {
+          captured.push(args as never);
+        },
+      } as never,
+    });
+
+    const res = await spyApp.request(`/api/threads/${threadId}/comments`, {
+      method: 'POST',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '@Three look here', mentions: ['mock-user-3'] }),
+    });
+    expect(res.status).toBe(201);
+    const out = (await res.json()) as { comment: CommentDTO; thread: ThreadDTO };
+    const [row] = await db.select().from(comments).where(eq(comments.id, out.comment.id));
+    expect(row.mentions).toEqual(['mock-user-3']);
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captured).toHaveLength(1);
+    expect(captured[0].mentionedUserIds).toEqual(['mock-user-3']);
+    // mock-user-2 is the prior participant (first comment author); mock-user-1 is the actor.
+    expect(captured[0].participantUserIds).toEqual(['mock-user-2']);
+    expect(captured[0].actorUserId).toBe('mock-user-1');
+  });
+
+  it('returns 400 invalid_mention when an unknown user id is in mentions', async () => {
+    await withApp(async (app) => {
+      const { threadId } = await seedDocVersionThread({ authorId: 'mock-user-1' });
+      const res = await app.request(`/api/threads/${threadId}/comments`, {
+        method: 'POST',
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'hi', mentions: ['ghost'] }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_mention');
+    });
+  });
+});
+
 describe('PATCH /api/comments/:cid', () => {
   it('updates body and sets updatedAt when called by author', async () => {
     await withApp(async (app) => {
@@ -179,6 +237,76 @@ describe('PATCH /api/comments/:cid', () => {
       });
       expect(res.status).toBe(409);
     });
+  });
+
+  it('persists the new mentions[] and fires notifyComment for newly-added mentions only', async () => {
+    await db
+      .insert(users)
+      .values([
+        { id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' },
+        { id: 'mock-user-3', email: 'three@p.t', displayName: 'Three' },
+      ])
+      .onConflictDoNothing();
+    const { commentId } = await seedDocVersionThread({
+      authorId: 'mock-user-1',
+      mentions: ['mock-user-2'],
+    });
+
+    const captured: { mentionedUserIds: string[]; participantUserIds: string[] }[] = [];
+    const spyApp = createApp({
+      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-edit-spy-'))),
+      notifier: {
+        async notifyComment(args: unknown) {
+          captured.push(args as never);
+        },
+      } as never,
+    });
+
+    // Edit: keep mock-user-2, add mock-user-3.
+    const res = await spyApp.request(`/api/comments/${commentId}`, {
+      method: 'PATCH',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '@Two @Three', mentions: ['mock-user-2', 'mock-user-3'] }),
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(comments).where(eq(comments.id, commentId));
+    expect(row.mentions.sort()).toEqual(['mock-user-2', 'mock-user-3']);
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captured).toHaveLength(1);
+    expect(captured[0].mentionedUserIds).toEqual(['mock-user-3']); // diff only
+    expect(captured[0].participantUserIds).toEqual([]);            // edits never re-notify participants
+  });
+
+  it('does not fire notifyComment on edits that only remove mentions', async () => {
+    await db
+      .insert(users)
+      .values({ id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' })
+      .onConflictDoNothing();
+    const { commentId } = await seedDocVersionThread({
+      authorId: 'mock-user-1',
+      mentions: ['mock-user-2'],
+    });
+
+    const captured: unknown[] = [];
+    const spyApp = createApp({
+      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-edit-rm-'))),
+      notifier: {
+        async notifyComment(args: unknown) {
+          captured.push(args);
+        },
+      } as never,
+    });
+
+    const res = await spyApp.request(`/api/comments/${commentId}`, {
+      method: 'PATCH',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: 'no longer tagging anyone', mentions: [] }),
+    });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captured).toHaveLength(0);
   });
 });
 

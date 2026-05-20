@@ -4,6 +4,8 @@ import { createApp } from './app.ts';
 import { logger } from './logger.ts';
 import { FilesystemStorage } from './storage/filesystem.ts';
 import { NoopNotifier } from './notifications/notifier.ts';
+import { ResendNotifier } from './notifications/resend.ts';
+import type { Notifier } from './notifications/notifier.ts';
 import { startPurgeInterval } from './jobs/purge.ts';
 import { mockResolver, makeOktaResolver, type UserResolver } from './auth/resolver.ts';
 import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from './auth/okta.ts';
@@ -11,7 +13,21 @@ import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from '
 const port = Number(process.env.PORT ?? 3000);
 const storageRoot = process.env.STORAGE_ROOT ?? './storage';
 const storage = new FilesystemStorage(storageRoot);
-const notifier = new NoopNotifier();
+function buildNotifier(): Notifier {
+  const apiKey = process.env.RESEND_API_KEY;
+  const fromAddress = process.env.EMAIL_FROM;
+  const appBaseUrl = process.env.AUTH_BASE_URL;
+  if (apiKey && fromAddress && appBaseUrl) {
+    logger.info({ fromAddress }, 'notifier: Resend enabled');
+    return new ResendNotifier({ apiKey, fromAddress, appBaseUrl });
+  }
+  logger.warn(
+    { hasApiKey: !!apiKey, hasFromAddress: !!fromAddress, hasAppBaseUrl: !!appBaseUrl },
+    'notifier: Resend env incomplete, falling back to NoopNotifier',
+  );
+  return new NoopNotifier();
+}
+const notifier = buildNotifier();
 
 const rawAuthMode = process.env.AUTH_MODE;
 if (!rawAuthMode || !['mock', 'okta'].includes(rawAuthMode.toLowerCase())) {

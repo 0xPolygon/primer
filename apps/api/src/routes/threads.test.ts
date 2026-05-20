@@ -8,7 +8,7 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { documents, versions, threads, comments } from '@primer/shared/schema';
+import { documents, versions, threads, comments, users } from '@primer/shared/schema';
 import type { ThreadsListResponse } from '@primer/shared';
 import type { ThreadDTO, CreateThreadRequest } from '@primer/shared';
 import { CSRF_HEADERS } from '../test/harness.ts';
@@ -351,5 +351,99 @@ describe('threads endpoints respect soft-delete', () => {
       const res = await app.request(`/api/threads/${threadId}/reopen`, { method: 'POST', headers: CSRF_HEADERS });
       expect(res.status).toBe(404);
     });
+  });
+});
+
+describe('POST /api/versions/:vid/threads — mentions', () => {
+  it('persists cleaned mentions[] on the first comment', async () => {
+    await withApp(async (app) => {
+      // Seed a second user that can be mentioned.
+      await db
+        .insert(users)
+        .values({ id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' })
+        .onConflictDoNothing();
+      const { versionId } = await seedDocument();
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: '@Two please look',
+          mentions: ['mock-user-2'],
+        }),
+      });
+      expect(res.status).toBe(201);
+      const out = (await res.json()) as { commentId: string };
+      const [row] = await db.select().from(comments).where(eq(comments.id, out.commentId));
+      expect(row.mentions).toEqual(['mock-user-2']);
+    });
+  });
+
+  it('returns 400 invalid_mention when an unknown user id is in mentions', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'hi',
+          mentions: ['ghost-user'],
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_mention');
+    });
+  });
+
+  it('silently drops the actor from mentions', async () => {
+    await withApp(async (app) => {
+      const { versionId } = await seedDocument();
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'self',
+          mentions: ['mock-user-1'],
+        }),
+      });
+      expect(res.status).toBe(201);
+      const out = (await res.json()) as { commentId: string };
+      const [row] = await db.select().from(comments).where(eq(comments.id, out.commentId));
+      expect(row.mentions).toEqual([]);
+    });
+  });
+
+  it('fires notifyComment with mentionedUserIds populated', async () => {
+    await db
+      .insert(users)
+      .values({ id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' })
+      .onConflictDoNothing();
+
+    const captured: { mentionedUserIds: string[]; actorUserId: string }[] = [];
+    const spyApp = createApp({
+      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-spy-'))),
+      notifier: {
+        async notifyComment(args: unknown) {
+          captured.push(args as never);
+        },
+      } as never,
+    });
+    const seed = await seedDocument();
+    await spyApp.request(`/api/versions/${seed.versionId}/threads`, {
+      method: 'POST',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+        body: '@Two hi',
+        mentions: ['mock-user-2'],
+      }),
+    });
+    // Notifier is fire-and-forget; give it a microtask tick.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captured).toHaveLength(1);
+    expect(captured[0].mentionedUserIds).toEqual(['mock-user-2']);
+    expect(captured[0].actorUserId).toBe('mock-user-1');
   });
 });

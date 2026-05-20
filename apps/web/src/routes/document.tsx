@@ -73,6 +73,16 @@ export function DocumentPage() {
     'closed',
   );
 
+  const COLLAPSED_KEY = 'primer.sidebar.collapsed';
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(COLLAPSED_KEY) === '1';
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(COLLAPSED_KEY, sidebarCollapsed ? '1' : '0');
+  }, [sidebarCollapsed]);
+
   const me = useMe();
   const isUploader = !!me.data && me.data.id === docQuery.data?.document.uploaderId;
 
@@ -174,14 +184,38 @@ export function DocumentPage() {
     senderRef.current?.({ type: 'highlight_anchor', anchorId });
   }, []);
 
-  const submitPending = async (body: string) => {
+  useEffect(() => {
+    const hash = window.location.hash;
+    const match = hash.match(/^#thread-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
+    if (!match) return;
+    const threadId = match[1];
+    if (!threadsQuery.isSuccess) return;
+    const found = threads.find((t) => t.id === threadId);
+    if (!found) return;
+
+    setSidebarCollapsed(false);
+
+    // Defer to next frame so the sidebar transition starts + the DOM is ready.
+    requestAnimationFrame(() => {
+      window.document.getElementById(`thread-${threadId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      onHighlight(threadId);
+    });
+
+    // Clear the hash so a manual refresh doesn't re-fire.
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }, [threadsQuery.isSuccess, threads, onHighlight]);
+
+  const submitPending = async (body: string, mentions: string[]) => {
     const anchor: AnchorData | null = pendingSelection
       ? pendingSelection.anchor
       : pendingPick
       ? pendingPick.anchor
       : null;
     if (!anchor) return;
-    await createThread.mutateAsync({ anchor, body });
+    await createThread.mutateAsync({ anchor, body, mentions });
     setPendingSelection(null);
     setPendingPick(null);
   };
@@ -396,6 +430,8 @@ export function DocumentPage() {
           onSubmitPending={submitPending}
           onHighlight={onHighlight}
           positionsByAnchorId={positionsByAnchorId}
+          collapsed={sidebarCollapsed}
+          onCollapsedChange={setSidebarCollapsed}
         />
       </div>
 

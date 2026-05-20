@@ -7,6 +7,9 @@ import {
   useEditComment,
   useDeleteComment,
 } from '../queries/mutations.ts';
+import { MentionTextarea } from './MentionTextarea.tsx';
+import { renderMentions } from './renderMentions.tsx';
+import { useMentionableUsers } from '../queries/users.ts';
 
 interface Props {
   versionId: string;
@@ -105,8 +108,10 @@ function CommentRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
+  const [editMentions, setEditMentions] = useState<string[]>(comment.mentions);
   const edit = useEditComment(versionId, comment.id);
   const del = useDeleteComment(versionId, comment.id);
+  const usersQ = useMentionableUsers();
   const isTombstoned = comment.deletedAt !== null;
   const canShowAuthorActions = !isTombstoned && !editing && isAuthor;
 
@@ -148,13 +153,13 @@ function CommentRow({
         <div className="italic text-neutral-400">deleted by author</div>
       ) : editing ? (
         <div className="mt-1">
-          <textarea
-            autoFocus
+          <MentionTextarea
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={setDraft}
+            onMentionsChange={setEditMentions}
             rows={2}
-            maxLength={5000}
-            className="block w-full rounded border border-neutral-300 px-2 py-1 text-xs"
+            autoFocus
+            initialSelectedIds={comment.mentions}
           />
           <div className="mt-1 flex justify-end gap-2">
             <button
@@ -162,6 +167,7 @@ function CommentRow({
               onClick={() => {
                 setEditing(false);
                 setDraft(comment.body);
+                setEditMentions(comment.mentions);
               }}
               className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
             >
@@ -171,7 +177,10 @@ function CommentRow({
               type="button"
               disabled={edit.isPending || draft.trim().length === 0}
               onClick={() => {
-                edit.mutate(draft.trim(), { onSuccess: () => setEditing(false) });
+                edit.mutate(
+                  { body: draft.trim(), mentions: editMentions },
+                  { onSuccess: () => setEditing(false) }
+                );
               }}
               className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50"
             >
@@ -180,7 +189,9 @@ function CommentRow({
           </div>
         </div>
       ) : (
-        <div className="mt-0.5 leading-snug text-neutral-900">{comment.body}</div>
+        <div className="mt-0.5 leading-snug text-neutral-900">
+          {renderMentions(comment.body, comment.mentions, usersQ.data ?? [])}
+        </div>
       )}
     </div>
   );
@@ -189,6 +200,7 @@ function CommentRow({
 export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighlight }: Props) {
   const [replying, setReplying] = useState(false);
   const [replyDraft, setReplyDraft] = useState('');
+  const [replyMentions, setReplyMentions] = useState<string[]>([]);
   const reply = useReply(versionId, thread.id);
   const resolve = useResolveThread(versionId, thread.id);
   const reopen = useReopenThread(versionId, thread.id);
@@ -197,6 +209,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
 
   return (
     <article
+      id={`thread-${thread.id}`}
       className={`border-b border-neutral-100 px-3 py-2.5 text-xs ${
         isResolved ? 'opacity-55' : ''
       } ${drifted ? 'opacity-60' : ''}`}
@@ -228,14 +241,13 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
       ))}
       {replying && (
         <div className="mt-2">
-          <textarea
-            autoFocus
+          <MentionTextarea
             value={replyDraft}
-            onChange={(e) => setReplyDraft(e.target.value)}
-            rows={2}
-            maxLength={5000}
+            onChange={setReplyDraft}
+            onMentionsChange={setReplyMentions}
             placeholder="Write a reply…"
-            className="block w-full rounded border border-neutral-300 px-2 py-1 text-xs"
+            rows={2}
+            autoFocus
           />
           <div className="mt-1 flex justify-end gap-2">
             <button
@@ -243,6 +255,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
               onClick={() => {
                 setReplying(false);
                 setReplyDraft('');
+                setReplyMentions([]);
               }}
               className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
             >
@@ -252,12 +265,16 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
               type="button"
               disabled={reply.isPending || replyDraft.trim().length === 0}
               onClick={() =>
-                reply.mutate(replyDraft.trim(), {
-                  onSuccess: () => {
-                    setReplyDraft('');
-                    setReplying(false);
-                  },
-                })
+                reply.mutate(
+                  { body: replyDraft.trim(), mentions: replyMentions },
+                  {
+                    onSuccess: () => {
+                      setReplyDraft('');
+                      setReplyMentions([]);
+                      setReplying(false);
+                    },
+                  }
+                )
               }
               className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50"
             >

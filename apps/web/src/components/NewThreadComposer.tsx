@@ -1,10 +1,11 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import type { AnchorData } from '@primer/shared';
+import { MentionTextarea } from './MentionTextarea.tsx';
 
 interface Props {
   anchor: AnchorData;
   submitting: boolean;
-  onSubmit: (body: string) => void;
+  onSubmit: (body: string, mentions: string[]) => void;
   onCancel: () => void;
 }
 
@@ -21,18 +22,12 @@ function anchorPreview(a: AnchorData): string {
 
 export function NewThreadComposer({ anchor, submitting, onSubmit, onCancel }: Props) {
   const [body, setBody] = useState('');
+  const [mentions, setMentions] = useState<string[]>([]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (body.trim().length === 0) return;
-    onSubmit(body.trim());
-  }
-
-  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault();
-      if (body.trim().length > 0) onSubmit(body.trim());
-    }
+    onSubmit(body.trim(), mentions);
   }
 
   return (
@@ -46,15 +41,13 @@ export function NewThreadComposer({ anchor, submitting, onSubmit, onCancel }: Pr
       <div className="mb-2 border-l-2 border-yellow-300 pl-2 italic text-neutral-600">
         {anchorPreview(anchor)}
       </div>
-      <textarea
-        autoFocus
+      <MentionTextarea
         value={body}
-        onChange={(e) => setBody(e.target.value)}
-        onKeyDown={handleKeyDown}
-        rows={3}
-        maxLength={5000}
+        onChange={setBody}
+        onMentionsChange={setMentions}
         placeholder="Write a comment…"
-        className="block w-full rounded border border-neutral-300 px-2 py-1 text-xs"
+        rows={3}
+        autoFocus
       />
       <div className="mt-2 flex justify-end gap-2">
         <button

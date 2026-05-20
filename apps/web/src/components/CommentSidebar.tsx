@@ -13,10 +13,12 @@ interface Props {
   currentUserId: string;
   pending: PendingAnchor | null;
   onCancelPending: () => void;
-  onSubmitPending: (body: string) => Promise<void>;
+  onSubmitPending: (body: string, mentions: string[]) => Promise<void>;
   onHighlight: (anchorId: string) => void;
   /** anchorId → top-of-rect y in iframe viewport (from anchor_positions). */
   positionsByAnchorId?: Map<string, { y: number; drifted: boolean }>;
+  collapsed?: boolean;
+  onCollapsedChange?: (next: boolean) => void;
 }
 
 const COLLAPSED_KEY = 'primer.sidebar.collapsed';
@@ -29,18 +31,33 @@ export function CommentSidebar({
   onSubmitPending,
   onHighlight,
   positionsByAnchorId,
+  collapsed: controlledCollapsed,
+  onCollapsedChange,
 }: Props) {
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
+  const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(COLLAPSED_KEY) === '1';
   });
+  const isControlled = controlledCollapsed !== undefined;
+  const collapsed = isControlled ? controlledCollapsed! : uncontrolledCollapsed;
+  const setCollapsed = (next: boolean) => {
+    if (isControlled) {
+      onCollapsedChange?.(next);
+    } else {
+      setUncontrolledCollapsed(next);
+    }
+  };
+
   const [hideResolved, setHideResolved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // localStorage write only fires in uncontrolled mode; controlled callers
+  // are responsible for their own persistence.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
-  }, [collapsed]);
+    if (!isControlled && typeof window !== 'undefined') {
+      window.localStorage.setItem(COLLAPSED_KEY, uncontrolledCollapsed ? '1' : '0');
+    }
+  }, [isControlled, uncontrolledCollapsed]);
 
   const query = useThreadsQuery(versionId);
   const threads = query.data?.data.threads ?? [];
@@ -140,10 +157,10 @@ export function CommentSidebar({
           anchor={pending.anchor}
           submitting={submitting}
           onCancel={onCancelPending}
-          onSubmit={async (body) => {
+          onSubmit={async (body, mentions) => {
             setSubmitting(true);
             try {
-              await onSubmitPending(body);
+              await onSubmitPending(body, mentions);
             } finally {
               setSubmitting(false);
             }

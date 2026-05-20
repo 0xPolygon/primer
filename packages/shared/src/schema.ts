@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   pgTable,
   text,
@@ -61,18 +62,26 @@ export const threads = pgTable('threads', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const comments = pgTable('comments', {
-  id: uuid('id').primaryKey(),
-  threadId: uuid('thread_id')
-    .notNull()
-    .references(() => threads.id, { onDelete: 'cascade' }),
-  authorId: text('author_id').notNull().references(() => users.id),
-  body: text('body').notNull(),
-  mentions: text('mentions').array().notNull().default([]),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }),
-  deletedAt: timestamp('deleted_at', { withTimezone: true }),
-});
+export const comments = pgTable(
+  'comments',
+  {
+    id: uuid('id').primaryKey(),
+    threadId: uuid('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    authorId: text('author_id').notNull().references(() => users.id),
+    body: text('body').notNull(),
+    mentions: text('mentions').array().notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => ({
+    byThreadAlive: index('comments_thread_id_alive_idx')
+      .on(t.threadId)
+      .where(sql`${t.deletedAt} IS NULL`),
+  }),
+);
 
 export const documentViews = pgTable(
   'document_views',

@@ -1,0 +1,1 @@
+CREATE INDEX "comments_thread_id_alive_idx" ON "comments" USING btree ("thread_id") WHERE "comments"."deleted_at" IS NULL;

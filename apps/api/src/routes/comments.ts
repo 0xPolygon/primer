@@ -2,9 +2,11 @@ import type { Hono } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
 import { eq, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
+import { logger } from '../logger.ts';
 import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@primer/shared';
 import { threads, comments, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
+import { validateAndCleanMentions } from '../notifications/mentions.ts';
 
 async function ensureLiveDocumentForThread(threadId: string): Promise<{ ok: true } | { ok: false }> {
   const [r] = (await db.execute(sql`
@@ -143,26 +145,57 @@ export function registerCommentRoutes(
       return c.json({ error: 'invalid_body', message: `Body must be 1–${MAX_BODY} chars after trim.` }, 400);
     }
 
-    // Pre-flight thread existence check — otherwise a fake threadId would
-    // trigger an unhandled FK violation in the transaction below.
-    const [existingThread] = await db
-      .select({ id: threads.id })
-      .from(threads)
-      .where(eq(threads.id, threadId));
-    if (!existingThread) {
+    // Load thread context (existence check + doc/version info for notifier).
+    const [threadCtx] = (await db.execute(sql`
+      SELECT d.id AS doc_id, d.title AS doc_title,
+             v.id AS version_id, v.version_number::int AS version_number
+      FROM threads t
+      INNER JOIN versions v ON v.id = t.version_id
+      INNER JOIN documents d ON d.id = v.document_id
+      WHERE t.id = ${threadId}
+      LIMIT 1
+    `)) as unknown as Array<{
+      doc_id: string;
+      doc_title: string;
+      version_id: string;
+      version_number: number;
+    }>;
+    if (!threadCtx) {
       return c.json({ error: 'not_found', message: 'thread not found' }, 404);
     }
 
-    const commentId = uuidv7();
     const user = c.get('user');
 
-    const priorAuthors = (await db
-      .select({ authorId: comments.authorId })
-      .from(comments)
-      .where(eq(comments.threadId, threadId))) as { authorId: string }[];
-    const participantUserIds = Array.from(
-      new Set(priorAuthors.map((r) => r.authorId).filter((id) => id !== user.id))
-    );
+    // Validate mentions before touching the DB.
+    const rawMentions = (payload as { mentions?: unknown }).mentions;
+    let validated;
+    if (rawMentions === undefined || (Array.isArray(rawMentions) && rawMentions.length === 0)) {
+      validated = { ok: true as const, mentions: [] };
+    } else {
+      const userRows = await db.select({ id: users.id }).from(users);
+      const knownUserIds = new Set(userRows.map((r) => r.id));
+      validated = validateAndCleanMentions(rawMentions as string[], user.id, knownUserIds);
+    }
+    if (!validated.ok) {
+      return c.json({ error: validated.error, message: validated.message }, 400);
+    }
+    const cleanedMentions = validated.mentions;
+
+    const commentId = uuidv7();
+    const insertedAt = new Date();
+
+    // Prior thread participants (only non-deleted comments).
+    const priorRows = (await db.execute(sql`
+      SELECT DISTINCT author_id AS author_id
+      FROM comments
+      WHERE thread_id = ${threadId}
+        AND deleted_at IS NULL
+    `)) as unknown as Array<{ author_id: string }>;
+
+    const mentionSet = new Set(cleanedMentions);
+    const participantUserIds = priorRows
+      .map((r) => r.author_id)
+      .filter((id) => id !== user.id && !mentionSet.has(id));
 
     await db.transaction(async (tx) => {
       await tx.insert(comments).values({
@@ -170,7 +203,7 @@ export function registerCommentRoutes(
         threadId,
         authorId: user.id,
         body: validation.body,
-        mentions: [],
+        mentions: cleanedMentions,
       });
       // Auto-reopen if resolved (no-op when not resolved).
       await tx
@@ -179,18 +212,17 @@ export function registerCommentRoutes(
         .where(eq(threads.id, threadId));
     });
 
-    await deps.notifier.notifyReplyParticipants({
-      participantUserIds,
-      threadId,
-      commentId,
-      actorUserId: user.id,
-    });
-    await deps.notifier.notifyMentions({
-      mentions: [],
-      threadId,
-      commentId,
-      actorUserId: user.id,
-    });
+    void deps.notifier
+      .notifyComment({
+        doc: { id: threadCtx.doc_id, title: threadCtx.doc_title },
+        version: { id: threadCtx.version_id, versionNumber: threadCtx.version_number },
+        thread: { id: threadId },
+        comment: { id: commentId, body: validation.body, createdAt: insertedAt },
+        mentionedUserIds: cleanedMentions,
+        participantUserIds,
+        actorUserId: user.id,
+      })
+      .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
 
     const dto = await loadThreadDTO(threadId);
     if (!dto) return c.json({ error: 'not_found' }, 404);
@@ -216,22 +248,66 @@ export function registerCommentRoutes(
     }
     const user = c.get('user');
 
+    // Validate mentions before touching the DB.
+    const rawMentions = (payload as { mentions?: unknown }).mentions;
+    let validated;
+    if (rawMentions === undefined || (Array.isArray(rawMentions) && rawMentions.length === 0)) {
+      validated = { ok: true as const, mentions: [] };
+    } else {
+      const userRows = await db.select({ id: users.id }).from(users);
+      const knownUserIds = new Set(userRows.map((r) => r.id));
+      validated = validateAndCleanMentions(rawMentions as string[], user.id, knownUserIds);
+    }
+    if (!validated.ok) {
+      return c.json({ error: validated.error, message: validated.message }, 400);
+    }
+    const cleanedMentions = validated.mentions;
+
     const [existing] = await db.select().from(comments).where(eq(comments.id, commentId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
     if (existing.authorId !== user.id) return c.json({ error: 'forbidden' }, 403);
     if (existing.deletedAt !== null) return c.json({ error: 'conflict' }, 409);
 
+    // Diff mentions: only newly-added ones trigger a notification.
+    const previous = new Set(existing.mentions);
+    const newlyAdded = cleanedMentions.filter((id) => !previous.has(id));
+
+    const updatedAt = new Date();
     await db
       .update(comments)
-      .set({ body: validation.body, updatedAt: new Date() })
+      .set({ body: validation.body, mentions: cleanedMentions, updatedAt })
       .where(eq(comments.id, commentId));
 
-    await deps.notifier.notifyMentions({
-      mentions: [],
-      threadId: existing.threadId,
-      commentId,
-      actorUserId: user.id,
-    });
+    if (newlyAdded.length > 0) {
+      const [editCtx] = (await db.execute(sql`
+        SELECT d.id AS doc_id, d.title AS doc_title,
+               v.id AS version_id, v.version_number::int AS version_number
+        FROM threads t
+        INNER JOIN versions v ON v.id = t.version_id
+        INNER JOIN documents d ON d.id = v.document_id
+        WHERE t.id = ${existing.threadId}
+        LIMIT 1
+      `)) as unknown as Array<{
+        doc_id: string;
+        doc_title: string;
+        version_id: string;
+        version_number: number;
+      }>;
+
+      if (editCtx) {
+        void deps.notifier
+          .notifyComment({
+            doc: { id: editCtx.doc_id, title: editCtx.doc_title },
+            version: { id: editCtx.version_id, versionNumber: editCtx.version_number },
+            thread: { id: existing.threadId },
+            comment: { id: commentId, body: validation.body, createdAt: existing.createdAt },
+            mentionedUserIds: newlyAdded,
+            participantUserIds: [],   // edits never re-notify participants
+            actorUserId: user.id,
+          })
+          .catch((err) => logger.error({ err, commentId }, 'notifier failed (edit)'));
+      }
+    }
 
     const [row] = (await db
       .select({

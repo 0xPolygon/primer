@@ -55,8 +55,8 @@ function applyCommentToCache(
 export function useCreateThread(versionId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { anchor: AnchorData; body: string }) => {
-      const payload: CreateThreadRequest = { anchor: input.anchor, body: input.body };
+    mutationFn: async (input: { anchor: AnchorData; body: string; mentions: string[] }) => {
+      const payload: CreateThreadRequest = { anchor: input.anchor, body: input.body, mentions: input.mentions };
       const res = await api(`/api/versions/${versionId}/threads`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -75,11 +75,11 @@ export function useCreateThread(versionId: string) {
 export function useReply(versionId: string, threadId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: string) => {
+    mutationFn: async (input: { body: string; mentions: string[] }) => {
       const res = await api(`/api/threads/${threadId}/comments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify(input),
       });
       return jsonOrThrow<{ comment: CommentDTO; thread: ThreadDTO }>(res);
     },
@@ -124,11 +124,11 @@ export function useReopenThread(versionId: string, threadId: string) {
 export function useEditComment(versionId: string, commentId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: string) => {
+    mutationFn: async (input: { body: string; mentions: string[] }) => {
       const res = await api(`/api/comments/${commentId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ body }),
+        body: JSON.stringify(input),
       });
       return jsonOrThrow<CommentDTO>(res);
     },

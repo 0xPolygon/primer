@@ -1,29 +1,21 @@
 import { logger } from '../logger.ts';
 
-export interface NotifyMentionsArgs {
-  mentions: string[];
-  threadId: string;
-  commentId: string;
-  actorUserId: string;
-}
-
-export interface NotifyReplyParticipantsArgs {
+export interface NotifyCommentArgs {
+  doc: { id: string; title: string };
+  version: { id: string; versionNumber: number };
+  thread: { id: string };
+  comment: { id: string; body: string; createdAt: Date };
+  mentionedUserIds: string[];
   participantUserIds: string[];
-  threadId: string;
-  commentId: string;
   actorUserId: string;
 }
 
 export interface Notifier {
-  notifyMentions(args: NotifyMentionsArgs): Promise<void>;
-  notifyReplyParticipants(args: NotifyReplyParticipantsArgs): Promise<void>;
+  notifyComment(args: NotifyCommentArgs): Promise<void>;
 }
 
 export class NoopNotifier implements Notifier {
-  async notifyMentions(args: NotifyMentionsArgs): Promise<void> {
-    logger.debug({ args }, 'notifyMentions (no-op)');
-  }
-  async notifyReplyParticipants(args: NotifyReplyParticipantsArgs): Promise<void> {
-    logger.debug({ args }, 'notifyReplyParticipants (no-op)');
+  async notifyComment(args: NotifyCommentArgs): Promise<void> {
+    logger.debug({ args }, 'notifyComment (no-op)');
   }
 }

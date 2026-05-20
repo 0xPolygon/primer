@@ -18,6 +18,7 @@ import { registerDashboardRoute } from './routes/dashboard.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerMeRoute } from './routes/me.ts';
+import { registerUserRoutes } from './routes/users.ts';
 import type { Storage } from '@primer/shared/storage';
 import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
@@ -69,6 +70,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerVersionRoutes(app);
   registerAuthRoutes(app, deps);
   registerMeRoute(app);
+  registerUserRoutes(app);
 
   if (process.env.NODE_ENV !== 'production') {
     registerDevFixtureRoute(app);

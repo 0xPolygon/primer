@@ -80,10 +80,22 @@ export interface ThreadsListResponse {
 export interface CreateThreadRequest {
   anchor: AnchorData;
   body: string;
+  mentions?: string[];
 }
 
 export interface CommentBodyRequest {
   body: string;
+  mentions?: string[];
+}
+
+export interface MentionableUser {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
+export interface MentionableUsersResponse {
+  users: MentionableUser[];
 }
 
 export interface DashboardDocumentSummary {
