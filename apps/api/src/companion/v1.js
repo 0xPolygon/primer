@@ -80,18 +80,8 @@
       case 'exit_pick_mode':
         exitPickMode('parent');
         break;
-      case 'highlight_anchor':
-        if (typeof msg.anchorId === 'string') {
-          applyFocusedHighlight(msg.anchorId, 1500);
-          const entry = elementByAnchorId.get(msg.anchorId);
-          if (entry) {
-            entry.badge.classList.add('focused');
-            try {
-              entry.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            } catch {}
-            setTimeout(() => entry.badge.classList.remove('focused'), 1500);
-          }
-        }
+      case 'set_focused_anchor':
+        setFocusedAnchor(typeof msg.anchorId === 'string' ? msg.anchorId : null);
         break;
       case 'request_anchor_positions':
         if (port) {
@@ -297,7 +287,15 @@
       /* Force dark text on the yellow highlight so it stays readable when
          the artifact's own text color is light (e.g. dark-mode artifacts). */
       ::highlight(primer-mark)         { background: rgba(254, 240, 138, 0.85); color: #111827; }
-      ::highlight(primer-mark-focused) { background: rgba(252, 211, 77, 0.95);  color: #111827; }
+      /* Focused (sticky) — more saturated + a soft amber underline for pop. */
+      ::highlight(primer-mark-focused) {
+        background: rgba(251, 191, 36, 0.95);
+        color: #111827;
+        text-decoration: underline;
+        text-decoration-color: rgba(180, 83, 9, 0.7);
+        text-decoration-thickness: 2px;
+        text-underline-offset: 3px;
+      }
       .__primer_badge__ {
         position: absolute;
         background: rgba(254, 240, 138, 0.95);
@@ -425,6 +423,10 @@
     return null;
   }
 
+  // Sticky-focus state. Persists across `update_anchors` until the parent
+  // sends a new `set_focused_anchor`. null = no focus.
+  let focusedAnchorId = null;
+
   function renderTextRangeMarkers() {
     ensureStyleTag();
     if (!ensureHighlights()) return;
@@ -442,24 +444,62 @@
         continue;
       }
       rangeByAnchorId.set(a.id, range);
-      highlightDefault.add(range);
+      // If this anchor is the currently-focused one, paint it focused;
+      // otherwise paint the default highlight.
+      if (a.id === focusedAnchorId) {
+        highlightFocused.add(range);
+      } else {
+        highlightDefault.add(range);
+      }
     }
   }
 
-  function applyFocusedHighlight(anchorId, durationMs) {
-    const range = rangeByAnchorId.get(anchorId);
-    if (!range) return;
-    highlightDefault.delete(range);
-    highlightFocused.add(range);
-    try {
-      const start = range.startContainer;
-      const parentEl = start instanceof Element ? start : start.parentElement;
-      parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } catch {}
-    setTimeout(() => {
-      highlightFocused.delete(range);
-      highlightDefault.add(range);
-    }, durationMs);
+  /** Switch the focused anchor. Pass null to clear focus.
+   *  Scrolls the iframe to the newly-focused anchor on transition. */
+  function setFocusedAnchor(nextId) {
+    const prevId = focusedAnchorId;
+    if (prevId === nextId) return;
+    focusedAnchorId = nextId;
+
+    // Repaint text-range focus.
+    if (prevId !== null) {
+      const prevRange = rangeByAnchorId.get(prevId);
+      if (prevRange && highlightFocused && highlightDefault) {
+        try {
+          highlightFocused.delete(prevRange);
+          highlightDefault.add(prevRange);
+        } catch {}
+      }
+    }
+    if (nextId !== null) {
+      const nextRange = rangeByAnchorId.get(nextId);
+      if (nextRange && highlightFocused && highlightDefault) {
+        try {
+          highlightDefault.delete(nextRange);
+          highlightFocused.add(nextRange);
+        } catch {}
+        try {
+          const start = nextRange.startContainer;
+          const parentEl = start instanceof Element ? start : start.parentElement;
+          parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {}
+      }
+    }
+
+    // Repaint element-path focus (badge styling).
+    if (prevId !== null) {
+      const prevEntry = elementByAnchorId.get(prevId);
+      prevEntry?.badge.classList.remove('focused');
+    }
+    if (nextId !== null) {
+      const nextEntry = elementByAnchorId.get(nextId);
+      if (nextEntry) {
+        nextEntry.badge.classList.add('focused');
+        try {
+          nextEntry.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch {}
+      }
+    }
   }
 
   // ── Overlay layer + element-pick badges ──────────────────────────
@@ -518,6 +558,8 @@
       }
       const badge = document.createElement('div');
       badge.className = '__primer_badge__';
+      // Re-apply focus state across re-renders (update_anchors clears + rebuilds).
+      if (a.id === focusedAnchorId) badge.classList.add('focused');
       badge.dataset.anchorId = a.id;
       badge.textContent = '💬';
       overlay.appendChild(badge);

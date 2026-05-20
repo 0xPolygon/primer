@@ -125,7 +125,7 @@ export function DevHarnessPage() {
     send({ type: 'update_anchors', anchors: next });
   };
 
-  const highlight = (id: string) => send({ type: 'highlight_anchor', anchorId: id });
+  const highlight = (id: string) => send({ type: 'set_focused_anchor', anchorId: id });
 
   const togglePickMode = () => {
     if (pickMode) {

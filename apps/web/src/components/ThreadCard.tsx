@@ -17,6 +17,10 @@ interface Props {
   drifted: boolean;
   currentUserId: string;
   onHighlight: (anchorId: string) => void;
+  /** True when this thread owns the sticky focus (its anchor is highlighted
+   *  in the iframe). Affects card styling only — focus changes are pushed
+   *  to the companion via the parent's onHighlight. */
+  isFocused?: boolean;
 }
 
 function relativeTime(iso: string): string {
@@ -100,11 +104,15 @@ function CommentRow({
   isReply,
   isAuthor,
   versionId,
+  onStartEditing,
 }: {
   comment: CommentDTO;
   isReply: boolean;
   isAuthor: boolean;
   versionId: string;
+  /** Fires when this comment enters edit mode — used to focus the parent
+   *  thread's anchor in the iframe. */
+  onStartEditing?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
@@ -115,6 +123,11 @@ function CommentRow({
   const isTombstoned = comment.deletedAt !== null;
   const canShowAuthorActions = !isTombstoned && !editing && isAuthor;
 
+  function startEditing() {
+    setEditing(true);
+    onStartEditing?.();
+  }
+
   return (
     <div className={isReply ? 'mt-1.5 ml-3 border-t border-dashed border-neutral-200 pt-1.5' : ''}>
       <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500">
@@ -124,7 +137,7 @@ function CommentRow({
             <>
               <button
                 type="button"
-                onClick={() => setEditing(true)}
+                onClick={startEditing}
                 aria-label="Edit comment"
                 className={iconButtonClass}
               >
@@ -197,7 +210,7 @@ function CommentRow({
   );
 }
 
-export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighlight }: Props) {
+export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighlight, isFocused = false }: Props) {
   const [replying, setReplying] = useState(false);
   const [replyDraft, setReplyDraft] = useState('');
   const [replyMentions, setReplyMentions] = useState<string[]>([]);
@@ -207,10 +220,21 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
   const isResolved = thread.resolvedAt !== null;
   const [first, ...replies] = thread.comments;
 
+  // Mounting a reply composer implicitly focuses this thread, so the user
+  // sees the highlight in the iframe while they're typing.
+  function startReplying() {
+    setReplying(true);
+    onHighlight(thread.id);
+  }
+
+  const focusedClass = isFocused
+    ? 'bg-yellow-50/40 ring-1 ring-inset ring-yellow-200'
+    : '';
+
   return (
     <article
       id={`thread-${thread.id}`}
-      className={`border-b border-neutral-100 px-3 py-2.5 text-xs ${
+      className={`border-b border-neutral-100 px-3 py-2.5 text-xs ${focusedClass} ${
         isResolved ? 'opacity-55' : ''
       } ${drifted ? 'opacity-60' : ''}`}
       onClick={(e) => {
@@ -228,6 +252,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
           isReply={false}
           isAuthor={first.authorId === currentUserId}
           versionId={versionId}
+          onStartEditing={() => onHighlight(thread.id)}
         />
       )}
       {replies.map((r) => (
@@ -237,6 +262,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
           isReply
           isAuthor={r.authorId === currentUserId}
           versionId={versionId}
+          onStartEditing={() => onHighlight(thread.id)}
         />
       ))}
       {replying && (
@@ -285,7 +311,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
       )}
       {!replying && (
         <div className="mt-1.5 flex items-center gap-1 border-t border-neutral-100 pt-1.5">
-          <button type="button" onClick={() => setReplying(true)} className={footerButtonClass}>
+          <button type="button" onClick={startReplying} className={footerButtonClass}>
             <ReplyIcon />
             Reply
           </button>

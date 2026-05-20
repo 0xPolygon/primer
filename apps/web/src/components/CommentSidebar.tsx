@@ -19,6 +19,8 @@ interface Props {
   positionsByAnchorId?: Map<string, { y: number; drifted: boolean }>;
   collapsed?: boolean;
   onCollapsedChange?: (next: boolean) => void;
+  /** Sticky-focus state owned by DocumentPage. */
+  focusedThreadId?: string | null;
 }
 
 const COLLAPSED_KEY = 'primer.sidebar.collapsed';
@@ -33,6 +35,7 @@ export function CommentSidebar({
   positionsByAnchorId,
   collapsed: controlledCollapsed,
   onCollapsedChange,
+  focusedThreadId = null,
 }: Props) {
   const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -179,6 +182,7 @@ export function CommentSidebar({
               drifted={pos?.drifted ?? false}
               currentUserId={currentUserId}
               onHighlight={onHighlight}
+              isFocused={focusedThreadId === t.id}
             />
           );
         })}

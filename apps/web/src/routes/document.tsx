@@ -118,6 +118,7 @@ export function DocumentPage() {
 
   useEffect(() => {
     setPositionsByAnchorId(new Map());
+    setFocusedThreadId(null);
   }, [currentVersionId]);
 
   useEffect(() => {
@@ -180,8 +181,19 @@ export function DocumentPage() {
     }
   };
 
+  // Sticky-focus state — null = no thread focused. Sidebar threads can set it
+  // (click or composer mount). Companion paints the focused anchor and keeps
+  // it painted until we send a new value.
+  const [focusedThreadId, setFocusedThreadId] = useState<string | null>(null);
+
+  // Push focus changes to the companion. Re-pushes on version change too so
+  // the new iframe picks up the existing focus on mount.
+  useEffect(() => {
+    senderRef.current?.({ type: 'set_focused_anchor', anchorId: focusedThreadId });
+  }, [focusedThreadId, currentVersionId]);
+
   const onHighlight = useCallback((anchorId: string) => {
-    senderRef.current?.({ type: 'highlight_anchor', anchorId });
+    setFocusedThreadId(anchorId);
   }, []);
 
   useEffect(() => {
@@ -432,6 +444,7 @@ export function DocumentPage() {
           positionsByAnchorId={positionsByAnchorId}
           collapsed={sidebarCollapsed}
           onCollapsedChange={setSidebarCollapsed}
+          focusedThreadId={focusedThreadId}
         />
       </div>
 

@@ -45,9 +45,13 @@ export interface MsgEnterPickMode {
 export interface MsgExitPickMode {
   type: 'exit_pick_mode';
 }
-export interface MsgHighlightAnchor {
-  type: 'highlight_anchor';
-  anchorId: string;
+/** Sticky-focus mode. Sending an anchorId focuses that anchor and keeps it
+ *  highlighted until another `set_focused_anchor` arrives. Sending null clears
+ *  the focus. The companion repaints focus state automatically on
+ *  `update_anchors` so the focus survives anchor refreshes. */
+export interface MsgSetFocusedAnchor {
+  type: 'set_focused_anchor';
+  anchorId: string | null;
 }
 export interface MsgRequestAnchorPositions {
   type: 'request_anchor_positions';
@@ -58,7 +62,7 @@ export type OutboundProtocolMessage =
   | MsgUpdateAnchors
   | MsgEnterPickMode
   | MsgExitPickMode
-  | MsgHighlightAnchor
+  | MsgSetFocusedAnchor
   | MsgRequestAnchorPositions;
 
 // Iframe → Parent
