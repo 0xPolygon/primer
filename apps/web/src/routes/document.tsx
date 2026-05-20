@@ -20,6 +20,7 @@ import { EditableField } from '../components/EditableField.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
+import { commentsFilename, formatThreadsAsMarkdown } from '../lib/exportComments.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -170,6 +171,28 @@ export function DocumentPage() {
     },
     [readMostly]
   );
+
+  function exportComments() {
+    if (!docQuery.data) return;
+    const md = formatThreadsAsMarkdown(
+      { title: docQuery.data.document.title },
+      { versionNumber: currentVersionNumber },
+      threads,
+    );
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = window.document.createElement('a');
+    a.href = url;
+    a.download = commentsFilename(
+      { title: docQuery.data.document.title },
+      { versionNumber: currentVersionNumber },
+    );
+    a.style.display = 'none';
+    window.document.body.appendChild(a);
+    a.click();
+    window.document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   const togglePickMode = () => {
     if (pickMode) {
@@ -341,6 +364,19 @@ export function DocumentPage() {
               + Version
             </button>
           )}
+          <button
+            type="button"
+            onClick={exportComments}
+            title="Download comments as Markdown"
+            className="inline-flex items-center gap-1 rounded border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-50"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export
+          </button>
           {isUploader && (
             <div className="relative">
               <button
