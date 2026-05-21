@@ -195,7 +195,7 @@ function CommentRow({
                   { onSuccess: () => setEditing(false) }
                 );
               }}
-              className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50"
+              className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
               Save
             </button>
@@ -302,7 +302,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
                   }
                 )
               }
-              className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50"
+              className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
               Reply
             </button>

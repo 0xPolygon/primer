@@ -210,7 +210,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
             type="button"
             onClick={submit}
             disabled={!canSubmit}
-            className="rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-800 disabled:opacity-50"
+            className="rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
             {addVersion.isPending ? 'Adding…' : 'Add version'}
           </button>

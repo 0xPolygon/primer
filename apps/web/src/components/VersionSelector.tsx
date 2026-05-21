@@ -94,7 +94,7 @@ export function VersionSelector({
                   <div className="text-[10px] text-neutral-400 dark:text-neutral-500">{relativeTime(v.createdAt)}</div>
                 </div>
                 {isLatest && (
-                  <span className="shrink-0 rounded-full bg-neutral-900 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white">
+                  <span className="shrink-0 rounded-full bg-neutral-900 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white dark:bg-neutral-100 dark:text-neutral-900">
                     Latest
                   </span>
                 )}

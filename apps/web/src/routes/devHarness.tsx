@@ -156,7 +156,7 @@ export function DevHarnessPage() {
                 {JSON.stringify(pendingSelection.anchor, null, 2)}
               </pre>
               <div className="mt-2 flex gap-2">
-                <button onClick={saveSelection} className="rounded bg-neutral-900 px-3 py-1 text-white">
+                <button onClick={saveSelection} className="rounded bg-neutral-900 px-3 py-1 text-white dark:bg-neutral-100 dark:text-neutral-900">
                   Save as anchor
                 </button>
                 <button onClick={() => setPendingSelection(null)} className="rounded border px-3 py-1">
@@ -198,7 +198,7 @@ export function DevHarnessPage() {
           <h2 className="font-semibold mb-1">Pick mode</h2>
           <button
             onClick={togglePickMode}
-            className={`rounded px-3 py-1 ${pickMode ? 'bg-red-600 text-white' : 'bg-neutral-900 text-white'}`}
+            className={`rounded px-3 py-1 ${pickMode ? 'bg-red-600 text-white' : 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'}`}
           >
             {pickMode ? 'Exit pick mode' : 'Enter pick mode'}
           </button>
@@ -207,7 +207,7 @@ export function DevHarnessPage() {
               <pre className="text-xs whitespace-pre-wrap break-words">
                 {JSON.stringify(pendingPick.anchor, null, 2)}
               </pre>
-              <button onClick={savePick} className="mt-2 rounded bg-neutral-900 px-3 py-1 text-white">
+              <button onClick={savePick} className="mt-2 rounded bg-neutral-900 px-3 py-1 text-white dark:bg-neutral-100 dark:text-neutral-900">
                 Save as anchor
               </button>
             </div>
