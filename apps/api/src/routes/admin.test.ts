@@ -40,4 +40,39 @@ describe('GET /api/admin/stats', () => {
       });
     });
   });
+
+  it('counts inserted rows in totals (delta from baseline)', async () => {
+    await withApp(async (app) => {
+      const before = await snapshot(app);
+
+      const userId = `admin-test-user-${uuidv7()}`;
+      const docId = uuidv7();
+      const versionId = uuidv7();
+      const threadId = uuidv7();
+      const commentId = uuidv7();
+
+      await db.insert(users).values({ id: userId, email: 'a@p.t', displayName: 'A' });
+      await db.insert(documents).values({ id: docId, title: 'A', uploaderId: userId });
+      await db.insert(versions).values({
+        id: versionId, documentId: docId, versionNumber: 1,
+        storageKey: `v1/${versionId}.html`, sizeBytes: 0, versionNote: null,
+      });
+      await db.insert(threads).values({
+        id: threadId, versionId,
+        anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+      });
+      await db.insert(comments).values({
+        id: commentId, threadId, authorId: userId, body: 'hi',
+      });
+      await db.insert(documentViews).values({ userId, documentId: docId });
+
+      const after = await snapshot(app);
+      expect(after.users.total - before.users.total).toBe(1);
+      expect(after.documents.total - before.documents.total).toBe(1);
+      expect(after.versions.total - before.versions.total).toBe(1);
+      expect(after.threads.total - before.threads.total).toBe(1);
+      expect(after.comments.total - before.comments.total).toBe(1);
+      expect(after.documentViews.total - before.documentViews.total).toBe(1);
+    });
+  });
 });
