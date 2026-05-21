@@ -108,4 +108,75 @@ describe('GET /api/admin/stats', () => {
       expect(after.comments.total - before.comments.total).toBe(1);
     });
   });
+
+  it('includes rows in last7d only when newer than 7 days; total counts both', async () => {
+    await withApp(async (app) => {
+      const before = await snapshot(app);
+
+      const userId = `admin-test-user-${uuidv7()}`;
+      await db.insert(users).values({ id: userId, email: 'c@p.t', displayName: 'C' });
+
+      const oldDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000); // 10 days ago
+      const oldDocId = uuidv7();
+      const newDocId = uuidv7();
+      await db.insert(documents).values({ id: oldDocId, title: 'Old', uploaderId: userId, createdAt: oldDate });
+      await db.insert(documents).values({ id: newDocId, title: 'New', uploaderId: userId });
+
+      const oldVersionId = uuidv7();
+      const newVersionId = uuidv7();
+      await db.insert(versions).values({
+        id: oldVersionId, documentId: newDocId, versionNumber: 1,
+        storageKey: `v1/${oldVersionId}.html`, sizeBytes: 0, versionNote: null,
+        createdAt: oldDate,
+      });
+      await db.insert(versions).values({
+        id: newVersionId, documentId: newDocId, versionNumber: 2,
+        storageKey: `v1/${newVersionId}.html`, sizeBytes: 0, versionNote: null,
+      });
+
+      const oldThreadId = uuidv7();
+      const newThreadId = uuidv7();
+      await db.insert(threads).values({
+        id: oldThreadId, versionId: newVersionId,
+        anchor: { type: 'text-range', selectorText: 'a', prefix: '', suffix: '', containerPath: 'body' },
+        createdAt: oldDate,
+      });
+      await db.insert(threads).values({
+        id: newThreadId, versionId: newVersionId,
+        anchor: { type: 'text-range', selectorText: 'b', prefix: '', suffix: '', containerPath: 'body' },
+      });
+
+      await db.insert(comments).values({
+        id: uuidv7(), threadId: newThreadId, authorId: userId, body: 'old', createdAt: oldDate,
+      });
+      await db.insert(comments).values({
+        id: uuidv7(), threadId: newThreadId, authorId: userId, body: 'new',
+      });
+
+      await db.insert(documentViews).values({
+        userId, documentId: oldDocId, viewedAt: oldDate,
+      });
+      // Same (userId, newDocId) pair as primary key — only one row per pair, so this is the "new" view.
+      await db.insert(documentViews).values({ userId, documentId: newDocId });
+
+      const after = await snapshot(app);
+
+      // Totals see both rows.
+      expect(after.documents.total - before.documents.total).toBe(2);
+      expect(after.versions.total - before.versions.total).toBe(2);
+      expect(after.threads.total - before.threads.total).toBe(2);
+      expect(after.comments.total - before.comments.total).toBe(2);
+      expect(after.documentViews.total - before.documentViews.total).toBe(2);
+
+      // last7d sees only the new one.
+      expect(after.documents.last7d - before.documents.last7d).toBe(1);
+      expect(after.versions.last7d - before.versions.last7d).toBe(1);
+      expect(after.threads.last7d - before.threads.last7d).toBe(1);
+      expect(after.comments.last7d - before.comments.last7d).toBe(1);
+      expect(after.documentViews.last7d - before.documentViews.last7d).toBe(1);
+
+      // users.last7d should also see the newly inserted (default-timestamped) user.
+      expect(after.users.last7d - before.users.last7d).toBe(1);
+    });
+  });
 });
