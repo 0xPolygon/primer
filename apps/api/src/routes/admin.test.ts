@@ -75,4 +75,37 @@ describe('GET /api/admin/stats', () => {
       expect(after.documentViews.total - before.documentViews.total).toBe(1);
     });
   });
+
+  it('excludes soft-deleted documents and tombstoned comments from totals', async () => {
+    await withApp(async (app) => {
+      const before = await snapshot(app);
+
+      const userId = `admin-test-user-${uuidv7()}`;
+      const aliveDocId = uuidv7();
+      const deletedDocId = uuidv7();
+      const versionId = uuidv7();
+      const threadId = uuidv7();
+      const aliveCommentId = uuidv7();
+      const tombstonedCommentId = uuidv7();
+      const now = new Date();
+
+      await db.insert(users).values({ id: userId, email: 'b@p.t', displayName: 'B' });
+      await db.insert(documents).values({ id: aliveDocId, title: 'Alive', uploaderId: userId });
+      await db.insert(documents).values({ id: deletedDocId, title: 'Gone', uploaderId: userId, deletedAt: now });
+      await db.insert(versions).values({
+        id: versionId, documentId: aliveDocId, versionNumber: 1,
+        storageKey: `v1/${versionId}.html`, sizeBytes: 0, versionNote: null,
+      });
+      await db.insert(threads).values({
+        id: threadId, versionId,
+        anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+      });
+      await db.insert(comments).values({ id: aliveCommentId, threadId, authorId: userId, body: 'kept' });
+      await db.insert(comments).values({ id: tombstonedCommentId, threadId, authorId: userId, body: 'gone', deletedAt: now });
+
+      const after = await snapshot(app);
+      expect(after.documents.total - before.documents.total).toBe(1);
+      expect(after.comments.total - before.comments.total).toBe(1);
+    });
+  });
 });

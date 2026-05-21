@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { count } from 'drizzle-orm';
+import { count, isNull } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
 import type { AdminStatsResponse } from '@primer/shared';
 import { db } from '../db/client.ts';
@@ -16,10 +16,10 @@ export function registerAdminRoute(app: Hono<{ Variables: AppVariables }>): void
       viewsTotal,
     ] = await Promise.all([
       db.select({ c: count() }).from(users),
-      db.select({ c: count() }).from(documents),
+      db.select({ c: count() }).from(documents).where(isNull(documents.deletedAt)),
       db.select({ c: count() }).from(versions),
       db.select({ c: count() }).from(threads),
-      db.select({ c: count() }).from(comments),
+      db.select({ c: count() }).from(comments).where(isNull(comments.deletedAt)),
       db.select({ c: count() }).from(documentViews),
     ]);
 
