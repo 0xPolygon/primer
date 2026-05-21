@@ -15,6 +15,7 @@ import { registerDevFixtureRoute } from './routes/devFixture.ts';
 import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
 import { registerDashboardRoute } from './routes/dashboard.ts';
+import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerMeRoute } from './routes/me.ts';
@@ -67,6 +68,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerThreadRoutes(app, deps);
   registerCommentRoutes(app, deps);
   registerDashboardRoute(app);
+  registerAdminRoute(app);
   registerVersionRoutes(app);
   registerAuthRoutes(app, deps);
   registerMeRoute(app);
