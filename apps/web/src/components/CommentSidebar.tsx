@@ -3,6 +3,7 @@ import type { AnchorData, ThreadDTO } from '@primer/shared';
 import { useThreadsQuery } from '../queries/threads.ts';
 import { ThreadCard } from './ThreadCard.tsx';
 import { NewThreadComposer } from './NewThreadComposer.tsx';
+import { hasLiveComments } from '../lib/liveComments.ts';
 
 interface PendingAnchor {
   anchor: AnchorData;
@@ -83,10 +84,12 @@ export function CommentSidebar({
     });
   }, [threads, positionsByAnchorId]);
 
+  const visibleThreads = sortedThreads.filter(hasLiveComments);
+
   const visible = hideResolved
-    ? sortedThreads.filter((t) => t.resolvedAt === null)
-    : sortedThreads;
-  const activeCount = threads.filter((t) => t.resolvedAt === null).length;
+    ? visibleThreads.filter((t) => t.resolvedAt === null)
+    : visibleThreads;
+  const activeCount = visibleThreads.filter((t) => t.resolvedAt === null).length;
 
   if (collapsed) {
     return (
@@ -103,7 +106,7 @@ export function CommentSidebar({
           {activeCount}
         </span>
         <div className="flex w-full flex-1 flex-col items-center gap-1 pt-2">
-          {sortedThreads.map((t) => (
+          {visibleThreads.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -132,7 +135,7 @@ export function CommentSidebar({
     <aside className="flex h-full w-[300px] flex-col border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       <header className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-3 py-2 text-xs text-neutral-600 dark:text-neutral-400">
         <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-          {threads.length} thread{threads.length === 1 ? '' : 's'}
+          {visibleThreads.length} thread{visibleThreads.length === 1 ? '' : 's'}
         </span>
         <div className="flex items-center gap-3">
           <label className="flex cursor-pointer select-none items-center gap-1">
@@ -188,7 +191,7 @@ export function CommentSidebar({
         })}
         {visible.length === 0 && (
           <div className="px-3 py-4 text-xs text-neutral-500">
-            {threads.length === 0 ? 'No comments yet.' : 'No active threads (all resolved).'}
+            {visibleThreads.length === 0 ? 'No comments yet.' : 'No active threads (all resolved).'}
           </div>
         )}
       </div>

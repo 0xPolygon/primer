@@ -21,6 +21,7 @@ import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { commentsFilename, formatThreadsAsMarkdown } from '../lib/exportComments.ts';
+import { hasLiveComments } from '../lib/liveComments.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -98,7 +99,7 @@ export function DocumentPage() {
   const iframeWrapperRef = useRef<HTMLDivElement>(null);
 
   const anchorsForCompanion = useMemo(
-    () => threads.map((t) => ({ id: t.id, data: t.anchor })),
+    () => threads.filter(hasLiveComments).map((t) => ({ id: t.id, data: t.anchor })),
     [threads]
   );
 

@@ -10,6 +10,7 @@ import {
 import { MentionTextarea } from './MentionTextarea.tsx';
 import { renderMentions } from './renderMentions.tsx';
 import { useMentionableUsers } from '../queries/users.ts';
+import { liveComments } from '../lib/liveComments.ts';
 
 interface Props {
   versionId: string;
@@ -120,8 +121,7 @@ function CommentRow({
   const edit = useEditComment(versionId, comment.id);
   const del = useDeleteComment(versionId, comment.id);
   const usersQ = useMentionableUsers();
-  const isTombstoned = comment.deletedAt !== null;
-  const canShowAuthorActions = !isTombstoned && !editing && isAuthor;
+  const canShowAuthorActions = !editing && isAuthor;
 
   function startEditing() {
     setEditing(true);
@@ -156,15 +156,13 @@ function CommentRow({
           )}
           <span className="whitespace-nowrap">
             {relativeTime(comment.createdAt)}
-            {comment.updatedAt && !isTombstoned && (
+            {comment.updatedAt && (
               <span className="ml-1 italic text-neutral-400 dark:text-neutral-500">(edited)</span>
             )}
           </span>
         </div>
       </div>
-      {isTombstoned ? (
-        <div className="italic text-neutral-400 dark:text-neutral-500">deleted by author</div>
-      ) : editing ? (
+      {editing ? (
         <div className="mt-1">
           <MentionTextarea
             value={draft}
@@ -218,7 +216,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
   const resolve = useResolveThread(versionId, thread.id);
   const reopen = useReopenThread(versionId, thread.id);
   const isResolved = thread.resolvedAt !== null;
-  const [first, ...replies] = thread.comments;
+  const [first, ...replies] = liveComments(thread);
 
   // Mounting a reply composer implicitly focuses this thread, so the user
   // sees the highlight in the iframe while they're typing.
