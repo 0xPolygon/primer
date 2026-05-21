@@ -151,7 +151,7 @@ export function DevHarnessPage() {
         <section>
           <h2 className="font-semibold mb-1">Current selection</h2>
           {pendingSelection ? (
-            <div className="rounded border border-neutral-200 p-2">
+            <div className="rounded border border-neutral-200 p-2 dark:border-neutral-800">
               <pre className="text-xs whitespace-pre-wrap break-words">
                 {JSON.stringify(pendingSelection.anchor, null, 2)}
               </pre>
@@ -174,11 +174,11 @@ export function DevHarnessPage() {
           {anchors.length === 0 && <p className="text-sm text-neutral-500">None yet.</p>}
           <ul className="space-y-1">
             {anchors.map((a) => (
-              <li key={a.id} className="rounded border border-neutral-200 p-2 text-xs">
+              <li key={a.id} className="rounded border border-neutral-200 p-2 text-xs dark:border-neutral-800">
                 <div className="font-mono">
                   {a.id} — {a.data.type}
                 </div>
-                <div className="truncate text-neutral-600">
+                <div className="truncate text-neutral-600 dark:text-neutral-400">
                   {a.data.type === 'text-range' ? `"${a.data.selectorText}"` : a.data.path}
                 </div>
                 <div className="mt-1 flex gap-2">
@@ -203,7 +203,7 @@ export function DevHarnessPage() {
             {pickMode ? 'Exit pick mode' : 'Enter pick mode'}
           </button>
           {pendingPick && (
-            <div className="mt-2 rounded border border-neutral-200 p-2">
+            <div className="mt-2 rounded border border-neutral-200 p-2 dark:border-neutral-800">
               <pre className="text-xs whitespace-pre-wrap break-words">
                 {JSON.stringify(pendingPick.anchor, null, 2)}
               </pre>
@@ -218,7 +218,7 @@ export function DevHarnessPage() {
           <h2 className="font-semibold mb-1">Message log</h2>
           <ul className="space-y-1">
             {log.map((e, i) => (
-              <li key={i} className="rounded border border-neutral-200 p-1 text-xs">
+              <li key={i} className="rounded border border-neutral-200 p-1 text-xs dark:border-neutral-800">
                 <span className="font-mono text-neutral-500">
                   {new Date(e.ts).toLocaleTimeString()}
                 </span>{' '}

@@ -57,7 +57,7 @@ export function UploadPage() {
           onChange={(e) => setTitle(e.target.value)}
           maxLength={200}
           required
-          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700"
         />
       </label>
 
@@ -68,17 +68,17 @@ export function UploadPage() {
           onChange={(e) => setDescription(e.target.value)}
           maxLength={2000}
           rows={3}
-          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+          className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700"
         />
       </label>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={() => navigate('/')}
-          className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+          className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           Cancel
         </button>
