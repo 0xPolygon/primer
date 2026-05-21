@@ -4,6 +4,7 @@ import { HomePage } from './routes/home.tsx';
 import { UploadPage } from './routes/upload.tsx';
 import { DocumentPage } from './routes/document.tsx';
 import { DevHarnessPage } from './routes/devHarness.tsx';
+import { AdminPage } from './routes/admin.tsx';
 import { NotFoundPage } from './routes/notFound.tsx';
 
 const router = createBrowserRouter([
@@ -15,6 +16,7 @@ const router = createBrowserRouter([
       { path: '/d/:docId', element: <DocumentPage /> },
       { path: '/d/:docId/v/:versionNumber', element: <DocumentPage /> },
       { path: '/dev/harness', element: <DevHarnessPage /> },
+      { path: '/admin', element: <AdminPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },
