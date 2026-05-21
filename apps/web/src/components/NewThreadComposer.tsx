@@ -33,12 +33,12 @@ export function NewThreadComposer({ anchor, submitting, onSubmit, onCancel }: Pr
   return (
     <form
       onSubmit={handleSubmit}
-      className="border-b border-yellow-200 bg-yellow-50 px-3 py-2 text-xs"
+      className="border-b border-yellow-200 dark:border-amber-800 bg-yellow-50 dark:bg-amber-900/20 px-3 py-2 text-xs"
     >
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
         New comment
       </div>
-      <div className="mb-2 border-l-2 border-yellow-300 pl-2 italic text-neutral-600">
+      <div className="mb-2 border-l-2 border-yellow-300 dark:border-amber-700 pl-2 italic text-neutral-600 dark:text-neutral-400">
         {anchorPreview(anchor)}
       </div>
       <MentionTextarea
@@ -53,7 +53,7 @@ export function NewThreadComposer({ anchor, submitting, onSubmit, onCancel }: Pr
         <button
           type="button"
           onClick={onCancel}
-          className="rounded border border-neutral-300 bg-white px-3 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+          className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
           Cancel
         </button>

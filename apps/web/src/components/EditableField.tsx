@@ -89,7 +89,7 @@ export function EditableField({
         className={`group inline-flex items-center gap-1.5 ${canEdit ? 'cursor-pointer' : ''}`}
         onClick={() => canEdit && setEditing(true)}
       >
-        <span className={`${displayClassName} ${isEmpty && canEdit ? 'italic text-neutral-400' : ''}`}>
+        <span className={`${displayClassName} ${isEmpty && canEdit ? 'italic text-neutral-400 dark:text-neutral-500' : ''}`}>
           {isEmpty ? (canEdit ? placeholder : '') : value}
         </span>
         {canEdit && (
@@ -123,11 +123,11 @@ export function EditableField({
         maxLength={maxLength}
         aria-label={ariaLabel}
         rows={multiline ? 3 : undefined}
-        className={`block w-full rounded border border-neutral-300 px-2 py-1 text-sm ${displayClassName}`}
+        className={`block w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-sm ${displayClassName}`}
         disabled={saving}
       />
       {error && (
-        <span role="alert" className="text-xs text-red-600">
+        <span role="alert" className="text-xs text-red-600 dark:text-red-400">
           {error}
         </span>
       )}

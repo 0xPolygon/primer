@@ -94,10 +94,10 @@ function ReopenIcon({ size = 13 }: { size?: number }) {
 }
 
 const iconButtonClass =
-  'inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-40';
+  'inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 dark:text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300 disabled:opacity-40';
 
 const footerButtonClass =
-  'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50';
+  'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-50';
 
 function CommentRow({
   comment,
@@ -129,9 +129,9 @@ function CommentRow({
   }
 
   return (
-    <div className={isReply ? 'mt-1.5 ml-3 border-t border-dashed border-neutral-200 pt-1.5' : ''}>
+    <div className={isReply ? 'mt-1.5 ml-3 border-t border-dashed border-neutral-200 dark:border-neutral-800 pt-1.5' : ''}>
       <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500">
-        <span className="truncate font-semibold text-neutral-800">{comment.authorDisplayName}</span>
+        <span className="truncate font-semibold text-neutral-800 dark:text-neutral-200">{comment.authorDisplayName}</span>
         <div className="flex shrink-0 items-center gap-1">
           {canShowAuthorActions && (
             <>
@@ -157,13 +157,13 @@ function CommentRow({
           <span className="whitespace-nowrap">
             {relativeTime(comment.createdAt)}
             {comment.updatedAt && !isTombstoned && (
-              <span className="ml-1 italic text-neutral-400">(edited)</span>
+              <span className="ml-1 italic text-neutral-400 dark:text-neutral-500">(edited)</span>
             )}
           </span>
         </div>
       </div>
       {isTombstoned ? (
-        <div className="italic text-neutral-400">deleted by author</div>
+        <div className="italic text-neutral-400 dark:text-neutral-500">deleted by author</div>
       ) : editing ? (
         <div className="mt-1">
           <MentionTextarea
@@ -182,7 +182,7 @@ function CommentRow({
                 setDraft(comment.body);
                 setEditMentions(comment.mentions);
               }}
-              className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+              className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
             >
               Cancel
             </button>
@@ -202,7 +202,7 @@ function CommentRow({
           </div>
         </div>
       ) : (
-        <div className="mt-0.5 leading-snug text-neutral-900">
+        <div className="mt-0.5 leading-snug text-neutral-900 dark:text-neutral-100">
           {renderMentions(comment.body, comment.mentions, usersQ.data ?? [])}
         </div>
       )}
@@ -228,13 +228,13 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
   }
 
   const focusedClass = isFocused
-    ? 'bg-yellow-50/40 ring-1 ring-inset ring-yellow-200'
+    ? 'bg-yellow-50/40 dark:bg-amber-900/20 ring-1 ring-inset ring-yellow-200 dark:ring-amber-800'
     : '';
 
   return (
     <article
       id={`thread-${thread.id}`}
-      className={`border-b border-neutral-100 px-3 py-2.5 text-xs ${focusedClass} ${
+      className={`border-b border-neutral-100 dark:border-neutral-800 px-3 py-2.5 text-xs ${focusedClass} ${
         isResolved ? 'opacity-55' : ''
       } ${drifted ? 'opacity-60' : ''}`}
       onClick={(e) => {
@@ -242,7 +242,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
         onHighlight(thread.id);
       }}
     >
-      <div className="mb-1.5 flex items-start gap-1 border-l-2 border-yellow-300 pl-2 italic leading-snug text-neutral-600">
+      <div className="mb-1.5 flex items-start gap-1 border-l-2 border-yellow-300 dark:border-amber-700 pl-2 italic leading-snug text-neutral-600 dark:text-neutral-400">
         {drifted && <span title="Could not place anchor" className="not-italic">📍?</span>}
         <span className="truncate">{anchorPreview(thread)}</span>
       </div>
@@ -283,7 +283,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
                 setReplyDraft('');
                 setReplyMentions([]);
               }}
-              className="rounded border border-neutral-300 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
+              className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
             >
               Cancel
             </button>
@@ -310,7 +310,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
         </div>
       )}
       {!replying && (
-        <div className="mt-1.5 flex items-center gap-1 border-t border-neutral-100 pt-1.5">
+        <div className="mt-1.5 flex items-center gap-1 border-t border-neutral-100 dark:border-neutral-800 pt-1.5">
           <button type="button" onClick={startReplying} className={footerButtonClass}>
             <ReplyIcon />
             Reply

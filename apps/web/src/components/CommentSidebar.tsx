@@ -90,16 +90,16 @@ export function CommentSidebar({
 
   if (collapsed) {
     return (
-      <div className="flex h-full w-9 flex-col items-center gap-2 border-l border-neutral-200 bg-white py-2">
+      <div className="flex h-full w-9 flex-col items-center gap-2 border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 py-2">
         <button
           type="button"
           aria-label="Expand sidebar"
           onClick={() => setCollapsed(false)}
-          className="flex h-6 w-6 items-center justify-center rounded border border-neutral-300 bg-white text-xs text-neutral-600 hover:bg-neutral-50"
+          className="flex h-6 w-6 items-center justify-center rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
           ›
         </button>
-        <span className="rounded-full border border-amber-300 bg-amber-100 px-2 text-[9px] font-semibold text-neutral-700">
+        <span className="rounded-full border border-amber-300 dark:border-amber-700 bg-amber-100 dark:bg-amber-900/30 px-2 text-[9px] font-semibold text-neutral-700 dark:text-neutral-300">
           {activeCount}
         </span>
         <div className="flex w-full flex-1 flex-col items-center gap-1 pt-2">
@@ -129,9 +129,9 @@ export function CommentSidebar({
   }
 
   return (
-    <aside className="flex h-full w-[300px] flex-col border-l border-neutral-200 bg-white">
-      <header className="flex items-center justify-between border-b border-neutral-200 px-3 py-2 text-xs text-neutral-600">
-        <span className="font-semibold text-neutral-900">
+    <aside className="flex h-full w-[300px] flex-col border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+      <header className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-3 py-2 text-xs text-neutral-600 dark:text-neutral-400">
+        <span className="font-semibold text-neutral-900 dark:text-neutral-100">
           {threads.length} thread{threads.length === 1 ? '' : 's'}
         </span>
         <div className="flex items-center gap-3">
@@ -148,7 +148,7 @@ export function CommentSidebar({
             type="button"
             aria-label="Collapse sidebar"
             onClick={() => setCollapsed(true)}
-            className="text-neutral-500 hover:text-neutral-900"
+            className="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
           >
             ›
           </button>

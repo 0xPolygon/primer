@@ -129,12 +129,12 @@ export function MentionTextarea({
         rows={rows}
         maxLength={maxLength}
         autoFocus={autoFocus}
-        className={className ?? 'block w-full rounded border border-neutral-300 px-2 py-1 text-xs'}
+        className={className ?? 'block w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs'}
       />
       {trigger && matches.length > 0 && (
         <ul
           role="listbox"
-          className="absolute left-0 right-0 z-20 mt-1 max-h-44 overflow-y-auto rounded border border-neutral-200 bg-white shadow-md"
+          className="absolute left-0 right-0 z-20 mt-1 max-h-44 overflow-y-auto rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-md"
         >
           {matches.map((u, idx) => (
             <li
@@ -146,10 +146,10 @@ export function MentionTextarea({
                 pick(u);
               }}
               className={`cursor-pointer px-3 py-1.5 text-xs ${
-                idx === highlightIdx ? 'bg-yellow-50' : ''
+                idx === highlightIdx ? 'bg-yellow-50 dark:bg-amber-900/20' : ''
               }`}
             >
-              <span className="font-medium text-neutral-800">{u.displayName}</span>
+              <span className="font-medium text-neutral-800 dark:text-neutral-200">{u.displayName}</span>
               <span className="ml-2 text-neutral-500">{u.email}</span>
             </li>
           ))}
