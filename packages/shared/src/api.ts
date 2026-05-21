@@ -152,3 +152,17 @@ export interface AddVersionResponse {
   versionNumber: number;
   url: string;
 }
+
+export interface AdminStatsBucket {
+  total: number;
+  last7d: number;
+}
+
+export interface AdminStatsResponse {
+  users: AdminStatsBucket;
+  documents: AdminStatsBucket;
+  versions: AdminStatsBucket;
+  threads: AdminStatsBucket;
+  comments: AdminStatsBucket;
+  documentViews: AdminStatsBucket;
+}
