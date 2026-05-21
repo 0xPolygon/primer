@@ -33,7 +33,7 @@ export function renderMentions(
     out.push(
       <span
         key={`${m.index}-${m[0]}`}
-        className="rounded-sm bg-yellow-50 px-0.5 text-yellow-700"
+        className="rounded-sm bg-yellow-50 dark:bg-amber-900/30 px-0.5 text-yellow-700 dark:text-yellow-300"
       >
         {m[0]}
       </span>,

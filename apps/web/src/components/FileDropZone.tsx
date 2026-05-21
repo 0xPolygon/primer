@@ -73,10 +73,10 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
   }
 
   const borderClass = error
-    ? 'border-red-400 bg-red-50'
+    ? 'border-red-400 bg-red-50 dark:border-red-700 dark:bg-red-900/20'
     : isDragging
-      ? 'border-yellow-500 bg-yellow-50'
-      : 'border-neutral-300 bg-neutral-50';
+      ? 'border-yellow-500 bg-yellow-50 dark:bg-amber-900/20'
+      : 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900';
 
   return (
     <div>
@@ -103,19 +103,19 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mb-2 text-neutral-500" aria-hidden="true">
               <path d="M12 5v14M5 12l7-7 7 7" />
             </svg>
-            <p className="text-sm font-medium text-neutral-700">
+            <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               {isDragging ? 'Drop to attach' : 'Drop an HTML file here, or click to browse'}
             </p>
             <p className="mt-1 text-xs text-neutral-500">.html files up to {formatSize(maxBytes)}</p>
           </>
         ) : (
           <div className="flex w-full items-center gap-3 px-4">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-neutral-600" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-neutral-600 dark:text-neutral-400" aria-hidden="true">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <path d="M14 2v6h6" />
             </svg>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-neutral-800">{file.name}</div>
+              <div className="truncate text-sm font-medium text-neutral-800 dark:text-neutral-200">{file.name}</div>
               <div className="text-xs text-neutral-500">{formatSize(file.size)}</div>
             </div>
             <button
@@ -124,7 +124,7 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
                 e.stopPropagation();
                 openPicker();
               }}
-              className="text-xs font-medium text-neutral-600 underline hover:text-neutral-900"
+              className="text-xs font-medium text-neutral-600 dark:text-neutral-400 underline hover:text-neutral-900 dark:hover:text-neutral-100"
             >
               Replace
             </button>
@@ -139,7 +139,7 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
         />
       </div>
       {error && (
-        <p id="filedropzone-error" role="alert" className="mt-1.5 text-xs text-red-600">
+        <p id="filedropzone-error" role="alert" className="mt-1.5 text-xs text-red-600 dark:text-red-400">
           {error}
         </p>
       )}

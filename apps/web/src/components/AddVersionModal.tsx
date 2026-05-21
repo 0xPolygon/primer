@@ -108,17 +108,17 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-version-title"
-        className="w-full max-w-[520px] rounded-lg bg-white shadow-xl"
+        className="w-full max-w-[520px] rounded-lg bg-white dark:bg-neutral-900 shadow-xl"
       >
-        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
-          <h2 id="add-version-title" className="text-base font-semibold text-neutral-900">
+        <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-4 py-3">
+          <h2 id="add-version-title" className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
             Add a new version
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="text-neutral-500 hover:text-neutral-900"
+            className="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
           >
             ×
           </button>
@@ -126,16 +126,16 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
 
         <div className="space-y-4 px-4 py-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-700">Document</label>
+            <label className="mb-1 block text-xs font-medium text-neutral-700 dark:text-neutral-300">Document</label>
             {preselectedDocId && selectedDocId === preselectedDocId ? (
-              <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
-                <div className="font-medium text-neutral-800">
+              <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 px-3 py-2 text-sm">
+                <div className="font-medium text-neutral-800 dark:text-neutral-200">
                   {selectedDoc?.title ?? preselectedDocTitle ?? '(loading)'}
                 </div>
                 <button
                   type="button"
                   onClick={() => setSelectedDocId(undefined)}
-                  className="mt-1 text-xs text-neutral-500 underline hover:text-neutral-900"
+                  className="mt-1 text-xs text-neutral-500 underline hover:text-neutral-900 dark:hover:text-neutral-100"
                 >
                   ← change document
                 </button>
@@ -147,10 +147,10 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search your documents…"
-                  className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="block w-full rounded-md border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
                 {filteredDocs.length > 0 && (
-                  <ul className="mt-1 max-h-44 overflow-y-auto rounded-md border border-neutral-200">
+                  <ul className="mt-1 max-h-44 overflow-y-auto rounded-md border border-neutral-200 dark:border-neutral-800">
                     {filteredDocs.map((d) => (
                       <li
                         key={d.id}
@@ -158,11 +158,11 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
                           setSelectedDocId(d.id);
                           setQuery(d.title);
                         }}
-                        className={`cursor-pointer px-3 py-2 text-sm hover:bg-neutral-50 ${
-                          d.id === selectedDocId ? 'bg-yellow-50' : ''
+                        className={`cursor-pointer px-3 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 ${
+                          d.id === selectedDocId ? 'bg-yellow-50 dark:bg-amber-900/20' : ''
                         }`}
                       >
-                        <div className="font-medium text-neutral-800">{d.title}</div>
+                        <div className="font-medium text-neutral-800 dark:text-neutral-200">{d.title}</div>
                         <div className="text-xs text-neutral-500">
                           {d.activeThreadCount}/{d.threadCount} active · {relativeTime(d.lastActivityAt)}
                         </div>
@@ -182,7 +182,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
           <FileDropZone file={file} onChange={setFile} />
 
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-neutral-700">
+            <span className="mb-1 block text-xs font-medium text-neutral-700 dark:text-neutral-300">
               Version note (optional)
             </span>
             <input
@@ -191,18 +191,18 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
               onChange={(e) => setVersionNote(e.target.value)}
               maxLength={500}
               placeholder='e.g. "fixed Y-axis scale"'
-              className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+              className="block w-full rounded-md border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
           </label>
 
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-neutral-200 px-4 py-3">
+        <div className="flex justify-end gap-2 border-t border-neutral-200 dark:border-neutral-800 px-4 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-neutral-300 bg-white px-4 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+            className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
           >
             Cancel
           </button>
