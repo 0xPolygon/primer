@@ -22,6 +22,8 @@ import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { commentsFilename, formatThreadsAsMarkdown } from '../lib/exportComments.ts';
 import { hasLiveComments } from '../lib/liveComments.ts';
+import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
+import { useMediaQuery } from '../lib/useMediaQuery.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -86,6 +88,8 @@ export function DocumentPage() {
   }, [sidebarCollapsed]);
 
   const me = useMe();
+  const isMobile = useMediaQuery('(max-width: 767px)');
+  const [sheetSnap, setSheetSnap] = useState<SnapPoint>('handle');
   const isUploader = !!me.data && me.data.id === docQuery.data?.document.uploaderId;
 
   const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
@@ -179,6 +183,7 @@ export function DocumentPage() {
         case 'anchor_clicked':
           setFocusedThreadId(msg.anchorId);
           setSidebarCollapsed(false);
+          setSheetSnap('peek');
           requestAnimationFrame(() => {
             window.document.getElementById(`thread-${msg.anchorId}`)?.scrollIntoView({
               behavior: 'smooth',
@@ -274,6 +279,25 @@ export function DocumentPage() {
     setPendingPick(null);
   };
 
+  const composerPending = readMostly
+    ? null
+    : pendingSelection
+      ? { anchor: pendingSelection.anchor as AnchorData }
+      : pendingPick
+        ? { anchor: pendingPick.anchor as AnchorData }
+        : null;
+
+  // Mobile sheet automation. No-op on desktop because the sheet isn't rendered.
+  // Placed after composerPending so it can appear in the dependency array.
+  useEffect(() => {
+    if (!isMobile) return;
+    if (pickMode) {
+      setSheetSnap('handle');
+    } else if (composerPending) {
+      setSheetSnap('expanded');
+    }
+  }, [isMobile, pickMode, composerPending]);
+
   if (docQuery.isLoading) return <div className="text-neutral-500">Loading…</div>;
   if (docQuery.error) {
     return (
@@ -303,13 +327,6 @@ export function DocumentPage() {
   }
 
   const { document } = docQuery.data;
-  const composerPending = readMostly
-    ? null
-    : pendingSelection
-      ? { anchor: pendingSelection.anchor as AnchorData }
-      : pendingPick
-        ? { anchor: pendingPick.anchor as AnchorData }
-        : null;
 
   let pillPos: { left: number; top: number } | null = null;
   if (!readMostly && pendingSelection && pendingSelection.clientRects.length > 0) {
@@ -324,7 +341,7 @@ export function DocumentPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-60px)]">
-      <header className="flex items-baseline justify-between border-b border-neutral-200 px-4 pb-2 pt-1 dark:border-neutral-800">
+      <header className="flex items-baseline justify-between border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
         <div>
           <EditableField
             value={document.title}
@@ -365,7 +382,7 @@ export function DocumentPage() {
           {!readMostly && (
             <button
               onClick={togglePickMode}
-              className={`rounded px-3 py-1 text-sm ${
+              className={`hidden md:inline-flex rounded px-3 py-1 text-sm ${
                 pickMode
                   ? 'bg-red-600 text-white'
                   : 'border border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
@@ -378,7 +395,7 @@ export function DocumentPage() {
             <button
               type="button"
               onClick={() => setShowAddVersion(true)}
-              className="rounded border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              className="hidden md:inline-flex rounded border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
             >
               + Version
             </button>
@@ -387,7 +404,7 @@ export function DocumentPage() {
             type="button"
             onClick={exportComments}
             title="Download comments as Markdown"
-            className="inline-flex items-center gap-1 rounded border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            className="hidden md:inline-flex items-center gap-1 rounded border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -397,7 +414,7 @@ export function DocumentPage() {
             Export
           </button>
           {isUploader && (
-            <div className="relative">
+            <div className="relative hidden md:block">
               <button
                 type="button"
                 onClick={() =>
@@ -454,7 +471,7 @@ export function DocumentPage() {
               )}
             </div>
           )}
-          <div className="text-sm text-neutral-500">
+          <div className="hidden md:block text-sm text-neutral-500">
             {document.uploaderDisplayName} ·{' '}
             {new Date(document.createdAt).toLocaleString()}
           </div>
@@ -486,24 +503,65 @@ export function DocumentPage() {
             registerSender={registerSender}
           />
         </div>
-        <CommentSidebar
-          versionId={currentVersionId}
-          currentUserId={me.data?.id ?? ''}
-          pending={composerPending}
-          onCancelPending={() => {
-            setPendingSelection(null);
-            setPendingPick(null);
-          }}
-          onSubmitPending={submitPending}
-          onHighlight={onHighlight}
-          positionsByAnchorId={positionsByAnchorId}
-          collapsed={sidebarCollapsed}
-          onCollapsedChange={setSidebarCollapsed}
-          focusedThreadId={focusedThreadId}
-        />
+        {!isMobile && (
+          <CommentSidebar
+            versionId={currentVersionId}
+            currentUserId={me.data?.id ?? ''}
+            pending={composerPending}
+            onCancelPending={() => {
+              setPendingSelection(null);
+              setPendingPick(null);
+            }}
+            onSubmitPending={submitPending}
+            onHighlight={onHighlight}
+            positionsByAnchorId={positionsByAnchorId}
+            collapsed={sidebarCollapsed}
+            onCollapsedChange={setSidebarCollapsed}
+            focusedThreadId={focusedThreadId}
+          />
+        )}
       </div>
 
-      {pillPos && pendingSelection && composerPending && (
+      {isMobile && !readMostly && (
+        <BottomSheet
+          snap={sheetSnap}
+          onSnapChange={(next) => {
+            if (pickMode && next !== 'handle') {
+              // User tried to expand the sheet while picking — interpret as cancel.
+              send({ type: 'exit_pick_mode' });
+              setPickMode(false);
+              setSheetSnap('handle');
+              return;
+            }
+            setSheetSnap(next);
+          }}
+          dragLocked={composerPending !== null}
+          showBackdrop
+          handleLabel={
+            pickMode
+              ? 'Picking element… (tap to cancel)'
+              : `💬 ${threads.filter(hasLiveComments).length} comments`
+          }
+        >
+          <CommentSidebar
+            versionId={currentVersionId}
+            currentUserId={me.data?.id ?? ''}
+            pending={composerPending}
+            onCancelPending={() => {
+              setPendingSelection(null);
+              setPendingPick(null);
+            }}
+            onSubmitPending={submitPending}
+            onHighlight={onHighlight}
+            positionsByAnchorId={positionsByAnchorId}
+            focusedThreadId={focusedThreadId}
+            onAddCommentClick={togglePickMode}
+            addCommentActive={pickMode}
+          />
+        </BottomSheet>
+      )}
+
+      {!isMobile && pillPos && pendingSelection && composerPending && (
         <div
           style={{ position: 'fixed', left: pillPos.left, top: pillPos.top, zIndex: 1000 }}
           className="flex items-center gap-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs text-white shadow-lg"
