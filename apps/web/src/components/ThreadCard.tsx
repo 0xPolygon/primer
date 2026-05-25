@@ -11,6 +11,7 @@ import { MentionTextarea } from './MentionTextarea.tsx';
 import { renderMentions } from './renderMentions.tsx';
 import { useMentionableUsers } from '../queries/users.ts';
 import { liveComments } from '../lib/liveComments.ts';
+import { useBottomSheet } from './BottomSheet.tsx';
 
 interface Props {
   versionId: string;
@@ -217,10 +218,12 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
   const reopen = useReopenThread(versionId, thread.id);
   const isResolved = thread.resolvedAt !== null;
   const [first, ...replies] = liveComments(thread);
+  const bottomSheet = useBottomSheet();
 
   // Mounting a reply composer implicitly focuses this thread, so the user
   // sees the highlight in the iframe while they're typing.
   function startReplying() {
+    bottomSheet?.snapTo('expanded');
     setReplying(true);
     onHighlight(thread.id);
   }
