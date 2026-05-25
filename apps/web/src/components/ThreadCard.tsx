@@ -226,7 +226,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
   }
 
   const focusedClass = isFocused
-    ? 'bg-yellow-50/40 dark:bg-amber-900/20 ring-1 ring-inset ring-yellow-200 dark:ring-amber-800'
+    ? 'bg-amber-100 dark:bg-amber-900/40 ring-2 ring-inset ring-amber-400 dark:ring-amber-600 shadow-sm'
     : '';
 
   return (
