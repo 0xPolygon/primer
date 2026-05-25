@@ -165,6 +165,14 @@ export function DocumentPage() {
         case 'open_external':
           if (isSafeExternalUrl(msg.url)) handleOpenExternal(msg);
           break;
+        case 'companion_log': {
+          const fn = msg.level === 'error' ? console.error
+                   : msg.level === 'warn'  ? console.warn
+                   : console.log;
+          // eslint-disable-next-line no-console
+          fn('[companion]', msg.message);
+          break;
+        }
         case 'resize':
           senderRef.current?.({ type: 'request_anchor_positions' });
           break;
