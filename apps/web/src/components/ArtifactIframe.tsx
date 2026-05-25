@@ -4,7 +4,8 @@ import type {
   InboundProtocolMessage,
   OutboundProtocolMessage,
 } from '@primer/shared';
-import { parseInboundMessage } from '@primer/shared';
+import { parseInboundMessage, parseWindowEnvelope } from '@primer/shared';
+import { createMessageBuffer } from '../companion/buffer.ts';
 
 interface Props {
   src: string;
@@ -24,13 +25,8 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
 
-  // Latest-value refs so `handleLoad` (which only registers on src change) sees
-  // the current prop values when the iframe finishes loading the artifact
-  // bytes — not the stale values from when the effect first ran. This matters
-  // because threads usually resolve AFTER the iframe is mounted but BEFORE its
-  // content finishes loading; without these refs, init would post empty
-  // anchors and the companion would never paint until something else triggered
-  // an update.
+  // Latest-value refs so deferred handlers see current props, not the values
+  // closed over at mount.
   const anchorsRef = useRef(anchors);
   const onMessageRef = useRef(onMessage);
   const registerSenderRef = useRef(registerSender);
@@ -42,7 +38,16 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
     const iframe = iframeRef.current;
     if (!iframe) return;
 
-    const handleLoad = () => {
+    // Per-mount state. Buffer drops messages older than 50 if the handshake
+    // never completes; sendInit is idempotent so duplicate triggers are safe.
+    const buffer = createMessageBuffer<OutboundProtocolMessage>(50);
+    let initSent = false;
+
+    const sendInit = () => {
+      if (initSent) return;
+      if (!iframe.contentWindow) return;
+      initSent = true;
+
       const channel = new MessageChannel();
       const port = channel.port1;
       portRef.current = port;
@@ -53,18 +58,42 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
       };
       port.start();
 
-      iframe.contentWindow?.postMessage(
+      iframe.contentWindow.postMessage(
         { type: 'init', anchors: anchorsRef.current } satisfies OutboundProtocolMessage,
         '*',
-        [channel.port2]
+        [channel.port2],
       );
 
-      registerSenderRef.current?.((msg) => port.postMessage(msg));
+      // Wire the sender for the parent route. Sends always go through the
+      // live port now that we have one. Any messages already buffered get
+      // flushed in order before the route sends new ones.
+      registerSenderRef.current?.((msg) => {
+        if (portRef.current) portRef.current.postMessage(msg);
+        else buffer.enqueue(msg);
+      });
+      buffer.drain((msg) => port.postMessage(msg));
     };
 
-    iframe.addEventListener('load', handleLoad);
+    const onWindowMessage = (event: MessageEvent) => {
+      if (event.source !== iframe.contentWindow) return;
+      const envelope = parseWindowEnvelope(event.data);
+      if (!envelope) return;
+      if (envelope.type === 'companion_ready') {
+        sendInit();
+      } else if (envelope.type === 'companion_panic') {
+        // eslint-disable-next-line no-console
+        console.error('[companion] panic:', envelope.reason);
+      }
+    };
+
+    const onLoad = () => sendInit();
+
+    window.addEventListener('message', onWindowMessage);
+    iframe.addEventListener('load', onLoad);
+
     return () => {
-      iframe.removeEventListener('load', handleLoad);
+      window.removeEventListener('message', onWindowMessage);
+      iframe.removeEventListener('load', onLoad);
       portRef.current?.close();
       portRef.current = null;
       registerSenderRef.current?.(null);
