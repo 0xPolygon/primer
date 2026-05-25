@@ -279,13 +279,17 @@ export function DocumentPage() {
     setPendingPick(null);
   };
 
-  const composerPending = readMostly
-    ? null
-    : pendingSelection
-      ? { anchor: pendingSelection.anchor as AnchorData }
-      : pendingPick
-        ? { anchor: pendingPick.anchor as AnchorData }
-        : null;
+  const composerPending = useMemo(
+    () =>
+      readMostly
+        ? null
+        : pendingSelection
+          ? { anchor: pendingSelection.anchor as AnchorData }
+          : pendingPick
+            ? { anchor: pendingPick.anchor as AnchorData }
+            : null,
+    [readMostly, pendingSelection, pendingPick],
+  );
 
   // Mobile sheet automation. No-op on desktop because the sheet isn't rendered.
   // Placed after composerPending so it can appear in the dependency array.
@@ -522,7 +526,7 @@ export function DocumentPage() {
         )}
       </div>
 
-      {isMobile && !readMostly && (
+      {isMobile && (
         <BottomSheet
           snap={sheetSnap}
           onSnapChange={(next) => {
@@ -555,8 +559,8 @@ export function DocumentPage() {
             onHighlight={onHighlight}
             positionsByAnchorId={positionsByAnchorId}
             focusedThreadId={focusedThreadId}
-            onAddCommentClick={togglePickMode}
-            addCommentActive={pickMode}
+            onAddCommentClick={readMostly ? undefined : togglePickMode}
+            addCommentActive={readMostly ? false : pickMode}
           />
         </BottomSheet>
       )}
