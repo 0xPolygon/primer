@@ -48,6 +48,15 @@
     }
   }
 
+  /** True when running in a UA without a hover-capable pointer (phones/tablets). */
+  function isTouchUA() {
+    try {
+      return matchMedia('(hover: none) and (pointer: coarse)').matches;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function flushLogBuffer() {
     if (!port) return;
     while (logBuffer.length > 0) {
@@ -719,6 +728,48 @@
     return overlay;
   }
 
+  const PICK_BANNER_ID = '__primer_pick_banner__';
+
+  function ensurePickBanner() {
+    let el = document.getElementById(PICK_BANNER_ID);
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = PICK_BANNER_ID;
+    el.style.cssText = [
+      'position:fixed',
+      'top:0',
+      'left:0',
+      'right:0',
+      'z-index:2147483647',
+      'background:#111',
+      'color:#fff',
+      'font:14px/1.4 system-ui, sans-serif',
+      'padding:10px 14px',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'gap:12px',
+    ].join(';') + ';';
+    el.innerHTML = '<span>Tap an element to add a comment</span>';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    cancel.style.cssText = 'background:transparent;color:#fff;border:1px solid #555;padding:4px 10px;border-radius:4px;font:inherit;cursor:pointer;';
+    cancel.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      exitPickMode('banner');
+    }, true);
+    el.appendChild(cancel);
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function removePickBanner() {
+    const el = document.getElementById(PICK_BANNER_ID);
+    if (el) el.remove();
+  }
+
   async function sha256Hex(text) {
     const buf = new TextEncoder().encode(text);
     const hash = await crypto.subtle.digest('SHA-256', buf);
@@ -789,30 +840,42 @@
     if (pickActive) return;
     pickActive = true;
     prevBodyCursor = document.body.style.cursor;
-    document.body.style.cursor = 'crosshair';
-    pickOutline = document.createElement('div');
-    pickOutline.className = '__primer_pick_outline__';
-    ensureOverlay().appendChild(pickOutline);
 
-    document.addEventListener('mousemove', onPickMove, true);
-    document.addEventListener('click', onPickClick, true);
-    document.addEventListener('keydown', onPickKey, true);
+    if (isTouchUA()) {
+      // Touch UAs: no outline preview (finger covers it), use `pointer` cursor
+      // so iOS Safari reliably synthesizes click on non-button elements.
+      document.body.style.cursor = 'pointer';
+      ensurePickBanner();
+      document.addEventListener('click', onPickClick, true);
+      document.addEventListener('touchend', onPickTouchEnd, true);
+    } else {
+      document.body.style.cursor = 'crosshair';
+      pickOutline = document.createElement('div');
+      pickOutline.className = '__primer_pick_outline__';
+      ensureOverlay().appendChild(pickOutline);
+      document.addEventListener('mousemove', onPickMove, true);
+      document.addEventListener('click', onPickClick, true);
+      document.addEventListener('keydown', onPickKey, true);
+    }
   }
 
-  function exitPickMode(reason /* 'click' | 'esc' | 'parent' */) {
+  function exitPickMode(reason /* 'click' | 'esc' | 'parent' | 'banner' */) {
     if (!pickActive) return;
     pickActive = false;
     document.body.style.cursor = prevBodyCursor;
     pickOutline?.remove();
     pickOutline = null;
+    removePickBanner();
 
     document.removeEventListener('mousemove', onPickMove, true);
     document.removeEventListener('click', onPickClick, true);
+    document.removeEventListener('touchend', onPickTouchEnd, true);
     document.removeEventListener('keydown', onPickKey, true);
 
     // 'click' exits are implicit in element_picked; 'parent' was parent-initiated.
-    // Only 'esc' needs an explicit pick_mode_exited so the parent UI can revert.
-    if (reason === 'esc' && port) {
+    // 'esc' and 'banner' are user-initiated from inside the iframe — parent
+    // needs an explicit pick_mode_exited to revert its UI.
+    if ((reason === 'esc' || reason === 'banner') && port) {
       port.postMessage({ type: 'pick_mode_exited' });
     }
   }
@@ -834,19 +897,39 @@
     });
   }
 
-  async function onPickClick(e) {
-    if (!pickActive) return;
-    const target = e.target;
+  let _pickInFlight = false;
+
+  function onPickTouchEnd(e) {
+    if (!pickActive || _pickInFlight) return;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    const target = document.elementFromPoint(t.clientX, t.clientY);
     if (!(target instanceof Element)) return;
-    // Don't let the artifact's own click handlers fire.
+    _pickInFlight = true;
+    // Synthesize the same flow as onPickClick.
     e.preventDefault();
     e.stopImmediatePropagation();
+    void commitPick(target).finally(() => { _pickInFlight = false; });
+  }
 
+  async function onPickClick(e) {
+    if (!pickActive || _pickInFlight) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    _pickInFlight = true;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    try {
+      await commitPick(target);
+    } finally {
+      _pickInFlight = false;
+    }
+  }
+
+  async function commitPick(target) {
     const path = cssPath(target);
     const rawText = normalize(target.textContent ?? '');
     const innerHash = (await sha256Hex(rawText)).slice(0, 16);
-    // Trim + cap the human-readable label so the JSON payload stays small
-    // and the sidebar preview is uncluttered.
     const innerText = rawText.length > 160 ? `${rawText.slice(0, 160)}…` : rawText;
     const clientRect = serializeRect(target.getBoundingClientRect());
 
