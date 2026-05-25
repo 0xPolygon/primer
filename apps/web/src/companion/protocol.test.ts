@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseInboundMessage } from '@primer/shared';
+import { parseInboundMessage, parseWindowEnvelope } from '@primer/shared';
 
 describe('parseInboundMessage', () => {
   it('round-trips selection_captured', () => {
@@ -84,5 +84,66 @@ describe('parseInboundMessage', () => {
         clientRects: [],
       })
     ).toBeNull();
+  });
+});
+
+describe('parseInboundMessage — companion_log', () => {
+  it('round-trips info level', () => {
+    const ok = { type: 'companion_log', level: 'info', message: 'hello world' };
+    expect(parseInboundMessage(ok)).toEqual(ok);
+  });
+
+  it('round-trips warn level', () => {
+    const ok = { type: 'companion_log', level: 'warn', message: 'CSS Highlight API missing' };
+    expect(parseInboundMessage(ok)).toEqual(ok);
+  });
+
+  it('round-trips error level', () => {
+    const ok = { type: 'companion_log', level: 'error', message: 'boom' };
+    expect(parseInboundMessage(ok)).toEqual(ok);
+  });
+
+  it('rejects companion_log with unknown level', () => {
+    expect(
+      parseInboundMessage({ type: 'companion_log', level: 'debug', message: 'x' })
+    ).toBeNull();
+  });
+
+  it('rejects companion_log without message string', () => {
+    expect(
+      parseInboundMessage({ type: 'companion_log', level: 'info', message: 42 })
+    ).toBeNull();
+  });
+});
+
+describe('parseWindowEnvelope', () => {
+  it('parses companion_ready', () => {
+    expect(parseWindowEnvelope({ type: 'companion_ready', v: 1 })).toEqual({
+      type: 'companion_ready',
+    });
+  });
+
+  it('parses companion_panic with reason', () => {
+    expect(
+      parseWindowEnvelope({ type: 'companion_panic', reason: 'init exhausted' })
+    ).toEqual({ type: 'companion_panic', reason: 'init exhausted' });
+  });
+
+  it('returns null for unknown type', () => {
+    expect(parseWindowEnvelope({ type: 'something_else' })).toBeNull();
+  });
+
+  it('returns null for missing type', () => {
+    expect(parseWindowEnvelope({ foo: 'bar' })).toBeNull();
+  });
+
+  it('returns null for non-object input', () => {
+    expect(parseWindowEnvelope(null)).toBeNull();
+    expect(parseWindowEnvelope(undefined)).toBeNull();
+    expect(parseWindowEnvelope('hi')).toBeNull();
+  });
+
+  it('returns null for companion_panic without reason string', () => {
+    expect(parseWindowEnvelope({ type: 'companion_panic', reason: 42 })).toBeNull();
   });
 });

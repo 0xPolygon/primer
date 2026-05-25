@@ -98,6 +98,13 @@ export interface MsgAnchorClicked {
   type: 'anchor_clicked';
   anchorId: string;
 }
+/** Log line streamed from companion to parent over the port so debugging
+ *  doesn't require reaching into the iframe's opaque-origin console. */
+export interface MsgCompanionLog {
+  type: 'companion_log';
+  level: 'info' | 'warn' | 'error';
+  message: string;
+}
 
 export type InboundProtocolMessage =
   | MsgSelectionCaptured
@@ -106,7 +113,20 @@ export type InboundProtocolMessage =
   | MsgAnchorPositions
   | MsgResize
   | MsgOpenExternal
-  | MsgAnchorClicked;
+  | MsgAnchorClicked
+  | MsgCompanionLog;
+
+/** Window-level handshake messages — go via window.postMessage (not the
+ *  port) because they exist for the case where the port isn't established
+ *  yet, or has already given up. */
+export interface MsgCompanionReady {
+  type: 'companion_ready';
+}
+export interface MsgCompanionPanic {
+  type: 'companion_panic';
+  reason: string;
+}
+export type WindowEnvelope = MsgCompanionReady | MsgCompanionPanic;
 
 // ───────────────────── Validation helpers ─────────────────────
 
@@ -199,6 +219,24 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
       if (!isString(raw.anchorId)) return null;
       return { type: 'anchor_clicked', anchorId: raw.anchorId };
     }
+    case 'companion_log': {
+      if (raw.level !== 'info' && raw.level !== 'warn' && raw.level !== 'error') return null;
+      if (!isString(raw.message)) return null;
+      return { type: 'companion_log', level: raw.level, message: raw.message };
+    }
+    default:
+      return null;
+  }
+}
+
+export function parseWindowEnvelope(raw: unknown): WindowEnvelope | null {
+  if (!isObject(raw) || !isString(raw.type)) return null;
+  switch (raw.type) {
+    case 'companion_ready':
+      return { type: 'companion_ready' };
+    case 'companion_panic':
+      if (!isString(raw.reason)) return null;
+      return { type: 'companion_panic', reason: raw.reason };
     default:
       return null;
   }
