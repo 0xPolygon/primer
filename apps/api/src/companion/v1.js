@@ -600,6 +600,13 @@
   // (element-path) tells the parent to focus the matching thread.
   // No preventDefault — the artifact's own click handlers still run.
 
+  let caretApiWarned = false;
+  function warnNoCaretApiOnce() {
+    if (caretApiWarned) return;
+    caretApiWarned = true;
+    log.warn('caretRangeFromPoint and caretPositionFromPoint both unavailable; click hit-test on text ranges disabled');
+  }
+
   /**
    * Caret-based hit-test for text-range anchors. Uses the browser's own
    * caret-positioning logic (caretRangeFromPoint / caretPositionFromPoint)
@@ -637,6 +644,8 @@
     } else if (typeof document.caretPositionFromPoint === 'function') {
       const p = document.caretPositionFromPoint(x, y);
       if (p) { caretNode = p.offsetNode; caretOffset = p.offset; }
+    } else {
+      warnNoCaretApiOnce();
     }
     if (!caretNode) return null;
 
@@ -647,7 +656,9 @@
       try {
         inside = range.comparePoint(caretNode, caretOffset) === 0;
       } catch (e) {
-        // detached node — treat as miss
+        // Range.comparePoint throws WrongDocumentError / InvalidNodeTypeError
+        // on cross-document or bad-typed nodes. Neither is reachable with
+        // caret API output, but catch defensively.
       }
       if (!inside) continue;
       const len = range.toString().length;
