@@ -17,7 +17,7 @@ export function HomePage() {
     <div className="space-y-8 max-w-3xl">
       <header className="flex items-center justify-between border-b border-neutral-200 pb-3 dark:border-neutral-800">
         <h1 className="text-2xl font-semibold">Primer</h1>
-        <div className="flex items-center gap-2">
+        <div className="hidden md:flex items-center gap-2">
           <button
             type="button"
             onClick={() => setShowAddVersion(true)}
