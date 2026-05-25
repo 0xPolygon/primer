@@ -91,9 +91,11 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
     return () => {
       window.removeEventListener('message', onWindowMessage);
       iframe.removeEventListener('load', onLoad);
+      // Deregister the sender BEFORE closing the port so any caller still
+      // holding a reference to the sender cannot post to a dead port.
+      registerSenderRef.current?.(null);
       portRef.current?.close();
       portRef.current = null;
-      registerSenderRef.current?.(null);
     };
   }, [src]);
 
