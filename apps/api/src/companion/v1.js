@@ -12,19 +12,103 @@
   /** @type {Set<string>} */
   const driftedIds = new Set();
 
-  function log(...args) {
-    // Cheap, namespaced. Cannot leak — the iframe console is opaque to the parent.
+  /** @type {{ level: 'info' | 'warn' | 'error', message: string }[]} */
+  const logBuffer = [];
+  const LOG_BUFFER_CAP = 100;
+
+  function log(level, ...args) {
+    const message = args
+      .map((a) => (typeof a === 'string' ? a : safeStringify(a)))
+      .join(' ');
+    // Local iframe console always — useful when inspecting the iframe directly.
     // eslint-disable-next-line no-console
-    console.log('[primer/companion]', ...args);
+    console.log('[primer/companion][' + level + ']', ...args);
+    if (port) {
+      try {
+        port.postMessage({ type: 'companion_log', level, message });
+      } catch (e) {
+        // port closed mid-send; nothing to do
+      }
+    } else {
+      logBuffer.push({ level, message });
+      if (logBuffer.length > LOG_BUFFER_CAP) logBuffer.shift();
+    }
+  }
+  log.info = (...args) => log('info', ...args);
+  log.warn = (...args) => log('warn', ...args);
+  log.error = (...args) => log('error', ...args);
+
+  function safeStringify(v) {
+    try { return JSON.stringify(v); } catch { return String(v); }
+  }
+
+  function flushLogBuffer() {
+    if (!port) return;
+    while (logBuffer.length > 0) {
+      const entry = logBuffer.shift();
+      try {
+        port.postMessage({
+          type: 'companion_log',
+          level: entry.level,
+          message: entry.message,
+        });
+      } catch (e) {
+        break; // port died mid-flush
+      }
+    }
   }
 
   // ── 1. Init handshake ────────────────────────────────────────────
-  // Wait for parent's init message. It carries a transferable port we keep.
-  // After init we tear down the window-level listener; everything goes via the port.
+  // Symmetric handshake: the companion announces readiness immediately and
+  // retries every 500ms until the parent posts `init` (with a transferable
+  // MessagePort). This decouples init from the parent's iframe load-event
+  // attachment timing — historically a race on cached page loads.
+  // If retries exhaust without receiving init, post a companion_panic so
+  // the parent at least surfaces a visible failure mode.
+
+  const READY_RETRY_MS = 500;
+  const READY_MAX_TRIES = 10;
+  let readyTimer = null;
+  let readyTries = 0;
+
+  function postReady() {
+    try {
+      window.parent.postMessage({ type: 'companion_ready' }, '*');
+    } catch (e) {
+      // window.parent inaccessible (top-level page); nothing to do.
+    }
+  }
+
+  function postPanic(reason) {
+    try {
+      window.parent.postMessage({ type: 'companion_panic', reason }, '*');
+    } catch (e) {
+      // best-effort
+    }
+  }
+
+  function startReadyRetry() {
+    postReady();
+    readyTimer = setInterval(() => {
+      if (port !== null) {
+        clearInterval(readyTimer);
+        readyTimer = null;
+        return;
+      }
+      readyTries += 1;
+      if (readyTries >= READY_MAX_TRIES) {
+        clearInterval(readyTimer);
+        readyTimer = null;
+        postPanic('init handshake exhausted retries');
+        log.error('init handshake exhausted retries');
+        return;
+      }
+      postReady();
+    }, READY_RETRY_MS);
+  }
 
   /** @type {((event: MessageEvent) => void) | null} */
   let onWindowMessage = (event) => {
-    // Defensive: drop messages with no transferred port. We're only interested in init.
     if (!event.ports || event.ports.length === 0) return;
     const incoming = event.data;
     if (!incoming || incoming.type !== 'init') return;
@@ -33,12 +117,19 @@
     port.onmessage = onPortMessage;
     port.start();
 
+    if (readyTimer) {
+      clearInterval(readyTimer);
+      readyTimer = null;
+    }
+
     if (Array.isArray(incoming.anchors)) {
       knownAnchors = incoming.anchors;
-      log('init received, anchors:', knownAnchors.length);
+      log.info('init received, anchors:', knownAnchors.length);
       renderTextRangeMarkers();
       renderElementBadges();
     }
+
+    flushLogBuffer();
 
     if (onWindowMessage) {
       window.removeEventListener('message', onWindowMessage);
@@ -47,23 +138,13 @@
   };
 
   window.addEventListener('message', onWindowMessage);
-
-  // Bail out silently if init never arrives.
-  setTimeout(() => {
-    if (port === null) {
-      log('init timeout (no parent or sandboxed harness without parent); standing down');
-      if (onWindowMessage) {
-        window.removeEventListener('message', onWindowMessage);
-        onWindowMessage = null;
-      }
-    }
-  }, 2000);
+  startReadyRetry();
 
   // ── 2. Port message dispatcher ───────────────────────────────────
   function onPortMessage(event) {
     const msg = event.data;
     if (!msg || typeof msg.type !== 'string') return;
-    log('inbound', msg.type);
+    log.info('inbound', msg.type);
 
     switch (msg.type) {
       case 'update_anchors':
@@ -92,7 +173,7 @@
         }
         break;
       default:
-        log('unknown inbound', msg.type);
+        log.warn('unknown inbound', msg.type);
     }
   }
 
@@ -108,7 +189,7 @@
 
   function postOpenExternal(url) {
     if (!port) {
-      log('open_external attempted before init; dropping', url);
+      log.warn('open_external attempted before init; dropping', url);
       return;
     }
     port.postMessage({ type: 'open_external', url });
@@ -330,7 +411,7 @@
   let highlightFocused = null;
   function ensureHighlights() {
     if (!('Highlight' in window) || !window.CSS || !CSS.highlights) {
-      log('CSS Custom Highlight API not available; text-range markers disabled');
+      log.warn('CSS Custom Highlight API not available; text-range markers disabled');
       return false;
     }
     if (!highlightDefault) {
