@@ -69,6 +69,7 @@ export function BottomSheet({
   const [dragHeight, setDragHeight] = useState<number | null>(null);
   const startRef = useRef<{ y: number; height: number; t: number } | null>(null);
   const lastRef = useRef<{ y: number; t: number } | null>(null);
+  const didDragRef = useRef(false);
 
   const renderedHeight = dragHeight ?? snapHeight(snap);
   const dimmerVisible = showBackdrop && snap === 'expanded' && dragHeight === null;
@@ -79,16 +80,27 @@ export function BottomSheet({
     const now = performance.now();
     startRef.current = { y: e.clientY, height: snapHeight(snap), t: now };
     lastRef.current = { y: e.clientY, t: now };
+    didDragRef.current = false;
     setDragHeight(snapHeight(snap));
   }
 
   function onPointerMove(e: ReactPointerEvent<HTMLButtonElement>) {
     if (!startRef.current) return;
     const dy = e.clientY - startRef.current.y;
+    if (!didDragRef.current && Math.abs(dy) > 3) {
+      didDragRef.current = true;
+    }
     // Drag-down = height shrinks; drag-up = height grows.
     const next = Math.max(HANDLE_PX, Math.min(vh, startRef.current.height - dy));
     setDragHeight(next);
     lastRef.current = { y: e.clientY, t: performance.now() };
+  }
+
+  function onPointerCancel(_e: ReactPointerEvent<HTMLButtonElement>) {
+    startRef.current = null;
+    lastRef.current = null;
+    didDragRef.current = false;
+    setDragHeight(null);
   }
 
   function onPointerUp(_e: ReactPointerEvent<HTMLButtonElement>) {
@@ -113,7 +125,7 @@ export function BottomSheet({
 
   function onHandleClick() {
     if (dragLocked) return;
-    if (dragHeight !== null) return; // Click fired alongside drag — ignore.
+    if (didDragRef.current) { didDragRef.current = false; return; } // Click fired alongside drag — ignore.
     if (snap === 'handle') onSnapChange('peek');
     else onSnapChange('handle');
   }
@@ -145,6 +157,7 @@ export function BottomSheet({
           transition: dragHeight === null ? 'height 200ms ease' : 'none',
         }}
         role="dialog"
+        aria-modal={snap === 'expanded'}
         aria-label="Comments"
       >
         <button
@@ -153,7 +166,7 @@ export function BottomSheet({
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
+          onPointerCancel={onPointerCancel}
           style={{ touchAction: 'none', height: `${HANDLE_PX}px` }}
           className="flex shrink-0 items-center justify-center gap-3 border-b border-neutral-200 px-3 text-xs text-neutral-700 dark:border-neutral-800 dark:text-neutral-300"
           aria-label="Drag to resize comments panel"
