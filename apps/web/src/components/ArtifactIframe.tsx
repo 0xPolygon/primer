@@ -64,13 +64,10 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
         [channel.port2],
       );
 
-      // Wire the sender for the parent route. Sends always go through the
-      // live port now that we have one. Any messages already buffered get
-      // flushed in order before the route sends new ones.
-      registerSenderRef.current?.((msg) => {
-        if (portRef.current) portRef.current.postMessage(msg);
-        else buffer.enqueue(msg);
-      });
+      // Wire the sender for the parent route. The cleanup function
+      // deregisters this sender BEFORE closing the port, so callers can rely
+      // on the port being live whenever this sender is reachable.
+      registerSenderRef.current?.((msg) => port.postMessage(msg));
       buffer.drain((msg) => port.postMessage(msg));
     };
 
