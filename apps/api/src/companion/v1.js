@@ -39,7 +39,13 @@
   log.error = (...args) => log('error', ...args);
 
   function safeStringify(v) {
-    try { return JSON.stringify(v); } catch { return String(v); }
+    if (v === undefined) return 'undefined';
+    try {
+      const s = JSON.stringify(v);
+      return s ?? String(v);
+    } catch {
+      return String(v);
+    }
   }
 
   function flushLogBuffer() {
