@@ -862,6 +862,7 @@
   function exitPickMode(reason /* 'click' | 'esc' | 'parent' | 'banner' */) {
     if (!pickActive) return;
     pickActive = false;
+    _pickInFlight = false;
     document.body.style.cursor = prevBodyCursor;
     pickOutline?.remove();
     pickOutline = null;
@@ -905,6 +906,7 @@
     if (!t) return;
     const target = document.elementFromPoint(t.clientX, t.clientY);
     if (!(target instanceof Element)) return;
+    if (target.closest('#' + PICK_BANNER_ID)) return;
     _pickInFlight = true;
     // Synthesize the same flow as onPickClick.
     e.preventDefault();
