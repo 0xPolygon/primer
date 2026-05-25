@@ -600,6 +600,65 @@
   // (element-path) tells the parent to focus the matching thread.
   // No preventDefault — the artifact's own click handlers still run.
 
+  /**
+   * Caret-based hit-test for text-range anchors. Uses the browser's own
+   * caret-positioning logic (caretRangeFromPoint / caretPositionFromPoint)
+   * and Range.comparePoint to decide which range — if any — contains the
+   * click point. Overlapping ranges resolve to the smallest containing one.
+   *
+   * Returns the anchorId of the matching text-range anchor, or null.
+   */
+  function findTextRangeAtClick(event) {
+    const x = event.clientX;
+    const y = event.clientY;
+
+    // Cheap reject: if no range's bounding box contains the click, skip the
+    // caret lookup entirely. Bails out fast on the common case (click is
+    // outside any highlight).
+    let anyRectHit = false;
+    outer: for (const range of rangeByAnchorId.values()) {
+      const rects = range.getClientRects();
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          anyRectHit = true;
+          break outer;
+        }
+      }
+    }
+    if (!anyRectHit) return null;
+
+    // Authoritative lookup via caret API.
+    let caretNode = null;
+    let caretOffset = 0;
+    if (typeof document.caretRangeFromPoint === 'function') {
+      const r = document.caretRangeFromPoint(x, y);
+      if (r) { caretNode = r.startContainer; caretOffset = r.startOffset; }
+    } else if (typeof document.caretPositionFromPoint === 'function') {
+      const p = document.caretPositionFromPoint(x, y);
+      if (p) { caretNode = p.offsetNode; caretOffset = p.offset; }
+    }
+    if (!caretNode) return null;
+
+    let best = null;
+    let bestLength = Infinity;
+    for (const [anchorId, range] of rangeByAnchorId) {
+      let inside = false;
+      try {
+        inside = range.comparePoint(caretNode, caretOffset) === 0;
+      } catch (e) {
+        // detached node — treat as miss
+      }
+      if (!inside) continue;
+      const len = range.toString().length;
+      if (len < bestLength) {
+        best = anchorId;
+        bestLength = len;
+      }
+    }
+    return best;
+  }
+
   function findAnchorAtClick(event) {
     // If the user just selected text by dragging, treat as selection capture,
     // not focus. (selection_captured fires on the same mouseup.)
@@ -616,24 +675,13 @@
     }
 
     // Element-path: check whether the click target is inside any tracked element.
-    // Iterate the map; first match wins.
+    // Iterate the map; first match wins (these don't overlap in practice).
     for (const [anchorId, entry] of elementByAnchorId) {
       if (entry.el.contains(target)) return anchorId;
     }
 
-    // Text-range: check whether the click point falls inside any range's rects.
-    const x = event.clientX;
-    const y = event.clientY;
-    for (const [anchorId, range] of rangeByAnchorId) {
-      const rects = range.getClientRects();
-      for (let i = 0; i < rects.length; i++) {
-        const r = rects[i];
-        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
-          return anchorId;
-        }
-      }
-    }
-    return null;
+    // Text-range: delegate to caret-based hit-test (more reliable than rects).
+    return findTextRangeAtClick(event);
   }
 
   document.addEventListener('click', (event) => {
