@@ -74,4 +74,71 @@ describe('validateUpload', () => {
     const r = validateUpload({ file: okFile, title: 't', description: 'x'.repeat(2001) });
     expect(r).toEqual({ ok: false, error: 'validation_failed', message: expect.any(String) });
   });
+
+  it('accepts a .md filename', () => {
+    const r = validateUpload({
+      file: { ...okFile, filename: 'notes.md', contentType: 'text/markdown' },
+      title: 't',
+      description: undefined,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts a .markdown filename', () => {
+    const r = validateUpload({
+      file: { ...okFile, filename: 'notes.markdown', contentType: 'text/markdown' },
+      title: 't',
+      description: undefined,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts a .MD uppercase extension', () => {
+    const r = validateUpload({
+      file: { ...okFile, filename: 'NOTES.MD', contentType: 'text/markdown' },
+      title: 't',
+      description: undefined,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts text/x-markdown content type', () => {
+    const r = validateUpload({
+      file: { ...okFile, filename: 'n.md', contentType: 'text/x-markdown' },
+      title: 't',
+      description: undefined,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('accepts missing content-type for .md', () => {
+    const r = validateUpload({
+      file: { ...okFile, filename: 'n.md', contentType: undefined },
+      title: 't',
+      description: undefined,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('rejects a content-type/extension mismatch (.md with text/html)', () => {
+    const r = validateUpload({
+      file: { ...okFile, filename: 'n.md', contentType: 'text/html' },
+      title: 't',
+      description: undefined,
+    });
+    expect(r).toEqual({ ok: false, error: 'bad_content_type', message: expect.any(String) });
+  });
+
+  it('rejects an unsupported extension with the updated message', () => {
+    const r = validateUpload({
+      file: { ...okFile, filename: 'report.txt' },
+      title: 't',
+      description: undefined,
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toBe('bad_extension');
+    expect(r.message).toContain('.html');
+    expect(r.message).toContain('.md');
+  });
 });

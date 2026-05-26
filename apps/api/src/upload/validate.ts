@@ -54,20 +54,29 @@ export function validateUpload(input: UploadInput): ValidateResult {
     };
   }
 
-  if (!input.file.filename.toLowerCase().endsWith('.html')) {
+  const lowerName = input.file.filename.toLowerCase();
+  const isHtml = lowerName.endsWith('.html');
+  const isMarkdown = lowerName.endsWith('.md') || lowerName.endsWith('.markdown');
+
+  if (!isHtml && !isMarkdown) {
     return {
       ok: false,
       error: 'bad_extension',
-      message: 'File must have a .html extension.',
+      message: 'File must be .html, .md, or .markdown.',
     };
   }
 
-  if (input.file.contentType !== undefined && input.file.contentType !== 'text/html') {
-    return {
-      ok: false,
-      error: 'bad_content_type',
-      message: `Unexpected content-type: ${input.file.contentType}.`,
-    };
+  if (input.file.contentType !== undefined) {
+    const ct = input.file.contentType;
+    const htmlOk = isHtml && ct === 'text/html';
+    const mdOk = isMarkdown && (ct === 'text/markdown' || ct === 'text/x-markdown' || ct === 'text/plain');
+    if (!htmlOk && !mdOk) {
+      return {
+        ok: false,
+        error: 'bad_content_type',
+        message: `Unexpected content-type: ${ct}.`,
+      };
+    }
   }
 
   return {
