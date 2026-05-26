@@ -10,6 +10,7 @@ import type {
 import { ArtifactIframe } from '../components/ArtifactIframe.tsx';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
+import { useTheme } from '../lib/useTheme.ts';
 
 interface LogEntry {
   ts: number;
@@ -40,6 +41,7 @@ export function DevHarnessPage() {
   const [pendingPick, setPendingPick] = useState<PendingPick | null>(null);
   const [anchors, setAnchors] = useState<Anchor[]>([]);
   const [pickMode, setPickMode] = useState(false);
+  const { effective: theme } = useTheme();
 
   const senderRef = useRef<((msg: OutboundProtocolMessage) => void) | null>(null);
 
@@ -145,6 +147,7 @@ export function DevHarnessPage() {
           <ArtifactIframe
             src="/dev/fixtures/anchoring.html"
             anchors={anchors}
+            theme={theme}
             onMessage={onMessage}
             registerSender={registerSender}
           />

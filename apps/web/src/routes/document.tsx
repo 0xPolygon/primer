@@ -20,6 +20,7 @@ import { EditableField } from '../components/EditableField.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
+import { useTheme } from '../lib/useTheme.ts';
 import { commentsFilename, formatThreadsAsMarkdown } from '../lib/exportComments.ts';
 import { hasLiveComments } from '../lib/liveComments.ts';
 import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
@@ -88,6 +89,7 @@ export function DocumentPage() {
   }, [sidebarCollapsed]);
 
   const me = useMe();
+  const { effective: theme } = useTheme();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [sheetSnap, setSheetSnap] = useState<SnapPoint>('handle');
   const isUploader = !!me.data && me.data.id === docQuery.data?.document.uploaderId;
@@ -503,6 +505,7 @@ export function DocumentPage() {
           <ArtifactIframe
             src={`/api/versions/${currentVersionId}/content`}
             anchors={anchorsForCompanion}
+            theme={theme}
             onMessage={onMessage}
             registerSender={registerSender}
           />
