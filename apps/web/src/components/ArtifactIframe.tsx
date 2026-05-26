@@ -3,6 +3,7 @@ import type {
   Anchor,
   InboundProtocolMessage,
   OutboundProtocolMessage,
+  Theme,
 } from '@primer/shared';
 import { parseInboundMessage, parseWindowEnvelope } from '@primer/shared';
 import { createMessageBuffer } from '../companion/buffer.ts';
@@ -10,6 +11,7 @@ import { createMessageBuffer } from '../companion/buffer.ts';
 interface Props {
   src: string;
   anchors: Anchor[];
+  theme: Theme;
   onMessage: (msg: InboundProtocolMessage) => void;
   /** Imperative outbound channel. Parent stores a setter; child stores the sender. */
   registerSender?: (send: ((msg: OutboundProtocolMessage) => void) | null) => void;
@@ -21,16 +23,18 @@ interface Props {
 // would re-open phishing / cookie-theft / fake-SSO vectors described in
 // docs/prd-primer.md ("Iframe sandboxing"). If you find yourself needing
 // to widen the sandbox, stop and consult the threat model first.
-export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Props) {
+export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
 
   // Latest-value refs so deferred handlers see current props, not the values
   // closed over at mount.
   const anchorsRef = useRef(anchors);
+  const themeRef = useRef(theme);
   const onMessageRef = useRef(onMessage);
   const registerSenderRef = useRef(registerSender);
   useEffect(() => { anchorsRef.current = anchors; }, [anchors]);
+  useEffect(() => { themeRef.current = theme; }, [theme]);
   useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
   useEffect(() => { registerSenderRef.current = registerSender; }, [registerSender]);
 
@@ -59,7 +63,11 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
       port.start();
 
       iframe.contentWindow.postMessage(
-        { type: 'init', anchors: anchorsRef.current } satisfies OutboundProtocolMessage,
+        {
+          type: 'init',
+          anchors: anchorsRef.current,
+          theme: themeRef.current,
+        } satisfies OutboundProtocolMessage,
         '*',
         [channel.port2],
       );
@@ -98,6 +106,13 @@ export function ArtifactIframe({ src, anchors, onMessage, registerSender }: Prop
       portRef.current = null;
     };
   }, [src]);
+
+  // Push theme changes to the companion. The init handshake already carries
+  // the current theme; this effect propagates subsequent toggles. The first
+  // run (initial mount) is harmless — the companion may not yet be ready.
+  useEffect(() => {
+    portRef.current?.postMessage({ type: 'theme_changed', theme } satisfies OutboundProtocolMessage);
+  }, [theme]);
 
   return (
     <iframe
