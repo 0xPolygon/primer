@@ -144,6 +144,16 @@
       renderElementBadges();
     }
 
+    // Apply parent-provided theme. Field is optional for backward-compat with
+    // parents that haven't been updated yet (they won't set anything).
+    if (incoming.theme === 'light' || incoming.theme === 'dark') {
+      try {
+        document.documentElement.dataset.theme = incoming.theme;
+      } catch (e) {
+        // documentElement should always exist; defensive catch.
+      }
+    }
+
     flushLogBuffer();
 
     if (onWindowMessage) {
@@ -185,6 +195,15 @@
             type: 'anchor_positions',
             positions: computeAnchorPositions(),
           });
+        }
+        break;
+      case 'theme_changed':
+        if (msg.theme === 'light' || msg.theme === 'dark') {
+          try {
+            document.documentElement.dataset.theme = msg.theme;
+          } catch (e) {
+            // defensive
+          }
         }
         break;
       default:
