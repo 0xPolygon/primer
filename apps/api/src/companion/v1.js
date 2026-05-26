@@ -272,6 +272,16 @@
     return s.replace(/\s+/g, ' ').trim();
   }
 
+  // Collapse whitespace runs to single spaces WITHOUT trimming the outer
+  // edges. Used at capture time so the prefix/suffix preserve a single
+  // boundary space between them and the selectorText — otherwise the
+  // needle reconstructed at resolution time would miss the space that's
+  // actually in the document at the join points.
+  // See apps/api/src/companion/textRangeResolution.test.ts for the math.
+  function collapseWhitespace(s) {
+    return s.replace(/\s+/g, ' ');
+  }
+
   function serializeRect(r) {
     return { x: r.x, y: r.y, width: r.width, height: r.height };
   }
@@ -338,8 +348,8 @@
       }
       node = walker2.nextNode();
     }
-    const beforeN = normalize(beforeRaw).slice(-n);
-    const afterN = normalize(afterRaw).slice(0, n);
+    const beforeN = collapseWhitespace(beforeRaw).slice(-n);
+    const afterN = collapseWhitespace(afterRaw).slice(0, n);
     return { prefix: beforeN, suffix: afterN };
   }
 
@@ -485,19 +495,25 @@
     }
 
     const normalizedRaw = normalize(raw);
-    const needle = normalize(anchor.prefix + anchor.selectorText + anchor.suffix);
+    const cPrefix = collapseWhitespace(anchor.prefix);
+    const cSelector = collapseWhitespace(anchor.selectorText);
+    const cSuffix = collapseWhitespace(anchor.suffix);
+    const cFull = cPrefix + cSelector + cSuffix;
+    // The needle aligns with normalizedRaw, which is fully normalized
+    // (outer ends trimmed). cFull is already run-collapsed so we only
+    // strip the outer edges.
+    const needle = cFull.replace(/^\s+|\s+$/g, '');
     const hit = normalizedRaw.indexOf(needle);
     if (hit === -1) return null;
 
-    // Map the normalized hit back to raw offsets.
-    const rawStart = mapNormalizedToRaw(
-      raw,
-      hit + normalize(anchor.prefix).length
-    );
-    const rawEnd = mapNormalizedToRaw(
-      raw,
-      hit + normalize(anchor.prefix).length + normalize(anchor.selectorText).length
-    );
+    // If the full collapsed string had leading whitespace that got
+    // trimmed from the needle, the selector's position inside the needle
+    // shifts left by that amount.
+    const leadingTrim = cFull.length - cFull.replace(/^\s+/, '').length;
+    const selStart = Math.max(0, cPrefix.length - leadingTrim);
+
+    const rawStart = mapNormalizedToRaw(raw, hit + selStart);
+    const rawEnd = mapNormalizedToRaw(raw, hit + selStart + cSelector.length);
     if (rawStart < 0 || rawEnd < 0) return null;
 
     const start = locateInSegments(segs, rawStart);
@@ -513,23 +529,20 @@
   function mapNormalizedToRaw(raw, normalizedOffset) {
     // Walk `raw`, counting normalized characters (single-space-collapsed,
     // leading whitespace dropped) until we reach normalizedOffset.
+    // A whitespace run contributes one normalized char and advances i
+    // past the entire run, so the returned position lands on the first
+    // non-whitespace character after the run (not mid-run).
     let i = 0;
-    // Skip leading whitespace that normalize() strips, so offset 0 lands on
-    // the first visible character.
     while (i < raw.length && /\s/.test(raw[i])) i++;
     let nIdx = 0;
-    let inWS = false;
     while (i < raw.length && nIdx < normalizedOffset) {
-      const ch = raw[i];
-      const isWS = /\s/.test(ch);
-      if (isWS) {
-        if (!inWS) nIdx++; // a run of whitespace contributes one space
-        inWS = true;
+      if (/\s/.test(raw[i])) {
+        while (i < raw.length && /\s/.test(raw[i])) i++;
+        nIdx++;
       } else {
-        inWS = false;
+        i++;
         nIdx++;
       }
-      i++;
     }
     return nIdx === normalizedOffset ? i : -1;
   }
