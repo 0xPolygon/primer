@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { UploadErrorResponse, UploadResponse } from '@primer/shared/api';
 import { FileDropZone } from '../components/FileDropZone.tsx';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
 import { api } from '../lib/fetch.ts';
+import { extractFrontmatterTitle } from '../lib/frontmatterTitle.ts';
 
 export function UploadPage() {
   const navigate = useNavigate();
@@ -12,6 +13,36 @@ export function UploadPage() {
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Frontmatter title prefill: when the user picks a .md/.markdown file and
+  // hasn't typed a title yet, read the first 8 KB and try to lift `title`
+  // out of YAML-ish frontmatter. Silent on any failure — server is
+  // authoritative if this misses.
+  useEffect(() => {
+    if (!file) return;
+    if (title.trim().length > 0) return;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith('.md') && !lower.endsWith('.markdown')) return;
+
+    let cancelled = false;
+    file
+      .slice(0, 8192)
+      .text()
+      .then((head) => {
+        if (cancelled) return;
+        const t = extractFrontmatterTitle(head);
+        if (t && title.trim().length === 0) {
+          setTitle(t);
+        }
+      })
+      .catch(() => {
+        // silent
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [file, title]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
