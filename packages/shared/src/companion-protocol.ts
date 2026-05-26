@@ -31,9 +31,15 @@ export interface Anchor {
 }
 
 // Parent → Iframe
+export type Theme = 'light' | 'dark';
+
 export interface MsgInit {
   type: 'init';
   anchors: Anchor[];
+  /** Parent's effective theme at iframe load. Companion sets
+   *  document.documentElement.dataset.theme accordingly. Older companion
+   *  snapshots ignore unknown init fields, so this is forward-compatible. */
+  theme: Theme;
 }
 export interface MsgUpdateAnchors {
   type: 'update_anchors';
@@ -56,6 +62,10 @@ export interface MsgSetFocusedAnchor {
 export interface MsgRequestAnchorPositions {
   type: 'request_anchor_positions';
 }
+export interface MsgThemeChanged {
+  type: 'theme_changed';
+  theme: Theme;
+}
 
 export type OutboundProtocolMessage =
   | MsgInit
@@ -63,7 +73,8 @@ export type OutboundProtocolMessage =
   | MsgEnterPickMode
   | MsgExitPickMode
   | MsgSetFocusedAnchor
-  | MsgRequestAnchorPositions;
+  | MsgRequestAnchorPositions
+  | MsgThemeChanged;
 
 // Iframe → Parent
 export interface MsgSelectionCaptured {
