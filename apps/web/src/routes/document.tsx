@@ -93,6 +93,14 @@ export function DocumentPage() {
     window.localStorage.setItem(COLLAPSED_KEY, sidebarCollapsed ? '1' : '0');
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current !== null) {
+        clearTimeout(copyFeedbackTimerRef.current);
+      }
+    };
+  }, []);
+
   const me = useMe();
   const { effective: theme } = useTheme();
   const isMobile = useMediaQuery('(max-width: 767px)');
@@ -108,6 +116,8 @@ export function DocumentPage() {
 
   const senderRef = useRef<((m: OutboundProtocolMessage) => void) | null>(null);
   const iframeWrapperRef = useRef<HTMLDivElement>(null);
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
 
   const anchorsForCompanion = useMemo(
     () => threads.filter(hasLiveComments).map((t) => ({ id: t.id, data: t.anchor })),
@@ -233,12 +243,18 @@ export function DocumentPage() {
       threads,
     );
     const result = await copyText(md);
-    if (result === 'failed') {
-      setCopyFeedback({ kind: 'error', message: 'Copy failed. Try Download instead.' });
-    } else {
-      setCopyFeedback({ kind: 'success', message: 'Copied' });
+    if (copyFeedbackTimerRef.current !== null) {
+      clearTimeout(copyFeedbackTimerRef.current);
     }
-    setTimeout(() => setCopyFeedback(null), result === 'failed' ? 3000 : 2000);
+    setCopyFeedback(
+      result === 'failed'
+        ? { kind: 'error', message: 'Copy failed. Try Download instead.' }
+        : { kind: 'success', message: 'Copied' }
+    );
+    copyFeedbackTimerRef.current = setTimeout(() => {
+      setCopyFeedback(null);
+      copyFeedbackTimerRef.current = null;
+    }, result === 'failed' ? 3000 : 2000);
   }
 
   const togglePickMode = () => {
@@ -261,6 +277,17 @@ export function DocumentPage() {
   useEffect(() => {
     senderRef.current?.({ type: 'set_focused_anchor', anchorId: focusedThreadId });
   }, [focusedThreadId, currentVersionId]);
+
+  useEffect(() => {
+    if (actionsMenuState !== 'menu') return;
+    function onDown(e: MouseEvent) {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
+        setActionsMenuState('closed');
+      }
+    }
+    window.document.addEventListener('mousedown', onDown);
+    return () => window.document.removeEventListener('mousedown', onDown);
+  }, [actionsMenuState]);
 
   const onHighlight = useCallback((anchorId: string) => {
     setFocusedThreadId(anchorId);
@@ -427,7 +454,7 @@ export function DocumentPage() {
               + Version
             </button>
           )}
-          <div className="relative">
+          <div className="relative" ref={actionsMenuRef}>
             <button
               type="button"
               onClick={() =>
