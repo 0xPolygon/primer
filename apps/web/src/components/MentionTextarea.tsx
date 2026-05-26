@@ -42,11 +42,29 @@ export function MentionTextarea({
   // Typeahead state.
   const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
   const [highlightIdx, setHighlightIdx] = useState(0);
+  const [dropdownPlacement, setDropdownPlacement] = useState<'below' | 'above'>('below');
 
   // Recompute reconciled mentions whenever body or selection changes.
   useEffect(() => {
     onMentionsChange(reconcileMentions(value, selected, users));
   }, [value, selected, users, onMentionsChange]);
+
+  useEffect(() => {
+    if (!trigger) return;
+    const ta = taRef.current;
+    if (!ta) return;
+    // Use visualViewport when available so the keyboard's intruded height is
+    // factored in; fall back to innerHeight on older UAs.
+    const viewportH =
+      typeof window !== 'undefined' && window.visualViewport
+        ? window.visualViewport.height + window.visualViewport.offsetTop
+        : window.innerHeight;
+    const r = ta.getBoundingClientRect();
+    const spaceBelow = viewportH - r.bottom;
+    const spaceAbove = r.top;
+    // Dropdown is max-h-44 ≈ 11rem ≈ 176px. Need ~180px to comfortably fit.
+    setDropdownPlacement(spaceBelow >= 180 || spaceBelow >= spaceAbove ? 'below' : 'above');
+  }, [trigger]);
 
   const matches = useMemo(() => {
     if (!trigger) return [];
@@ -134,7 +152,9 @@ export function MentionTextarea({
       {trigger && matches.length > 0 && (
         <ul
           role="listbox"
-          className="absolute left-0 right-0 z-20 mt-1 max-h-44 overflow-y-auto rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-md"
+          className={`absolute left-0 right-0 z-20 max-h-44 overflow-y-auto rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-md ${
+            dropdownPlacement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'
+          }`}
         >
           {matches.map((u, idx) => (
             <li

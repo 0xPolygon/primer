@@ -22,6 +22,12 @@ interface Props {
   onCollapsedChange?: (next: boolean) => void;
   /** Sticky-focus state owned by DocumentPage. */
   focusedThreadId?: string | null;
+  /** Mobile-only: when set, render a "+ Add comment" trigger above the
+   *  thread list. The handler is expected to enter pick mode AND snap the
+   *  sheet to handle so the iframe is fully tappable. */
+  onAddCommentClick?: () => void;
+  /** True while the parent is in pick mode — used to dim/disable the button. */
+  addCommentActive?: boolean;
 }
 
 const COLLAPSED_KEY = 'primer.sidebar.collapsed';
@@ -37,6 +43,8 @@ export function CommentSidebar({
   collapsed: controlledCollapsed,
   onCollapsedChange,
   focusedThreadId = null,
+  onAddCommentClick,
+  addCommentActive = false,
 }: Props) {
   const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -157,6 +165,22 @@ export function CommentSidebar({
           </button>
         </div>
       </header>
+
+      {onAddCommentClick && !pending && (
+        <div className="border-b border-neutral-200 dark:border-neutral-800 px-3 py-2">
+          <button
+            type="button"
+            onClick={onAddCommentClick}
+            className={`w-full rounded px-3 py-2 text-sm ${
+              addCommentActive
+                ? 'bg-red-600 text-white'
+                : 'border border-neutral-300 bg-white text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300'
+            }`}
+          >
+            {addCommentActive ? 'Cancel' : '+ Add comment'}
+          </button>
+        </div>
+      )}
 
       {pending && (
         <NewThreadComposer

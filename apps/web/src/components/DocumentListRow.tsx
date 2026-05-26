@@ -42,7 +42,7 @@ export function MyDocumentRow({ doc }: MyDocProps) {
             ? 'no threads yet'
             : `${doc.activeThreadCount}/${doc.threadCount} active`}
         </span>
-        <span className="w-20 text-right text-xs text-neutral-500">
+        <span className="hidden sm:inline w-20 text-right text-xs text-neutral-500">
           {relativeTime(doc.lastActivityAt)}
         </span>
       </div>
@@ -77,7 +77,7 @@ export function ActivityRow({ entry }: ActivityProps) {
             ? 'no threads'
             : `${entry.activeThreadCount}/${entry.threadCount} active`}
         </span>
-        <span className="w-20 text-right text-xs text-neutral-500">
+        <span className="hidden sm:inline w-20 text-right text-xs text-neutral-500">
           {relativeTime(entry.signalAt)}
         </span>
       </div>
