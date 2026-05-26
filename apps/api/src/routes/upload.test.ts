@@ -140,3 +140,49 @@ describe('POST /api/upload — error paths', () => {
     });
   });
 });
+
+describe('POST /api/upload — markdown', () => {
+  it('converts a .md upload to HTML and stores it as an artifact', async () => {
+    await withTmpStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const md = '---\ntitle: From Frontmatter\n---\n\n# Hello\n\nWorld.';
+      const fd = new FormData();
+      fd.append('file', new Blob([md], { type: 'text/markdown' }), 'notes.md');
+      fd.append('title', 'My Title'); // multipart title wins over frontmatter
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as UploadResponse;
+
+      const docRows = await db.select().from(documents).where(eq(documents.id, body.documentId));
+      expect(docRows[0].title).toBe('My Title');
+
+      const versionRows = await db.select().from(versions).where(eq(versions.id, body.versionId));
+      const stream = await storage.get(versionRows[0].storageKey);
+      const reader = stream.getReader();
+      let combined = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        combined += new TextDecoder().decode(value);
+      }
+      expect(combined).toContain('<h1>Hello</h1>');
+      expect(combined).toContain('<p>World.</p>');
+      expect(combined).toContain('data-theme="light"');
+      expect(combined).toContain('<script src="/companion/v1.js"'); // companion still injected
+      expect(combined).not.toContain('---'); // frontmatter stripped
+    });
+  });
+
+  it('rejects an empty-body markdown upload', async () => {
+    await withTmpStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const md = '---\ntitle: empty\n---\n';
+      const fd = new FormData();
+      fd.append('file', new Blob([md], { type: 'text/markdown' }), 'empty.md');
+      fd.append('title', 't');
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: 'parse_failed' });
+    });
+  });
+});

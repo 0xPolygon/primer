@@ -5,6 +5,7 @@ import type { UploadResponse } from '@primer/shared/api';
 import { documents, versions } from '@primer/shared/schema';
 import { validateUpload } from '../upload/validate.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
+import { markdownToHtml } from '../upload/markdown.ts';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 
@@ -38,7 +39,36 @@ export function registerUploadRoute(
     }
 
     const text = new TextDecoder('utf-8').decode(validated.file.bytes);
-    const transformed = transformHtml(text);
+    const lowerName = validated.file.filename.toLowerCase();
+    const isMarkdown =
+      lowerName.endsWith('.md') || lowerName.endsWith('.markdown');
+
+    let preparedHtml: string;
+    if (isMarkdown) {
+      let mdResult;
+      try {
+        mdResult = markdownToHtml(text);
+      } catch (err) {
+        return c.json(
+          {
+            error: 'parse_failed',
+            message: `Markdown conversion failed: ${(err as Error).message}`,
+          },
+          400,
+        );
+      }
+      if (mdResult.bodyIsEmpty) {
+        return c.json(
+          { error: 'parse_failed', message: 'Document body is empty.' },
+          400,
+        );
+      }
+      preparedHtml = mdResult.html;
+    } else {
+      preparedHtml = text;
+    }
+
+    const transformed = transformHtml(preparedHtml);
     if (!transformed.ok) {
       return c.json({ error: transformed.error, message: transformed.message }, 400);
     }
