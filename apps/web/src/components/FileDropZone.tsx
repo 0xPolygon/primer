@@ -19,7 +19,11 @@ function formatSize(bytes: number): string {
 
 function validate(file: File, maxBytes: number): string | null {
   const lowerName = file.name.toLowerCase();
-  if (!lowerName.endsWith('.html')) return 'Only .html files are accepted.';
+  const ok =
+    lowerName.endsWith('.html') ||
+    lowerName.endsWith('.md') ||
+    lowerName.endsWith('.markdown');
+  if (!ok) return 'Only .html, .md, or .markdown files are accepted.';
   if (file.size > maxBytes) {
     return `This file is ${formatSize(file.size)} — limit is ${formatSize(maxBytes)}.`;
   }
@@ -83,7 +87,7 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
       <div
         role="button"
         tabIndex={disabled ? -1 : 0}
-        aria-label="Upload HTML file"
+        aria-label="Upload HTML or Markdown file"
         aria-invalid={error !== null}
         aria-describedby={error ? 'filedropzone-error' : undefined}
         onClick={openPicker}
@@ -104,9 +108,9 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
               <path d="M12 5v14M5 12l7-7 7 7" />
             </svg>
             <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-              {isDragging ? 'Drop to attach' : 'Drop an HTML file here, or click to browse'}
+              {isDragging ? 'Drop to attach' : 'Drop an HTML or Markdown file here, or click to browse'}
             </p>
-            <p className="mt-1 text-xs text-neutral-500">.html files up to {formatSize(maxBytes)}</p>
+            <p className="mt-1 text-xs text-neutral-500">.html / .md files up to {formatSize(maxBytes)}</p>
           </>
         ) : (
           <div className="flex w-full items-center gap-3 px-4">
@@ -133,7 +137,7 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
         <input
           ref={inputRef}
           type="file"
-          accept=".html,text/html"
+          accept=".html,text/html,.md,.markdown,text/markdown,text/x-markdown"
           className="hidden"
           onChange={(e) => handlePick(e.target.files?.[0] ?? null)}
         />
