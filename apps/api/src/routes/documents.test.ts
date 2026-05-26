@@ -447,6 +447,50 @@ describe('POST /api/documents/:docId/versions', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('converts a .md file to HTML when adding a new version', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-addver-md-'));
+    try {
+      const storage = new FilesystemStorage(root);
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const md = '---\ntitle: ignored\n---\n\n# v2\n\nNew content.';
+      const fd = new FormData();
+      fd.append('file', new Blob([md], { type: 'text/markdown' }), 'notes.md');
+
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+        body: fd,
+      });
+      expect(res.status).toBe(201);
+      const out = (await res.json()) as AddVersionResponse;
+      expect(out.versionNumber).toBe(2);
+
+      const versionRows = await db
+        .select()
+        .from(versions)
+        .where(eq(versions.id, out.versionId));
+      expect(versionRows).toHaveLength(1);
+
+      const stream = await storage.get(versionRows[0].storageKey);
+      const reader = stream.getReader();
+      let combined = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        combined += new TextDecoder().decode(value);
+      }
+      expect(combined).toContain('<h1>v2</h1>');
+      expect(combined).toContain('<p>New content.</p>');
+      expect(combined).toContain('data-theme="light"');
+      expect(combined).toContain('<script src="/companion/v1.js"');
+      expect(combined).not.toContain('---'); // frontmatter stripped
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('GET /api/documents/:docId/versions', () => {

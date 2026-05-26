@@ -48,7 +48,7 @@ export function UploadPage() {
     e.preventDefault();
     setError(null);
     if (!file) {
-      setError('Please choose an .html file.');
+      setError('Please choose a file (.html, .md, or .markdown).');
       return;
     }
     setSubmitting(true);
