@@ -25,6 +25,8 @@ import { commentsFilename, formatThreadsAsMarkdown } from '../lib/exportComments
 import { hasLiveComments } from '../lib/liveComments.ts';
 import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
+import { copyText } from '../lib/clipboardCopy.ts';
+import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -77,6 +79,9 @@ export function DocumentPage() {
   const [actionsMenuState, setActionsMenuState] = useState<'closed' | 'menu' | 'confirm'>(
     'closed',
   );
+  const [copyFeedback, setCopyFeedback] = useState<
+    { kind: 'success' | 'error'; message: string } | null
+  >(null);
 
   const COLLAPSED_KEY = 'primer.sidebar.collapsed';
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -218,6 +223,22 @@ export function DocumentPage() {
     a.click();
     window.document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  async function copyComments() {
+    if (!docQuery.data) return;
+    const md = formatThreadsAsMarkdown(
+      { title: docQuery.data.document.title },
+      { versionNumber: currentVersionNumber },
+      threads,
+    );
+    const result = await copyText(md);
+    if (result === 'failed') {
+      setCopyFeedback({ kind: 'error', message: 'Copy failed. Try Download instead.' });
+    } else {
+      setCopyFeedback({ kind: 'success', message: 'Copied' });
+    }
+    setTimeout(() => setCopyFeedback(null), result === 'failed' ? 3000 : 2000);
   }
 
   const togglePickMode = () => {
@@ -406,77 +427,104 @@ export function DocumentPage() {
               + Version
             </button>
           )}
-          <button
-            type="button"
-            onClick={exportComments}
-            title="Download comments as Markdown"
-            className="hidden md:inline-flex items-center gap-1 rounded border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            Export
-          </button>
-          {isUploader && (
-            <div className="relative hidden md:block">
-              <button
-                type="button"
-                onClick={() =>
-                  setActionsMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))
-                }
-                aria-label="More actions"
-                aria-haspopup="menu"
-                aria-expanded={actionsMenuState !== 'closed'}
-                className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() =>
+                setActionsMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))
+              }
+              aria-label="More actions"
+              aria-haspopup="menu"
+              aria-expanded={actionsMenuState !== 'closed'}
+              className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            >
+              ⋯
+            </button>
+            {actionsMenuState === 'menu' && (
+              <div
+                role="menu"
+                className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
               >
-                ⋯
-              </button>
-              {actionsMenuState === 'menu' && (
-                <div
-                  role="menu"
-                  className="absolute right-0 z-10 mt-1 w-44 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
-                >
+                {buildMenuItems({ isUploader }).map((item) => {
+                  if (item.id === 'separator') {
+                    return (
+                      <div
+                        key="sep"
+                        className="my-1 border-t border-neutral-200 dark:border-neutral-800"
+                        aria-hidden="true"
+                      />
+                    );
+                  }
+                  const onClickFor: Record<Exclude<MenuItemId, 'separator'>, () => void> = {
+                    copy: () => {
+                      setActionsMenuState('closed');
+                      void copyComments();
+                    },
+                    download: () => {
+                      setActionsMenuState('closed');
+                      exportComments();
+                    },
+                    delete: () => setActionsMenuState('confirm'),
+                  };
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={onClickFor[item.id]}
+                      className={`block w-full px-3 py-1.5 text-left text-xs ${
+                        item.destructive
+                          ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20'
+                          : 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {actionsMenuState === 'confirm' && (
+              <div className="absolute right-0 z-10 mt-1 w-64 rounded border border-neutral-200 bg-white p-3 shadow-md dark:border-neutral-800 dark:bg-neutral-900">
+                <p className="text-xs text-neutral-700 dark:text-neutral-300">
+                  Delete this document? You can restore it within 30 days from the home page.
+                </p>
+                <div className="mt-2 flex justify-end gap-2">
                   <button
                     type="button"
-                    role="menuitem"
-                    onClick={() => setActionsMenuState('confirm')}
-                    className="block w-full px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                    onClick={() => setActionsMenuState('closed')}
+                    className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
                   >
-                    Delete document…
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await deleteDoc.mutateAsync();
+                      setActionsMenuState('closed');
+                      navigate('/');
+                    }}
+                    className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-700"
+                  >
+                    Delete
                   </button>
                 </div>
-              )}
-              {actionsMenuState === 'confirm' && (
-                <div className="absolute right-0 z-10 mt-1 w-64 rounded border border-neutral-200 bg-white p-3 shadow-md dark:border-neutral-800 dark:bg-neutral-900">
-                  <p className="text-xs text-neutral-700 dark:text-neutral-300">
-                    Delete this document? You can restore it within 30 days from the home page.
-                  </p>
-                  <div className="mt-2 flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setActionsMenuState('closed')}
-                      className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await deleteDoc.mutateAsync();
-                        setActionsMenuState('closed');
-                        navigate('/');
-                      }}
-                      className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-700"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+            {copyFeedback && (
+              <div
+                role="status"
+                aria-live="polite"
+                className={`absolute right-0 z-10 mt-1 rounded border px-2 py-1 text-xs shadow-md ${
+                  copyFeedback.kind === 'success'
+                    ? 'border-neutral-200 bg-white text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300'
+                    : 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400'
+                }`}
+              >
+                {copyFeedback.message}
+              </div>
+            )}
+          </div>
           <div className="hidden md:block text-sm text-neutral-500">
             {document.uploaderDisplayName} ·{' '}
             {new Date(document.createdAt).toLocaleString()}
