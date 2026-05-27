@@ -67,14 +67,26 @@ function findTextRangeOffsets(
   const hit = normalizedRaw.indexOf(needle);
   if (hit === -1) return null;
 
-  // If the full collapsed string had leading whitespace that got trimmed
-  // from the needle, the selector's position inside the needle shifts
-  // left by that amount.
+  // Account for whitespace at the outer ends of cFull that got trimmed
+  // from the needle. The trim eats cPrefix/cSuffix first, then chews into
+  // cSelector if either is empty. Selector.toString() in Chrome/Brave
+  // inserts a "\n" at touched block boundaries (triple-click on a list
+  // item, shift+extend past a paragraph end), which becomes trailing
+  // whitespace in cSelector — without the trim adjustment, the rawEnd
+  // computation overshoots the actual normalized raw length and returns
+  // -1, drifting the anchor.
   const leadingTrim = cFull.length - cFull.replace(/^\s+/, '').length;
+  const trailingTrim = cFull.length - cFull.replace(/\s+$/, '').length;
+  const leadingChopFromSelector = Math.max(0, leadingTrim - cPrefix.length);
+  const trailingChopFromSelector = Math.max(0, trailingTrim - cSuffix.length);
   const selStart = Math.max(0, cPrefix.length - leadingTrim);
+  const selLength = Math.max(
+    0,
+    cSelector.length - leadingChopFromSelector - trailingChopFromSelector,
+  );
 
   const rawStart = mapNormalizedToRaw(raw, hit + selStart);
-  const rawEnd = mapNormalizedToRaw(raw, hit + selStart + cSelector.length);
+  const rawEnd = mapNormalizedToRaw(raw, hit + selStart + selLength);
   if (rawStart < 0 || rawEnd < 0) return null;
   return { rawStart, rawEnd };
 }
@@ -165,6 +177,45 @@ describe('findTextRangeOffsets — round-trip via buildContext', () => {
       suffix: ' friend',
     });
     expect(result).toBeNull();
+  });
+
+  it('resolves a triple-click selection where selectorText carries a trailing block-boundary newline', () => {
+    // Triple-click on a list-item in Chrome/Brave: Selection.toString()
+    // appends a \n for the block boundary the selection touches. The raw
+    // text node has no such character.
+    const raw =
+      'USDT0 already runs a multi-DVN required set across all 18+ chains; we are adding a slot, not replacing one.';
+    const result = findTextRangeOffsets(raw, {
+      prefix: '',
+      selectorText: `${raw}\n`,
+      suffix: '',
+    });
+    expect(result).not.toBeNull();
+    expect(raw.slice(result!.rawStart, result!.rawEnd)).toBe(raw);
+  });
+
+  it('resolves a selection where selectorText carries a leading block-boundary newline', () => {
+    // Symmetric case: selection starts at the leading edge of a block,
+    // Selection.toString() prepends a \n.
+    const raw = 'Second paragraph text.';
+    const result = findTextRangeOffsets(raw, {
+      prefix: '',
+      selectorText: `\n${raw}`,
+      suffix: '',
+    });
+    expect(result).not.toBeNull();
+    expect(raw.slice(result!.rawStart, result!.rawEnd)).toBe(raw);
+  });
+
+  it('resolves when selectorText has both leading and trailing boundary newlines (empty prefix and suffix)', () => {
+    const raw = 'A single sentence.';
+    const result = findTextRangeOffsets(raw, {
+      prefix: '',
+      selectorText: `\n${raw}\n`,
+      suffix: '',
+    });
+    expect(result).not.toBeNull();
+    expect(raw.slice(result!.rawStart, result!.rawEnd)).toBe(raw);
   });
 });
 

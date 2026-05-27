@@ -506,14 +506,26 @@
     const hit = normalizedRaw.indexOf(needle);
     if (hit === -1) return null;
 
-    // If the full collapsed string had leading whitespace that got
-    // trimmed from the needle, the selector's position inside the needle
-    // shifts left by that amount.
+    // Account for whitespace at the outer ends of cFull that got trimmed
+    // from the needle. The trim eats cPrefix/cSuffix first, then chews
+    // into cSelector if either is empty. Selection.toString() in
+    // Chrome/Brave inserts a "\n" at touched block boundaries (triple-
+    // click on a list item, shift+extend past a paragraph end), which
+    // becomes trailing whitespace in cSelector — without the trim
+    // adjustment the rawEnd math overshoots the actual normalized raw
+    // length and returns -1, drifting the anchor.
     const leadingTrim = cFull.length - cFull.replace(/^\s+/, '').length;
+    const trailingTrim = cFull.length - cFull.replace(/\s+$/, '').length;
+    const leadingChopFromSelector = Math.max(0, leadingTrim - cPrefix.length);
+    const trailingChopFromSelector = Math.max(0, trailingTrim - cSuffix.length);
     const selStart = Math.max(0, cPrefix.length - leadingTrim);
+    const selLength = Math.max(
+      0,
+      cSelector.length - leadingChopFromSelector - trailingChopFromSelector,
+    );
 
     const rawStart = mapNormalizedToRaw(raw, hit + selStart);
-    const rawEnd = mapNormalizedToRaw(raw, hit + selStart + cSelector.length);
+    const rawEnd = mapNormalizedToRaw(raw, hit + selStart + selLength);
     if (rawStart < 0 || rawEnd < 0) return null;
 
     const start = locateInSegments(segs, rawStart);
