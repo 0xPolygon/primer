@@ -1,4 +1,10 @@
-export type MenuItemId = 'copy' | 'download' | 'separator' | 'delete';
+export type MenuItemId =
+  | 'open-fullscreen'
+  | 'download-html'
+  | 'copy'
+  | 'download'
+  | 'separator'
+  | 'delete';
 
 export interface MenuItem {
   id: MenuItemId;
@@ -14,6 +20,9 @@ export interface MenuInput {
  *  caller maps each item to a click handler. */
 export function buildMenuItems({ isUploader }: MenuInput): MenuItem[] {
   const items: MenuItem[] = [
+    { id: 'open-fullscreen', label: 'Open full screen' },
+    { id: 'download-html', label: 'Download HTML' },
+    { id: 'separator' },
     { id: 'copy', label: 'Copy comments as Markdown' },
     { id: 'download', label: 'Download comments as Markdown' },
   ];
