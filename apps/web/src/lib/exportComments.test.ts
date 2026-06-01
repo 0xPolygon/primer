@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ThreadDTO, CommentDTO } from '@primer/shared';
-import { commentsFilename, formatThreadsAsMarkdown } from './exportComments.ts';
+import { commentsFilename, formatThreadsAsMarkdown, htmlFilename } from './exportComments.ts';
 
 const NOW = new Date('2026-05-21T12:00:00Z');
 
@@ -162,5 +162,38 @@ describe('commentsFilename', () => {
 
   it('falls back to "document" for an empty slug', () => {
     expect(commentsFilename({ title: '!!!' }, { versionNumber: 2 })).toBe('document-v2-comments.md');
+  });
+});
+
+describe('htmlFilename', () => {
+  it('produces a sluggified filename ending in -v{n}.html', () => {
+    expect(htmlFilename({ title: 'Agglayer DVN Paths' }, { versionNumber: 3 })).toBe(
+      'agglayer-dvn-paths-v3.html',
+    );
+  });
+
+  it('handles titles with special characters the same way commentsFilename does', () => {
+    expect(htmlFilename({ title: "Carol's Notes (draft)" }, { versionNumber: 1 })).toBe(
+      'carol-s-notes-draft-v1.html',
+    );
+  });
+
+  it('falls back to "document" for an empty slug', () => {
+    expect(htmlFilename({ title: '!!!' }, { versionNumber: 2 })).toBe('document-v2.html');
+  });
+
+  it('truncates long titles to 60 chars of slug before the suffix', () => {
+    const longTitle = 'a'.repeat(120);
+    const name = htmlFilename({ title: longTitle }, { versionNumber: 7 });
+    expect(name).toBe(`${'a'.repeat(60)}-v7.html`);
+  });
+
+  it('uses the same slug as commentsFilename for the same title', () => {
+    const title = 'Mixed CASE  with — punctuation!';
+    const html = htmlFilename({ title }, { versionNumber: 4 });
+    const md = commentsFilename({ title }, { versionNumber: 4 });
+    const htmlSlug = html.replace(/-v4\.html$/, '');
+    const mdSlug = md.replace(/-v4-comments\.md$/, '');
+    expect(htmlSlug).toBe(mdSlug);
   });
 });
