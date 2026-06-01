@@ -84,3 +84,15 @@ export function commentsFilename(doc: DocInfo, version: VersionInfo): string {
     .slice(0, 60);
   return `${slug || 'document'}-v${version.versionNumber}-comments.md`;
 }
+
+/** Sluggify the doc title for a filesystem-safe HTML download filename.
+ *  Uses the same slug rule as commentsFilename — diverges only in the
+ *  suffix. */
+export function htmlFilename(doc: DocInfo, version: VersionInfo): string {
+  const slug = doc.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60);
+  return `${slug || 'document'}-v${version.versionNumber}.html`;
+}

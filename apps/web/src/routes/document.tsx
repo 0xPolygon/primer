@@ -21,7 +21,7 @@ import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { useTheme } from '../lib/useTheme.ts';
-import { commentsFilename, formatThreadsAsMarkdown } from '../lib/exportComments.ts';
+import { commentsFilename, formatThreadsAsMarkdown, htmlFilename } from '../lib/exportComments.ts';
 import { hasLiveComments } from '../lib/liveComments.ts';
 import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
@@ -213,6 +213,54 @@ export function DocumentPage() {
     [readMostly]
   );
 
+  function showFeedback(
+    fb: { kind: 'success' | 'error'; message: string },
+    dismissMs: number = fb.kind === 'error' ? 3000 : 2000,
+  ) {
+    if (copyFeedbackTimerRef.current !== null) {
+      clearTimeout(copyFeedbackTimerRef.current);
+    }
+    setCopyFeedback(fb);
+    copyFeedbackTimerRef.current = setTimeout(() => {
+      setCopyFeedback(null);
+      copyFeedbackTimerRef.current = null;
+    }, dismissMs);
+  }
+
+  function openFullScreen() {
+    if (!currentVersionId) return;
+    window.open(
+      `/api/versions/${currentVersionId}/content`,
+      '_blank',
+      'noopener,noreferrer',
+    );
+  }
+
+  async function downloadHtml() {
+    if (!docQuery.data || !currentVersionId) return;
+    try {
+      const res = await fetch(`/api/versions/${currentVersionId}/content`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = window.document.createElement('a');
+      a.href = url;
+      a.download = htmlFilename(
+        { title: docQuery.data.document.title },
+        { versionNumber: currentVersionNumber },
+      );
+      a.style.display = 'none';
+      window.document.body.appendChild(a);
+      a.click();
+      window.document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      showFeedback({ kind: 'error', message: 'Download failed. Try again.' });
+    }
+  }
+
   function exportComments() {
     if (!docQuery.data) return;
     const md = formatThreadsAsMarkdown(
@@ -243,18 +291,11 @@ export function DocumentPage() {
       threads,
     );
     const result = await copyText(md);
-    if (copyFeedbackTimerRef.current !== null) {
-      clearTimeout(copyFeedbackTimerRef.current);
-    }
-    setCopyFeedback(
+    showFeedback(
       result === 'failed'
         ? { kind: 'error', message: 'Copy failed. Try Download instead.' }
-        : { kind: 'success', message: 'Copied' }
+        : { kind: 'success', message: 'Copied' },
     );
-    copyFeedbackTimerRef.current = setTimeout(() => {
-      setCopyFeedback(null);
-      copyFeedbackTimerRef.current = null;
-    }, result === 'failed' ? 3000 : 2000);
   }
 
   const togglePickMode = () => {
@@ -472,17 +513,25 @@ export function DocumentPage() {
                 role="menu"
                 className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
               >
-                {buildMenuItems({ isUploader }).map((item) => {
+                {buildMenuItems({ isUploader }).map((item, index) => {
                   if (item.id === 'separator') {
                     return (
                       <div
-                        key="sep"
+                        key={`sep-${index}`}
                         className="my-1 border-t border-neutral-200 dark:border-neutral-800"
                         aria-hidden="true"
                       />
                     );
                   }
                   const onClickFor: Record<Exclude<MenuItemId, 'separator'>, () => void> = {
+                    'open-fullscreen': () => {
+                      setActionsMenuState('closed');
+                      openFullScreen();
+                    },
+                    'download-html': () => {
+                      setActionsMenuState('closed');
+                      void downloadHtml();
+                    },
                     copy: () => {
                       setActionsMenuState('closed');
                       void copyComments();
