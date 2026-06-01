@@ -213,6 +213,20 @@ export function DocumentPage() {
     [readMostly]
   );
 
+  function showFeedback(
+    fb: { kind: 'success' | 'error'; message: string },
+    dismissMs: number = fb.kind === 'error' ? 3000 : 2000,
+  ) {
+    if (copyFeedbackTimerRef.current !== null) {
+      clearTimeout(copyFeedbackTimerRef.current);
+    }
+    setCopyFeedback(fb);
+    copyFeedbackTimerRef.current = setTimeout(() => {
+      setCopyFeedback(null);
+      copyFeedbackTimerRef.current = null;
+    }, dismissMs);
+  }
+
   function exportComments() {
     if (!docQuery.data) return;
     const md = formatThreadsAsMarkdown(
@@ -243,18 +257,11 @@ export function DocumentPage() {
       threads,
     );
     const result = await copyText(md);
-    if (copyFeedbackTimerRef.current !== null) {
-      clearTimeout(copyFeedbackTimerRef.current);
-    }
-    setCopyFeedback(
+    showFeedback(
       result === 'failed'
         ? { kind: 'error', message: 'Copy failed. Try Download instead.' }
-        : { kind: 'success', message: 'Copied' }
+        : { kind: 'success', message: 'Copied' },
     );
-    copyFeedbackTimerRef.current = setTimeout(() => {
-      setCopyFeedback(null);
-      copyFeedbackTimerRef.current = null;
-    }, result === 'failed' ? 3000 : 2000);
   }
 
   const togglePickMode = () => {
