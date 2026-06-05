@@ -144,10 +144,12 @@ Codes returned in the `code` field of tool error payloads:
 
 ## MCP not configured
 
-If the MCP server isn't installed in the user's Claude Code, tell them:
+If the MCP server isn't installed in the user's Claude Code, tell them to install the Primer plugin:
 
 ```
-claude mcp add primer --env PRIMER_API_URL=<your-primer-url> -- npx -y @primer/mcp
+/plugin marketplace add 0xPolygon/primer
+/plugin install primer@primer
+/reload-plugins
 ```
 
-`PRIMER_API_URL` should match the Primer deployment they want to publish to (e.g. `https://primer.up.railway.app` for production, `http://localhost:3000` for local development). The token store keys by this URL, so distinct deployments don't clobber each other.
+The plugin's `plugin.json` declares the MCP server with the prod `PRIMER_API_URL` baked in, so there is nothing else to configure. The token store keys by this URL, so a user can also have separate dev/staging entries side-by-side if they manually register additional MCP instances against other Primer deployments.

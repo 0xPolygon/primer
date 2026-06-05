@@ -11,6 +11,20 @@ See:
 - This sub-project's design spec: `docs/superpowers/specs/2026-05-13-primer-local-foundation-design.md`
 - Implementation plan: `docs/superpowers/plans/2026-05-13-primer-local-foundation.md`
 
+## Publish from Claude Code (or any MCP-capable agent)
+
+This repo ships a Claude Code plugin (`primer`) that bundles a skill + the [`@polygonlabs/primer-mcp`](apps/mcp/) server. End users at Polygon install it once with:
+
+```
+/plugin marketplace add 0xPolygon/primer
+/plugin install primer@primer
+/reload-plugins
+```
+
+Then in any Claude Code session: *"publish this to Primer"* triggers the device-flow login (one-time browser approval), creates the document, and returns a stable URL. Subsequent versions and reviewer comments flow through the same skill.
+
+The plugin manifest bakes in the prod `PRIMER_API_URL` (`https://primer-polygon.up.railway.app`) — nothing else to configure. For local development against `localhost:3000`, see `apps/mcp/README.md`.
+
 ## Quickstart
 
 Prerequisites: Node 24 LTS, Docker, Corepack-enabled (Node ships with this; run `corepack enable` once — see NixOS note below).

@@ -4,17 +4,21 @@ description: >-
   Publish and iterate on LLM-generated HTML or Markdown artifacts in Primer.
   Use when the user wants to share an artifact at a stable URL, push a new
   version as they iterate, or pull reviewer comments/feedback on a version.
-  Requires the @primer/mcp server; the skill walks the user through a one-time
-  browser approval to obtain a token.
+  The plugin auto-registers the @polygonlabs/primer-mcp server; the skill
+  walks the user through a one-time browser approval to obtain a token.
 ---
 
-Workflow brain over the `@primer/mcp` tools. Use the five steps below in order; deeper detail (full tool I/O, error taxonomy, file schemas) lives in `reference.md` — read it on demand.
+Workflow brain over the `@polygonlabs/primer-mcp` tools. Use the five steps below in order; deeper detail (full tool I/O, error taxonomy, file schemas) lives in `reference.md` — read it on demand.
 
-If the MCP server isn't configured, tell the user:
+If the user reports the MCP server isn't running, tell them to install/reinstall the Primer plugin:
 
 ```
-claude mcp add primer --env PRIMER_API_URL=<your-primer-url> -- npx -y @primer/mcp
+/plugin marketplace add 0xPolygon/primer
+/plugin install primer@primer
+/reload-plugins
 ```
+
+The plugin bakes the prod `PRIMER_API_URL` into the MCP registration — there is nothing else to configure.
 
 Never echo, log, or otherwise surface the token. The MCP tools intentionally do not return it to you — only a `tokenPrefix` for display.
 
