@@ -61,13 +61,15 @@ The new work is concentrated in **authentication** (device flow + bearer tokens)
 └──────┬───────────────────┘     to the user                      │                                 │
        │                                                           │  device_authorizations table   │
        │  3. user opens verifyUrl in browser (already Okta-authed) │                                 │
-       │     GET /device?code=WDJB-MZHT  →  Approve                │  COOKIE: GET /device (SPA page) │
-       │                                   POST /api/device/approve │          /api/device/approve    │
+       │     GET /device → page shows requester metadata,          │  COOKIE: GET /device (SPA page) │
+       │     user TYPES userCode from terminal, clicks Approve     │          /api/device/pending    │
+       │                       POST /api/device/approve            │          /api/device/approve    │
        │                                                           │          /api/device/deny       │
        │  4. POST /api/device/token (poll, every `interval`s)      │                                 │
        │  ◀──── 200 { token: primer_pat_… }  (minted on approval)  │  mints api_tokens row           │
        │                                                           │                                 │
-       │  5. store token in ~/.config/primer/token.json           │                                 │
+       │  5. store token in ~/.config/primer/tokens.json           │                                 │
+       │     (keyed by PRIMER_API_URL, atomic write)               │                                 │
        ▼                                                           │                                 │
   ─── Steady state: every API call carries ───────────────────▶   │  authMiddleware:                │
       Authorization: Bearer primer_pat_…                          │   composeResolvers(             │
@@ -84,7 +86,7 @@ Once a token exists, requests authenticate exactly as in the bearer design: `aut
 
 ### CSRF change
 
-A bearer token is not an ambient credential, so a cross-site page cannot forge a bearer-authed request. `csrfMiddleware` therefore **skips the check when `authMethod === 'bearer'`** (keyed off the winning resolver, not raw header presence). The unauthenticated device endpoints (`/api/device/authorize`, `/api/device/token`) carry no cookie either and are CSRF-exempt as well. The "no permissive CORS" invariant from `csrf.ts` still holds and is reaffirmed.
+A bearer token is not an ambient credential, so a cross-site page cannot forge a bearer-authed request. `csrfMiddleware` therefore **skips the check when `authMethod === 'bearer'`** (keyed off the winning resolver, not raw header presence). The unauthenticated device endpoints (`/api/device/authorize`, `/api/device/token`) carry no cookie either and are CSRF-exempt as well — they are added to a shared `PUBLIC_PATHS` set in `middleware/auth.ts` that both the auth middleware and CSRF middleware consume (D18). The "no permissive CORS" invariant from `csrf.ts` still holds and is reaffirmed.
 
 ### What is unchanged
 
@@ -126,7 +128,8 @@ export const deviceAuthorizations = pgTable(
     userCode: text('user_code').notNull(),               // human-typable, e.g. "WDJB-MZHT"
     status: text('status').notNull().default('pending'), // 'pending' | 'approved' | 'denied' | 'consumed'
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }), // set on approval
-    clientLabel: text('client_label'),                   // optional hint from the CLI (hostname)
+    clientLabel: text('client_label'),                   // optional hint from the CLI (hostname); displayed on the approval page as untrusted
+    requesterIp: text('requester_ip'),                   // captured at /api/device/authorize for the approval page; nullable when unknown
     intervalSeconds: integer('interval_seconds').notNull().default(5),
     lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -145,7 +148,9 @@ export const deviceAuthorizations = pgTable(
 
 **`user_code`** is short and human-typable: 8 chars from an unambiguous alphabet (no `0/O/1/I`), formatted `XXXX-XXXX` (~40 bits). It is single-use and lives only for `expires_at` (default 10 min), which together with the short window makes guessing infeasible without a general rate limiter.
 
-**Token issuance is deferred to first successful poll.** On approval we only set `status='approved'` + `user_id`. When the CLI's poll arrives and the row is approved, the server *then* `generateToken()`, inserts the `api_tokens` row (`name = clientLabel ?? 'device login'`), returns the **plaintext once**, and marks the device row `consumed`. This way the plaintext exists only in that one response and is never stored.
+**Token issuance is deferred to first successful poll.** On approval we only set `status='approved'` + `user_id`. When the CLI's poll arrives and the row is approved, the server *then* `generateToken()`, inserts the `api_tokens` row (`name = clientLabel ?? 'device login'`, `expires_at = now + 90 days`), returns the **plaintext once**, and marks the device row `consumed`. This way the plaintext exists only in that one response and is never stored.
+
+**Device-issued tokens expire by default.** `expires_at = now + 90 days` for any token minted via the device flow. Re-running login is cheap and writes the new token to the local store; making expiry the default prevents abandoned device tokens from accumulating indefinitely. The column stays nullable so future flows (e.g. CI long-lived tokens, scoped tokens) can opt out — device flow is the only minter that sets a default expiry.
 
 **Validation query** (once per bearer request), unchanged from the token design:
 
@@ -173,50 +178,69 @@ LIMIT 1
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `POST` | `/api/device/authorize` | **none** (public) | Start the flow. Optional body `{ clientLabel? }`. Generates `device_code` + `user_code`, stores a pending row, returns `{ deviceCode, userCode, verificationUri, verificationUriComplete, expiresIn, interval }`. |
+| `POST` | `/api/device/authorize` | **none** (public) | Start the flow. Optional body `{ clientLabel? }`. Records the requester's IP (from `x-forwarded-for` last hop or socket) and `clientLabel`. Generates `device_code` + `user_code`, stores a pending row, returns `{ deviceCode, userCode, verificationUri, verificationUriComplete, expiresIn, interval }`. |
 | `POST` | `/api/device/token` | **none** (the `device_code` is the credential) | Poll. Body `{ deviceCode }`. Returns one of: `authorization_pending` (400), `slow_down` (400, if polled faster than `interval`), `expired_token` (400), `access_denied` (400), or **200 `{ token, tokenPrefix, expiresAt }`** on the first poll after approval (then the row is `consumed`; further polls → `invalid_grant`). |
-| `GET` | `/device` | cookie/Okta (page) | The browser approval **page** (served by the SPA). `?code=WDJB-MZHT` pre-fills the code. If the user isn't signed in, the existing middleware redirects through Okta and back. |
-| `POST` | `/api/device/approve` | cookie/Okta + CSRF | Body `{ userCode }`. Looks up a pending, non-expired row; sets `status='approved'`, `user_id = current user`. Returns the resolved `clientLabel` for display/confirmation. |
+| `GET` | `/device` | cookie/Okta (page) | The browser approval **page** (served by the SPA). The page does **not** pre-fill the code from `?code=`; the user must type it from their terminal (see Section 6, phishing mitigation). If the user isn't signed in, the existing middleware redirects through Okta and back. |
+| `POST` | `/api/device/approve` | cookie/Okta + CSRF | Body `{ userCode }`. Looks up a pending, non-expired row; sets `status='approved'`, `user_id = current user`. Returns `{ clientLabel, requesterIp, createdAt }` for the post-approval confirmation. |
 | `POST` | `/api/device/deny` | cookie/Okta + CSRF | Body `{ userCode }`. Sets `status='denied'`. |
+| `GET` | `/api/device/pending` | cookie/Okta | Body for the approval page: takes `?userCode=…`, returns `{ clientLabel, requesterIp, createdAt, expiresAt }` for a pending row, or 404 / 410 (expired). Used so the page can display request metadata before the user clicks Approve. |
 
-`/api/device/authorize` and `/api/device/token` are added to the middleware **public-path allowlist** and are **CSRF-exempt** (no cookie involved; the device/user codes are the security boundary). Error bodies follow RFC 8628 naming so the shape is familiar.
+`/api/device/authorize` and `/api/device/token` are added to the centralized **`PUBLIC_PATHS`** allowlist exported from `middleware/auth.ts` and are **CSRF-exempt** (no cookie involved; the device/user codes are the security boundary). `csrfMiddleware` imports `PUBLIC_PATHS` and skips those paths plus any request with `authMethod === 'bearer'` — one source of truth, no string-literal duplication. Error bodies follow RFC 8628 naming so the shape is familiar.
+
+The `requester_ip` column on `device_authorizations` (Section 2) is populated from the trusted forwarded-for last hop (or socket address when not behind a proxy) so the approval page can render where the request came from.
 
 ### Token-management endpoints (`apps/api/src/routes/tokens.ts`)
 
-For visibility and revocation of device-issued (and any manually-minted) tokens.
+For visibility and revocation of device-issued tokens.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `GET` | `/api/tokens` | any authenticated identity | List the caller's tokens (metadata only — never the secret): `{ id, name, tokenPrefix, createdAt, lastUsedAt, expiresAt, revokedAt }[]`. |
 | `DELETE` | `/api/tokens/:id` | owner only | Revoke (set `revoked_at`). 404 if not found/owned. Idempotent. |
-| `POST` | `/api/tokens` | any authenticated identity | **Optional/secondary.** Manually mint a token (`{ name, expiresInDays? }`) → returns the plaintext once. Useful for CI/scripts; the device flow is the primary path for interactive agents. |
+
+Manual web-UI minting of tokens (for CI etc.) is **not** in v1; the device flow is the only mint path. See Section 7. This keeps the surface tight: every token in `api_tokens` came from an explicit Okta-authenticated approval of a specific device request.
 
 ### DTOs (`packages/shared/src/api.ts`, append)
 
 ```ts
 export interface DeviceAuthorizeResponse {
   deviceCode: string; userCode: string;
-  verificationUri: string; verificationUriComplete: string;
+  verificationUri: string;
+  // Informational: the RFC's pre-filled convenience URL. Clients SHOULD display
+  // verificationUri + userCode separately (see Section 6). Kept in the response
+  // so the shape stays RFC-8628 friendly and tooling can render a QR if it wants.
+  verificationUriComplete: string;
   expiresIn: number; interval: number;
 }
-export interface DeviceTokenSuccess { token: string; tokenPrefix: string; expiresAt: string | null; }
+export interface DeviceTokenSuccess { token: string; tokenPrefix: string; tokenId: string; expiresAt: string | null; }
 export interface DeviceTokenPending { error: 'authorization_pending' | 'slow_down' | 'expired_token' | 'access_denied' | 'invalid_grant'; }
+export interface DevicePendingResponse {
+  clientLabel: string | null;
+  requesterIp: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+export interface DeviceApproveResponse {
+  clientLabel: string | null;
+  requesterIp: string | null;
+  createdAt: string;
+}
 
 export interface ApiTokenSummary {
   id: string; name: string; tokenPrefix: string;
   createdAt: string; lastUsedAt: string | null; expiresAt: string | null; revokedAt: string | null;
 }
 export interface ApiTokensListResponse { tokens: ApiTokenSummary[]; }
-export interface CreateTokenRequest { name: string; expiresInDays?: number; }
-export interface CreateTokenResponse extends ApiTokenSummary { token: string; }
 ```
+
+`DeviceTokenSuccess.tokenId` is new — it lets the MCP store remember the token's id alongside the secret so `primer_logout` can call `DELETE /api/tokens/:id` for a true server-side revoke (not just a local-file delete).
 
 ### Resolver & middleware
 
 - `makeBearerResolver()` — `Authorization: Bearer primer_pat_…` → hash → validation query → throttled `last_used_at` touch → `c.set('authMethod','bearer')`.
-- `composeResolvers(...)` — first non-null wins. Composed at boot in **both** auth modes (so the flow is testable under `AUTH_MODE=mock`).
-- `AppVariables.authMethod?: 'bearer' | 'cookie' | 'mock'`; okta/mock resolvers set their values.
-- `csrfMiddleware` exempts `authMethod === 'bearer'` and the two public device endpoints.
+- `composeResolvers(...)` — first non-null wins, short-circuiting on the first match. Composed at boot in **both** auth modes (so the flow is testable under `AUTH_MODE=mock`). Test coverage explicitly includes: invalid bearer + valid cookie ⇒ `authMethod='cookie'` and CSRF still required.
+- `AppVariables.authMethod?: 'bearer' | 'cookie' | 'mock'`; okta/mock resolvers set their values on success.
+- `PUBLIC_PATHS` is exported from `middleware/auth.ts` as the single source of truth: `/api/health`, `/auth/login`, `/auth/callback`, plus the two new device endpoints (`/api/device/authorize`, `/api/device/token`). `csrfMiddleware` imports it and skips mutating-method checks for any path in the set, in addition to `authMethod === 'bearer'`. No duplicated string literals.
 
 ### Upload over the API
 
@@ -232,11 +256,31 @@ A standalone runnable workspace package (consistent with `apps/api`/`apps/web`; 
 
 | Var | Required | Meaning |
 |---|---|---|
-| `PRIMER_API_URL` | yes | Base URL, e.g. `https://primer.up.railway.app` or `http://localhost:3000` |
+| `PRIMER_API_URL` | yes | Base URL, e.g. `https://primer.up.railway.app` or `http://localhost:3000`. Used as both the API target *and* the token-store key (see below). |
 | `PRIMER_API_TOKEN` | no | Explicit token (CI/override). If unset, the server uses the **token store**. |
 | `PRIMER_TOKEN_FILE` | no | Override for the token store path |
 
-**Token resolution order:** `PRIMER_API_TOKEN` env → token-store file (default `~/.config/primer/token.json`, mode `0600`) → none (unauthenticated; data tools error and tell the user to log in). The device-flow login writes the store file.
+**Token store is keyed by base URL.** The store file (default `~/.config/primer/tokens.json`, mode `0600`) holds a map keyed by the normalized API base URL, so a user can have separate tokens for prod, staging, and `http://localhost:3000` without clobbering. Shape:
+
+```jsonc
+{
+  "https://primer.up.railway.app": {
+    "tokenId": "8b3c…",        // server-side id, used by primer_logout to revoke
+    "token": "primer_pat_…",
+    "prefix": "abc12345",       // for display only
+    "savedAt": "2026-06-05T…"
+  },
+  "http://localhost:3000": { … }
+}
+```
+
+Reads/writes are scoped to the entry for `PRIMER_API_URL`. Writes are **atomic**: write to `tokens.json.tmp` (mode `0600`), `fsync`, `rename` over `tokens.json`. Prevents partial writes when two entry points race (in-agent `primer_login_status` and the standalone `primer-mcp login` CLI subcommand).
+
+**Token resolution order:** `PRIMER_API_TOKEN` env → token-store entry for the current `PRIMER_API_URL` → none (unauthenticated; data tools error with `code: 'not_authenticated'` and tell the user to log in). The device-flow login writes the store entry for `PRIMER_API_URL`.
+
+### Dev vs. prod base URLs
+
+In **prod**, `AUTH_BASE_URL` on the API points at the public SPA origin (`https://primer.up.railway.app`); `verificationUri` resolves to `https://primer.up.railway.app/device`, which the React Router handles via the SPA fallback in `app.ts`. In **dev**, the API runs at `localhost:3000` but the SPA is served by Vite at `localhost:5173` (which proxies `/api/*` to :3000). Set `AUTH_BASE_URL=http://localhost:5173` so device-flow URLs render the SPA-served approval page. If `AUTH_BASE_URL` is unset, `/api/device/authorize` returns relative paths (`/device`) and the CLI prepends `PRIMER_API_URL` — works for prod-style same-origin setups, breaks the dev split-origin case (callers must explicitly set `AUTH_BASE_URL` in dev).
 
 ### Transport & registration
 
@@ -252,11 +296,29 @@ No token in the registration — it's obtained interactively via the login flow.
 
 ### Login (device flow) — two entry points sharing the store
 
+The login tools are **stateless** between calls: `primer_login` returns the `deviceCode` to the agent (along with the user-facing URL + code), and `primer_login_status` accepts the `deviceCode` as input. This way an MCP server restart mid-flow (Claude Code restarts MCPs fairly often) doesn't orphan the login — the agent already has the only piece of state it needs.
+
 - **In-agent (MCP tools):**
-  - `primer_login` — `POST /api/device/authorize`, stash the `device_code` in the server process, return `{ verificationUri, verificationUriComplete, userCode, expiresIn }` plus a text instruction for the agent to relay ("Open <url> and click Approve; the code is WDJB-MZHT").
-  - `primer_login_status` — poll `/api/device/token` once (respecting `interval`); return `pending` / `approved` / `denied` / `expired`. On `approved`, write the token to the store; subsequent data tools just work. (The agent shows the URL, waits for the user, then calls this — or calls it a few times.)
-  - `primer_logout` — clear the stored token (and optionally call `DELETE /api/tokens/:id` if the id is known).
-- **From the CLI (`primer-mcp login` subcommand):** runs the full loop non-interactively for the user — prints the URL + code (optionally opens the browser), auto-polls until approved/expired, writes the store. For users who prefer a one-shot terminal command outside the agent.
+  - `primer_login` — `POST /api/device/authorize` (with `clientLabel = os.hostname()` by default), return `{ deviceCode, userCode, verificationUri, expiresIn, interval }`. The tool result includes a fixed-shape user-facing instruction string the agent surfaces verbatim (see Section 5 on the strict format). The response intentionally **omits `verificationUriComplete`** so the agent doesn't accidentally show the pre-filled URL — that URL exists in the API response but the MCP layer drops it to enforce the "user types the code" UX.
+  - `primer_login_status` — accepts `{ deviceCode }`; **long-polls internally**, calling `POST /api/device/token` with the server-recommended `interval` and respecting `slow_down`, up to a hard MCP-side timeout of **90 seconds** per invocation. Returns one of: `{ status: 'approved', tokenPrefix, expiresAt }` (after writing the store), `{ status: 'pending' }` (timed out before user approved — agent calls again), `{ status: 'denied' }`, `{ status: 'expired' }`, `{ status: 'error', code }`. The internal poll collapses what would otherwise be many round-trips between agent and MCP into one.
+  - `primer_logout` — clears the local store entry for `PRIMER_API_URL` **and** calls `DELETE /api/tokens/:tokenId` to revoke server-side (the `tokenId` is stored alongside the secret per the schema above). Idempotent if the token is already revoked / missing.
+- **From the CLI (`primer-mcp login` subcommand):** runs the full loop non-interactively for the user — prints the URL + code (does **not** open the browser automatically; the user pastes), auto-polls until approved/expired, writes the store. Shares the same atomic write path as the in-agent flow.
+
+### Tool error contract
+
+Every MCP tool error includes a machine-checkable `code` field so the skill can branch on it without string-matching messages. Codes:
+
+| Code | Meaning |
+|---|---|
+| `not_authenticated` | No token in env or store, or the API returned 401. Skill triggers `primer_login`. |
+| `forbidden` | API returned 403 (e.g., not the uploader of a document). Skill surfaces and asks the user. |
+| `not_found` | API returned 404 (document/version id stale). |
+| `bad_request` | API returned 400 (validation / size / format). Message carries server detail. |
+| `rate_limited` | Reserved for future use; the device endpoints emit `slow_down` only. |
+| `network` | Fetch failed before getting a response; transient, retryable. |
+| `login_denied` / `login_expired` | Terminal login states surfaced by `primer_login_status`. |
+
+`PrimerApiError` carries `{ code, message, status }`; tool handlers map it into the MCP error shape.
 
 ### Data tools
 
@@ -271,7 +333,7 @@ All return structured JSON + a readable text summary; API errors (401/403/404/40
 | `primer_list_versions` | `{ documentId }` | `GET /api/documents/:id/versions` | version list |
 | `primer_get_comments` | `{ versionId }` **or** `{ documentId }` (→ latest version) | `GET /api/versions/:versionId/threads` | threads + comments, formatted for review |
 
-`content` is inline (artifacts ≤10 MB). `primer_get_comments` groups by thread and renders the anchored selection, open/resolved state, and each comment's author/body/timestamps, so the agent can act on feedback.
+`content` is inline (artifacts ≤10 MB). `primer_get_comments` groups by thread; **for each thread it emits the anchored selection text** — i.e., the literal quote from the document the comment is attached to (`selectorText` from the existing thread anchor, NOT the CSS path) — followed by open/resolved state and each non-deleted comment's author, body, and timestamps. Tombstoned comments render as `(deleted)`. The selection text is the part the agent uses to locate the corresponding source position; emitting only the CSS selector would force the agent to re-fetch and parse the rendered HTML.
 
 ### Internal modules
 
@@ -307,38 +369,70 @@ description: >-
 
 ### Body (workflow)
 
-1. **Auth preflight** — try `primer_whoami`. If it errors with "not authenticated", run the login flow: call `primer_login`, **show the user the verification URL + code**, ask them to open it and click Approve, then call `primer_login_status` (re-poll a few times until approved/expired). Never print the token.
+1. **Auth preflight** — try `primer_whoami`. If the error has `code === 'not_authenticated'`, run the login flow: call `primer_login`, **show the user the verification URL + code using the strict format below**, then call `primer_login_status` (passing the `deviceCode` returned by `primer_login`). Re-poll if it returns `pending` (each call long-polls up to 90s server-side). Never print the token. Branch on `code`, not on message text.
 2. **Create vs. iterate** — new artifact → `primer_create_document` (pick `format` from content/extension); **remember the `documentId`** in `.primer/document.json` so later turns target the same doc. Existing doc (file present or user names it) → `primer_add_version`.
 3. **Share** — surface the returned `url` immediately.
 4. **Iterate** — regenerate, `primer_add_version` with a concise `versionNote` ("fixed Y-axis scale").
-5. **Gather feedback** — `primer_get_comments` (latest version by default); summarize open threads, propose/apply fixes, then push a new version whose note references the addressed feedback.
+5. **Gather feedback** — `primer_get_comments` (latest version by default); summarize open threads using the anchored selection text as the quote, propose/apply fixes, then push a new version whose note references the addressed feedback.
+
+### Strict login-prompt format
+
+When relaying `primer_login`'s result to the user, the skill outputs exactly this shape, on its own with no surrounding prose:
+
+```
+Open this URL in your browser:
+  <verificationUri>
+
+Then type this code on the page:
+  <userCode>
+```
+
+No markdown links, no code-fence wrappers around the whole thing, no extra suggestions. The user's eye lands on the URL and code without parsing a paragraph.
+
+### `.primer/document.json` location
+
+The file lives in `process.cwd()` of the agent invocation, **not** the repo root. If the user runs `claude` from `~/work/charts/` and asks the agent to publish `report.html`, the file is `~/work/charts/.primer/document.json`. The skill must `mkdir -p .primer` before writing. Shape:
+
+```jsonc
+{ "documentId": "…", "lastVersionId": "…", "url": "https://primer…/d/…", "savedAt": "…" }
+```
+
+If the file exists and references a document the API returns 404 for (deleted on the server), the skill prompts the user before creating a new one — never silently overwrites.
 
 ### Conventions captured
 
-`.primer/document.json` persistence; format selection + 10 MB limit; the two upload mutations Primer makes (`<iframe>` / `<meta refresh>` stripped); never echo the token; what to tell the user if the MCP server isn't configured (`claude mcp add primer …` + `PRIMER_API_URL`). A `reference.md` holds full tool I/O and the login sequence (progressive disclosure).
+`.primer/document.json` persistence (location + 404 handling); format selection (`.md`/`.markdown` → markdown, else html) + 10 MB limit; the two upload mutations Primer makes (`<iframe>` / `<meta refresh>` stripped); never echo the token; the strict login-prompt format; the MCP error `code` taxonomy and how the skill branches on it; what to tell the user if the MCP server isn't configured (`claude mcp add primer …` + `PRIMER_API_URL`). A `reference.md` holds full tool I/O and the login sequence (progressive disclosure).
 
 ---
 
 ## Section 6 — Security
 
-- **Device flow.** Approval is an explicit, CSRF-protected click by an Okta-authenticated user; the page displays the `user_code` and "a command-line tool is requesting access to your Primer account as <you@polygon>" so a socially-engineered approval is at least legible. `user_code` is short-lived (10 min), single-use, high-enough entropy for the window. `device_code` is 256-bit and stored hashed. Poll `interval` is enforced (`slow_down`). `verification_uri_complete` is a convenience pre-fill, not an auto-approve.
-- **Token at rest.** sha-256 hex; plaintext returned exactly once (on the first post-approval poll, or on manual mint). Indexed point-lookup, no per-char compare.
-- **Revoke + expiry** first-class; validation query rejects both; revoked rows purged after 30 days, device rows after 1 day.
-- **CSRF.** Bearer requests and the two public device endpoints are exempt (no ambient credential); exemption keyed off the winning resolver. No permissive CORS — reaffirmed.
+- **Device flow — phishing posture.** The dominant attack on device-grant systems (the GitHub/Google class of socially-engineered approvals): attacker initiates `POST /api/device/authorize`, social-engineers a Polygon employee to click `verificationUriComplete`, victim clicks Approve, attacker polls and pockets a `primer_pat_…` for the victim's account. The mitigations stack:
+  1. **The approval page does not pre-fill `user_code` from `?code=`.** The user must read the code from their terminal and type it on the page. This is the single highest-leverage change: an attacker who supplies a pre-filled URL cannot also supply the code the victim sees in their own terminal.
+  2. **Approval page surfaces request metadata** fetched via `GET /api/device/pending`: the `clientLabel` (clearly labeled "claimed by the requesting tool, not verified"), `requester_ip`, and "started N minutes ago". A request from an unfamiliar IP / claiming an unfamiliar source is legible to a security-aware user.
+  3. **`user_code`** has ~40 bits of entropy in an unambiguous alphabet, single-use, 10-minute window. Guessing is infeasible even without a general rate limiter.
+  4. **`verificationUriComplete`** stays in the API response (RFC compatibility, QR-code tooling) but the MCP server **omits it from `primer_login`'s output** so the agent cannot accidentally show it; the user sees only `verificationUri` + `userCode`.
+- **Token at rest.** sha-256 hex; plaintext returned exactly once (on the first post-approval poll). Indexed point-lookup, no per-char compare.
+- **Token expiry.** Device-issued tokens get a default 90-day expiry (Section 2). Re-running login is cheap and replaces the stored token in-place.
+- **Revoke + expiry** first-class; validation query rejects both; revoked rows purged after 30 days, device rows after 1 day. `primer_logout` revokes server-side via `DELETE /api/tokens/:tokenId` in addition to clearing the local store.
+- **CSRF.** Bearer requests and the public device endpoints are exempt (no ambient credential); exemption keyed off `authMethod === 'bearer'` and the shared `PUBLIC_PATHS` set (Section 3). No permissive CORS — reaffirmed.
+- **No bearer override of session identity.** `composeResolvers(bearer, …)` short-circuits on the first non-null match, so a header-based mock identity (`X-Mock-User-Id`) is **never consulted** when a bearer is present. Explicit test coverage.
 - **Authority.** A token == its owner; no scopes in v1 (Section 7). A token can manage tokens for its own user; flagged for the v2 scope model.
-- **Secrets hygiene.** `primer_pat_` prefix is greppable for push-protection/secret-scanning. API request logger logs `user_id` only; token/device routes never log secrets or hashes. The MCP server never logs the token; the store file is `0600`.
+- **Secrets hygiene.** `primer_pat_` prefix is greppable for push-protection/secret-scanning. API request logger logs `user_id` only; token/device routes never log secrets, hashes, or response bodies. **Hard rule:** `/api/device/token` response bodies are never serialized to any log sink, current or future — a unit test asserts the route handler does not call `logger.*` with the response payload, and any logger interceptor that would dump bodies must explicitly exclude this path. The MCP server never logs the token; the store file is `0600`.
+- **Atomic token-store writes.** The MCP store uses temp-file write + `rename` (atomic on POSIX) so a crash or concurrent writer (CLI `login` subcommand racing the in-agent flow) cannot leave a half-written `tokens.json`.
 - **Mock mode.** Bearer + device flow work under `AUTH_MODE=mock` (tokens/approvals resolve to `mock-user-1`), enabling local end-to-end testing without Okta. Mock mode stays forbidden in production (existing `index.ts` guard).
 
 ---
 
 ## Section 7 — Out of scope / deferred
 
+- **Manual web-UI token minting (`POST /api/tokens`).** Removed from v1 — the device flow is the only mint path so every `api_tokens` row corresponds to an explicit Okta-authenticated device approval. Re-introduce in v2 alongside the scope model, when CI/long-lived tokens need a different shape.
 - Token **scopes** (read-only, per-document). v2.
 - **Remote HTTP MCP transport** on the API. Future phase (D2).
 - **Full OAuth authorization-code / client registry / refresh tokens.** Device grant only.
 - **Agent-authored comments.** Fetch-only in v1.
 - **General rate limiting / per-token usage analytics.**
-- **Public npm publish of `@primer/mcp`.** v1 runs via `npx`/internal registry.
+- **Public npm publish of `@primer/mcp`.** v1 runs via `npx`/internal registry. When published, `claude mcp add` invocations should pin a version (`npx -y @primer/mcp@<pinned>`).
 - **Standalone `primer` CLI binary** beyond the `@primer/mcp` `login` subcommand.
 - **Raw-JSON upload body.** Multipart reuse only.
 
@@ -348,9 +442,9 @@ description: >-
 
 | # | Topic | Decision |
 |---|---|---|
-| D1 | Token **issuance** | **OAuth 2.0 Device Authorization Grant (RFC 8628)**: agent initiates, user approves in-browser (reusing the Okta session), CLI polls and auto-receives a `primer_pat_…` token. Manual web minting kept as an optional secondary path. |
+| D1 | Token **issuance** | **OAuth 2.0 Device Authorization Grant (RFC 8628)** is the **only** mint path in v1: agent initiates, user approves in-browser (reusing the Okta session), CLI polls and auto-receives a `primer_pat_…` token. Manual web minting is deferred (see D19). |
 | D2 | MCP transport | Local **stdio** package (`@primer/mcp`). Remote HTTP deferred. |
-| D3 | Steady-state auth | Compose `bearerResolver` ahead of okta/mock; record `authMethod`; CSRF exempts bearer + device endpoints. No data-route changes. |
+| D3 | Steady-state auth | Compose `bearerResolver` ahead of okta/mock; record `authMethod`; CSRF exempts bearer requests + shared `PUBLIC_PATHS` (D18). No data-route changes. |
 | D4 | Upload over API | Reuse multipart endpoints; MCP builds `FormData`. No raw-JSON path. |
 | D5 | MCP content input | Inline `content` string. File-path input deferred. |
 | D6 | Token scopes | Full-user authority in v1; scopes v2. |
@@ -358,5 +452,14 @@ description: >-
 | D8 | Comment fetch | Reuse `GET /api/versions/:versionId/threads`; MCP formats for review. Fetch-only. |
 | D9 | Package placement | `apps/mcp` (runnable). |
 | D10 | Token at first poll | Token minted on first post-approval poll, returned once, never stored in plaintext. Approval only flips status + sets user. |
-| D11 | Token store | `@primer/mcp` persists to `~/.config/primer/token.json` (`0600`); `PRIMER_API_TOKEN` env overrides; `PRIMER_TOKEN_FILE` relocates. |
+| D11 | Token store | `@primer/mcp` persists to `~/.config/primer/tokens.json` (`0600`), **keyed by `PRIMER_API_URL`**, atomic temp+rename writes; each entry holds `{ tokenId, token, prefix, savedAt }`. `PRIMER_API_TOKEN` env overrides; `PRIMER_TOKEN_FILE` relocates the file. |
 | D12 | Login entry points | Both in-agent MCP tools (`primer_login`/`primer_login_status`) and a `primer-mcp login` CLI subcommand, sharing the store. |
+| D13 | Phishing hardening | Approval page **does not pre-fill the user code from `?code=`** — user types it from their terminal. `verificationUriComplete` is dropped from the MCP `primer_login` result (kept in the API response for RFC compatibility). Approval page surfaces `clientLabel` (untrusted), `requester_ip`, and request age via `GET /api/device/pending`. |
+| D14 | Device token expiry | Device-issued tokens default to `now + 90 days`. Re-login is cheap and replaces the stored entry. Nullable `expires_at` stays for future flows. |
+| D15 | Stateless login tools | `primer_login` returns `deviceCode` to the agent; `primer_login_status` accepts it as input. Survives MCP process restarts mid-login. |
+| D16 | Long-polling login status | `primer_login_status` polls internally up to 90 s honoring server `interval`/`slow_down`, returning a terminal state or `pending` for re-invocation. Collapses agent ↔ MCP round-trips. |
+| D17 | MCP error taxonomy | Tools return a machine-checkable `code` (`not_authenticated` / `forbidden` / `not_found` / `bad_request` / `rate_limited` / `network` / `login_denied` / `login_expired`). Skill branches on `code`, never on message text. |
+| D18 | Centralized `PUBLIC_PATHS` | The public-path allowlist lives in `middleware/auth.ts` and is imported by `csrfMiddleware`. One source of truth; CSRF + auth exemptions cannot drift. |
+| D19 | Manual mint removed from v1 | `POST /api/tokens` is out for v1. Every `api_tokens` row corresponds to an Okta-authenticated device approval. Re-introduce alongside the v2 scope model. |
+| D20 | No log of `/api/device/token` response bodies | Hard rule with explicit unit test. Future debug interceptors must skip this path. |
+| D21 | `.primer/document.json` location | Lives in `process.cwd()` of the agent invocation (not the repo root). Skill creates `.primer/` on demand and prompts before overwriting when the recorded document id is 404. |
