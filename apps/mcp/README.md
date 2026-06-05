@@ -158,3 +158,41 @@ To exercise the full device flow, point the CLI at a running API:
 ```
 PRIMER_API_URL=http://localhost:3000 node apps/mcp/dist/index.js login
 ```
+
+## Publishing to npm (maintainers only)
+
+Releases are cut **manually from a maintainer's machine** with npm 2FA — no automation token, no CI publish workflow. This keeps the publish path narrowly under human + hardware-MFA control.
+
+One-time setup:
+- npm account is a member of the [`@polygonlabs` npm org](https://www.npmjs.com/org/polygonlabs) with publish rights.
+- npm 2FA enabled (`npm profile enable-2fa auth-and-writes`).
+- Locally signed in: `npm whoami` returns your username.
+
+Per release:
+
+```bash
+# From repo root, on a clean master with the version bump merged
+git checkout master && git pull --ff-only
+pnpm install --frozen-lockfile
+
+# Verify
+pnpm --filter @polygonlabs/primer-mcp typecheck
+pnpm --filter @polygonlabs/primer-mcp test
+pnpm --filter @polygonlabs/primer-mcp build   # also runs as prepublishOnly
+
+# Publish (prompts for 2FA OTP interactively)
+cd apps/mcp
+npm publish --access public
+
+# Confirm
+npm view @polygonlabs/primer-mcp version
+```
+
+After publishing, **bump the version pin in `plugins/primer/.claude-plugin/plugin.json`** (`mcpServers.primer.args` → `["-y", "@polygonlabs/primer-mcp@<new-version>"]`) so the marketplace plugin picks up the release on the next `/plugin marketplace update primer`.
+
+Optionally tag the release for traceability (no automation hangs off it):
+
+```bash
+git tag mcp-v<version>
+git push origin mcp-v<version>
+```
