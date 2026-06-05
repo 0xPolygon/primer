@@ -3,10 +3,13 @@ import type { DeviceApproveResponse, DevicePendingResponse } from '@primer/share
 import { api } from '../lib/fetch.ts';
 
 /**
- * `XXXX-XXXX` where each X is a character from [A-Z2-9]. The server generates
- * codes in this exact shape (no `0`/`1`/`O`/`I` to avoid look-alike confusion).
+ * `XXXX-XXXX` from the server alphabet `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` —
+ * no `0`/`1`/`O`/`I` (avoids look-alike confusion when the user types from
+ * terminal). The server in `apps/api/src/auth/tokens.ts` is the source of
+ * truth; this client regex mirrors it so a typo like `O` vs `0` is rejected
+ * locally with a clear "format" hint rather than round-tripped into a 404.
  */
-const USER_CODE_REGEX = /^[A-Z2-9]{4}-[A-Z2-9]{4}$/;
+const USER_CODE_REGEX = /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/;
 
 export function isValidUserCode(userCode: string): boolean {
   return USER_CODE_REGEX.test(userCode);

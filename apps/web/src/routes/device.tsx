@@ -42,9 +42,9 @@ function relativeTimeFrom(iso: string): string {
 /** Normalise input: uppercase and auto-insert a dash after 4 chars (UX nicety). */
 function normalizeUserCode(raw: string): string {
   const upper = raw.toUpperCase();
-  // Strip everything not in the allowed alphabet or dash, then re-insert a
-  // single dash after position 4.
-  const cleaned = upper.replace(/[^A-Z2-9-]/g, '');
+  // Strip everything not in the server alphabet (excludes 0/1/O/I) or dash,
+  // then re-insert a single dash after position 4.
+  const cleaned = upper.replace(/[^A-HJ-NP-Z2-9-]/g, '');
   const noDash = cleaned.replace(/-/g, '');
   if (noDash.length <= 4) return noDash;
   return `${noDash.slice(0, 4)}-${noDash.slice(4, 8)}`;
