@@ -213,7 +213,31 @@ export function registerDeviceRoutes(
       const tokenId = uuidv7();
       const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_MS);
 
+      // Race-safety: the outer `status === 'approved'` check happens BEFORE the
+      // transaction, so two parallel polls can both pass it and both enter the
+      // mint block. To prevent a double-mint, we transition the row first via
+      // a conditional UPDATE (status: approved -> consumed) and only proceed
+      // with the INSERT when our UPDATE actually changed a row. The loser of
+      // the race sees rowCount === 0 and returns invalid_grant — same shape as
+      // a stale second-poll-after-consumed, which is consistent UX.
+      let raceLost = false;
       await db.transaction(async (tx) => {
+        const updateResult = (await tx.execute(sql`
+          UPDATE device_authorizations
+          SET status = 'consumed'
+          WHERE id = ${row.id} AND status = 'approved'
+        `)) as unknown as { count?: number; rowCount?: number } | unknown;
+        // Drizzle's underlying driver may surface rowCount via different keys.
+        let affected = 0;
+        if (updateResult && typeof updateResult === 'object') {
+          const obj = updateResult as Record<string, unknown>;
+          if (typeof obj.count === 'number') affected = obj.count;
+          else if (typeof obj.rowCount === 'number') affected = obj.rowCount;
+        }
+        if (affected === 0) {
+          raceLost = true;
+          return;
+        }
         await tx.insert(apiTokens).values({
           id: tokenId,
           userId: row.userId!,
@@ -222,12 +246,11 @@ export function registerDeviceRoutes(
           tokenPrefix: minted.tokenPrefix,
           expiresAt: tokenExpiresAt,
         });
-        await tx.execute(sql`
-          UPDATE device_authorizations
-          SET status = 'consumed'
-          WHERE id = ${row.id}
-        `);
       });
+
+      if (raceLost) {
+        return c.json({ error: 'invalid_grant' }, 400);
+      }
 
       // CRITICAL: do NOT log the token plaintext, token hash, or response body.
       return c.json(

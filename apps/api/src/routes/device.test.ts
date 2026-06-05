@@ -409,6 +409,59 @@ describe('approve + token mint path', () => {
     });
   });
 
+  it('does not double-mint when two polls race on an approved row', async () => {
+    await withApp(async (app) => {
+      const userId = await seedUser();
+      const auth = await startAuthorize(app, { clientLabel: 'race-laptop' });
+
+      const approveRes = await app.request('/api/device/approve', {
+        method: 'POST',
+        headers: asUserJson(userId),
+        body: JSON.stringify({ userCode: auth.userCode }),
+      });
+      expect(approveRes.status).toBe(200);
+
+      // Force last_polled_at back far enough that BOTH parallel polls are past
+      // the throttle window — otherwise the second poll would be rejected as
+      // slow_down before reaching the mint path. We want both polls to enter
+      // the approved branch concurrently.
+      await db
+        .update(deviceAuthorizations)
+        .set({ lastPolledAt: new Date(Date.now() - 60_000) })
+        .where(eq(deviceAuthorizations.userCode, auth.userCode));
+
+      // Fire two polls in parallel — same deviceCode, same approved row.
+      const [res1, res2] = await Promise.all([
+        app.request('/api/device/token', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ deviceCode: auth.deviceCode }),
+        }),
+        app.request('/api/device/token', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ deviceCode: auth.deviceCode }),
+        }),
+      ]);
+
+      const statuses = [res1.status, res2.status].sort();
+      // Exactly one 200 + one 400.
+      expect(statuses).toEqual([200, 400]);
+
+      // The 400 must be invalid_grant (consumed-or-race-lost), not slow_down
+      // or anything else. Both throttle UPDATEs ran before either entered the
+      // approved branch (because last_polled_at was pushed 60s into the past),
+      // so neither poll sees a tooFast condition.
+      const losingRes = res1.status === 400 ? res1 : res2;
+      const losingBody = (await losingRes.json()) as { error: string };
+      expect(losingBody.error).toBe('invalid_grant');
+
+      // Exactly one api_tokens row exists for this user.
+      const mintedRows = await db.select().from(apiTokens).where(eq(apiTokens.userId, userId));
+      expect(mintedRows).toHaveLength(1);
+    });
+  });
+
   it('deny then poll returns access_denied', async () => {
     await withApp(async (app) => {
       const userId = await seedUser();
