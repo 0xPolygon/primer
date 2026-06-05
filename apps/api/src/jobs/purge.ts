@@ -65,20 +65,57 @@ export interface SessionPurgeReport {
 }
 
 const SESSION_GRACE_DAYS = 7;
+const DEVICE_AUTH_GRACE_DAYS = 1;
+const REVOKED_TOKEN_GRACE_DAYS = 30;
+
+function extractDeletedCount(result: unknown): number {
+  if (result && typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    if (typeof obj.count === 'number') return obj.count;
+    if (typeof obj.rowCount === 'number') return obj.rowCount;
+  }
+  return 0;
+}
 
 export async function purgeExpiredSessions(): Promise<SessionPurgeReport> {
   const startedAt = Date.now();
   const result = (await db.execute(sql`
     DELETE FROM sessions
     WHERE expires_at < now() - make_interval(days => ${SESSION_GRACE_DAYS})
-  `)) as unknown as { count?: number; rowCount?: number } | unknown;
+  `)) as unknown;
   // Drizzle's underlying driver may surface rowCount via different keys.
-  let deletedCount = 0;
-  if (result && typeof result === 'object') {
-    const obj = result as Record<string, unknown>;
-    if (typeof obj.count === 'number') deletedCount = obj.count;
-    else if (typeof obj.rowCount === 'number') deletedCount = obj.rowCount;
-  }
+  const deletedCount = extractDeletedCount(result);
+  return { deletedCount, durationMs: Date.now() - startedAt };
+}
+
+export interface DeviceAuthPurgeReport {
+  deletedCount: number;
+  durationMs: number;
+}
+
+export async function purgeStaleDeviceAuthorizations(): Promise<DeviceAuthPurgeReport> {
+  const startedAt = Date.now();
+  const result = (await db.execute(sql`
+    DELETE FROM device_authorizations
+    WHERE expires_at < now() - make_interval(days => ${DEVICE_AUTH_GRACE_DAYS})
+  `)) as unknown;
+  const deletedCount = extractDeletedCount(result);
+  return { deletedCount, durationMs: Date.now() - startedAt };
+}
+
+export interface RevokedTokenPurgeReport {
+  deletedCount: number;
+  durationMs: number;
+}
+
+export async function purgeRevokedTokens(): Promise<RevokedTokenPurgeReport> {
+  const startedAt = Date.now();
+  const result = (await db.execute(sql`
+    DELETE FROM api_tokens
+    WHERE revoked_at IS NOT NULL
+      AND revoked_at < now() - make_interval(days => ${REVOKED_TOKEN_GRACE_DAYS})
+  `)) as unknown;
+  const deletedCount = extractDeletedCount(result);
   return { deletedCount, durationMs: Date.now() - startedAt };
 }
 
@@ -93,21 +130,43 @@ export function startPurgeInterval(deps: {
   const tick = async () => {
     if (stopped) return;
     inFlight = (async () => {
+      // Run each step independently so one failure doesn't block the others.
+      let docReport: PurgeReport | null = null;
+      let sessionReport: SessionPurgeReport | null = null;
+      let deviceAuthReport: DeviceAuthPurgeReport | null = null;
+      let revokedTokenReport: RevokedTokenPurgeReport | null = null;
       try {
-        const docReport = await purgeExpiredDocuments({ storage: deps.storage });
-        const sessionReport = await purgeExpiredSessions();
-        if (
-          docReport.purgedDocumentIds.length > 0 ||
-          docReport.failedStorageKeys.length > 0 ||
-          sessionReport.deletedCount > 0
-        ) {
-          logger.info({ docReport, sessionReport }, 'purge interval: complete');
-        }
+        docReport = await purgeExpiredDocuments({ storage: deps.storage });
       } catch (err) {
-        logger.error({ err }, 'purge interval: unexpected failure');
-      } finally {
-        inFlight = null;
+        logger.error({ err }, 'purge interval: purgeExpiredDocuments failed');
       }
+      try {
+        sessionReport = await purgeExpiredSessions();
+      } catch (err) {
+        logger.error({ err }, 'purge interval: purgeExpiredSessions failed');
+      }
+      try {
+        deviceAuthReport = await purgeStaleDeviceAuthorizations();
+      } catch (err) {
+        logger.error({ err }, 'purge interval: purgeStaleDeviceAuthorizations failed');
+      }
+      try {
+        revokedTokenReport = await purgeRevokedTokens();
+      } catch (err) {
+        logger.error({ err }, 'purge interval: purgeRevokedTokens failed');
+      }
+      if (
+        (docReport && (docReport.purgedDocumentIds.length > 0 || docReport.failedStorageKeys.length > 0)) ||
+        (sessionReport && sessionReport.deletedCount > 0) ||
+        (deviceAuthReport && deviceAuthReport.deletedCount > 0) ||
+        (revokedTokenReport && revokedTokenReport.deletedCount > 0)
+      ) {
+        logger.info(
+          { docReport, sessionReport, deviceAuthReport, revokedTokenReport },
+          'purge interval: complete',
+        );
+      }
+      inFlight = null;
     })();
     await inFlight;
   };

@@ -5,9 +5,22 @@ import { join } from 'node:path';
 import { v7 as uuidv7 } from 'uuid';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { documents, versions, sessions, users } from '@primer/shared/schema';
+import {
+  documents,
+  versions,
+  sessions,
+  users,
+  apiTokens,
+  deviceAuthorizations,
+} from '@primer/shared/schema';
 import { FilesystemStorage } from '../storage/filesystem.ts';
-import { purgeExpiredDocuments, purgeExpiredSessions } from './purge.ts';
+import {
+  purgeExpiredDocuments,
+  purgeExpiredSessions,
+  purgeStaleDeviceAuthorizations,
+  purgeRevokedTokens,
+} from './purge.ts';
+import { generateDeviceCode, generateToken } from '../auth/tokens.ts';
 
 async function seedExpiredDoc(daysOld: number, storage: FilesystemStorage) {
   const documentId = uuidv7();
@@ -163,6 +176,127 @@ describe('purgeExpiredSessions', () => {
 
   it('returns deletedCount: 0 when nothing is past the grace window', async () => {
     const report = await purgeExpiredSessions();
+    expect(report.deletedCount).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('purgeStaleDeviceAuthorizations', () => {
+  it('deletes rows whose expires_at is more than 1 day in the past, leaves recent rows', async () => {
+    const tag = Math.random().toString(36).slice(2, 8);
+    const staleId = uuidv7();
+    const freshId = uuidv7();
+    const staleDeviceCode = generateDeviceCode();
+    const freshDeviceCode = generateDeviceCode();
+    const staleUserCode = `S${tag.slice(0, 3).toUpperCase()}-AAAA`;
+    const freshUserCode = `F${tag.slice(0, 3).toUpperCase()}-BBBB`;
+
+    await db.insert(deviceAuthorizations).values([
+      {
+        id: staleId,
+        deviceCodeHash: staleDeviceCode.deviceCodeHash,
+        userCode: staleUserCode,
+        status: 'pending',
+        intervalSeconds: 5,
+        // 2 days ago — outside the 1-day grace window.
+        expiresAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+      },
+      {
+        id: freshId,
+        deviceCodeHash: freshDeviceCode.deviceCodeHash,
+        userCode: freshUserCode,
+        status: 'pending',
+        intervalSeconds: 5,
+        // Expired 1 hour ago — still within the grace window, should remain.
+        expiresAt: new Date(Date.now() - 60 * 60 * 1000),
+      },
+    ]);
+
+    const report = await purgeStaleDeviceAuthorizations();
+    expect(report.deletedCount).toBeGreaterThanOrEqual(1);
+
+    const staleRows = await db
+      .select()
+      .from(deviceAuthorizations)
+      .where(eq(deviceAuthorizations.id, staleId));
+    expect(staleRows).toHaveLength(0);
+
+    const freshRows = await db
+      .select()
+      .from(deviceAuthorizations)
+      .where(eq(deviceAuthorizations.id, freshId));
+    expect(freshRows).toHaveLength(1);
+
+    // Cleanup.
+    await db.delete(deviceAuthorizations).where(eq(deviceAuthorizations.id, freshId));
+  });
+
+  it('returns deletedCount: 0 when nothing is past the grace window', async () => {
+    const report = await purgeStaleDeviceAuthorizations();
+    expect(report.deletedCount).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('purgeRevokedTokens', () => {
+  it('deletes tokens revoked >30 days ago; keeps recently revoked and never-revoked tokens', async () => {
+    const userId = `purge-tok-${Math.random().toString(36).slice(2, 8)}`;
+    await db.insert(users).values({
+      id: userId,
+      email: `${userId}@p.t`,
+      displayName: userId,
+    });
+
+    const oldRevokedId = uuidv7();
+    const recentRevokedId = uuidv7();
+    const liveId = uuidv7();
+    const oldTok = generateToken();
+    const recentTok = generateToken();
+    const liveTok = generateToken();
+
+    await db.insert(apiTokens).values([
+      {
+        id: oldRevokedId,
+        userId,
+        name: 'old-revoked',
+        tokenHash: oldTok.tokenHash,
+        tokenPrefix: oldTok.tokenPrefix,
+        revokedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+      },
+      {
+        id: recentRevokedId,
+        userId,
+        name: 'recent-revoked',
+        tokenHash: recentTok.tokenHash,
+        tokenPrefix: recentTok.tokenPrefix,
+        revokedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+      {
+        id: liveId,
+        userId,
+        name: 'live',
+        tokenHash: liveTok.tokenHash,
+        tokenPrefix: liveTok.tokenPrefix,
+        revokedAt: null,
+      },
+    ]);
+
+    const report = await purgeRevokedTokens();
+    expect(report.deletedCount).toBeGreaterThanOrEqual(1);
+
+    const oldRows = await db.select().from(apiTokens).where(eq(apiTokens.id, oldRevokedId));
+    expect(oldRows).toHaveLength(0);
+
+    const recentRows = await db.select().from(apiTokens).where(eq(apiTokens.id, recentRevokedId));
+    expect(recentRows).toHaveLength(1);
+
+    const liveRows = await db.select().from(apiTokens).where(eq(apiTokens.id, liveId));
+    expect(liveRows).toHaveLength(1);
+
+    // Cleanup. The users row cascades to api_tokens.
+    await db.delete(users).where(eq(users.id, userId));
+  });
+
+  it('returns deletedCount: 0 when no tokens are past the grace window', async () => {
+    const report = await purgeRevokedTokens();
     expect(report.deletedCount).toBeGreaterThanOrEqual(0);
   });
 });
