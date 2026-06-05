@@ -116,3 +116,43 @@ export const sessions = pgTable(
     byExpiry: index('sessions_expires_at_idx').on(t.expiresAt),
   })
 );
+
+export const apiTokens = pgTable(
+  'api_tokens',
+  {
+    id: uuid('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),                  // e.g. "device: my-laptop" or a manual label
+    tokenHash: text('token_hash').notNull(),       // sha-256 hex of the full secret
+    tokenPrefix: text('token_prefix').notNull(),   // first 8 chars of the random part, for display
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),   // nullable = no expiry
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => ({
+    byHash: uniqueIndex('api_tokens_token_hash_unique').on(t.tokenHash),
+    byUser: index('api_tokens_user_id_idx').on(t.userId),
+  }),
+);
+
+export const deviceAuthorizations = pgTable(
+  'device_authorizations',
+  {
+    id: uuid('id').primaryKey(),
+    deviceCodeHash: text('device_code_hash').notNull(),  // sha-256 of the device_code secret
+    userCode: text('user_code').notNull(),               // human-typable, e.g. "WDJB-MZHT"
+    status: text('status').notNull().default('pending'), // 'pending' | 'approved' | 'denied' | 'consumed'
+    userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }), // set on approval
+    clientLabel: text('client_label'),                   // optional hint from the CLI (hostname); displayed as untrusted
+    requesterIp: text('requester_ip'),                   // captured at /api/device/authorize; nullable when unknown
+    intervalSeconds: integer('interval_seconds').notNull().default(5),
+    lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDeviceHash: uniqueIndex('device_auth_device_code_hash_unique').on(t.deviceCodeHash),
+    byUserCode: uniqueIndex('device_auth_user_code_unique').on(t.userCode),
+  }),
+);
