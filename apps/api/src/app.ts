@@ -20,6 +20,7 @@ import { registerVersionRoutes } from './routes/versions.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerMeRoute } from './routes/me.ts';
 import { registerUserRoutes } from './routes/users.ts';
+import { registerDeviceRoutes } from './routes/device.ts';
 import type { Storage } from '@primer/shared/storage';
 import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
@@ -36,6 +37,7 @@ export interface AppDeps {
   oktaAdapter?: OktaAdapter;            // NEW
   authCookieName?: string;              // NEW; defaults to 'primer_sid'
   authStateCookieName?: string;         // NEW; defaults to 'primer_auth_state'
+  authBaseUrl?: string;                 // NEW; base URL used in device verification links
 }
 
 export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
@@ -74,6 +76,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerAuthRoutes(app, deps);
   registerMeRoute(app);
   registerUserRoutes(app);
+  registerDeviceRoutes(app, { baseUrl: deps.authBaseUrl ?? process.env.AUTH_BASE_URL ?? '' });
 
   if (process.env.NODE_ENV !== 'production') {
     registerDevFixtureRoute(app);
