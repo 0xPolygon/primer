@@ -1,4 +1,6 @@
 import type { MiddlewareHandler } from 'hono';
+import type { AppVariables } from '../app.ts';
+import { PUBLIC_PATHS } from '../middleware/auth.ts';
 
 export const CSRF_HEADER = 'x-primer-csrf';
 
@@ -17,8 +19,17 @@ const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 // the header and forge any state-changing request. Before adding CORS,
 // upgrade this to the Double Submit Cookie pattern (random per-session
 // secret, not a static '1').
-export const csrfMiddleware: MiddlewareHandler = async (c, next) => {
+//
+// Bearer-token requests (programmatic API clients) are exempt: CSRF only
+// matters for credentials the browser attaches automatically (cookies). A
+// bearer token must be explicitly set by JS that already has read access to
+// it, so there's no cross-origin forgery vector. Public paths are also
+// exempt — the auth middleware skips them, and the path allowlist lives in
+// one place (`PUBLIC_PATHS` in `../middleware/auth.ts`).
+export const csrfMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   if (!MUTATING_METHODS.has(c.req.method)) return next();
+  if (c.get('authMethod') === 'bearer') return next();
+  if (PUBLIC_PATHS.has(c.req.path)) return next();
   if (c.req.header(CSRF_HEADER) === '1') return next();
   return c.json({ error: 'csrf', message: 'Missing X-Primer-Csrf header' }, 403);
 };

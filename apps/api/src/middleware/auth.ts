@@ -2,7 +2,13 @@ import type { MiddlewareHandler } from 'hono';
 import type { AppVariables } from '../app.ts';
 import type { UserResolver } from '../auth/resolver.ts';
 
-const PUBLIC_PATHS = new Set(['/api/health', '/auth/login', '/auth/callback']);
+export const PUBLIC_PATHS = new Set([
+  '/api/health',
+  '/auth/login',
+  '/auth/callback',
+  '/api/device/authorize',
+  '/api/device/token',
+]);
 
 function isApiPath(path: string): boolean {
   return path.startsWith('/api/');

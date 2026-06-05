@@ -5,6 +5,8 @@ import { UploadPage } from './routes/upload.tsx';
 import { DocumentPage } from './routes/document.tsx';
 import { DevHarnessPage } from './routes/devHarness.tsx';
 import { AdminPage } from './routes/admin.tsx';
+import { DevicePage } from './routes/device.tsx';
+import { TokenSettingsPage } from './routes/settings-tokens.tsx';
 import { NotFoundPage } from './routes/notFound.tsx';
 
 const router = createBrowserRouter([
@@ -17,6 +19,8 @@ const router = createBrowserRouter([
       { path: '/d/:docId/v/:versionNumber', element: <DocumentPage /> },
       { path: '/dev/harness', element: <DevHarnessPage /> },
       { path: '/admin', element: <AdminPage /> },
+      { path: '/device', element: <DevicePage /> },
+      { path: '/settings/tokens', element: <TokenSettingsPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

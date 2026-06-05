@@ -15,12 +15,16 @@ export const MOCK_USER: ResolvedUser = {
   displayName: 'Mock User',
 };
 
-export const mockResolver: UserResolver = async () => MOCK_USER;
+export const mockResolver: UserResolver = async (c) => {
+  c.set('authMethod', 'mock');
+  return MOCK_USER;
+};
 
 /** Reads `X-Mock-User-Id` from the request. Falls back to MOCK_USER's id when absent. */
 export const mockMultiResolver: UserResolver = async (c) => {
   const headerId = c.req.header('x-mock-user-id');
   const id = headerId && headerId.trim().length > 0 ? headerId : MOCK_USER.id;
+  c.set('authMethod', 'mock');
   // The middleware needs the FULL user (email + displayName). For tests we
   // don't read these from the DB — they're synthesized from the id.
   if (id === MOCK_USER.id) return MOCK_USER;
@@ -39,6 +43,7 @@ export function makeOktaResolver(opts: OktaResolverOptions): UserResolver {
     if (!found) return null;
     // Sliding refresh — fire and forget; refresh failures don't break the request.
     void refreshSessionIfStale(sid).catch(() => undefined);
+    c.set('authMethod', 'cookie');
     return found.user;
   };
 }
