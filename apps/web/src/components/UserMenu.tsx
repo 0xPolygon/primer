@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMe } from '../queries/me.ts';
 import { api } from '../lib/fetch.ts';
 
@@ -42,6 +43,14 @@ export function UserMenu() {
           role="menu"
           className="absolute right-0 z-10 mt-1 w-44 overflow-hidden rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 py-1 shadow-md"
         >
+          <Link
+            to="/settings/tokens"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+          >
+            API tokens
+          </Link>
           <button
             type="button"
             role="menuitem"
