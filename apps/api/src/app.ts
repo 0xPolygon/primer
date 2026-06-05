@@ -26,6 +26,7 @@ import type { OktaAdapter } from './auth/okta.ts';
 
 export type AppVariables = {
   user: { id: string; email: string; displayName: string };
+  authMethod?: 'bearer' | 'cookie' | 'mock';
 };
 
 export interface AppDeps {
