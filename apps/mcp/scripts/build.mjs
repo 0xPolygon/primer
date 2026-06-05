@@ -36,7 +36,10 @@ await build({
   bundle: true,
   format: 'esm',
   platform: 'node',
-  target: 'node24',
+  // Target the lowest node we support so the published bundle runs for users
+  // on older runtimes. node20 has fetch/FormData/native ESM — everything the
+  // MCP needs. Bump only if you start using node24-only features.
+  target: 'node20',
   external: externalFiltered,
   // node:fs etc. are auto-external on platform: 'node'.
   sourcemap: true,

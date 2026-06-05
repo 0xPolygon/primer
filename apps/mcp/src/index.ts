@@ -1,5 +1,5 @@
 /**
- * `@primer/mcp` entrypoint.
+ * `@polygonlabs/primer-mcp` entrypoint.
  *
  * Two modes:
  *   1. `primer-mcp login` (argv[2] === 'login') — interactive CLI device

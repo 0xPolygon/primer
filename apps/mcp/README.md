@@ -1,4 +1,4 @@
-# @primer/mcp
+# @polygonlabs/primer-mcp
 
 Stdio MCP server for Primer — exposes Primer documents, versions, and
 comments as tools, and bundles a device-authorization login flow for both
@@ -7,17 +7,32 @@ client) via stdio.
 
 ## Install in Claude Code
 
-```
-claude mcp add primer --env PRIMER_API_URL=https://primer.example.com -- npx -y @primer/mcp
-```
-
-When this package is published to npm, pin a version in the command above
-(e.g. `npx -y @primer/mcp@0.1.0`) so the local install doesn't drift.
-During local development, point `--` at the built entrypoint instead of
-`npx`:
+**Preferred — via the Primer plugin marketplace** (also installs the `primer` skill that drives this MCP):
 
 ```
-claude mcp add primer --env PRIMER_API_URL=http://localhost:3000 -- node /abs/path/to/apps/mcp/dist/index.js
+/plugin marketplace add 0xPolygon/primer
+/plugin install primer@primer
+/reload-plugins
+```
+
+The plugin bakes the prod `PRIMER_API_URL` into the MCP server registration, so there's nothing else to configure — open a Claude Code session and say "publish this to Primer" to trigger the device-login + create-document flow.
+
+**Manual install** (skip the plugin, register the MCP yourself):
+
+```
+claude mcp add primer \
+  --env PRIMER_API_URL=https://primer-polygon.up.railway.app \
+  -- npx -y @polygonlabs/primer-mcp@1.0.0
+```
+
+Pin the version so the local install doesn't drift on each `npx` run.
+
+**Local dev** (point at a locally-running API):
+
+```
+claude mcp add primer \
+  --env PRIMER_API_URL=http://localhost:3000 \
+  -- node /abs/path/to/apps/mcp/dist/index.js
 ```
 
 ## Logging in
@@ -76,7 +91,7 @@ The CLI never auto-opens a browser and never echoes the bare token.
 
 ## Token store
 
-`@primer/mcp` writes tokens to `~/.config/primer/tokens.json`
+`@polygonlabs/primer-mcp` writes tokens to `~/.config/primer/tokens.json`
 (override with `PRIMER_TOKEN_FILE`). The file is a plain JSON object
 keyed by normalized `PRIMER_API_URL`, so one store can hold tokens for
 local-dev, staging, and prod simultaneously without collision.
@@ -133,7 +148,7 @@ on `code`, never on `message` text.
 To verify the bundle locally without a real Primer instance:
 
 ```
-pnpm --filter @primer/mcp build
+pnpm --filter @polygonlabs/primer-mcp build
 node --check apps/mcp/dist/index.js
 PRIMER_API_URL= node apps/mcp/dist/index.js   # should exit 1 with "PRIMER_API_URL is required."
 ```

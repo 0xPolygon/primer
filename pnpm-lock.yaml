@@ -86,13 +86,13 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
-      '@primer/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       zod:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@primer/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@types/node':
         specifier: ^25.6.0
         version: 25.6.0

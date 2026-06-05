@@ -16,7 +16,7 @@ Let a CLI-based coding agent (Claude Code or equivalent) publish to Primer direc
 Three deliverables, one dependency chain:
 
 1. **Programmatic API auth** — an **OAuth 2.0 Device Authorization Grant (RFC 8628)** that lets a non-browser client obtain a personal-access token (`primer_pat_…`) by having the user approve in the browser. The token itself is a bearer credential layered onto the existing REST API. The PRD lists "service-to-service auth / machine clients" as out of scope for v1; this spec lifts that exclusion deliberately and narrowly.
-2. **MCP interface** — a small `@primer/mcp` stdio server that exposes Primer's operations as MCP tools, plus a `login` step that drives the device flow and stores the resulting token. Agents add it with `claude mcp add`.
+2. **MCP interface** — a small `@polygonlabs/primer-mcp` stdio server that exposes Primer's operations as MCP tools, plus a `login` step that drives the device flow and stores the resulting token. Agents add it with `claude mcp add`.
 3. **Agent skill** — a Claude Code skill (`primer`) that orchestrates the tools: log in if needed → create → share URL → iterate (add version) → fetch feedback → repeat.
 
 Mental model: **the API is the capability + auth surface, the MCP is the tool surface (incl. login) for agents, and the skill is the workflow layer.** Each layer depends only on the one below it.
@@ -42,7 +42,7 @@ The new work is concentrated in **authentication** (device flow + bearer tokens)
 - **Remote/HTTP MCP transport.** We ship a local **stdio** server. A hosted Streamable-HTTP MCP endpoint mounted on the Hono app is a viable later phase but is explicitly out of scope here (D2).
 - **A full OAuth Authorization Code server.** We implement only the device grant (RFC 8628), reusing the existing Okta-cookie session for the *approval* step. No client registry, no refresh tokens, no PKCE web-app flow.
 - **Rate limiting / quotas on token use.** (Device endpoints get minimal anti-abuse — code entropy, expiry, poll throttling — but no general rate limiter.)
-- **A standalone published `primer` CLI binary.** Login + tools ship inside `@primer/mcp` (a `login` subcommand + MCP tools). A curl fallback is documented only.
+- **A standalone published `primer` CLI binary.** Login + tools ship inside `@polygonlabs/primer-mcp` (a `login` subcommand + MCP tools). A curl fallback is documented only.
 - **Agent-authored comments / replies.** v1 is fetch-only for comments from the agent side.
 - **New document/version/comment read or write endpoints.** The existing surface is sufficient.
 
@@ -56,7 +56,7 @@ The new work is concentrated in **authentication** (device flow + bearer tokens)
 ┌──────────────────┴──────┐  1. POST /api/device/authorize        ┌────────────────▼───────────────┐
 │ Claude Code / CLI agent  │ ─────────────────────────────────▶   │  Primer API (apps/api, Hono)    │
 │ + `primer` skill         │  ◀──── { userCode, verifyUrl, … }     │                                 │
-│ + @primer/mcp (stdio)    │                                       │  PUBLIC: /api/device/authorize  │
+│ + @polygonlabs/primer-mcp (stdio)    │                                       │  PUBLIC: /api/device/authorize  │
 │                          │  2. show verifyUrl + userCode         │          /api/device/token      │
 └──────┬───────────────────┘     to the user                      │                                 │
        │                                                           │  device_authorizations table   │
@@ -248,7 +248,7 @@ export interface ApiTokensListResponse { tokens: ApiTokenSummary[]; }
 
 ---
 
-## Section 4 — MCP server (`apps/mcp`, package `@primer/mcp`)
+## Section 4 — MCP server (`apps/mcp`, package `@polygonlabs/primer-mcp`)
 
 A standalone runnable workspace package (consistent with `apps/api`/`apps/web`; `packages/*` stays for libraries). Stdio MCP server with a built-in login flow.
 
@@ -289,7 +289,7 @@ In **prod**, `AUTH_BASE_URL` on the API points at the public SPA origin (`https:
 ```bash
 claude mcp add primer \
   --env PRIMER_API_URL=https://primer.up.railway.app \
-  -- npx -y @primer/mcp
+  -- npx -y @polygonlabs/primer-mcp
 ```
 
 No token in the registration — it's obtained interactively via the login flow.
@@ -362,7 +362,7 @@ description: >-
   Publish and iterate on LLM-generated HTML or Markdown artifacts in Primer.
   Use when the user wants to share an artifact at a stable URL, push a new
   version as they iterate, or pull reviewer comments/feedback on a version.
-  Requires the @primer/mcp server; the skill walks the user through a one-time
+  Requires the @polygonlabs/primer-mcp server; the skill walks the user through a one-time
   browser approval to obtain a token.
 ---
 ```
@@ -432,8 +432,8 @@ If the file exists and references a document the API returns 404 for (deleted on
 - **Full OAuth authorization-code / client registry / refresh tokens.** Device grant only.
 - **Agent-authored comments.** Fetch-only in v1.
 - **General rate limiting / per-token usage analytics.**
-- **Public npm publish of `@primer/mcp`.** v1 runs via `npx`/internal registry. When published, `claude mcp add` invocations should pin a version (`npx -y @primer/mcp@<pinned>`).
-- **Standalone `primer` CLI binary** beyond the `@primer/mcp` `login` subcommand.
+- **Public npm publish of `@polygonlabs/primer-mcp`.** v1 runs via `npx`/internal registry. When published, `claude mcp add` invocations should pin a version (`npx -y @polygonlabs/primer-mcp@<pinned>`).
+- **Standalone `primer` CLI binary** beyond the `@polygonlabs/primer-mcp` `login` subcommand.
 - **Raw-JSON upload body.** Multipart reuse only.
 
 ---
@@ -443,7 +443,7 @@ If the file exists and references a document the API returns 404 for (deleted on
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Token **issuance** | **OAuth 2.0 Device Authorization Grant (RFC 8628)** is the **only** mint path in v1: agent initiates, user approves in-browser (reusing the Okta session), CLI polls and auto-receives a `primer_pat_…` token. Manual web minting is deferred (see D19). |
-| D2 | MCP transport | Local **stdio** package (`@primer/mcp`). Remote HTTP deferred. |
+| D2 | MCP transport | Local **stdio** package (`@polygonlabs/primer-mcp`). Remote HTTP deferred. |
 | D3 | Steady-state auth | Compose `bearerResolver` ahead of okta/mock; record `authMethod`; CSRF exempts bearer requests + shared `PUBLIC_PATHS` (D18). No data-route changes. |
 | D4 | Upload over API | Reuse multipart endpoints; MCP builds `FormData`. No raw-JSON path. |
 | D5 | MCP content input | Inline `content` string. File-path input deferred. |
@@ -452,7 +452,7 @@ If the file exists and references a document the API returns 404 for (deleted on
 | D8 | Comment fetch | Reuse `GET /api/versions/:versionId/threads`; MCP formats for review. Fetch-only. |
 | D9 | Package placement | `apps/mcp` (runnable). |
 | D10 | Token at first poll | Token minted on first post-approval poll, returned once, never stored in plaintext. Approval only flips status + sets user. |
-| D11 | Token store | `@primer/mcp` persists to `~/.config/primer/tokens.json` (`0600`), **keyed by `PRIMER_API_URL`**, atomic temp+rename writes; each entry holds `{ tokenId, token, prefix, savedAt }`. `PRIMER_API_TOKEN` env overrides; `PRIMER_TOKEN_FILE` relocates the file. |
+| D11 | Token store | `@polygonlabs/primer-mcp` persists to `~/.config/primer/tokens.json` (`0600`), **keyed by `PRIMER_API_URL`**, atomic temp+rename writes; each entry holds `{ tokenId, token, prefix, savedAt }`. `PRIMER_API_TOKEN` env overrides; `PRIMER_TOKEN_FILE` relocates the file. |
 | D12 | Login entry points | Both in-agent MCP tools (`primer_login`/`primer_login_status`) and a `primer-mcp login` CLI subcommand, sharing the store. |
 | D13 | Phishing hardening | Approval page **does not pre-fill the user code from `?code=`** — user types it from their terminal. `verificationUriComplete` is dropped from the MCP `primer_login` result (kept in the API response for RFC compatibility). Approval page surfaces `clientLabel` (untrusted), `requester_ip`, and request age via `GET /api/device/pending`. |
 | D14 | Device token expiry | Device-issued tokens default to `now + 90 days`. Re-login is cheap and replaces the stored entry. Nullable `expires_at` stays for future flows. |
