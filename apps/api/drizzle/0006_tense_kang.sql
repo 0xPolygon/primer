@@ -1,0 +1,1 @@
+CREATE INDEX "device_auth_expires_at_idx" ON "device_authorizations" USING btree ("expires_at");

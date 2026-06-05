@@ -154,5 +154,6 @@ export const deviceAuthorizations = pgTable(
   (t) => ({
     byDeviceHash: uniqueIndex('device_auth_device_code_hash_unique').on(t.deviceCodeHash),
     byUserCode: uniqueIndex('device_auth_user_code_unique').on(t.userCode),
+    byExpiry: index('device_auth_expires_at_idx').on(t.expiresAt),
   }),
 );
