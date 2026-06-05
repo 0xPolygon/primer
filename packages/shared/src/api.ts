@@ -166,3 +166,50 @@ export interface AdminStatsResponse {
   comments: AdminStatsBucket;
   documentViews: AdminStatsBucket;
 }
+
+export interface DeviceAuthorizeResponse {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string;
+  expiresIn: number;
+  interval: number;
+}
+
+export interface DeviceTokenSuccess {
+  token: string;
+  tokenPrefix: string;
+  tokenId: string;
+  expiresAt: string | null;
+}
+
+export interface DeviceTokenPending {
+  error: 'authorization_pending' | 'slow_down' | 'expired_token' | 'access_denied' | 'invalid_grant';
+}
+
+export interface DevicePendingResponse {
+  clientLabel: string | null;
+  requesterIp: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface DeviceApproveResponse {
+  clientLabel: string | null;
+  requesterIp: string | null;
+  createdAt: string;
+}
+
+export interface ApiTokenSummary {
+  id: string;
+  name: string;
+  tokenPrefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface ApiTokensListResponse {
+  tokens: ApiTokenSummary[];
+}
