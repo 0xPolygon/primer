@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a CLI agent publish to Primer with a zero-copy-paste login: the agent starts a device-authorization flow, the user approves in the browser (where they're already signed into Okta), and the CLI auto-receives a token. The agent then creates a document, uploads new versions as the user iterates, and fetches a version's comments for feedback. Delivered as three layers — (A) device-flow auth + bearer tokens on the existing API, (B) a `@primer/mcp` stdio server with a built-in login flow, (C) a `primer` Claude Code skill.
+**Goal:** Let a CLI agent publish to Primer with a zero-copy-paste login: the agent starts a device-authorization flow, the user approves in the browser (where they're already signed into Okta), and the CLI auto-receives a token. The agent then creates a document, uploads new versions as the user iterates, and fetches a version's comments for feedback. Delivered as three layers — (A) device-flow auth + bearer tokens on the existing API, (B) a `@polygonlabs/primer-mcp` stdio server with a built-in login flow, (C) a `primer` Claude Code skill.
 
 **Architecture:** A bearer resolver is composed ahead of the existing okta/mock resolver so a `primer_pat_…` token resolves to its owner; CSRF exempts bearer-authed requests and the shared `PUBLIC_PATHS` set (which now includes the two public device endpoints — single source of truth, D18). The device grant (RFC 8628) issues those tokens: `POST /api/device/authorize` + `POST /api/device/token` (public) for the CLI, and a browser approval page (`GET /device` + `GET /api/device/pending` + `POST /api/device/approve|deny`, cookie-authed) for the user. **The approval page does not pre-fill the user code** — the user types it from their terminal (phishing mitigation, D13); the page fetches `/api/device/pending` to display the requester's `clientLabel`, IP, and request age. Device-issued tokens default to a 90-day expiry; the MCP server drives the flow, stores the token locally (keyed by `PRIMER_API_URL`, atomic writes), and wraps the existing REST API. Tool errors carry a machine-checkable `code` taxonomy. No existing data-route handler changes behavior.
 
@@ -47,7 +47,7 @@ New/Modified (web):
 - `apps/web/src/routes/settings-tokens.tsx` — token list/revoke page.
 - route registration + nav entries (read existing router/AppShell first).
 
-**Sub-project B — `@primer/mcp` stdio server**
+**Sub-project B — `@polygonlabs/primer-mcp` stdio server**
 
 New (`apps/mcp/`): `package.json`, `tsconfig.json`, `vitest.config.ts`, `scripts/build.mjs`, `README.md`, and `src/{client,tokenStore,deviceLogin,format,tools,index}.ts` each with a sibling `.test.ts` where logic warrants.
 
@@ -257,16 +257,16 @@ The approval page **does not pre-fill the user code from `?code=`** (spec D13 / 
 
 ---
 
-# Sub-project B — `@primer/mcp` stdio server
+# Sub-project B — `@polygonlabs/primer-mcp` stdio server
 
 ### Task B1: Scaffold `apps/mcp`
 
 **Files:** `apps/mcp/{package.json,tsconfig.json,vitest.config.ts,scripts/build.mjs}` (mirror `apps/api`).
 
-- [ ] **Step 1:** `package.json` — `name: @primer/mcp`, `type: module`, `bin: { "primer-mcp": "dist/index.js" }`, scripts (`dev`/`build`/`start`/`typecheck`/`test`), deps `@modelcontextprotocol/sdk` + `zod` (pin ≥14-day-old versions) + `@primer/shared` (workspace:*), devDeps matching `apps/api`.
+- [ ] **Step 1:** `package.json` — `name: @polygonlabs/primer-mcp`, `type: module`, `bin: { "primer-mcp": "dist/index.js" }`, scripts (`dev`/`build`/`start`/`typecheck`/`test`), deps `@modelcontextprotocol/sdk` + `zod` (pin ≥14-day-old versions) + `@primer/shared` (workspace:*), devDeps matching `apps/api`.
 - [ ] **Step 2:** `tsconfig.json` + `vitest.config.ts` copied from `apps/api`; `scripts/build.mjs` = esbuild bundle to `dist/index.js` with a `#!/usr/bin/env node` banner.
 - [ ] **Step 3:** `pnpm install` (expect lockfile update, **no** build-script prompt — if prompted, stop and ask).
-- [ ] **Step 4:** Commit `build(mcp): scaffold @primer/mcp stdio server package` (+ `pnpm-lock.yaml`).
+- [ ] **Step 4:** Commit `build(mcp): scaffold @polygonlabs/primer-mcp stdio server package` (+ `pnpm-lock.yaml`).
 
 ---
 
@@ -378,14 +378,14 @@ Login tools are **stateless** (spec D15): `primer_login` returns the `deviceCode
 - [ ] **Step 2:** Build + manual smoke against a local mock-mode API (with `AUTH_BASE_URL=http://localhost:5173` on the API):
 
 ```
-pnpm --filter @primer/mcp build
+pnpm --filter @polygonlabs/primer-mcp build
 PRIMER_API_URL=http://localhost:3000 node apps/mcp/dist/index.js login   # CLI flow
 PRIMER_API_URL=http://localhost:3000 npx @modelcontextprotocol/inspector node apps/mcp/dist/index.js  # tools
 ```
 
 For the CLI flow: open the printed `verificationUri` (NOT verificationUriComplete — the CLI never prints it), type the code on the page, watch the CLI flip to "Logged in." For the MCP-Inspector flow: exercise `primer_login` → confirm the response includes `deviceCode`/`userCode`/`verificationUri` but **not** `verificationUriComplete` → approve in browser → `primer_login_status` (passing the `deviceCode` back) → `primer_whoami` → `primer_create_document` → `primer_get_comments` (confirm the rendered output includes the selection text as a blockquote) → `primer_logout` (confirm the server-side revoke: a subsequent `primer_whoami` errors with `code: 'not_authenticated'`).
 
-- [ ] **Step 3:** `README.md` — `claude mcp add primer --env PRIMER_API_URL=… -- npx -y @primer/mcp`; the login UX (in-agent tools vs `primer-mcp login`, including why the approval page is no-pre-fill); env vars; **token store at `~/.config/primer/tokens.json` keyed by `PRIMER_API_URL`, atomic writes, mode 0600**; tool list; **error code taxonomy** (the codes the skill / callers branch on); inline-content + 10 MB note. Pin the version in the `claude mcp add` example once published (`@primer/mcp@<x.y.z>`).
+- [ ] **Step 3:** `README.md` — `claude mcp add primer --env PRIMER_API_URL=… -- npx -y @polygonlabs/primer-mcp`; the login UX (in-agent tools vs `primer-mcp login`, including why the approval page is no-pre-fill); env vars; **token store at `~/.config/primer/tokens.json` keyed by `PRIMER_API_URL`, atomic writes, mode 0600**; tool list; **error code taxonomy** (the codes the skill / callers branch on); inline-content + 10 MB note. Pin the version in the `claude mcp add` example once published (`@polygonlabs/primer-mcp@<x.y.z>`).
 - [ ] **Step 4:** `pnpm typecheck && pnpm test`. Commit `feat(mcp): stdio bootstrap, CLI login subcommand, usage docs`.
 - [ ] **Step 5 (stretch):** in-memory integration test (boot `createApp` with a bearer-composed resolver; drive a real `PrimerClient` over `app.request` for create→add-version→get-comments). Commit separately.
 
@@ -452,4 +452,4 @@ For the CLI flow: open the printed `verificationUri` (NOT verificationUriComplet
 - `AUTH_BASE_URL` must be set so `verificationUri` is absolute and clickable. **In prod**, point at the public SPA origin (`https://primer.up.railway.app`). **In dev**, point at the Vite SPA origin (`http://localhost:5173`) — Vite proxies `/api/*` back to :3000.
 - The MCP server's `PRIMER_API_URL` (and optional `PRIMER_API_TOKEN`/`PRIMER_TOKEN_FILE`) live on the **agent's** machine; device-issued tokens land in `~/.config/primer/tokens.json` (`0600`, keyed by base URL), never in the repo or on Railway.
 - Optionally add the `primer_pat_` prefix to GitHub secret-scanning / push-protection patterns.
-- `@primer/mcp` distribution (internal registry vs. `npx` tarball) is an ops decision; v1 can run via `node apps/mcp/dist/index.js`. When published, recommend version-pinned `claude mcp add` invocations.
+- `@polygonlabs/primer-mcp` distribution (internal registry vs. `npx` tarball) is an ops decision; v1 can run via `node apps/mcp/dist/index.js`. When published, recommend version-pinned `claude mcp add` invocations.

@@ -1,10 +1,39 @@
 {
-  "name": "@primer/mcp",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@polygonlabs/primer-mcp",
+  "version": "1.0.0",
+  "description": "MCP server + device-flow login for Primer — lets Claude Code (or any MCP-capable agent) publish HTML/Markdown artifacts and pull reviewer comments.",
   "type": "module",
   "bin": {
     "primer-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/0xPolygon/primer.git",
+    "directory": "apps/mcp"
+  },
+  "homepage": "https://github.com/0xPolygon/primer/tree/master/apps/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/0xPolygon/primer/issues"
+  },
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "claude-code",
+    "primer",
+    "polygon",
+    "artifact-publishing"
+  ],
+  "engines": {
+    "node": ">=20"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -12,14 +41,15 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "node scripts/build.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@primer/shared": "workspace:*",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@primer/shared": "workspace:*",
     "@types/node": "^25.6.0",
     "esbuild": "^0.27.0",
     "tsx": "^4.21.0",
