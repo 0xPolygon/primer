@@ -181,8 +181,10 @@ export function isTextRangeAnchor(v: unknown): v is TextRangeAnchor {
   if (!isObject(v) || v.type !== 'text-range' || !isString(v.selectorText)) {
     return false;
   }
-  // Position-based shape: start AND end must be finite numbers.
-  const hasPosition = isNumber(v.start) && isNumber(v.end);
+  // Position-based shape: start AND end must be finite numbers AND end > start.
+  // (A zero-length range would resolve to an invisible "ghost" highlight.)
+  const hasPosition =
+    isNumber(v.start) && isNumber(v.end) && (v.end as number) > (v.start as number);
   // Legacy shape: prefix AND suffix AND containerPath must all be strings.
   const hasLegacy =
     isString(v.prefix) && isString(v.suffix) && isString(v.containerPath);

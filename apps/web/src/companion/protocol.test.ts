@@ -137,6 +137,20 @@ describe('parseInboundMessage', () => {
       })
     ).toBeNull();
   });
+
+  it('rejects text-range anchor with end <= start', () => {
+    const parsed = parseInboundMessage({
+      type: 'selection_captured',
+      anchor: {
+        type: 'text-range',
+        selectorText: 'x',
+        start: 10,
+        end: 10,
+      },
+      clientRects: [],
+    });
+    expect(parsed).toBeNull();
+  });
 });
 
 describe('parseInboundMessage — companion_log', () => {
