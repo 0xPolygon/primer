@@ -1,12 +1,12 @@
-// Pure-logic tests for the text-range anchor resolution math in
-// apps/api/src/companion/v1.js. The companion script is plain ES2020 JS
-// served verbatim into the iframe — there's no module loader, so the
-// helpers below are a self-contained copy of the math from v1.js. If you
-// change the math in v1.js, mirror it here (and vice versa).
+// Pure-logic tests for the legacy text-pattern resolution path
+// (resolveTextRangeLegacy in apps/api/src/companion/v1.js). Position-based
+// anchors — the current default — are tested in textRangePosition.test.ts.
 //
-// NOTE: This file deliberately *starts* mirroring v1.js's buggy
-// trim-based normalization to demonstrate the failing-test stage of TDD.
-// The helpers and v1.js are updated together in the same change.
+// The companion script is plain ES2020 served verbatim into the iframe,
+// so the helpers below mirror the legacy math in v1.js. If you change
+// the math in v1.js's resolveTextRangeLegacy, mirror it here (and vice
+// versa). Kept until the legacy resolver is removed in a follow-up PR
+// after stored anchors are backfilled to the position-based shape.
 
 import { describe, it, expect } from 'vitest';
 
