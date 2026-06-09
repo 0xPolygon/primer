@@ -553,11 +553,24 @@
     const selectorText = sel.toString();
     if (selectorText.trim().length === 0) return;
 
-    const container = nearestBlockAncestor(range.startContainer);
-    const { prefix, suffix } = collectContext(container, range, 32);
-    const containerPath = cssPath(container);
+    // Reject selections that started or ended inside companion-injected
+    // DOM (overlay badges, pick banner). endpointToOffset would return
+    // -1 anyway, but bailing early keeps the capture path quiet.
+    if (
+      isInCompanionDom(range.startContainer) ||
+      isInCompanionDom(range.endContainer)
+    ) {
+      return;
+    }
 
-    const fingerprint = `${containerPath}|${prefix}|${selectorText}|${suffix}`;
+    const start = endpointToOffset(range.startContainer, range.startOffset);
+    const end = endpointToOffset(range.endContainer, range.endOffset);
+    if (start < 0 || end < 0 || end <= start) {
+      log.warn('selection capture skipped — endpoints unmappable', { start, end });
+      return;
+    }
+
+    const fingerprint = `${start}|${end}`;
     if (fingerprint === lastEmittedFingerprint && Date.now() - lastEmittedAt < 200) {
       return;
     }
@@ -570,13 +583,21 @@
       type: 'selection_captured',
       anchor: {
         type: 'text-range',
+        start,
+        end,
         selectorText,
-        prefix,
-        suffix,
-        containerPath,
       },
       clientRects,
     });
+  }
+
+  function isInCompanionDom(node) {
+    let p = node instanceof Element ? node : node.parentElement;
+    while (p) {
+      if (p.id && COMPANION_DOM_IDS.has(p.id)) return true;
+      p = p.parentElement;
+    }
+    return false;
   }
 
   document.addEventListener('mouseup', () => requestAnimationFrame(onPossibleSelection));
