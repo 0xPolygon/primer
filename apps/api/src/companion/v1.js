@@ -856,9 +856,26 @@
           highlightFocused.add(nextRange);
         } catch {}
         try {
-          const start = nextRange.startContainer;
-          const parentEl = start instanceof Element ? start : start.parentElement;
-          parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Scroll to the range's actual visual position. Using
+          // startContainer.parentElement is wrong when the resolver
+          // landed start at the end of a whitespace text node between
+          // elements — that node's parent is a far ancestor (article,
+          // body), not the meaningful target. The bounding rect is
+          // where the user actually wants to look. Also handles ranges
+          // that span multiple elements (cross-cell, cross-paragraph)
+          // by centering on the rect spanning all of them.
+          const rect = nextRange.getBoundingClientRect();
+          if (rect.width > 0 || rect.height > 0) {
+            const targetY = window.scrollY + rect.top + rect.height / 2 - window.innerHeight / 2;
+            window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+          } else {
+            // Fallback for ranges with no client rects (e.g., inside
+            // display:none subtree — unexpected for visible artifact
+            // content, but defensive).
+            const start = nextRange.startContainer;
+            const parentEl = start instanceof Element ? start : start.parentElement;
+            parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
         } catch {}
       }
     }
