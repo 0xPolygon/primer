@@ -682,7 +682,28 @@
   /** anchorId → Range (for live anchors), so highlight_anchor can find the range. */
   const rangeByAnchorId = new Map();
 
+  /** Resolve a text-range anchor to a DOM Range. Dispatches on shape:
+   *  position-based anchors (start/end integers) use the segment-index
+   *  helpers; legacy anchors (prefix / selectorText / suffix /
+   *  containerPath) use the text-pattern matcher. Returns null if
+   *  unresolvable. New captures (post-Task 4) always carry start/end;
+   *  pre-existing stored anchors carry the legacy fields. */
   function resolveTextRange(anchor) {
+    if (
+      typeof anchor.start === 'number' &&
+      typeof anchor.end === 'number' &&
+      Number.isFinite(anchor.start) &&
+      Number.isFinite(anchor.end)
+    ) {
+      return rangeFromOffsets(anchor.start, anchor.end);
+    }
+    if (typeof anchor.containerPath === 'string') {
+      return resolveTextRangeLegacy(anchor);
+    }
+    return null;
+  }
+
+  function resolveTextRangeLegacy(anchor) {
     /** @type {Element | null} */
     let container;
     try {
