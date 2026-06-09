@@ -6,8 +6,8 @@
 // change the math in v1.js, mirror it here (and vice versa).
 //
 // These tests do NOT exercise DOM — they operate on a synthetic
-// `Segment[]` representation that mimics what `computeSegments(root)`
-// returns. DOM integration is verified manually via devHarness.
+// `Segment[]` representation that mimics what `getSegments()` returns in v1.js.
+// DOM integration is verified manually via devHarness.
 
 import { describe, it, expect } from 'vitest';
 
@@ -70,8 +70,18 @@ function offsetToEndpoint(segs: Segment[], offset: number): Endpoint | null {
     if (offset < seg.start) hi = mid - 1;
     else if (offset > seg.end) lo = mid + 1;
     else {
-      // Boundary convention: if offset == seg.end and there's a next
-      // segment, still return this segment (not the next's start).
+      // Boundary convention: when an offset lies on a segment boundary
+      // (== seg.start of this segment AND == segs[mid-1].end of the
+      // previous segment), prefer the earlier segment. Matches
+      // Range.setEnd's behavior, where setEnd(node, node.length) and
+      // setStart(nextNode, 0) refer to the same document position; we
+      // always pick the former. Also handles the empty-text-node case
+      // where mid lands directly on a zero-length segment (its start
+      // equals its end equals the offset).
+      if (offset === seg.start && mid > 0 && segs[mid - 1]!.end === offset) {
+        const prev = segs[mid - 1]!;
+        return { segId: prev.id, offset: offset - prev.start };
+      }
       return { segId: seg.id, offset: offset - seg.start };
     }
   }
@@ -106,7 +116,7 @@ describe('position-based anchors — cross-cell selection', () => {
       { id: 'td3', text: 'USDC' },
     ]);
 
-    // Select from "usdc_ethereum" (start of td1) to mid-"USDC" (offset 4 of td3, i.e. all of "USDC").
+    // Select from start of td1 (offset 0) to end of td3 (offset 4 == all of "USDC").
     const start = endpointToOffset(segs, { segId: 'td1', offset: 0 });
     const end = endpointToOffset(segs, { segId: 'td3', offset: 4 });
 
@@ -121,5 +131,10 @@ describe('position-based anchors — cross-cell selection', () => {
 
     // And the selected text is the concatenation across cells.
     expect(sliceByOffsets(segs, start, end)).toBe('usdc_ethereumCOINMEUSDC');
+
+    // Lock down the boundary convention at a real cell junction: an
+    // offset on the td2/td3 seam belongs to td2 (the earlier segment).
+    expect(offsetToEndpoint(segs, 19)).toEqual({ segId: 'td2', offset: 6 });
+    expect(offsetToEndpoint(segs, 13)).toEqual({ segId: 'td1', offset: 13 });
   });
 });
