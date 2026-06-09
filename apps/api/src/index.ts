@@ -4,7 +4,7 @@ import { createApp } from './app.ts';
 import { logger } from './logger.ts';
 import { FilesystemStorage } from './storage/filesystem.ts';
 import { NoopNotifier } from './notifications/notifier.ts';
-import { ResendNotifier } from './notifications/resend.ts';
+import { MailgunNotifier } from './notifications/mailgun.ts';
 import type { Notifier } from './notifications/notifier.ts';
 import { startPurgeInterval } from './jobs/purge.ts';
 import { mockResolver, makeOktaResolver, type UserResolver } from './auth/resolver.ts';
@@ -14,17 +14,30 @@ import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
 const port = Number(process.env.PORT ?? 3000);
 const storageRoot = process.env.STORAGE_ROOT ?? './storage';
 const storage = new FilesystemStorage(storageRoot);
+function deriveDomain(fromAddress: string): string | undefined {
+  // Accepts "primer@domain" or "Primer <primer@domain>" — returns the host part.
+  const match = fromAddress.match(/<?[^<\s@]+@([^>\s]+)>?\s*$/);
+  return match?.[1];
+}
+
 function buildNotifier(): Notifier {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = process.env.MAILGUN_API_KEY;
   const fromAddress = process.env.EMAIL_FROM;
   const appBaseUrl = process.env.AUTH_BASE_URL;
-  if (apiKey && fromAddress && appBaseUrl) {
-    logger.info({ fromAddress }, 'notifier: Resend enabled');
-    return new ResendNotifier({ apiKey, fromAddress, appBaseUrl });
+  const domain = process.env.MAILGUN_DOMAIN ?? (fromAddress ? deriveDomain(fromAddress) : undefined);
+  const apiBaseUrl = process.env.MAILGUN_API_BASE_URL;
+  if (apiKey && fromAddress && appBaseUrl && domain) {
+    logger.info({ fromAddress, domain, apiBaseUrl }, 'notifier: Mailgun enabled');
+    return new MailgunNotifier({ apiKey, domain, fromAddress, appBaseUrl, apiBaseUrl });
   }
   logger.warn(
-    { hasApiKey: !!apiKey, hasFromAddress: !!fromAddress, hasAppBaseUrl: !!appBaseUrl },
-    'notifier: Resend env incomplete, falling back to NoopNotifier',
+    {
+      hasApiKey: !!apiKey,
+      hasFromAddress: !!fromAddress,
+      hasAppBaseUrl: !!appBaseUrl,
+      hasDomain: !!domain,
+    },
+    'notifier: Mailgun env incomplete, falling back to NoopNotifier',
   );
   return new NoopNotifier();
 }

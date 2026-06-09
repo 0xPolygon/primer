@@ -4,10 +4,12 @@ import { users } from '@primer/shared/schema';
 import { logger } from '../logger.ts';
 import type { Notifier, NotifyCommentArgs } from './notifier.ts';
 
-export interface ResendConfig {
+export interface MailgunConfig {
   apiKey: string;
-  fromAddress: string;
+  domain: string; // sending domain, e.g. dashboard.polygon.technology
+  fromAddress: string; // e.g. primer@dashboard.polygon.technology
   appBaseUrl: string; // e.g. https://primer-polygon.up.railway.app
+  apiBaseUrl?: string; // defaults to https://api.mailgun.net
 }
 
 interface UserRow {
@@ -18,6 +20,7 @@ interface UserRow {
 
 const SUBJECT_TITLE_LIMIT = 50;
 const BODY_EXCERPT_LIMIT = 280;
+const DEFAULT_API_BASE_URL = 'https://api.mailgun.net';
 
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
@@ -90,8 +93,8 @@ function renderHtml(
 </body></html>`;
 }
 
-export class ResendNotifier implements Notifier {
-  constructor(private readonly cfg: ResendConfig) {}
+export class MailgunNotifier implements Notifier {
+  constructor(private readonly cfg: MailgunConfig) {}
 
   async notifyComment(args: NotifyCommentArgs): Promise<void> {
     const mentionSet = new Set(args.mentionedUserIds);
@@ -111,6 +114,10 @@ export class ResendNotifier implements Notifier {
     const excerpt = truncate(args.comment.body, BODY_EXCERPT_LIMIT);
     const subject = renderSubject(actorName, args.doc.title);
 
+    const apiBase = (this.cfg.apiBaseUrl ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
+    const endpoint = `${apiBase}/v3/${encodeURIComponent(this.cfg.domain)}/messages`;
+    const authHeader = `Basic ${Buffer.from(`api:${this.cfg.apiKey}`).toString('base64')}`;
+
     for (const recipientId of recipientIds) {
       const recipient = rows.find((u) => u.id === recipientId);
       if (!recipient) {
@@ -121,30 +128,30 @@ export class ResendNotifier implements Notifier {
       const reply = participantSet.has(recipientId);
       const html = renderHtml(actorName, args.doc.title, excerpt, url, mention, reply);
       const text = renderText(actorName, args.doc.title, excerpt, url, mention, reply);
+      const form = new URLSearchParams();
+      form.set('from', this.cfg.fromAddress);
+      form.set('to', recipient.email);
+      form.set('subject', subject);
+      form.set('text', text);
+      form.set('html', html);
       try {
-        const res = await fetch('https://api.resend.com/emails', {
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${this.cfg.apiKey}`,
-            'Content-Type': 'application/json',
+            Authorization: authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
           },
-          body: JSON.stringify({
-            from: this.cfg.fromAddress,
-            to: recipient.email,
-            subject,
-            html,
-            text,
-          }),
+          body: form.toString(),
         });
         if (!res.ok) {
           const errBody = await res.text().catch(() => '');
           logger.error(
             { status: res.status, recipientId, errBody: errBody.slice(0, 300) },
-            'resend send failed',
+            'mailgun send failed',
           );
         }
       } catch (err) {
-        logger.error({ err, recipientId }, 'resend fetch threw');
+        logger.error({ err, recipientId }, 'mailgun fetch threw');
       }
     }
   }

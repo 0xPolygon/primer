@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ResendNotifier } from './resend.ts';
+import { MailgunNotifier } from './mailgun.ts';
 import { db } from '../db/client.ts';
 import { users } from '@primer/shared/schema';
 import type { NotifyCommentArgs } from './notifier.ts';
@@ -20,7 +20,18 @@ function args(over: Partial<NotifyCommentArgs> = {}): NotifyCommentArgs {
   };
 }
 
-describe('ResendNotifier.notifyComment', () => {
+function parseForm(body: string) {
+  const p = new URLSearchParams(body);
+  return {
+    from: p.get('from') ?? '',
+    to: p.get('to') ?? '',
+    subject: p.get('subject') ?? '',
+    text: p.get('text') ?? '',
+    html: p.get('html') ?? '',
+  };
+}
+
+describe('MailgunNotifier.notifyComment', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -35,7 +46,9 @@ describe('ResendNotifier.notifyComment', () => {
         target: users.id,
         set: { email: sql`excluded.email`, displayName: sql`excluded.display_name` },
       });
-    fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 'resend-id' }), { status: 200 }));
+    fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ id: 'mg-id', message: 'Queued. Thank you.' }), { status: 200 }),
+    );
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -52,87 +65,103 @@ describe('ResendNotifier.notifyComment', () => {
       });
   });
 
-  it('POSTs to api.resend.com with bearer auth and the expected body', async () => {
-    const n = new ResendNotifier({
+  it('POSTs to api.mailgun.net with Basic auth and a form-encoded body', async () => {
+    const n = new MailgunNotifier({
       apiKey: 'sk-test',
-      fromAddress: 'primer@sequence-demos.xyz',
+      domain: 'dashboard.polygon.technology',
+      fromAddress: 'primer@dashboard.polygon.technology',
       appBaseUrl: 'https://primer.example',
     });
     await n.notifyComment(args());
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.resend.com/emails');
+    expect(url).toBe('https://api.mailgun.net/v3/dashboard.polygon.technology/messages');
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer sk-test');
-    expect(headers['Content-Type']).toBe('application/json');
-    const body = JSON.parse(init.body as string) as {
-      from: string;
-      to: string;
-      subject: string;
-      html: string;
-      text: string;
-    };
-    expect(body.from).toBe('primer@sequence-demos.xyz');
+    const expectedAuth = `Basic ${Buffer.from('api:sk-test').toString('base64')}`;
+    expect(headers.Authorization).toBe(expectedAuth);
+    expect(headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    const body = parseForm(init.body as string);
+    expect(body.from).toBe('primer@dashboard.polygon.technology');
     expect(body.to).toBe('two@p.t');
     expect(body.subject).toBe("User One commented on 'Test Doc'");
     expect(body.html).toContain('https://primer.example/d/doc-1/v/3#thread-thread-abc');
     expect(body.text).toContain('https://primer.example/d/doc-1/v/3#thread-thread-abc');
   });
 
-  it('renders mention-only signal copy', async () => {
-    const n = new ResendNotifier({
+  it('honors apiBaseUrl override and url-encodes the domain segment', async () => {
+    const n = new MailgunNotifier({
       apiKey: 'k',
-      fromAddress: 'p@s.x',
+      domain: 'mg.dashboard.polygon.technology',
+      fromAddress: 'p@d.x',
+      appBaseUrl: 'https://p.x',
+      apiBaseUrl: 'https://api.eu.mailgun.net/',
+    });
+    await n.notifyComment(args());
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.eu.mailgun.net/v3/mg.dashboard.polygon.technology/messages');
+  });
+
+  it('renders mention-only signal copy', async () => {
+    const n = new MailgunNotifier({
+      apiKey: 'k',
+      domain: 'd.x',
+      fromAddress: 'p@d.x',
       appBaseUrl: 'https://p.x',
     });
     await n.notifyComment(args({ mentionedUserIds: ['mock-user-2'], participantUserIds: [] }));
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.text).toContain('mentioned you in a comment');
     expect(body.text).not.toContain('replied to a thread');
   });
 
   it('renders reply-only signal copy', async () => {
-    const n = new ResendNotifier({ apiKey: 'k', fromAddress: 'p@s.x', appBaseUrl: 'https://p.x' });
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
     await n.notifyComment(args({ mentionedUserIds: [], participantUserIds: ['mock-user-2'] }));
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.text).toContain("replied to a thread you're in");
     expect(body.text).not.toContain('mentioned you');
   });
 
   it('renders combined signal copy', async () => {
-    const n = new ResendNotifier({ apiKey: 'k', fromAddress: 'p@s.x', appBaseUrl: 'https://p.x' });
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
     await n.notifyComment(args({ mentionedUserIds: ['mock-user-2'], participantUserIds: ['mock-user-2'] }));
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.text).toContain("mentioned you and replied to a thread you're in");
   });
 
   it('sends one email per unique recipient (union, dedup)', async () => {
-    const n = new ResendNotifier({ apiKey: 'k', fromAddress: 'p@s.x', appBaseUrl: 'https://p.x' });
-    await n.notifyComment(args({
-      mentionedUserIds: ['mock-user-2', 'mock-user-3'],
-      participantUserIds: ['mock-user-2'],          // user-2 in both → still one email
-    }));
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(
+      args({
+        mentionedUserIds: ['mock-user-2', 'mock-user-3'],
+        participantUserIds: ['mock-user-2'], // user-2 in both → still one email
+      }),
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const toValues = fetchMock.mock.calls.map((c) => JSON.parse((c[1] as RequestInit).body as string).to);
+    const toValues = fetchMock.mock.calls.map(
+      (c) => parseForm((c[1] as RequestInit).body as string).to,
+    );
     expect(toValues.sort()).toEqual(['three@p.t', 'two@p.t']);
   });
 
   it('excludes the actor even if accidentally in either list', async () => {
-    const n = new ResendNotifier({ apiKey: 'k', fromAddress: 'p@s.x', appBaseUrl: 'https://p.x' });
-    await n.notifyComment(args({
-      mentionedUserIds: ['mock-user-1', 'mock-user-2'],   // actor accidentally included
-      participantUserIds: ['mock-user-1'],
-    }));
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(
+      args({
+        mentionedUserIds: ['mock-user-1', 'mock-user-2'], // actor accidentally included
+        participantUserIds: ['mock-user-1'],
+      }),
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.to).toBe('two@p.t');
   });
 
-  it('does not throw when Resend returns 5xx; logs and continues to the next recipient', async () => {
+  it('does not throw when Mailgun returns 5xx; logs and continues to the next recipient', async () => {
     fetchMock.mockResolvedValueOnce(new Response('boom', { status: 503 }));
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: 'ok' }), { status: 200 }));
-    const n = new ResendNotifier({ apiKey: 'k', fromAddress: 'p@s.x', appBaseUrl: 'https://p.x' });
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
     await expect(
       n.notifyComment(args({ mentionedUserIds: ['mock-user-2', 'mock-user-3'] })),
     ).resolves.toBeUndefined();
@@ -140,10 +169,10 @@ describe('ResendNotifier.notifyComment', () => {
   });
 
   it('truncates doc title in subject at 50 chars', async () => {
-    const n = new ResendNotifier({ apiKey: 'k', fromAddress: 'p@s.x', appBaseUrl: 'https://p.x' });
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
     const longTitle = 'A'.repeat(80);
     await n.notifyComment(args({ doc: { id: 'd', title: longTitle } }));
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
     expect(body.subject.length).toBeLessThanOrEqual('User One commented on '.length + 50 + 3);
     expect(body.subject).toContain('…');
   });
