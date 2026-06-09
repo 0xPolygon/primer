@@ -353,6 +353,192 @@
     return { prefix: beforeN, suffix: afterN };
   }
 
+  // ── Position-based anchoring (W3C TextPositionSelector style) ────
+  //
+  // Artifacts are immutable per version, so we anchor text-range
+  // comments by raw cumulative character offsets into the flattened
+  // text walk of document.body. Capture: range endpoints → (start, end)
+  // integers. Resolve: (start, end) → DOM Range. Cross-block,
+  // cross-cell, repeated-text, and whitespace edge cases dissolve.
+  //
+  // The pure math is mirrored in apps/api/src/companion/textRangePosition.test.ts.
+  // Keep the two in sync — especially the boundary convention in
+  // offsetToEndpoint (offsets at a segment boundary belong to the
+  // earlier segment, matching Range.setEnd at end-of-node).
+
+  /** Ids of DOM injected by the companion. Text nodes inside any of
+   *  these subtrees are excluded from the segment index so our own
+   *  badges / banner do not shift offsets. */
+  const COMPANION_DOM_IDS = new Set([
+    '__primer_overlay__',         // appended to document.body
+    '__primer_pick_banner__',     // appended to document.body
+    '__primer_companion_style__', // in document.head — excluded for completeness
+  ]);
+
+  /** Cached segment index. Built lazily on first call to getSegments().
+   *  Never invalidated: artifact DOM is immutable, companion DOM is
+   *  excluded from the walk, so the index is stable for the lifetime
+   *  of the iframe.
+   *  @type {{ node: Text, start: number, end: number }[] | null} */
+  let _segmentsCache = null;
+
+  /** NodeFilter that rejects text nodes whose ancestor is a subtree
+   *  we've injected (overlay, banner, style). Used by every text walker
+   *  in the position-based anchoring path so capture, resolution, and
+   *  Element-endpoint descent all agree on which text nodes count. */
+  function makeCompanionExcludeFilter() {
+    return {
+      acceptNode(node) {
+        let p = node.parentElement;
+        while (p) {
+          if (p.id && COMPANION_DOM_IDS.has(p.id)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          p = p.parentElement;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    };
+  }
+
+  function getSegments() {
+    if (_segmentsCache) return _segmentsCache;
+    /** @type {{ node: Text, start: number, end: number }[]} */
+    const out = [];
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+      makeCompanionExcludeFilter()
+    );
+    let cursor = 0;
+    let n = walker.nextNode();
+    while (n) {
+      const t = /** @type {Text} */ (n);
+      const len = t.nodeValue.length;
+      out.push({ node: t, start: cursor, end: cursor + len });
+      cursor += len;
+      n = walker.nextNode();
+    }
+    _segmentsCache = out;
+    return out;
+  }
+
+  function findFirstTextDescendant(node) {
+    if (node instanceof Text) return node;
+    const walker = document.createTreeWalker(
+      node,
+      NodeFilter.SHOW_TEXT,
+      makeCompanionExcludeFilter()
+    );
+    return /** @type {Text | null} */ (walker.nextNode());
+  }
+
+  function findLastTextDescendant(node) {
+    if (node instanceof Text) return node;
+    const walker = document.createTreeWalker(
+      node,
+      NodeFilter.SHOW_TEXT,
+      makeCompanionExcludeFilter()
+    );
+    /** @type {Text | null} */
+    let last = null;
+    /** @type {Node | null} */
+    let n = walker.nextNode();
+    while (n) {
+      last = /** @type {Text} */ (n);
+      n = walker.nextNode();
+    }
+    return last;
+  }
+
+  /** Map (containerNode, intra-node offset) → raw cumulative offset.
+   *  If containerNode is an Element, descends into childNodes[offset]
+   *  and walks to the first text descendant (== "position at start of
+   *  that subtree's text"). If offset is past the last child, returns
+   *  the end of the element's last text descendant. Returns -1 if no
+   *  mapping found. */
+  function endpointToOffset(containerNode, offset) {
+    const segs = getSegments();
+    if (containerNode instanceof Text) {
+      for (const seg of segs) {
+        if (seg.node === containerNode) {
+          const clamped = Math.max(0, Math.min(offset, seg.end - seg.start));
+          return seg.start + clamped;
+        }
+      }
+      return -1;
+    }
+    if (!(containerNode instanceof Element)) return -1;
+    const children = containerNode.childNodes;
+    if (offset >= children.length) {
+      const lastText = findLastTextDescendant(containerNode);
+      if (!lastText) return -1;
+      for (const seg of segs) {
+        if (seg.node === lastText) return seg.end;
+      }
+      return -1;
+    }
+    const child = children[offset];
+    const firstText = child instanceof Text ? child : findFirstTextDescendant(child);
+    if (!firstText) return -1;
+    for (const seg of segs) {
+      if (seg.node === firstText) return seg.start;
+    }
+    return -1;
+  }
+
+  /** Map a raw cumulative offset → (Text node, intra-node offset).
+   *  Boundary convention: an offset that sits on a segment boundary
+   *  (== seg.start of the current segment AND == segs[mid-1].end of the
+   *  previous segment) belongs to the EARLIER segment. Matches
+   *  Range.setEnd's behavior where setEnd(node, node.length) and
+   *  setStart(nextNode, 0) refer to the same document position; we
+   *  always pick the former. Also handles empty text nodes where
+   *  seg.start == seg.end.
+   *  Returns null if out of bounds or segments are empty. */
+  function offsetToEndpoint(rawOffset) {
+    const segs = getSegments();
+    if (segs.length === 0) return null;
+    const last = segs[segs.length - 1];
+    if (rawOffset < 0 || rawOffset > last.end) return null;
+    let lo = 0;
+    let hi = segs.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const seg = segs[mid];
+      if (rawOffset < seg.start) hi = mid - 1;
+      else if (rawOffset > seg.end) lo = mid + 1;
+      else {
+        if (rawOffset === seg.start && mid > 0 && segs[mid - 1].end === rawOffset) {
+          const prev = segs[mid - 1];
+          return { node: prev.node, offset: rawOffset - prev.start };
+        }
+        return { node: seg.node, offset: rawOffset - seg.start };
+      }
+    }
+    // Unreachable: the bounds check above guarantees rawOffset ∈ [0, last.end],
+    // and the segment array is contiguous by construction, so every valid
+    // offset is found inside some segment. Kept as a defensive tail.
+    return null;
+  }
+
+  /** Build a DOM Range from raw (start, end) offsets. Returns null if
+   *  either endpoint can't be mapped or end < start. */
+  function rangeFromOffsets(start, end) {
+    if (end < start) return null;
+    const a = offsetToEndpoint(start);
+    const b = offsetToEndpoint(end);
+    if (!a || !b) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(a.node, a.offset);
+      range.setEnd(b.node, b.offset);
+      return range;
+    } catch {
+      return null;
+    }
+  }
+
   // ── Selection capture ────────────────────────────────────────────
 
   let lastEmittedFingerprint = '';
@@ -367,11 +553,24 @@
     const selectorText = sel.toString();
     if (selectorText.trim().length === 0) return;
 
-    const container = nearestBlockAncestor(range.startContainer);
-    const { prefix, suffix } = collectContext(container, range, 32);
-    const containerPath = cssPath(container);
+    // Reject selections that started or ended inside companion-injected
+    // DOM (overlay badges, pick banner). endpointToOffset would return
+    // -1 anyway, but bailing early keeps the capture path quiet.
+    if (
+      isInCompanionDom(range.startContainer) ||
+      isInCompanionDom(range.endContainer)
+    ) {
+      return;
+    }
 
-    const fingerprint = `${containerPath}|${prefix}|${selectorText}|${suffix}`;
+    const start = endpointToOffset(range.startContainer, range.startOffset);
+    const end = endpointToOffset(range.endContainer, range.endOffset);
+    if (start < 0 || end < 0 || end <= start) {
+      log.info('selection capture skipped — endpoints unmappable', { start, end });
+      return;
+    }
+
+    const fingerprint = `${start}|${end}`;
     if (fingerprint === lastEmittedFingerprint && Date.now() - lastEmittedAt < 200) {
       return;
     }
@@ -384,13 +583,24 @@
       type: 'selection_captured',
       anchor: {
         type: 'text-range',
+        start,
+        end,
         selectorText,
-        prefix,
-        suffix,
-        containerPath,
       },
       clientRects,
     });
+  }
+
+  /** True if `node` is inside any companion-injected subtree. Shares
+   *  COMPANION_DOM_IDS with makeCompanionExcludeFilter — register new
+   *  companion roots there and both paths pick them up automatically. */
+  function isInCompanionDom(node) {
+    let p = node instanceof Element ? node : node.parentElement;
+    while (p) {
+      if (p.id && COMPANION_DOM_IDS.has(p.id)) return true;
+      p = p.parentElement;
+    }
+    return false;
   }
 
   document.addEventListener('mouseup', () => requestAnimationFrame(onPossibleSelection));
@@ -472,7 +682,28 @@
   /** anchorId → Range (for live anchors), so highlight_anchor can find the range. */
   const rangeByAnchorId = new Map();
 
+  /** Resolve a text-range anchor to a DOM Range. Dispatches on shape:
+   *  position-based anchors (start/end integers) use the segment-index
+   *  helpers; legacy anchors (prefix / selectorText / suffix /
+   *  containerPath) use the text-pattern matcher. Returns null if
+   *  unresolvable. New captures (post-Task 4) always carry start/end;
+   *  pre-existing stored anchors carry the legacy fields. */
   function resolveTextRange(anchor) {
+    if (
+      typeof anchor.start === 'number' &&
+      typeof anchor.end === 'number' &&
+      Number.isFinite(anchor.start) &&
+      Number.isFinite(anchor.end)
+    ) {
+      return rangeFromOffsets(anchor.start, anchor.end);
+    }
+    if (typeof anchor.containerPath === 'string') {
+      return resolveTextRangeLegacy(anchor);
+    }
+    return null;
+  }
+
+  function resolveTextRangeLegacy(anchor) {
     /** @type {Element | null} */
     let container;
     try {
@@ -625,9 +856,26 @@
           highlightFocused.add(nextRange);
         } catch {}
         try {
-          const start = nextRange.startContainer;
-          const parentEl = start instanceof Element ? start : start.parentElement;
-          parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Scroll to the range's actual visual position. Using
+          // startContainer.parentElement is wrong when the resolver
+          // landed start at the end of a whitespace text node between
+          // elements — that node's parent is a far ancestor (article,
+          // body), not the meaningful target. The bounding rect is
+          // where the user actually wants to look. Also handles ranges
+          // that span multiple elements (cross-cell, cross-paragraph)
+          // by centering on the rect spanning all of them.
+          const rect = nextRange.getBoundingClientRect();
+          if (rect.width > 0 || rect.height > 0) {
+            const targetY = window.scrollY + rect.top + rect.height / 2 - window.innerHeight / 2;
+            window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+          } else {
+            // Fallback for ranges with no client rects (e.g., inside
+            // display:none subtree — unexpected for visible artifact
+            // content, but defensive).
+            const start = nextRange.startContainer;
+            const parentEl = start instanceof Element ? start : start.parentElement;
+            parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
         } catch {}
       }
     }

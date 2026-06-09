@@ -5,12 +5,26 @@ export interface SerializableRect {
   height: number;
 }
 
+/** Text-range anchor. New captures (v1.1+) emit `start`/`end` raw
+ *  character offsets into the artifact's flattened text. Legacy
+ *  captures (pre-v1.1) carry `prefix`/`suffix`/`containerPath` for
+ *  text-pattern resolution. The companion's resolver dispatches on
+ *  which fields are present, so both shapes are valid on the wire and
+ *  in storage. New code should write the position-based shape. */
 export interface TextRangeAnchor {
   type: 'text-range';
   selectorText: string;
-  prefix: string;
-  suffix: string;
-  containerPath: string;
+  /** Inclusive raw cumulative character offset (position-based shape). */
+  start?: number;
+  /** Exclusive raw cumulative character offset (position-based shape). */
+  end?: number;
+  /** Legacy: text-context prefix. Present on pre-v1.1 anchors. */
+  prefix?: string;
+  /** Legacy: text-context suffix. Present on pre-v1.1 anchors. */
+  suffix?: string;
+  /** Legacy: CSS path to the nearest block ancestor. Present on
+   *  pre-v1.1 anchors. */
+  containerPath?: string;
 }
 
 export interface ElementPathAnchor {
@@ -164,14 +178,17 @@ function isRect(v: unknown): v is SerializableRect {
 }
 
 export function isTextRangeAnchor(v: unknown): v is TextRangeAnchor {
-  return (
-    isObject(v) &&
-    v.type === 'text-range' &&
-    isString(v.selectorText) &&
-    isString(v.prefix) &&
-    isString(v.suffix) &&
-    isString(v.containerPath)
-  );
+  if (!isObject(v) || v.type !== 'text-range' || !isString(v.selectorText)) {
+    return false;
+  }
+  // Position-based shape: start AND end must be finite numbers AND end > start.
+  // (A zero-length range would resolve to an invisible "ghost" highlight.)
+  const hasPosition =
+    isNumber(v.start) && isNumber(v.end) && (v.end as number) > (v.start as number);
+  // Legacy shape: prefix AND suffix AND containerPath must all be strings.
+  const hasLegacy =
+    isString(v.prefix) && isString(v.suffix) && isString(v.containerPath);
+  return hasPosition || hasLegacy;
 }
 
 export function isElementPathAnchor(v: unknown): v is ElementPathAnchor {

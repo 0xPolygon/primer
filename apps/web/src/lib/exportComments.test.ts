@@ -66,6 +66,21 @@ describe('formatThreadsAsMarkdown', () => {
     );
   });
 
+  it('renders a position-based text-range anchor without a Context line', () => {
+    const t = thread({
+      anchor: {
+        type: 'text-range',
+        selectorText: 'Hello World',
+        start: 42,
+        end: 53,
+      },
+    });
+    const md = formatThreadsAsMarkdown(doc, version, [t], NOW);
+    expect(md).toContain('**Anchored on:** "Hello World"');
+    expect(md).not.toContain('**Context:**');
+    expect(md).not.toContain('undefined');
+  });
+
   it('renders an element-path anchor with innerText when present', () => {
     const t = thread({
       anchor: { type: 'element-path', path: 'body > div > h2:nth-of-type(1)', innerHash: 'abc', innerText: 'Performance' },

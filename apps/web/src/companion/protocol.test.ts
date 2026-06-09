@@ -85,6 +85,72 @@ describe('parseInboundMessage', () => {
       })
     ).toBeNull();
   });
+
+  it('accepts selection_captured with position-based anchor', () => {
+    const ok = {
+      type: 'selection_captured',
+      anchor: {
+        type: 'text-range',
+        selectorText: 'Hello World',
+        start: 100,
+        end: 111,
+      },
+      clientRects: [{ x: 0, y: 0, width: 10, height: 10 }],
+    };
+    const parsed = parseInboundMessage(ok);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe('selection_captured');
+  });
+
+  it('accepts selection_captured with legacy text-context anchor', () => {
+    const ok = {
+      type: 'selection_captured',
+      anchor: {
+        type: 'text-range',
+        selectorText: 'Hello World',
+        prefix: 'before ',
+        suffix: ' after',
+        containerPath: 'body > article > p',
+      },
+      clientRects: [],
+    };
+    const parsed = parseInboundMessage(ok);
+    expect(parsed).not.toBeNull();
+  });
+
+  it('rejects text-range anchor with neither position nor legacy shape', () => {
+    expect(
+      parseInboundMessage({
+        type: 'selection_captured',
+        anchor: { type: 'text-range', selectorText: 'just text' },
+        clientRects: [],
+      })
+    ).toBeNull();
+  });
+
+  it('rejects text-range anchor with only `start`, no `end`', () => {
+    expect(
+      parseInboundMessage({
+        type: 'selection_captured',
+        anchor: { type: 'text-range', selectorText: 'x', start: 5 },
+        clientRects: [],
+      })
+    ).toBeNull();
+  });
+
+  it('rejects text-range anchor with end <= start', () => {
+    const parsed = parseInboundMessage({
+      type: 'selection_captured',
+      anchor: {
+        type: 'text-range',
+        selectorText: 'x',
+        start: 10,
+        end: 10,
+      },
+      clientRects: [],
+    });
+    expect(parsed).toBeNull();
+  });
 });
 
 describe('parseInboundMessage — companion_log', () => {

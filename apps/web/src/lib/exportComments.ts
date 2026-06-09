@@ -47,8 +47,13 @@ export function formatThreadsAsMarkdown(
     if (t.anchor.type === 'text-range') {
       lines.push(`**Anchored on:** "${t.anchor.selectorText}"`);
       // Prefix + selection + suffix gives Claude enough surrounding text to
-      // disambiguate the same phrase appearing multiple times.
-      const context = `${t.anchor.prefix}${t.anchor.selectorText}${t.anchor.suffix}`.trim();
+      // disambiguate the same phrase appearing multiple times. New
+      // position-based anchors don't carry surrounding-text fields — their
+      // position alone is unique — so the Context line is naturally omitted
+      // for them when prefix/suffix are absent.
+      const prefix = t.anchor.prefix ?? '';
+      const suffix = t.anchor.suffix ?? '';
+      const context = `${prefix}${t.anchor.selectorText}${suffix}`.trim();
       if (context.length > 0 && context !== t.anchor.selectorText) {
         lines.push(`**Context:** "…${context}…"`);
       }
