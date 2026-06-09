@@ -8,7 +8,7 @@ description: >-
   walks the user through a one-time browser approval to obtain a token.
 ---
 
-Workflow brain over the `@polygonlabs/primer-mcp` tools. Use the five steps below in order; deeper detail (full tool I/O, error taxonomy, file schemas) lives in `reference.md` — read it on demand.
+Workflow brain over the `@polygonlabs/primer-mcp` tools. Use the steps below in order (templates in step 2 are optional); deeper detail (full tool I/O, error taxonomy, file schemas) lives in `reference.md` — read it on demand.
 
 If the user reports the MCP server isn't running, tell them to install/reinstall the Primer plugin:
 
@@ -46,7 +46,7 @@ If it errors, parse the JSON payload in the tool result's text and branch on `co
    ```
 
 4. Call `primer_login_status` with the captured `deviceCode`. It long-polls internally for up to ~90 seconds and returns `{ status }`:
-   - `approved` → token is now stored. Continue to step 2 of the workflow.
+   - `approved` → token is now stored. Continue to the create/iterate step.
    - `pending` → the long-poll timed out before the user finished approving. Call `primer_login_status` again with the same `deviceCode`. Typical logins complete in one or two calls.
    - `denied` → tell the user the request was denied in the browser; stop.
    - `expired` → tell the user the login code expired (10-minute window) and offer to start again from `primer_login`.
@@ -54,16 +54,29 @@ If it errors, parse the JSON payload in the tool result's text and branch on `co
 
 Do not print the token. Do not summarize what was stored.
 
-## 2. Create vs. iterate
+## 2. Templates (optional styling)
+
+A **template** is a named style (an Agent Skill) you apply to the artifact before publishing. The agent does the styling; Primer records which template a version used and shows a badge on the rendered document.
+
+Offer or apply a template when the user asks for a named style (e.g. "make it paperclip punk"), asks what styles are available, or wants the artifact restyled.
+
+1. `primer_list_templates` → show the user the `{ id, label, description }` options (skip if they already named one).
+2. `primer_get_template({ id })` → read the returned `instructions` and **regenerate the artifact content to follow them** (this is real work — produce styled HTML, not a wrapper).
+3. Pass the chosen `id` as `template` to `primer_create_document` / `primer_add_version`.
+
+Templates are **per-version**: pass `template` on every version you want badged; omit it for a plain version. If the user is iterating on a templated doc and doesn't ask to change the look, reuse the `template` recorded in `.primer/document.json`.
+
+## 3. Create vs. iterate
 
 Check for `.primer/document.json` in `process.cwd()` (the directory the agent was invoked from — NOT the repo root).
 
 - **No file** (or user is publishing fresh content): call `primer_create_document`.
   - Pick `format` from the source: `.md` or `.markdown` extension → `"markdown"`; everything else → `"html"`.
-  - On success, `mkdir -p .primer` in `process.cwd()`, then write `.primer/document.json` with the shape from `reference.md`.
-- **File present**: call `primer_add_version` with the recorded `documentId`. After success, update `lastVersionId`, `url`, and `savedAt` in the file.
+  - Include `template` if one was applied (step 2).
+  - On success, `mkdir -p .primer` in `process.cwd()`, then write `.primer/document.json` with the shape from `reference.md` (record `template` if used).
+- **File present**: call `primer_add_version` with the recorded `documentId`, carrying `template` forward unless the user changed the style. After success, update `lastVersionId`, `url`, `template`, and `savedAt` in the file.
 
-## 3. Share
+## 4. Share
 
 Surface the `url` from the response immediately. One line, no decoration:
 
@@ -71,11 +84,11 @@ Surface the `url` from the response immediately. One line, no decoration:
 Published: <url>
 ```
 
-## 4. Iterate
+## 5. Iterate
 
-When the user revises the artifact, regenerate the content and call `primer_add_version` with a concise `versionNote` describing what changed (e.g. `"fixed Y-axis scale"`, `"addressed reviewer Q on assumptions"`). Update `.primer/document.json` with the new version id.
+When the user revises the artifact, regenerate the content and call `primer_add_version` with a concise `versionNote` describing what changed (e.g. `"fixed Y-axis scale"`, `"addressed reviewer Q on assumptions"`). Carry the recorded `template` forward unless the user asked to change the style. Update `.primer/document.json` with the new version id (and `template`).
 
-## 5. Gather feedback
+## 6. Gather feedback
 
 Call `primer_get_comments` with `{ documentId }` to target the latest version automatically (or `{ versionId }` if pinning to a specific revision). Provide exactly one of the two.
 

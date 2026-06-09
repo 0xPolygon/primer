@@ -39,29 +39,47 @@ Revoke the stored token server-side (`DELETE /api/tokens/:tokenId`) and clear th
 - **Input:** `{}`.
 - **Output:** `{ id, email, displayName }`. Errors with `code: 'not_authenticated'` if no valid token — the trigger for the login flow.
 
+### `primer_list_templates`
+
+List the available document templates (skill-driven styles). No auth required.
+
+- **Input:** `{}`.
+- **Output:** `{ templates: [{ id, label, description }] }`.
+
+### `primer_get_template`
+
+Fetch one template's instructions by id. No auth required.
+
+- **Input:** `{ id: string }`.
+- **Output:** `{ id, label, description, instructions }`. Unknown id → `code: 'bad_request'`.
+- `instructions` is the verbatim skill content. Read it and apply it when generating the document HTML, then pass the same `id` as `template` to `primer_create_document` / `primer_add_version`.
+
 ### `primer_create_document`
 
 Create a new document and upload its first version. Multipart upload built server-side; you only pass strings.
 
-- **Input:** `{ title: string, description?: string, content: string, format: "html" | "markdown" }`.
+- **Input:** `{ title: string, description?: string, content: string, format: "html" | "markdown", template?: string }`.
 - **Output:** `{ documentId, versionId, url }`.
+- `template` (optional) — the id of the template the `content` was styled with. The API validates it against the registry; an unknown id → `code: 'bad_request'`.
 
 ### `primer_add_version`
 
 Upload a new version of an existing document.
 
-- **Input:** `{ documentId: string, content: string, format: "html" | "markdown", versionNote?: string }`.
+- **Input:** `{ documentId: string, content: string, format: "html" | "markdown", versionNote?: string, template?: string }`.
 - **Output:** `{ versionId, versionNumber, url }`.
+- `template` is **per-version**: pass it on each version built with a template; omit it for a plain version. The badge in Primer follows the viewed version.
 
 ### `primer_get_document`
 
 - **Input:** `{ documentId: string }`.
-- **Output:** `{ document: { id, title, description, uploaderId, uploaderDisplayName, createdAt }, latestVersion: { id, versionNumber, versionNote, sizeBytes, createdAt } }`.
+- **Output:** `{ document: { id, title, description, uploaderId, uploaderDisplayName, createdAt }, latestVersion: { id, versionNumber, versionNote, sizeBytes, template, createdAt } }`.
+- `template` is `{ id, label, color }` when the version was built with a template, else `null`.
 
 ### `primer_list_versions`
 
 - **Input:** `{ documentId: string }`.
-- **Output:** `{ versions: VersionSummaryDTO[] }`, newest first.
+- **Output:** `{ versions: VersionSummaryDTO[] }`, newest first. Each entry includes `template` (`{ id, label, color }` or `null`).
 
 ### `primer_get_comments`
 
@@ -117,9 +135,14 @@ Persisted state so iterations on the same artifact target the same document acro
     "documentId": "01J…",        // stable id of the Primer document
     "lastVersionId": "01J…",     // id of the most recently uploaded version
     "url": "https://primer.example.com/d/01J…",
+    "template": "paperclip-punkify", // optional: template id of the last version (omit/null if none)
     "savedAt": "2026-06-05T14:32:11.234Z"
   }
   ```
+
+  When the user keeps iterating with the same look, reuse the recorded
+  `template` on the next `primer_add_version` so the badge stays consistent.
+  Write the new `template` (or omit it) each time you push a version.
 
 - **404 handling:** if a tool call against the recorded `documentId` returns `code: 'not_found'`, the document was deleted on the server. **Prompt the user before creating a replacement** — never silently overwrite the file. Confirm with the user, then call `primer_create_document` and write the new ids over the old file.
 

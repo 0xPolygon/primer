@@ -141,6 +141,45 @@ describe('POST /api/upload — error paths', () => {
   });
 });
 
+describe('POST /api/upload — template', () => {
+  it('persists a valid template id on the version', async () => {
+    await withTmpStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const fd = buildFormData('<html><body><h1>Hi</h1></body></html>', 'Styled');
+      fd.append('template', 'paperclip-punkify');
+
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as UploadResponse;
+
+      const versionRows = await db.select().from(versions).where(eq(versions.id, body.versionId));
+      expect(versionRows[0].template).toBe('paperclip-punkify');
+    });
+  });
+
+  it('stores null when no template is provided', async () => {
+    await withTmpStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const fd = buildFormData('<html><body><h1>Hi</h1></body></html>', 'Plain');
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
+      const body = (await res.json()) as UploadResponse;
+      const versionRows = await db.select().from(versions).where(eq(versions.id, body.versionId));
+      expect(versionRows[0].template).toBeNull();
+    });
+  });
+
+  it('rejects an unknown template id with validation_failed', async () => {
+    await withTmpStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const fd = buildFormData('<html><body><h1>Hi</h1></body></html>', 'Bad');
+      fd.append('template', 'not-a-real-template');
+      const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: 'validation_failed' });
+    });
+  });
+});
+
 describe('POST /api/upload — markdown', () => {
   it('converts a .md upload to HTML and stores it as an artifact', async () => {
     await withTmpStorage(async (storage) => {

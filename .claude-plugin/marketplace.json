@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Publish and iterate on HTML/Markdown artifacts at a stable URL via Claude Code or any MCP-capable agent.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [

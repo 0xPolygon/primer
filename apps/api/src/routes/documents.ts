@@ -4,6 +4,7 @@ import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type { DocumentDetailResponse, AddVersionResponse } from '@primer/shared/api';
 import { documents, versions, users } from '@primer/shared/schema';
+import { isValidTemplateId, resolveDocumentTemplate } from '@primer/shared/templates';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
@@ -68,6 +69,7 @@ export function registerDocumentRoutes(
         versionNumber: v.versionNumber,
         versionNote: v.versionNote,
         sizeBytes: v.sizeBytes,
+        template: resolveDocumentTemplate(v.template),
         createdAt: v.createdAt.toISOString(),
       },
     };
@@ -250,6 +252,7 @@ export function registerDocumentRoutes(
         versionNumber: versions.versionNumber,
         versionNote: versions.versionNote,
         sizeBytes: versions.sizeBytes,
+        template: versions.template,
         createdAt: versions.createdAt,
       })
       .from(versions)
@@ -263,6 +266,7 @@ export function registerDocumentRoutes(
           versionNumber: r.versionNumber,
           versionNote: r.versionNote,
           sizeBytes: r.sizeBytes,
+          template: resolveDocumentTemplate(r.template),
           createdAt: r.createdAt.toISOString(),
         })),
       },
@@ -285,6 +289,18 @@ export function registerDocumentRoutes(
     const form = await c.req.parseBody();
     const file = form['file'];
     const versionNoteRaw = form['versionNote'];
+
+    const templateRaw = form['template'];
+    let template: string | null = null;
+    if (typeof templateRaw === 'string' && templateRaw.length > 0) {
+      if (!isValidTemplateId(templateRaw)) {
+        return c.json(
+          { error: 'validation_failed', message: `Unknown template: ${templateRaw}` },
+          400,
+        );
+      }
+      template = templateRaw;
+    }
 
     let bytes: Uint8Array | undefined;
     let filename = '';
@@ -369,6 +385,7 @@ export function registerDocumentRoutes(
         storageKey,
         sizeBytes: transformedBytes.byteLength,
         versionNote,
+        template,
       });
     } catch (err) {
       try { await deps.storage.delete(storageKey); } catch {}

@@ -1,4 +1,5 @@
 import type { AnchorData } from './companion-protocol.ts';
+import type { DocumentTemplate } from './templates/index.ts';
 
 export interface UploadResponse {
   documentId: string;
@@ -41,6 +42,7 @@ export interface VersionSummary {
   versionNumber: number;
   versionNote: string | null;
   sizeBytes: number;
+  template: DocumentTemplate | null;   // resolved from the version's template id
   createdAt: string;          // ISO timestamp
 }
 
@@ -131,6 +133,7 @@ export interface VersionSummaryDTO {
   versionNumber: number;
   versionNote: string | null;
   sizeBytes: number;
+  template: DocumentTemplate | null;   // resolved from the version's template id
   createdAt: string;
 }
 

@@ -16,6 +16,7 @@ import { useCreateThread } from '../queries/mutations.ts';
 import { ArtifactIframe } from '../components/ArtifactIframe.tsx';
 import { CommentSidebar } from '../components/CommentSidebar.tsx';
 import { VersionSelector } from '../components/VersionSelector.tsx';
+import { TemplateBadge } from '../components/TemplateBadge.tsx';
 import { EditableField } from '../components/EditableField.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
@@ -466,6 +467,9 @@ export function DocumentPage() {
           />
         </div>
         <div className="flex items-center gap-3">
+          {currentVersion?.template && (
+            <TemplateBadge template={currentVersion.template} />
+          )}
           {versions.length > 0 && (
             <VersionSelector
               docId={docId!}

@@ -3,6 +3,7 @@ import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type { UploadResponse } from '@primer/shared/api';
 import { documents, versions } from '@primer/shared/schema';
+import { isValidTemplateId } from '@primer/shared/templates';
 import { validateUpload } from '../upload/validate.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { markdownToHtml } from '../upload/markdown.ts';
@@ -19,6 +20,18 @@ export function registerUploadRoute(
     const title = typeof form['title'] === 'string' ? form['title'] : '';
     const description =
       typeof form['description'] === 'string' ? form['description'] : undefined;
+
+    const templateRaw = form['template'];
+    let template: string | null = null;
+    if (typeof templateRaw === 'string' && templateRaw.length > 0) {
+      if (!isValidTemplateId(templateRaw)) {
+        return c.json(
+          { error: 'validation_failed', message: `Unknown template: ${templateRaw}` },
+          400,
+        );
+      }
+      template = templateRaw;
+    }
 
     let bytes: Uint8Array | undefined;
     let filename = '';
@@ -95,6 +108,7 @@ export function registerUploadRoute(
           storageKey,
           sizeBytes: transformedBytes.byteLength,
           versionNote: null,
+          template,
         });
       });
     } catch (err) {

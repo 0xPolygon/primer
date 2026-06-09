@@ -149,6 +149,24 @@ describe('PrimerClient.createDocument', () => {
     expect(await (file as File).text()).toBe('# hello');
     expect(fd.get('title')).toBe('My Doc');
     expect(fd.get('description')).toBe('Some desc');
+    // No template passed → no template field on the form.
+    expect(fd.get('template')).toBeNull();
+  });
+
+  it('appends the template field when provided', async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ documentId: 'd3', versionId: 'v3', url: '/d/d3' }, 200));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+
+    await client.createDocument({
+      title: 'Styled',
+      content: '<p>hi</p>',
+      format: 'html',
+      template: 'paperclip-punkify',
+    });
+
+    const [, init] = firstCall(mockFetch);
+    const fd = init.body as FormData;
+    expect(fd.get('template')).toBe('paperclip-punkify');
   });
 
   it('uses doc.html and text/html for html format and omits description when absent', async () => {
@@ -200,6 +218,23 @@ describe('PrimerClient.addVersion', () => {
     expect(file.type).toBe('text/markdown');
     expect(await file.text()).toBe('# v3');
     expect(fd.get('versionNote')).toBe('tweaked something');
+    expect(fd.get('template')).toBeNull();
+  });
+
+  it('appends the template field when provided', async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ versionId: 'v5', versionNumber: 5, url: '/d/d1' }, 201));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+
+    await client.addVersion({
+      documentId: 'd1',
+      content: '<p>v5</p>',
+      format: 'html',
+      template: 'paperclip-punkify',
+    });
+
+    const [, init] = firstCall(mockFetch);
+    const fd = init.body as FormData;
+    expect(fd.get('template')).toBe('paperclip-punkify');
   });
 
   it('omits versionNote when not provided and uses doc.html for html', async () => {

@@ -491,6 +491,48 @@ describe('POST /api/documents/:docId/versions', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('persists a valid template id on the new version', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-addver-tmpl-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const fd = buildVersionFormData('<html><body><h1>Styled</h1></body></html>');
+      fd.append('template', 'paperclip-punkify');
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+        body: fd,
+      });
+      expect(res.status).toBe(201);
+      const out = (await res.json()) as AddVersionResponse;
+      const versionRows = await db.select().from(versions).where(eq(versions.id, out.versionId));
+      expect(versionRows[0].template).toBe('paperclip-punkify');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unknown template id with 400 validation_failed', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-addver-tmpl-bad-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app);
+
+      const fd = buildVersionFormData('<html><body></body></html>');
+      fd.append('template', 'bogus');
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+        body: fd,
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('validation_failed');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('GET /api/documents/:docId/versions', () => {
@@ -529,6 +571,38 @@ describe('GET /api/documents/:docId/versions', () => {
       expect(out.versions.map((v) => v.versionNumber)).toEqual([3, 2, 1]);
       expect(out.versions[1].versionNote).toBe('second');
       expect(out.versions[0].versionNote).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves the stored template id to a display DTO (null when absent)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-listver-tmpl-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const upload = await uploadFixture(app); // v1, no template
+
+      const v2Id = uuidv7();
+      await db.insert(versions).values({
+        id: v2Id,
+        documentId: upload.documentId,
+        versionNumber: 2,
+        storageKey: `v1/${v2Id}.html`,
+        sizeBytes: 100,
+        versionNote: null,
+        template: 'paperclip-punkify',
+      });
+
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`);
+      const out = (await res.json()) as VersionsListResponse;
+      const v2 = out.versions.find((v) => v.versionNumber === 2);
+      const v1 = out.versions.find((v) => v.versionNumber === 1);
+      expect(v2?.template).toEqual({
+        id: 'paperclip-punkify',
+        label: 'Paperclip Punk',
+        color: '#670DE5',
+      });
+      expect(v1?.template).toBeNull();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -41,6 +41,10 @@ export const versions = pgTable(
     storageKey: text('storage_key').notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
     versionNote: text('version_note'),
+    // Template id this version was built with (see @primer/shared/templates).
+    // Nullable: most versions carry no template. Validated against the registry
+    // at upload time, resolved to a display DTO at read time.
+    template: text('template'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

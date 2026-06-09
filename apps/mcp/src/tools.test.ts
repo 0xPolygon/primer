@@ -338,13 +338,33 @@ describe('primer_create_document', () => {
       description: 'desc',
     });
 
-    expect(client.createDocument).toHaveBeenCalledWith({
-      title: 'Hello',
-      content: '# h',
-      format: 'markdown',
-      description: 'desc',
-    });
+    expect(client.createDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Hello',
+        content: '# h',
+        format: 'markdown',
+        description: 'desc',
+      }),
+    );
     expect(parseSuccessPayload(result)).toEqual(created);
+  });
+
+  it('forwards the template id to client.createDocument', async () => {
+    const client = makeFakeClient();
+    client.createDocument.mockResolvedValue({ documentId: 'd1', versionId: 'v1', url: '/d/d1' });
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    await handlers.primer_create_document({
+      title: 'Hello',
+      content: '<p>styled</p>',
+      format: 'html',
+      template: 'paperclip-punkify',
+    });
+
+    expect(client.createDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ template: 'paperclip-punkify' }),
+    );
   });
 });
 
@@ -363,13 +383,33 @@ describe('primer_add_version', () => {
       versionNote: 'minor',
     });
 
-    expect(client.addVersion).toHaveBeenCalledWith({
-      documentId: 'd1',
-      content: '# new',
-      format: 'markdown',
-      versionNote: 'minor',
-    });
+    expect(client.addVersion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'd1',
+        content: '# new',
+        format: 'markdown',
+        versionNote: 'minor',
+      }),
+    );
     expect(parseSuccessPayload(result)).toEqual(added);
+  });
+
+  it('forwards the template id to client.addVersion', async () => {
+    const client = makeFakeClient();
+    client.addVersion.mockResolvedValue({ versionId: 'v2', versionNumber: 2, url: '/d/d1' });
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    await handlers.primer_add_version({
+      documentId: 'd1',
+      content: '<p>styled</p>',
+      format: 'html',
+      template: 'paperclip-punkify',
+    });
+
+    expect(client.addVersion).toHaveBeenCalledWith(
+      expect.objectContaining({ template: 'paperclip-punkify' }),
+    );
   });
 
   it('no token → not_authenticated', async () => {
@@ -381,6 +421,43 @@ describe('primer_add_version', () => {
       format: 'html',
     });
     expect(parseErrorPayload(result).code).toBe('not_authenticated');
+  });
+});
+
+// ─────────────────── template discovery ───────────────────
+
+describe('primer_list_templates', () => {
+  it('returns template summaries without requiring auth', async () => {
+    const { deps } = buildDeps({ client: null });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_list_templates({});
+    const payload = parseSuccessPayload<{ templates: { id: string; label: string }[] }>(result);
+    expect(payload.templates.some((t) => t.id === 'paperclip-punkify')).toBe(true);
+  });
+});
+
+describe('primer_get_template', () => {
+  it('returns id/label/description/instructions for a known template', async () => {
+    const { deps } = buildDeps({ client: null });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_get_template({ id: 'paperclip-punkify' });
+    const payload = parseSuccessPayload<{ id: string; instructions: string }>(result);
+    expect(payload.id).toBe('paperclip-punkify');
+    expect(payload.instructions).toContain('paperclip punk');
+  });
+
+  it('unknown id → bad_request', async () => {
+    const { deps } = buildDeps({ client: null });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_get_template({ id: 'nope' });
+    expect(parseErrorPayload(result).code).toBe('bad_request');
+  });
+
+  it('missing id → bad_request', async () => {
+    const { deps } = buildDeps({ client: null });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_get_template({});
+    expect(parseErrorPayload(result).code).toBe('bad_request');
   });
 });
 

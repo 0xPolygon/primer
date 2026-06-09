@@ -4,6 +4,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PrimerApiError, type PrimerClient, type PrimerErrorCode } from './client.ts';
 import { pollUntil, startDeviceLogin } from './deviceLogin.ts';
 import { formatComments } from './format.ts';
+import { getTemplate, listTemplates } from '@primer/shared/templates';
 
 /**
  * Public surface of the MCP server. Every tool returns either:
@@ -209,6 +210,30 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
       }
     },
 
+    primer_list_templates: async () => {
+      // Templates are vendored in @primer/shared — no auth or API round-trip.
+      return ok({ templates: listTemplates() });
+    },
+
+    primer_get_template: async (args) => {
+      const id = typeof args.id === 'string' ? args.id : '';
+      if (id.length === 0) {
+        return err('bad_request', 'id is required');
+      }
+      const template = getTemplate(id);
+      if (!template) {
+        return err('bad_request', `Unknown template: ${id}`);
+      }
+      // Drop `color`/`skillName` from the agent-facing payload — the agent
+      // only needs the instructions to apply, plus id/label for confirmation.
+      return ok({
+        id: template.id,
+        label: template.label,
+        description: template.description,
+        instructions: template.instructions,
+      });
+    },
+
     primer_create_document: async (args) => {
       const auth = await requireClient(deps);
       if (!auth.ok) return auth.result;
@@ -217,7 +242,14 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
         const content = String(args.content);
         const format = args.format as 'html' | 'markdown';
         const description = typeof args.description === 'string' ? args.description : undefined;
-        const result = await auth.client.createDocument({ title, content, format, description });
+        const template = typeof args.template === 'string' ? args.template : undefined;
+        const result = await auth.client.createDocument({
+          title,
+          content,
+          format,
+          description,
+          template,
+        });
         return ok(result);
       } catch (e) {
         return errFromException(e);
@@ -232,7 +264,14 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
         const content = String(args.content);
         const format = args.format as 'html' | 'markdown';
         const versionNote = typeof args.versionNote === 'string' ? args.versionNote : undefined;
-        const result = await auth.client.addVersion({ documentId, content, format, versionNote });
+        const template = typeof args.template === 'string' ? args.template : undefined;
+        const result = await auth.client.addVersion({
+          documentId,
+          content,
+          format,
+          versionNote,
+          template,
+        });
         return ok(result);
       } catch (e) {
         return errFromException(e);
@@ -327,6 +366,18 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     description: 'Return the authenticated Primer user (id, email, displayName).',
     inputSchema: {},
   },
+  primer_list_templates: {
+    description:
+      'List available Primer document templates (skill-driven styles). Returns { templates: [{ id, label, description }] }. Call primer_get_template to fetch a template\'s instructions before applying it.',
+    inputSchema: {},
+  },
+  primer_get_template: {
+    description:
+      "Fetch a template's instructions by id. Returns { id, label, description, instructions }. Read the instructions and apply them when generating the document HTML, then pass the same id as `template` to primer_create_document / primer_add_version.",
+    inputSchema: {
+      id: z.string(),
+    },
+  },
   primer_create_document: {
     description: 'Create a new Primer document and upload the initial version.',
     inputSchema: {
@@ -334,6 +385,10 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
       description: z.string().optional(),
       content: z.string(),
       format: z.enum(['html', 'markdown']),
+      template: z
+        .string()
+        .optional()
+        .describe('Template id applied to the content (from primer_list_templates).'),
     },
   },
   primer_add_version: {
@@ -343,6 +398,10 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
       content: z.string(),
       format: z.enum(['html', 'markdown']),
       versionNote: z.string().optional(),
+      template: z
+        .string()
+        .optional()
+        .describe('Template id applied to the content (from primer_list_templates).'),
     },
   },
   primer_get_document: {

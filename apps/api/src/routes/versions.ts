@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
 import type { VersionSummaryDTO } from '@primer/shared';
 import { documents, versions } from '@primer/shared/schema';
+import { resolveDocumentTemplate } from '@primer/shared/templates';
 import { db } from '../db/client.ts';
 
 export function registerVersionRoutes(app: Hono<{ Variables: AppVariables }>): void {
@@ -56,6 +57,7 @@ export function registerVersionRoutes(app: Hono<{ Variables: AppVariables }>): v
         versionNumber: versions.versionNumber,
         versionNote: versions.versionNote,
         sizeBytes: versions.sizeBytes,
+        template: versions.template,
         createdAt: versions.createdAt,
       })
       .from(versions)
@@ -66,6 +68,7 @@ export function registerVersionRoutes(app: Hono<{ Variables: AppVariables }>): v
       versionNumber: updated.versionNumber,
       versionNote: updated.versionNote,
       sizeBytes: updated.sizeBytes,
+      template: resolveDocumentTemplate(updated.template),
       createdAt: updated.createdAt.toISOString(),
     };
     return c.json(dto, 200);

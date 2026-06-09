@@ -52,6 +52,8 @@ export interface CreateDocumentInput {
   description?: string;
   content: string;
   format: DocumentFormat;
+  /** Template id the content was built with (see @primer/shared/templates). */
+  template?: string;
 }
 
 export interface AddVersionInput {
@@ -59,6 +61,8 @@ export interface AddVersionInput {
   content: string;
   format: DocumentFormat;
   versionNote?: string;
+  /** Template id the content was built with (see @primer/shared/templates). */
+  template?: string;
 }
 
 interface RequestOptions {
@@ -156,6 +160,9 @@ export class PrimerClient {
     if (input.description !== undefined) {
       fd.append('description', input.description);
     }
+    if (input.template !== undefined) {
+      fd.append('template', input.template);
+    }
     return this.request<UploadResponse>({
       method: 'POST',
       path: '/api/upload',
@@ -168,6 +175,9 @@ export class PrimerClient {
     fd.append('file', buildFileBlob(input.content, input.format), filenameFor(input.format));
     if (input.versionNote !== undefined) {
       fd.append('versionNote', input.versionNote);
+    }
+    if (input.template !== undefined) {
+      fd.append('template', input.template);
     }
     return this.request<AddVersionResponse>({
       method: 'POST',
