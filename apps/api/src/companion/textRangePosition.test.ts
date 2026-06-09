@@ -138,3 +138,98 @@ describe('position-based anchors — cross-cell selection', () => {
     expect(offsetToEndpoint(segs, 13)).toEqual({ segId: 'td1', offset: 13 });
   });
 });
+
+describe('position-based anchors — single-block selections', () => {
+  it('round-trips a selection inside a single text node', () => {
+    const segs = buildSegments([
+      { id: 'p1', text: 'Hello World friend' },
+    ]);
+    const start = endpointToOffset(segs, { segId: 'p1', offset: 6 });
+    const end = endpointToOffset(segs, { segId: 'p1', offset: 11 });
+    expect(sliceByOffsets(segs, start, end)).toBe('World');
+    expect(offsetToEndpoint(segs, start)).toEqual({ segId: 'p1', offset: 6 });
+    expect(offsetToEndpoint(segs, end)).toEqual({ segId: 'p1', offset: 11 });
+  });
+
+  it('round-trips a selection that includes a nested element boundary', () => {
+    // <p>Hello <em>brave</em> world</p>
+    // → three text nodes: "Hello ", "brave", " world"
+    const segs = buildSegments([
+      { id: 't1', text: 'Hello ' },
+      { id: 't2', text: 'brave' },
+      { id: 't3', text: ' world' },
+    ]);
+    // Select "brave world" (offset 0 of t2 through offset 6 of t3).
+    const start = endpointToOffset(segs, { segId: 't2', offset: 0 });
+    const end = endpointToOffset(segs, { segId: 't3', offset: 6 });
+    expect(sliceByOffsets(segs, start, end)).toBe('brave world');
+  });
+});
+
+describe('position-based anchors — cross-paragraph selection', () => {
+  it('round-trips a selection that crosses a P→P boundary', () => {
+    // <article><p>First paragraph.</p>\n<p>Second paragraph.</p></article>
+    // The whitespace between </p> and <p> in flow-content IS a text node.
+    const segs = buildSegments([
+      { id: 'p1', text: 'First paragraph.' },
+      { id: 'ws', text: '\n' },
+      { id: 'p2', text: 'Second paragraph.' },
+    ]);
+    // Select "paragraph.\nSecond" (from "paragraph." in p1 to "Second" in p2).
+    const start = endpointToOffset(segs, { segId: 'p1', offset: 6 });
+    const end = endpointToOffset(segs, { segId: 'p2', offset: 6 });
+    expect(sliceByOffsets(segs, start, end)).toBe('paragraph.\nSecond');
+    expect(offsetToEndpoint(segs, start)).toEqual({ segId: 'p1', offset: 6 });
+    expect(offsetToEndpoint(segs, end)).toEqual({ segId: 'p2', offset: 6 });
+  });
+});
+
+describe('position-based anchors — boundary cases', () => {
+  it('resolves offset 0 to the first segment, offset 0', () => {
+    const segs = buildSegments([
+      { id: 'a', text: 'Hello' },
+      { id: 'b', text: 'World' },
+    ]);
+    expect(offsetToEndpoint(segs, 0)).toEqual({ segId: 'a', offset: 0 });
+  });
+
+  it('resolves the total length to the last segment, end of its text', () => {
+    const segs = buildSegments([
+      { id: 'a', text: 'Hello' },
+      { id: 'b', text: 'World' },
+    ]);
+    expect(offsetToEndpoint(segs, 10)).toEqual({ segId: 'b', offset: 5 });
+  });
+
+  it('resolves an offset that sits exactly on a segment boundary to the earlier segment', () => {
+    // Locks the boundary convention: end of "Hello" (offset 5) belongs
+    // to segment 'a', not the start of 'b'. Symmetric to how Range.setEnd
+    // works when endOffset equals the end of a text node.
+    const segs = buildSegments([
+      { id: 'a', text: 'Hello' },
+      { id: 'b', text: 'World' },
+    ]);
+    expect(offsetToEndpoint(segs, 5)).toEqual({ segId: 'a', offset: 5 });
+  });
+
+  it('returns null for out-of-bounds offsets', () => {
+    const segs = buildSegments([{ id: 'a', text: 'Hello' }]);
+    expect(offsetToEndpoint(segs, -1)).toBeNull();
+    expect(offsetToEndpoint(segs, 6)).toBeNull();
+  });
+
+  it('handles empty text nodes without producing nonsense endpoints', () => {
+    // Empty text nodes can be created by the HTML parser in edge cases.
+    // Their start == end. They should never be selected by binary search
+    // for any offset because no offset's range [start, end) includes them.
+    const segs = buildSegments([
+      { id: 'a', text: 'Hello' },
+      { id: 'empty', text: '' },
+      { id: 'b', text: 'World' },
+    ]);
+    // Offset 5 is the boundary. Earlier-segment convention picks 'a' (not
+    // 'empty' or 'b'). This is what we want — never produce an endpoint
+    // inside an empty segment.
+    expect(offsetToEndpoint(segs, 5)).toEqual({ segId: 'a', offset: 5 });
+  });
+});
