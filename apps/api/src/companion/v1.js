@@ -370,17 +370,36 @@
    *  these subtrees are excluded from the segment index so our own
    *  badges / banner do not shift offsets. */
   const COMPANION_DOM_IDS = new Set([
-    '__primer_overlay__',
-    '__primer_pick_banner__',
-    '__primer_companion_style__',
+    '__primer_overlay__',         // appended to document.body
+    '__primer_pick_banner__',     // appended to document.body
+    '__primer_companion_style__', // in document.head — excluded for completeness
   ]);
 
   /** Cached segment index. Built lazily on first call to getSegments().
    *  Never invalidated: artifact DOM is immutable, companion DOM is
    *  excluded from the walk, so the index is stable for the lifetime
-   *  of the iframe. */
-  /** @type {{ node: Text, start: number, end: number }[] | null} */
+   *  of the iframe.
+   *  @type {{ node: Text, start: number, end: number }[] | null} */
   let _segmentsCache = null;
+
+  /** NodeFilter that rejects text nodes whose ancestor is a subtree
+   *  we've injected (overlay, banner, style). Used by every text walker
+   *  in the position-based anchoring path so capture, resolution, and
+   *  Element-endpoint descent all agree on which text nodes count. */
+  function makeCompanionExcludeFilter() {
+    return {
+      acceptNode(node) {
+        let p = node.parentElement;
+        while (p) {
+          if (p.id && COMPANION_DOM_IDS.has(p.id)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          p = p.parentElement;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    };
+  }
 
   function getSegments() {
     if (_segmentsCache) return _segmentsCache;
@@ -389,24 +408,13 @@
     const walker = document.createTreeWalker(
       document.body,
       NodeFilter.SHOW_TEXT,
-      {
-        acceptNode(node) {
-          let p = node.parentElement;
-          while (p) {
-            if (p.id && COMPANION_DOM_IDS.has(p.id)) {
-              return NodeFilter.FILTER_REJECT;
-            }
-            p = p.parentElement;
-          }
-          return NodeFilter.FILTER_ACCEPT;
-        },
-      }
+      makeCompanionExcludeFilter()
     );
     let cursor = 0;
     let n = walker.nextNode();
     while (n) {
       const t = /** @type {Text} */ (n);
-      const len = t.nodeValue ? t.nodeValue.length : 0;
+      const len = t.nodeValue.length;
       out.push({ node: t, start: cursor, end: cursor + len });
       cursor += len;
       n = walker.nextNode();
@@ -417,13 +425,21 @@
 
   function findFirstTextDescendant(node) {
     if (node instanceof Text) return node;
-    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(
+      node,
+      NodeFilter.SHOW_TEXT,
+      makeCompanionExcludeFilter()
+    );
     return /** @type {Text | null} */ (walker.nextNode());
   }
 
   function findLastTextDescendant(node) {
     if (node instanceof Text) return node;
-    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(
+      node,
+      NodeFilter.SHOW_TEXT,
+      makeCompanionExcludeFilter()
+    );
     /** @type {Text | null} */
     let last = null;
     /** @type {Node | null} */
@@ -442,8 +458,8 @@
    *  the end of the element's last text descendant. Returns -1 if no
    *  mapping found. */
   function endpointToOffset(containerNode, offset) {
+    const segs = getSegments();
     if (containerNode instanceof Text) {
-      const segs = getSegments();
       for (const seg of segs) {
         if (seg.node === containerNode) {
           const clamped = Math.max(0, Math.min(offset, seg.end - seg.start));
@@ -457,7 +473,6 @@
     if (offset >= children.length) {
       const lastText = findLastTextDescendant(containerNode);
       if (!lastText) return -1;
-      const segs = getSegments();
       for (const seg of segs) {
         if (seg.node === lastText) return seg.end;
       }
@@ -466,7 +481,6 @@
     const child = children[offset];
     const firstText = child instanceof Text ? child : findFirstTextDescendant(child);
     if (!firstText) return -1;
-    const segs = getSegments();
     for (const seg of segs) {
       if (seg.node === firstText) return seg.start;
     }
@@ -502,6 +516,9 @@
         return { node: seg.node, offset: rawOffset - seg.start };
       }
     }
+    // Unreachable: the bounds check above guarantees rawOffset ∈ [0, last.end],
+    // and the segment array is contiguous by construction, so every valid
+    // offset is found inside some segment. Kept as a defensive tail.
     return null;
   }
 
