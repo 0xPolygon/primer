@@ -11,6 +11,10 @@
       button { padding: 4px 10px; font: inherit; }
       canvas { border: 1px solid #ccc; }
       svg { display: block; }
+      table { border-collapse: collapse; margin: 12px 0; }
+      th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
+      th { background: #f3f4f6; }
+      h2 { margin-top: 24px; }
     </style>
   </head>
   <body>
@@ -26,6 +30,24 @@
       veritatis et quasi architecto beatae vitae dicta sunt explicabo. Highlight a
       saved anchor to see the focused style.
     </p>
+
+    <h2>Cross-cell / cross-paragraph fixtures</h2>
+    <p>
+      The table below lets you exercise cross-cell selections.
+      Drag from the first cell of row 1 to the third cell to capture
+      an anchor that spans three table cells.
+    </p>
+    <table>
+      <thead>
+        <tr><th>pair_code</th><th>vendor</th><th>asset</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>usdc_ethereum</td><td>COINME</td><td>USDC</td></tr>
+        <tr><td>usdc_polygon</td><td>COINME</td><td>USDC</td></tr>
+      </tbody>
+    </table>
+    <p>First cross-paragraph paragraph — drag from here into the next paragraph.</p>
+    <p>Second cross-paragraph paragraph — selection should round-trip across reload.</p>
 
     <div class="row">
       <a href="https://example.com/external" target="_blank" rel="noopener">External link (target=_blank)</a>
