@@ -566,7 +566,7 @@
     const start = endpointToOffset(range.startContainer, range.startOffset);
     const end = endpointToOffset(range.endContainer, range.endOffset);
     if (start < 0 || end < 0 || end <= start) {
-      log.warn('selection capture skipped — endpoints unmappable', { start, end });
+      log.info('selection capture skipped — endpoints unmappable', { start, end });
       return;
     }
 
@@ -591,6 +591,9 @@
     });
   }
 
+  /** True if `node` is inside any companion-injected subtree. Shares
+   *  COMPANION_DOM_IDS with makeCompanionExcludeFilter — register new
+   *  companion roots there and both paths pick them up automatically. */
   function isInCompanionDom(node) {
     let p = node instanceof Element ? node : node.parentElement;
     while (p) {
