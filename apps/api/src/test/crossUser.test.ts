@@ -103,4 +103,75 @@ describe('cross-user ownership boundaries (multi-user)', () => {
       expect((await r2.json()).id).toBe('mock-user-2');
     });
   });
+
+  it('POST /api/threads/:tid/resolve by non-owner → 403', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db
+        .select({ id: versions.id })
+        .from(versions)
+        .where(eq(versions.documentId, upload.documentId));
+      const createRes = await app.request(`/api/versions/${v.id}/threads`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({
+          anchor: {
+            type: 'text-range',
+            selectorText: 'x',
+            prefix: '',
+            suffix: '',
+            containerPath: 'body',
+          },
+          body: 'hello',
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id: threadId } = (await createRes.json()) as { id: string };
+
+      const res = await app.request(`/api/threads/${threadId}/resolve`, {
+        method: 'POST',
+        headers: asUser('mock-user-2'),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it('POST /api/threads/:tid/reopen by non-owner → 403', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db
+        .select({ id: versions.id })
+        .from(versions)
+        .where(eq(versions.documentId, upload.documentId));
+      const createRes = await app.request(`/api/versions/${v.id}/threads`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({
+          anchor: {
+            type: 'text-range',
+            selectorText: 'x',
+            prefix: '',
+            suffix: '',
+            containerPath: 'body',
+          },
+          body: 'hello',
+        }),
+      });
+      expect(createRes.status).toBe(201);
+      const { id: threadId } = (await createRes.json()) as { id: string };
+
+      // Resolve as the owner first so reopen has something to do.
+      const resolveRes = await app.request(`/api/threads/${threadId}/resolve`, {
+        method: 'POST',
+        headers: asUser('mock-user-1'),
+      });
+      expect(resolveRes.status).toBe(200);
+
+      const res = await app.request(`/api/threads/${threadId}/reopen`, {
+        method: 'POST',
+        headers: asUser('mock-user-2'),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
 });

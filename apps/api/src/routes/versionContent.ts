@@ -11,7 +11,11 @@ export const ARTIFACT_CSP = [
   // origin-bound to the creator (the sandboxed opaque-origin iframe) so this
   // does not expand the exfil surface — connect-src 'none' still blocks all
   // outbound network from the artifact.
-  "script-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
+  // 'unsafe-inline' was removed: with HTML sanitization in place, inline
+  // <script> elements are stripped at upload time, so the artifact only
+  // executes the same-origin companion script (`'self'`) and any external
+  // CDN scripts whose domains are explicitly listed below.
+  "script-src 'self' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
   "style-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net fonts.googleapis.com",
   "connect-src 'none'",
   "img-src data: blob: 'self' https:",
