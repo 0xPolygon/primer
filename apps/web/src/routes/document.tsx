@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Navigate, useParams, useNavigate } from 'react-router-dom';
 import type {
   AnchorData,
   InboundProtocolMessage,
@@ -27,6 +27,7 @@ import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
 import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
+import { extractCanonicalDocId } from '../lib/docIdParam.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -39,6 +40,18 @@ interface PendingPick {
 }
 
 export function DocumentPage() {
+  const { docId: rawDocId, versionNumber: versionNumberParam } = useParams();
+  const canonicalDocId = rawDocId ? extractCanonicalDocId(rawDocId) : null;
+  if (canonicalDocId && canonicalDocId !== rawDocId) {
+    const target = versionNumberParam
+      ? `/d/${canonicalDocId}/v/${versionNumberParam}`
+      : `/d/${canonicalDocId}`;
+    return <Navigate to={target} replace />;
+  }
+  return <DocumentPageInner />;
+}
+
+function DocumentPageInner() {
   const { docId, versionNumber: versionNumberParam } = useParams();
   const navigate = useNavigate();
   const docQuery = useDocument(docId ?? '');
