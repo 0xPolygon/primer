@@ -349,6 +349,10 @@ export function registerThreadRoutes(
     if (!live.ok) return c.json({ error: 'not_found' }, 404);
 
     const user = c.get('user');
+    const authz = await authorizeThreadMutation(threadId, user.id);
+    if (authz === 'not_found') return c.json({ error: 'not_found' }, 404);
+    if (authz === 'forbidden') return c.json({ error: 'forbidden' }, 403);
+
     await db
       .update(threads)
       .set({ resolvedAt: new Date(), resolvedBy: user.id })
@@ -364,6 +368,11 @@ export function registerThreadRoutes(
     const live = await ensureLiveDocumentForThread(threadId);
     if (!live.ok) return c.json({ error: 'not_found' }, 404);
 
+    const user = c.get('user');
+    const authz = await authorizeThreadMutation(threadId, user.id);
+    if (authz === 'not_found') return c.json({ error: 'not_found' }, 404);
+    if (authz === 'forbidden') return c.json({ error: 'forbidden' }, 403);
+
     await db
       .update(threads)
       .set({ resolvedAt: null, resolvedBy: null })
@@ -372,4 +381,33 @@ export function registerThreadRoutes(
     if (!dto) return c.json({ error: 'not_found' }, 404);
     return c.json(dto, 200);
   });
+}
+
+/**
+ * Resolve/reopen are permitted for either the document uploader or the
+ * thread's first-comment author (the thread starter).
+ */
+async function authorizeThreadMutation(
+  threadId: string,
+  userId: string
+): Promise<'ok' | 'not_found' | 'forbidden'> {
+  const [row] = (await db.execute(sql`
+    SELECT d.uploader_id AS "uploaderId",
+           (
+             SELECT c.author_id FROM comments c
+             WHERE c.thread_id = t.id
+             ORDER BY c.created_at ASC
+             LIMIT 1
+           ) AS "firstAuthorId"
+    FROM threads t
+    INNER JOIN versions v ON v.id = t.version_id
+    INNER JOIN documents d ON d.id = v.document_id
+    WHERE t.id = ${threadId}
+    LIMIT 1
+  `)) as unknown as { uploaderId: string; firstAuthorId: string | null }[];
+
+  if (!row) return 'not_found';
+  if (row.uploaderId === userId) return 'ok';
+  if (row.firstAuthorId !== null && row.firstAuthorId === userId) return 'ok';
+  return 'forbidden';
 }
