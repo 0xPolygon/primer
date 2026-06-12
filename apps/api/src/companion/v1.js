@@ -57,6 +57,21 @@
     }
   }
 
+  // WebKit (Safari + all iOS browsers) silently no-ops `behavior: 'smooth'`
+  // in scrollTo/scrollIntoView inside cross-origin sandboxed iframes, which is
+  // exactly the companion's context — the call returns with no error and no
+  // scroll, so clicking a comment never reveals its anchor. Fall back to
+  // instant scroll on WebKit. Chromium identifies as AppleWebKit via the
+  // legacy UA token, so exclude it explicitly.
+  const SCROLL_BEHAVIOR = (() => {
+    try {
+      const ua = navigator.userAgent || '';
+      return /AppleWebKit\//.test(ua) && !/(Chrome|Chromium|Edg)\//.test(ua) ? 'auto' : 'smooth';
+    } catch (_) {
+      return 'smooth';
+    }
+  })();
+
   function flushLogBuffer() {
     if (!port) return;
     while (logBuffer.length > 0) {
@@ -867,14 +882,14 @@
           const rect = nextRange.getBoundingClientRect();
           if (rect.width > 0 || rect.height > 0) {
             const targetY = window.scrollY + rect.top + rect.height / 2 - window.innerHeight / 2;
-            window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+            window.scrollTo({ top: Math.max(0, targetY), behavior: SCROLL_BEHAVIOR });
           } else {
             // Fallback for ranges with no client rects (e.g., inside
             // display:none subtree — unexpected for visible artifact
             // content, but defensive).
             const start = nextRange.startContainer;
             const parentEl = start instanceof Element ? start : start.parentElement;
-            parentEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            parentEl?.scrollIntoView({ behavior: SCROLL_BEHAVIOR, block: 'center' });
           }
         } catch {}
       }
@@ -890,7 +905,7 @@
       if (nextEntry) {
         nextEntry.badge.classList.add('focused');
         try {
-          nextEntry.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          nextEntry.el.scrollIntoView({ behavior: SCROLL_BEHAVIOR, block: 'center' });
         } catch {}
       }
     }
