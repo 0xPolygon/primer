@@ -29,11 +29,23 @@ const SVG_PRESENTATION_ATTRS = [
   'marker-start', 'marker-mid', 'marker-end',
 ];
 
+// Threat model: uploaded HTML executes inside ArtifactIframe's
+// `sandbox="allow-scripts allow-forms"` (no `allow-same-origin`), so any
+// script that runs is on an opaque origin — no access to Primer cookies,
+// storage, parent DOM, or the app's auth surface. The artifact CSP also
+// pins `connect-src 'none'` and `form-action 'none'`, so even hostile JS
+// inside the sandbox cannot exfiltrate over the network or post forms.
+// We therefore allow <script> and inline on* event handlers so uploaded
+// dashboards remain interactive. We still strip the things the sandbox
+// does NOT defang: <iframe>/<object>/<embed> (could nest non-sandboxed
+// content via document.write), <form> (UI deception), javascript: hrefs
+// (defense-in-depth against URL-based injection), and <meta http-equiv>
+// (no legitimate use here).
 const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   allowedTags: [
     // Document structure — preserved so theming attrs on <html>/<body> and
     // inline <style>/<meta charset> survive the upload.
-    'html', 'head', 'body', 'meta', 'title', 'style',
+    'html', 'head', 'body', 'meta', 'title', 'style', 'script',
     // Block + inline
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'p', 'br', 'hr',
@@ -45,6 +57,12 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     'div', 'span', 'section', 'article', 'aside', 'header', 'footer', 'main', 'nav',
     'figure', 'figcaption', 'details', 'summary',
     'canvas',
+    // Form controls — kept so interactive dashboards (selects/inputs/buttons
+    // wired up via addEventListener) work. <form> itself is intentionally
+    // omitted; CSP `form-action 'none'` blocks submissions either way and
+    // dashboards drive these via JS, not native form posts.
+    'button', 'input', 'select', 'option', 'optgroup', 'textarea',
+    'label', 'fieldset', 'legend',
     ...SVG_TAGS,
   ],
   allowedAttributes: {
@@ -55,6 +73,22 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     // strips unlisted attributes, so http-equiv="refresh" cannot survive.
     meta: ['charset', 'name', 'content'],
     style: ['type', 'media'],
+    script: ['type', 'src', 'async', 'defer', 'integrity', 'crossorigin', 'nonce'],
+    button: ['type', 'name', 'value', 'disabled', 'autofocus'],
+    input: [
+      'type', 'name', 'value', 'placeholder', 'disabled', 'readonly', 'checked',
+      'min', 'max', 'step', 'pattern', 'required', 'autocomplete', 'autofocus',
+      'list', 'maxlength', 'minlength', 'size', 'multiple', 'accept',
+    ],
+    select: ['name', 'multiple', 'disabled', 'size', 'required', 'autofocus'],
+    option: ['value', 'selected', 'disabled', 'label'],
+    optgroup: ['label', 'disabled'],
+    textarea: [
+      'name', 'rows', 'cols', 'placeholder', 'disabled', 'readonly',
+      'required', 'maxlength', 'minlength', 'wrap', 'autofocus',
+    ],
+    label: ['for'],
+    fieldset: ['disabled', 'name'],
     svg: ['viewBox', 'xmlns', 'preserveAspectRatio', 'width', 'height',
           'role', 'aria-label', 'aria-labelledby', 'aria-describedby'],
     path: ['d', 'pathLength'],
@@ -78,6 +112,9 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     '*': [
       'class', 'id', 'style', 'role', 'tabindex',
       'data-*', 'aria-*',
+      // Inline event handlers — allowed because the iframe sandbox isolates
+      // any JS they trigger. See threat-model comment above SANITIZE_OPTIONS.
+      'on*',
       ...SVG_PRESENTATION_ATTRS,
     ],
   },

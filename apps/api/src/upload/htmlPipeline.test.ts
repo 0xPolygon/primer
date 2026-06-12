@@ -2,15 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { transformHtml } from './htmlPipeline.ts';
 
 describe('transformHtml', () => {
-  it('returns serialized HTML with dangerous content stripped and companion script injected', () => {
+  it('returns serialized HTML with dangerous content stripped, user script preserved, and companion script injected', () => {
     const input =
-      '<html><body><h1>Report</h1><iframe src="x"></iframe><script>alert(1)</script></body></html>';
+      '<html><body><h1>Report</h1><iframe src="x"></iframe>' +
+      '<script>document.querySelector("h1").click();</script></body></html>';
     const out = transformHtml(input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.html).toContain('<h1>Report</h1>');
     expect(out.html).not.toContain('<iframe');
-    expect(out.html).not.toMatch(/<script>alert/);
+    // User <script> is preserved — the iframe sandbox is the JS defense.
+    expect(out.html).toContain('document.querySelector("h1").click();');
     // Companion script is injected by inject.ts after sanitization.
     expect(out.html).toContain('<script src="/companion/v1.js"');
   });
