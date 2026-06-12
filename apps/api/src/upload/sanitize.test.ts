@@ -22,25 +22,31 @@ describe('sanitizeUploadedHtml — dangerous content', () => {
     expect(out.toLowerCase()).not.toContain('http-equiv');
   });
 
-  it('strips <script>, <form>, inline event handlers, <object>, <embed>, javascript: URIs', () => {
+  it('strips <form>, <object>, <embed>, and javascript: URIs', () => {
     const input = `<html><body>
-      <script>alert(1)</script>
-      <form action="/x" onsubmit="return false"><input name="a"></form>
-      <div onclick="boom()">click</div>
+      <form action="/x"><input name="a"></form>
       <object data="x"></object>
       <embed src="x">
       <a href="javascript:alert(1)">x</a>
-      <img src="x" onerror="alert(1)">
     </body></html>`;
     const out = sanitizeUploadedHtml(input);
-    expect(out).not.toContain('<script>');
     expect(out).not.toContain('<form');
-    expect(out).not.toContain('onsubmit');
-    expect(out).not.toContain('onclick');
     expect(out).not.toContain('<object');
     expect(out).not.toContain('<embed');
-    expect(out).not.toContain('onerror');
     expect(out).not.toMatch(/javascript:/i);
+  });
+
+  it('preserves <script> and inline on* event handlers (iframe sandbox is the defense)', () => {
+    const input = `<html><body>
+      <script>document.addEventListener('DOMContentLoaded', () => {});</script>
+      <button onclick="doThing()">click</button>
+      <img src="https://example.com/x.png" onerror="fallback()">
+    </body></html>`;
+    const out = sanitizeUploadedHtml(input);
+    expect(out).toContain('<script>');
+    expect(out).toContain("addEventListener('DOMContentLoaded'");
+    expect(out).toContain('onclick="doThing()"');
+    expect(out).toContain('onerror="fallback()"');
   });
 
   it('preserves safe content: headings, paragraphs, links, images', () => {
@@ -151,19 +157,20 @@ describe('sanitizeUploadedHtml — inline SVG', () => {
     expect(out).toContain('d="M0,0 L7,3 L0,6 Z"');
   });
 
-  it('strips <script> inside SVG', () => {
+  it('preserves <script> inside SVG (iframe sandbox is the defense)', () => {
     const out = sanitizeUploadedHtml(
-      '<svg><script>alert(1)</script><rect width="10" height="10"/></svg>'
+      '<svg><script>doThing()</script><rect width="10" height="10"/></svg>'
     );
-    expect(out).not.toContain('<script');
+    expect(out).toContain('<script');
+    expect(out).toContain('doThing()');
     expect(out).toContain('<rect');
   });
 
-  it('strips event handlers on SVG elements', () => {
+  it('preserves event handlers on SVG elements (iframe sandbox is the defense)', () => {
     const out = sanitizeUploadedHtml(
-      '<svg><rect onclick="alert(1)" width="10" height="10"/></svg>'
+      '<svg><rect onclick="doThing()" width="10" height="10"/></svg>'
     );
-    expect(out).not.toContain('onclick');
+    expect(out).toContain('onclick="doThing()"');
     expect(out).toContain('<rect');
   });
 

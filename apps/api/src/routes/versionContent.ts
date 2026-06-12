@@ -11,11 +11,14 @@ export const ARTIFACT_CSP = [
   // origin-bound to the creator (the sandboxed opaque-origin iframe) so this
   // does not expand the exfil surface — connect-src 'none' still blocks all
   // outbound network from the artifact.
-  // 'unsafe-inline' was removed: with HTML sanitization in place, inline
-  // <script> elements are stripped at upload time, so the artifact only
-  // executes the same-origin companion script (`'self'`) and any external
-  // CDN scripts whose domains are explicitly listed below.
-  "script-src 'self' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
+  // 'unsafe-inline' is required so uploaded artifacts can ship inline
+  // <script> blocks and on* event handlers — that's the only way most
+  // interactive dashboards work. The threat surface this opens is bounded
+  // by ArtifactIframe's sandbox (opaque origin, no `allow-same-origin`) plus
+  // `connect-src 'none'` and `form-action 'none'` below: inline JS runs,
+  // but cannot reach Primer cookies/storage/parent DOM, cannot make network
+  // requests, and cannot submit forms.
+  "script-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
   "style-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net fonts.googleapis.com",
   "connect-src 'none'",
   "img-src data: blob: 'self' https:",
