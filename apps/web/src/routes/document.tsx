@@ -485,27 +485,21 @@ function DocumentPageInner() {
               versions={versions}
               currentVersionNumber={currentVersionNumber}
               isViewingLatest={isViewingLatest}
+              onAddVersion={
+                isUploader && !readMostly ? () => setShowAddVersion(true) : undefined
+              }
             />
           )}
           {!readMostly && (
             <button
               onClick={togglePickMode}
-              className={`hidden md:inline-flex rounded px-3 py-1 text-sm ${
+              className={`hidden md:inline-flex h-7 items-center rounded px-3 text-sm ${
                 pickMode
                   ? 'bg-red-600 text-white'
                   : 'border border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
               }`}
             >
               {pickMode ? 'Cancel' : 'Add Comment'}
-            </button>
-          )}
-          {isUploader && !readMostly && (
-            <button
-              type="button"
-              onClick={() => setShowAddVersion(true)}
-              className="hidden md:inline-flex rounded border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-            >
-              + Version
             </button>
           )}
           <div className="relative" ref={actionsMenuRef}>
@@ -517,7 +511,7 @@ function DocumentPageInner() {
               aria-label="More actions"
               aria-haspopup="menu"
               aria-expanded={actionsMenuState !== 'closed'}
-              className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
             >
               ⋯
             </button>
