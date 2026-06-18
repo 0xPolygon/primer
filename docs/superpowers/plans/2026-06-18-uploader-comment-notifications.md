@@ -313,24 +313,34 @@ actor-skip happens after the add so uploader == actor is handled."
 
 ---
 
-### Task 3: Mailgun — broaden the email footer copy
+### Task 3: Mailgun — broaden email copy (lead line AND footer) so uploader-only recipients see accurate copy
 
-TDD: the current footer string fails to mention "uploaded the document." Update the test to assert the new string, then update both render functions.
+The opening line of every email comes from `signalLead(actorName, mention, reply)`. When a recipient is the uploader but neither @-mentioned nor a prior participant, the current fallback says "${actorName} replied to a thread you're in." — which is false (they haven't been replied to). Task 3 fixes both the opening line and the footer so uploader-only recipients see accurate copy.
 
 **Files:**
-- Test: `apps/api/src/notifications/mailgun.test.ts` (one new case; one existing case may need adjustment if it hard-asserts the old footer — check first)
-- Modify: `apps/api/src/notifications/mailgun.ts:64-67` (text footer) and `apps/api/src/notifications/mailgun.ts:90` (html footer)
+- Test: `apps/api/src/notifications/mailgun.test.ts` (two new cases; broadened-but-backward-compatible expectations for the existing `mention-only` / `reply-only` / `combined` tests stay valid)
+- Modify: `apps/api/src/notifications/mailgun.ts` — `signalLead`, `renderText`, `renderHtml`, and the per-recipient call site in `notifyComment` that computes `mention` and `reply`
 
-- [ ] **Step 1: Scan the test file for the existing footer string**
+- [ ] **Step 1: Add the failing tests**
 
-Run: `grep -n "received this because" apps/api/src/notifications/mailgun.test.ts`
-Expected: no matches. If matches appear, replace each one inline with the new string in the same step as the new test below. (As of writing, only the source file contains the string.)
-
-- [ ] **Step 2: Add the failing footer test**
-
-Append to `describe('MailgunNotifier.notifyComment', ...)`:
+Append to `describe('MailgunNotifier.notifyComment', ...)` in `apps/api/src/notifications/mailgun.test.ts`:
 
 ```ts
+it('renders uploader-only lead copy (no mention, no participation)', async () => {
+  const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+  await n.notifyComment(
+    args({
+      mentionedUserIds: [],
+      participantUserIds: [],
+      uploaderUserId: 'mock-user-2',
+    }),
+  );
+  const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  expect(body.text).toContain('commented on a document you uploaded');
+  expect(body.text).not.toContain("replied to a thread you're in");
+  expect(body.text).not.toContain('mentioned you');
+});
+
 it('renders an uploader-aware footer in both text and HTML', async () => {
   const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
   await n.notifyComment(args());
@@ -341,14 +351,44 @@ it('renders an uploader-aware footer in both text and HTML', async () => {
 });
 ```
 
-- [ ] **Step 3: Run the test — expect failure**
+The existing `'renders mention-only signal copy'`, `'renders reply-only signal copy'`, and `'renders combined signal copy'` tests must continue to pass without modification — `signalLead` keeps its current outputs in the no-uploader cases.
 
-Run: `pnpm --filter @primer/api exec vitest run src/notifications/mailgun.test.ts -t "uploader-aware footer"`
-Expected: failing assertion that the rendered text does not contain the new footer string.
+- [ ] **Step 2: Run the new tests — expect both to fail**
 
-- [ ] **Step 4: Update the text footer**
+Run: `pnpm --filter @primer/api exec vitest run src/notifications/mailgun.test.ts`
+Expected:
+- `renders uploader-only lead copy` fails because the current fallback returns `"… replied to a thread you're in."` for `!mention && !reply`.
+- `renders an uploader-aware footer in both text and HTML` fails because the current footer string is the old phrasing.
 
-In `apps/api/src/notifications/mailgun.ts`, change the last line of `renderText`:
+- [ ] **Step 3: Update `signalLead` to take an `uploaded` flag**
+
+In `apps/api/src/notifications/mailgun.ts`, replace `signalLead`:
+
+```ts
+function signalLead(actorName: string, mention: boolean, reply: boolean, uploaded: boolean): string {
+  if (mention && reply) {
+    return uploaded
+      ? `${actorName} mentioned you and replied to a thread on a document you uploaded.`
+      : `${actorName} mentioned you and replied to a thread you're in.`;
+  }
+  if (mention) {
+    return uploaded
+      ? `${actorName} mentioned you in a comment on a document you uploaded.`
+      : `${actorName} mentioned you in a comment.`;
+  }
+  if (reply) {
+    return uploaded
+      ? `${actorName} replied to a thread on a document you uploaded.`
+      : `${actorName} replied to a thread you're in.`;
+  }
+  // uploaded-only: no mention, not in the thread, but they uploaded the doc.
+  return `${actorName} commented on a document you uploaded.`;
+}
+```
+
+The three pre-uploader cases (`mention && reply`, `mention`, `reply`) keep their existing copy when `uploaded === false`, so the existing tests stay green.
+
+- [ ] **Step 4: Update `renderText` to accept and forward `uploaded`, and update the footer**
 
 ```ts
 function renderText(
@@ -358,9 +398,10 @@ function renderText(
   url: string,
   mention: boolean,
   reply: boolean,
+  uploaded: boolean,
 ): string {
   return [
-    signalLead(actorName, mention, reply),
+    signalLead(actorName, mention, reply, uploaded),
     '',
     `Doc: ${docTitle}`,
     '',
@@ -373,31 +414,90 @@ function renderText(
 }
 ```
 
-(Only the final string changes — every other character is identical.)
+- [ ] **Step 5: Update `renderHtml` to accept and forward `uploaded`, and update the footer**
 
-- [ ] **Step 5: Update the HTML footer**
-
-In `renderHtml`, change the final `<p>` of the body:
-
-```html
-<p style="margin:24px 0 0;font-size:11px;color:#a3a3a3;">You received this because you were mentioned, are a participant in this thread, or uploaded this document.</p>
+```ts
+function renderHtml(
+  actorName: string,
+  docTitle: string,
+  commentExcerpt: string,
+  url: string,
+  mention: boolean,
+  reply: boolean,
+  uploaded: boolean,
+): string {
+  const lead = escapeHtml(signalLead(actorName, mention, reply, uploaded));
+  const safeTitle = escapeHtml(docTitle);
+  const safeExcerpt = escapeHtml(commentExcerpt).replace(/\n/g, '<br/>');
+  return `<!doctype html>
+<html><body style="font-family:-apple-system,system-ui,sans-serif;color:#171717;background:#fafafa;margin:0;padding:24px;">
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:8px;">
+  <tr><td style="padding:24px;">
+    <p style="margin:0 0 12px;font-size:14px;color:#525252;">${lead}</p>
+    <p style="margin:0 0 8px;font-size:13px;color:#737373;">Doc: <strong style="color:#171717;">${safeTitle}</strong></p>
+    <blockquote style="margin:16px 0;padding:12px 16px;border-left:3px solid #fbbf24;background:#fef9c3;font-size:14px;line-height:1.5;color:#262626;">${safeExcerpt}</blockquote>
+    <p style="margin:24px 0;">
+      <a href="${url}" style="display:inline-block;padding:10px 18px;background:#171717;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;">Open thread</a>
+    </p>
+    <p style="margin:24px 0 0;font-size:11px;color:#a3a3a3;">You received this because you were mentioned, are a participant in this thread, or uploaded this document.</p>
+  </td></tr>
+</table>
+</body></html>`;
+}
 ```
 
-- [ ] **Step 6: Run the tests — expect green**
+Only the signature (added `uploaded` param), the `signalLead` call, and the footer `<p>` change. Everything else is byte-identical.
+
+- [ ] **Step 6: Compute and pass `uploaded` per recipient in `notifyComment`**
+
+In the per-recipient loop in `apps/api/src/notifications/mailgun.ts`:
+
+```ts
+for (const recipientId of recipientIds) {
+  const recipient = rows.find((u) => u.id === recipientId);
+  if (!recipient) {
+    logger.warn({ recipientId }, 'recipient not found in users table, skipping');
+    continue;
+  }
+  const mention = mentionSet.has(recipientId);
+  const reply = participantSet.has(recipientId);
+  const html = renderHtml(actorName, args.doc.title, excerpt, url, mention, reply);
+  const text = renderText(actorName, args.doc.title, excerpt, url, mention, reply);
+```
+
+Change it to:
+
+```ts
+for (const recipientId of recipientIds) {
+  const recipient = rows.find((u) => u.id === recipientId);
+  if (!recipient) {
+    logger.warn({ recipientId }, 'recipient not found in users table, skipping');
+    continue;
+  }
+  const mention = mentionSet.has(recipientId);
+  const reply = participantSet.has(recipientId);
+  const uploaded = args.uploaderUserId !== null && recipientId === args.uploaderUserId;
+  const html = renderHtml(actorName, args.doc.title, excerpt, url, mention, reply, uploaded);
+  const text = renderText(actorName, args.doc.title, excerpt, url, mention, reply, uploaded);
+```
+
+- [ ] **Step 7: Run the tests — expect all green**
 
 Run: `pnpm --filter @primer/api exec vitest run src/notifications/mailgun.test.ts`
-Expected: all pass.
+Expected: all tests pass (14 total: original 9 + Task 2's 3 + Task 3's 2). The existing `mention-only`, `reply-only`, and `combined` cases still pass because `signalLead`'s behavior for `uploaded === false` is unchanged.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add apps/api/src/notifications/mailgun.ts \
   apps/api/src/notifications/mailgun.test.ts
-git commit -m "feat(notifier): broaden email footer to mention uploader reason
+git commit -m "feat(notifier): make email lead and footer accurate for uploader recipients
 
-The 'why you're getting this' footer line now covers uploader-only
-recipients in addition to mentions and participants. One static string
-update in renderText and renderHtml; no per-recipient logic."
+signalLead now takes an 'uploaded' boolean and renders an uploader-aware
+opening line in all combinations (uploader-only, uploader+mention,
+uploader+reply, uploader+mention+reply). Footer copy is broadened to
+cover the uploader reason. Non-uploader cases keep their existing copy
+so the mention-only / reply-only / combined assertions remain valid."
 ```
 
 ---

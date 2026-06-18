@@ -15,7 +15,7 @@ This change adds the uploader as a third recipient class on **new comments** (ne
 - **No per-document or per-user opt-out.** The behavior is unconditional. Primer is a small internal tool; if this turns out to be too loud, an opt-out can be added later.
 - **No change to edits.** `PATCH /api/comments/:id` continues to notify only newly-added @-mentions. Editing a typo on someone else's document does not ping the uploader.
 - **No change to resolve / reopen / delete flows.** Those don't currently fire `notifyComment`.
-- **No separate email template for uploader-only recipients.** The existing template is reused; only the footer reason line is broadened.
+- **No separate email template for uploader-only recipients.** The existing render functions are reused; only the per-recipient `signalLead` opening line gains a new `uploaded` boolean (so uploader-only recipients see "commented on a document you uploaded" instead of the misleading "replied to a thread you're in"), and the static footer line is broadened. The HTML/text layout, subject, and excerpt formatting are unchanged.
 
 ## Architecture
 
@@ -57,17 +57,40 @@ if (recipientIds.size === 0) return;
 
 Dedup is automatic because `recipientIds` is a Set: if the uploader is also @-mentioned or already a participant, they receive one email, not two or three. Self-skip is automatic because we always `delete(actorUserId)` after building the set — if the uploader posts a comment on their own doc, they don't email themselves.
 
-### Email footer copy
+### Email copy (opening line and footer)
 
-The existing footer in both `renderText` and `renderHtml`:
+Two complementary copy changes:
+
+**1. `signalLead` (per-recipient opening line) gains an `uploaded` boolean.**
+The current helper returns `${actor} replied to a thread you're in.` as the fallback for `!mention && !reply` — which is factually wrong when the only reason a recipient is being emailed is that they uploaded the doc (they have not been replied to). The new shape:
+
+```ts
+signalLead(actorName, mention, reply, uploaded)
+```
+
+renders accurate copy for all combinations:
+
+- mention + reply + uploaded → "… mentioned you and replied to a thread on a document you uploaded."
+- mention + uploaded → "… mentioned you in a comment on a document you uploaded."
+- reply + uploaded → "… replied to a thread on a document you uploaded."
+- uploaded only → "… commented on a document you uploaded."
+- (existing combos when `uploaded === false` keep their current copy — important for back-compat with the existing mention-only / reply-only / combined tests).
+
+`uploaded` is computed per recipient inside the `notifyComment` loop:
+
+```ts
+const uploaded = args.uploaderUserId !== null && recipientId === args.uploaderUserId;
+```
+
+**2. The static footer line in both `renderText` and `renderHtml`:**
 
 > "You received this because you were mentioned or are a participant in this Primer thread."
 
-Becomes:
+becomes:
 
 > "You received this because you were mentioned, are a participant in this thread, or uploaded this document."
 
-This is a static string change in both render functions. We don't compute a per-recipient reason — the cost of differentiated copy is not worth the complexity at this scale.
+The footer stays static (not per-recipient) — the differentiated logic is in `signalLead`. The footer is just a "your possible reasons" disclaimer.
 
 ### Route plumbing
 
