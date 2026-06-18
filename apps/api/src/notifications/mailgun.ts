@@ -35,10 +35,24 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function signalLead(actorName: string, mention: boolean, reply: boolean): string {
-  if (mention && reply) return `${actorName} mentioned you and replied to a thread you're in.`;
-  if (mention) return `${actorName} mentioned you in a comment.`;
-  return `${actorName} replied to a thread you're in.`;
+function signalLead(actorName: string, mention: boolean, reply: boolean, uploaded: boolean): string {
+  if (mention && reply) {
+    return uploaded
+      ? `${actorName} mentioned you and replied to a thread on a document you uploaded.`
+      : `${actorName} mentioned you and replied to a thread you're in.`;
+  }
+  if (mention) {
+    return uploaded
+      ? `${actorName} mentioned you in a comment on a document you uploaded.`
+      : `${actorName} mentioned you in a comment.`;
+  }
+  if (reply) {
+    return uploaded
+      ? `${actorName} replied to a thread on a document you uploaded.`
+      : `${actorName} replied to a thread you're in.`;
+  }
+  // uploaded-only: no mention, not in the thread, but they uploaded the doc.
+  return `${actorName} commented on a document you uploaded.`;
 }
 
 function renderSubject(actorName: string, docTitle: string): string {
@@ -52,9 +66,10 @@ function renderText(
   url: string,
   mention: boolean,
   reply: boolean,
+  uploaded: boolean,
 ): string {
   return [
-    signalLead(actorName, mention, reply),
+    signalLead(actorName, mention, reply, uploaded),
     '',
     `Doc: ${docTitle}`,
     '',
@@ -62,7 +77,7 @@ function renderText(
     '',
     `Open thread: ${url}`,
     '',
-    'You received this because you were mentioned or are a participant in this Primer thread.',
+    'You received this because you were mentioned, are a participant in this thread, or uploaded this document.',
   ].join('\n');
 }
 
@@ -73,8 +88,9 @@ function renderHtml(
   url: string,
   mention: boolean,
   reply: boolean,
+  uploaded: boolean,
 ): string {
-  const lead = escapeHtml(signalLead(actorName, mention, reply));
+  const lead = escapeHtml(signalLead(actorName, mention, reply, uploaded));
   const safeTitle = escapeHtml(docTitle);
   const safeExcerpt = escapeHtml(commentExcerpt).replace(/\n/g, '<br/>');
   return `<!doctype html>
@@ -87,7 +103,7 @@ function renderHtml(
     <p style="margin:24px 0;">
       <a href="${url}" style="display:inline-block;padding:10px 18px;background:#171717;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;">Open thread</a>
     </p>
-    <p style="margin:24px 0 0;font-size:11px;color:#a3a3a3;">You received this because you were mentioned or are a participant in this Primer thread.</p>
+    <p style="margin:24px 0 0;font-size:11px;color:#a3a3a3;">You received this because you were mentioned, are a participant in this thread, or uploaded this document.</p>
   </td></tr>
 </table>
 </body></html>`;
@@ -127,8 +143,9 @@ export class MailgunNotifier implements Notifier {
       }
       const mention = mentionSet.has(recipientId);
       const reply = participantSet.has(recipientId);
-      const html = renderHtml(actorName, args.doc.title, excerpt, url, mention, reply);
-      const text = renderText(actorName, args.doc.title, excerpt, url, mention, reply);
+      const uploaded = args.uploaderUserId !== null && recipientId === args.uploaderUserId;
+      const html = renderHtml(actorName, args.doc.title, excerpt, url, mention, reply, uploaded);
+      const text = renderText(actorName, args.doc.title, excerpt, url, mention, reply, uploaded);
       const form = new URLSearchParams();
       form.set('from', this.cfg.fromAddress);
       form.set('to', recipient.email);

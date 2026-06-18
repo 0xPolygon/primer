@@ -217,4 +217,28 @@ describe('MailgunNotifier.notifyComment', () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('renders uploader-only lead copy (no mention, no participation)', async () => {
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(
+      args({
+        mentionedUserIds: [],
+        participantUserIds: [],
+        uploaderUserId: 'mock-user-2',
+      }),
+    );
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.text).toContain('commented on a document you uploaded');
+    expect(body.text).not.toContain("replied to a thread you're in");
+    expect(body.text).not.toContain('mentioned you');
+  });
+
+  it('renders an uploader-aware footer in both text and HTML', async () => {
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(args());
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    const expected = 'You received this because you were mentioned, are a participant in this thread, or uploaded this document.';
+    expect(body.text).toContain(expected);
+    expect(body.html).toContain(expected);
+  });
 });
