@@ -100,6 +100,7 @@ export class MailgunNotifier implements Notifier {
     const mentionSet = new Set(args.mentionedUserIds);
     const participantSet = new Set(args.participantUserIds);
     const recipientIds = new Set<string>([...mentionSet, ...participantSet]);
+    if (args.uploaderUserId) recipientIds.add(args.uploaderUserId);
     recipientIds.delete(args.actorUserId);
     if (recipientIds.size === 0) return;
 

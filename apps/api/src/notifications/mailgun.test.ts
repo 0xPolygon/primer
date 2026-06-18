@@ -177,4 +177,44 @@ describe('MailgunNotifier.notifyComment', () => {
     expect(body.subject.length).toBeLessThanOrEqual('User One commented on '.length + 50 + 3);
     expect(body.subject).toContain('…');
   });
+
+  it('emails the uploader even when they are not @-mentioned or a participant', async () => {
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(
+      args({
+        mentionedUserIds: [],
+        participantUserIds: [],
+        uploaderUserId: 'mock-user-2',
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.to).toBe('two@p.t');
+  });
+
+  it('dedups the uploader against mentions and participants (one email)', async () => {
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(
+      args({
+        mentionedUserIds: ['mock-user-2'],
+        participantUserIds: ['mock-user-2'],
+        uploaderUserId: 'mock-user-2',
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.to).toBe('two@p.t');
+  });
+
+  it('does not email the uploader when they are the actor (self-skip)', async () => {
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(
+      args({
+        mentionedUserIds: [],
+        participantUserIds: [],
+        uploaderUserId: 'mock-user-1',   // same as default actorUserId
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
