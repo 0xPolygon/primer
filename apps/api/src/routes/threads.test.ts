@@ -33,6 +33,26 @@ async function seedDocument() {
   return { documentId, versionId };
 }
 
+async function seedDocumentAs(uploaderId: string) {
+  const documentId = uuidv7();
+  const versionId = uuidv7();
+  await db.insert(documents).values({
+    id: documentId,
+    title: 'Seed Doc',
+    description: null,
+    uploaderId,
+  });
+  await db.insert(versions).values({
+    id: versionId,
+    documentId,
+    versionNumber: 1,
+    storageKey: `v1/${versionId}.html`,
+    sizeBytes: 0,
+    versionNote: null,
+  });
+  return { documentId, versionId };
+}
+
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-threads-test-'));
   try {
@@ -444,6 +464,38 @@ describe('POST /api/versions/:vid/threads — mentions', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(captured).toHaveLength(1);
     expect(captured[0].mentionedUserIds).toEqual(['mock-user-2']);
+    expect(captured[0].actorUserId).toBe('mock-user-1');
+  });
+
+  it('forwards the document uploader id to notifyComment on a new thread', async () => {
+    await db
+      .insert(users)
+      .values({ id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' })
+      .onConflictDoNothing();
+
+    const captured: { uploaderUserId: string | null; actorUserId: string }[] = [];
+    const spyApp = createApp({
+      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-uploader-spy-'))),
+      notifier: {
+        async notifyComment(args: unknown) {
+          captured.push(args as never);
+        },
+      } as never,
+    });
+    // Uploader is user-2; actor (default header) is user-1.
+    const seed = await seedDocumentAs('mock-user-2');
+    await spyApp.request(`/api/versions/${seed.versionId}/threads`, {
+      method: 'POST',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+        body: 'first comment, no mentions',
+        mentions: [],
+      }),
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captured).toHaveLength(1);
+    expect(captured[0].uploaderUserId).toBe('mock-user-2');
     expect(captured[0].actorUserId).toBe('mock-user-1');
   });
 });

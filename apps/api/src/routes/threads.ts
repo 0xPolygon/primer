@@ -268,18 +268,20 @@ export function registerThreadRoutes(
              v.version_number::int AS this_n,
              v.id AS version_id,
              d.id AS doc_id,
-             d.title AS doc_title
+             d.title AS doc_title,
+             d.uploader_id AS uploader_id
       FROM versions v
       INNER JOIN documents d ON d.id = v.document_id
       INNER JOIN versions v2 ON v2.document_id = d.id
       WHERE v.id = ${versionId}
-      GROUP BY v.version_number, v.id, d.id, d.title
+      GROUP BY v.version_number, v.id, d.id, d.title, d.uploader_id
     `)) as unknown as {
       max_n: number | null;
       this_n: number | null;
       version_id: string;
       doc_id: string;
       doc_title: string;
+      uploader_id: string;
     }[];
 
     if (!latestRow || latestRow.this_n === null) {
@@ -333,7 +335,7 @@ export function registerThreadRoutes(
         comment: { id: commentId, body: bodyValidation.body, createdAt: insertedAt },
         mentionedUserIds: cleanedMentions,
         participantUserIds: [],
-        uploaderUserId: null,
+        uploaderUserId: latestRow.uploader_id,
         actorUserId: user.id,
       })
       .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
