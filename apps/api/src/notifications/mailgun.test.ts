@@ -233,6 +233,19 @@ describe('MailgunNotifier.notifyComment', () => {
     expect(body.text).not.toContain('mentioned you');
   });
 
+  it('renders uploader+mention combined lead copy', async () => {
+    const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
+    await n.notifyComment(
+      args({
+        mentionedUserIds: ['mock-user-2'],
+        participantUserIds: [],
+        uploaderUserId: 'mock-user-2',
+      }),
+    );
+    const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.text).toContain('mentioned you in a comment on a document you uploaded');
+  });
+
   it('renders the updated footer copy in both text and HTML', async () => {
     const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
     await n.notifyComment(args());
