@@ -13,27 +13,7 @@ import type { ThreadsListResponse } from '@primer/shared';
 import type { ThreadDTO, CreateThreadRequest } from '@primer/shared';
 import { CSRF_HEADERS } from '../test/harness.ts';
 
-async function seedDocument() {
-  const documentId = uuidv7();
-  const versionId = uuidv7();
-  await db.insert(documents).values({
-    id: documentId,
-    title: 'Seed Doc',
-    description: null,
-    uploaderId: 'mock-user-1',
-  });
-  await db.insert(versions).values({
-    id: versionId,
-    documentId,
-    versionNumber: 1,
-    storageKey: `v1/${versionId}.html`,
-    sizeBytes: 0,
-    versionNote: null,
-  });
-  return { documentId, versionId };
-}
-
-async function seedDocumentAs(uploaderId: string) {
+async function seedDocument({ uploaderId = 'mock-user-1' }: { uploaderId?: string } = {}) {
   const documentId = uuidv7();
   const versionId = uuidv7();
   await db.insert(documents).values({
@@ -483,7 +463,7 @@ describe('POST /api/versions/:vid/threads — mentions', () => {
       } as never,
     });
     // Uploader is user-2; actor (default header) is user-1.
-    const seed = await seedDocumentAs('mock-user-2');
+    const seed = await seedDocument({ uploaderId: 'mock-user-2' });
     await spyApp.request(`/api/versions/${seed.versionId}/threads`, {
       method: 'POST',
       headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },

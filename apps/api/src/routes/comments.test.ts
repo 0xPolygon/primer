@@ -14,45 +14,9 @@ import { CSRF_HEADERS } from '../test/harness.ts';
 
 async function seedDocVersionThread({
   authorId = 'mock-user-1',
+  uploaderId = 'mock-user-1',
   mentions = [],
-}: { authorId?: string; mentions?: string[] } = {}) {
-  const documentId = uuidv7();
-  const versionId = uuidv7();
-  const threadId = uuidv7();
-  const commentId = uuidv7();
-  await db.insert(documents).values({
-    id: documentId,
-    title: 'Seed',
-    description: null,
-    uploaderId: 'mock-user-1',
-  });
-  await db.insert(versions).values({
-    id: versionId,
-    documentId,
-    versionNumber: 1,
-    storageKey: `v1/${versionId}.html`,
-    sizeBytes: 0,
-    versionNote: null,
-  });
-  await db.insert(threads).values({
-    id: threadId,
-    versionId,
-    anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
-  });
-  await db.insert(comments).values({
-    id: commentId,
-    threadId,
-    authorId,
-    body: 'first',
-    mentions,
-  });
-  return { documentId, versionId, threadId, commentId };
-}
-
-async function seedDocVersionThreadAs({
-  uploaderId,
-  authorId = 'mock-user-1',
-}: { uploaderId: string; authorId?: string }) {
+}: { authorId?: string; uploaderId?: string; mentions?: string[] } = {}) {
   const documentId = uuidv7();
   const versionId = uuidv7();
   const threadId = uuidv7();
@@ -80,8 +44,8 @@ async function seedDocVersionThreadAs({
     id: commentId,
     threadId,
     authorId,
-    body: 'seed',
-    mentions: [],
+    body: 'first',
+    mentions,
   });
   return { documentId, versionId, threadId, commentId };
 }
@@ -219,7 +183,7 @@ describe('POST /api/threads/:tid/comments — mentions', () => {
       .values({ id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' })
       .onConflictDoNothing();
     // Uploader is user-2; the first comment author is also user-2 so user-1's reply is the only new event.
-    const { threadId } = await seedDocVersionThreadAs({ uploaderId: 'mock-user-2', authorId: 'mock-user-2' });
+    const { threadId } = await seedDocVersionThread({ uploaderId: 'mock-user-2', authorId: 'mock-user-2' });
 
     const captured: { uploaderUserId: string | null; actorUserId: string }[] = [];
     const spyApp = createApp({
@@ -355,7 +319,7 @@ describe('PATCH /api/comments/:cid', () => {
       ])
       .onConflictDoNothing();
     // Uploader is user-2; the comment author (editor) is user-1.
-    const { commentId } = await seedDocVersionThreadAs({ uploaderId: 'mock-user-2', authorId: 'mock-user-1' });
+    const { commentId } = await seedDocVersionThread({ uploaderId: 'mock-user-2', authorId: 'mock-user-1' });
 
     const captured: { uploaderUserId: string | null }[] = [];
     const spyApp = createApp({
