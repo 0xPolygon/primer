@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type { AnchorData } from '@primer/shared';
 import { MentionTextarea } from './MentionTextarea.tsx';
 
@@ -7,6 +7,11 @@ interface Props {
   submitting: boolean;
   onSubmit: (body: string, mentions: string[]) => void;
   onCancel: () => void;
+  /** Fires with `true` once the user has typed any non-whitespace content,
+   *  `false` when the field becomes empty again. Used by callers that want
+   *  to keep the composer open across iframe interactions only while the
+   *  user has unsaved input. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 function anchorPreview(a: AnchorData): string {
@@ -20,9 +25,25 @@ function anchorPreview(a: AnchorData): string {
   return a.path;
 }
 
-export function NewThreadComposer({ anchor, submitting, onSubmit, onCancel }: Props) {
+export function NewThreadComposer({
+  anchor,
+  submitting,
+  onSubmit,
+  onCancel,
+  onDirtyChange,
+}: Props) {
   const [body, setBody] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
+
+  useEffect(() => {
+    onDirtyChange?.(body.trim().length > 0);
+  }, [body, onDirtyChange]);
+
+  useEffect(() => {
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [onDirtyChange]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();

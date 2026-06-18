@@ -131,6 +131,10 @@ function DocumentPageInner() {
   const iframeWrapperRef = useRef<HTMLDivElement>(null);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
+  // True iff the new-thread composer currently holds non-whitespace input.
+  // Read by the iframe message handler to decide whether `selection_cleared`
+  // should auto-dismiss a still-empty composer.
+  const composerDirtyRef = useRef(false);
 
   const anchorsForCompanion = useMemo(
     () => threads.filter(hasLiveComments).map((t) => ({ id: t.id, data: t.anchor })),
@@ -139,6 +143,10 @@ function DocumentPageInner() {
 
   const send = useCallback((msg: OutboundProtocolMessage) => {
     senderRef.current?.(msg);
+  }, []);
+
+  const onComposerDirtyChange = useCallback((dirty: boolean) => {
+    composerDirtyRef.current = dirty;
   }, []);
 
   const registerSender = useCallback(
@@ -171,6 +179,11 @@ function DocumentPageInner() {
           if (!readMostly) {
             setPendingSelection({ anchor: msg.anchor, clientRects: msg.clientRects });
             setPendingPick(null);
+          }
+          break;
+        case 'selection_cleared':
+          if (!composerDirtyRef.current) {
+            setPendingSelection(null);
           }
           break;
         case 'element_picked':
@@ -449,8 +462,8 @@ function DocumentPageInner() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-60px)]">
-      <header className="flex items-baseline justify-between border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
-        <div>
+      <header className="flex items-baseline justify-between gap-3 border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
+        <div className="min-w-0 flex-1">
           <EditableField
             value={document.title}
             placeholder="Add a title"
@@ -470,7 +483,7 @@ function DocumentPageInner() {
             placeholder="Add a description"
             canEdit={isUploader}
             multiline
-            displayClassName="text-sm text-neutral-600 dark:text-neutral-400"
+            displayClassName="inline-block max-w-[60ch] truncate align-middle text-sm text-neutral-600 dark:text-neutral-400"
             maxLength={2000}
             ariaLabel="Document description"
             onSave={async (next) => {
@@ -478,7 +491,7 @@ function DocumentPageInner() {
             }}
           />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           {versions.length > 0 && (
             <VersionSelector
               docId={docId!}
@@ -651,6 +664,7 @@ function DocumentPageInner() {
               setPendingPick(null);
             }}
             onSubmitPending={submitPending}
+            onComposerDirtyChange={onComposerDirtyChange}
             onHighlight={onHighlight}
             positionsByAnchorId={positionsByAnchorId}
             collapsed={sidebarCollapsed}
@@ -690,6 +704,7 @@ function DocumentPageInner() {
               setPendingPick(null);
             }}
             onSubmitPending={submitPending}
+            onComposerDirtyChange={onComposerDirtyChange}
             onHighlight={onHighlight}
             positionsByAnchorId={positionsByAnchorId}
             focusedThreadId={focusedThreadId}

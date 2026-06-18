@@ -15,6 +15,7 @@ interface Props {
   pending: PendingAnchor | null;
   onCancelPending: () => void;
   onSubmitPending: (body: string, mentions: string[]) => Promise<void>;
+  onComposerDirtyChange?: (dirty: boolean) => void;
   onHighlight: (anchorId: string) => void;
   /** anchorId → top-of-rect y in iframe viewport (from anchor_positions). */
   positionsByAnchorId?: Map<string, { y: number; drifted: boolean }>;
@@ -38,6 +39,7 @@ export function CommentSidebar({
   pending,
   onCancelPending,
   onSubmitPending,
+  onComposerDirtyChange,
   onHighlight,
   positionsByAnchorId,
   collapsed: controlledCollapsed,
@@ -187,6 +189,7 @@ export function CommentSidebar({
           anchor={pending.anchor}
           submitting={submitting}
           onCancel={onCancelPending}
+          onDirtyChange={onComposerDirtyChange}
           onSubmit={async (body, mentions) => {
             setSubmitting(true);
             try {

@@ -36,6 +36,12 @@ describe('parseInboundMessage', () => {
     });
   });
 
+  it('round-trips selection_cleared', () => {
+    expect(parseInboundMessage({ type: 'selection_cleared' })).toEqual({
+      type: 'selection_cleared',
+    });
+  });
+
   it('round-trips anchor_positions including drifted entries', () => {
     const ok = {
       type: 'anchor_positions',

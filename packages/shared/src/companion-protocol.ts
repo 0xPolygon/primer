@@ -104,6 +104,12 @@ export interface MsgElementPicked {
 export interface MsgPickModeExited {
   type: 'pick_mode_exited';
 }
+/** Fired when a previously-captured text selection collapses or is cleared
+ *  inside the iframe (e.g. the user clicked elsewhere). Lets the parent
+ *  auto-dismiss a still-empty new-thread composer. */
+export interface MsgSelectionCleared {
+  type: 'selection_cleared';
+}
 export interface MsgAnchorPositions {
   type: 'anchor_positions';
   positions: { anchorId: string; rects: SerializableRect[]; drifted?: boolean }[];
@@ -133,6 +139,7 @@ export interface MsgCompanionLog {
 
 export type InboundProtocolMessage =
   | MsgSelectionCaptured
+  | MsgSelectionCleared
   | MsgElementPicked
   | MsgPickModeExited
   | MsgAnchorPositions
@@ -220,6 +227,8 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
     }
     case 'pick_mode_exited':
       return { type: 'pick_mode_exited' };
+    case 'selection_cleared':
+      return { type: 'selection_cleared' };
     case 'anchor_positions': {
       if (!Array.isArray(raw.positions)) return null;
       const positions: MsgAnchorPositions['positions'] = [];
