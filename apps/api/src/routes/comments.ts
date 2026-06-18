@@ -148,6 +148,7 @@ export function registerCommentRoutes(
     // Load thread context (existence check + doc/version info for notifier).
     const [threadCtx] = (await db.execute(sql`
       SELECT d.id AS doc_id, d.title AS doc_title,
+             d.uploader_id AS uploader_id,
              v.id AS version_id, v.version_number::int AS version_number
       FROM threads t
       INNER JOIN versions v ON v.id = t.version_id
@@ -157,6 +158,7 @@ export function registerCommentRoutes(
     `)) as unknown as Array<{
       doc_id: string;
       doc_title: string;
+      uploader_id: string;
       version_id: string;
       version_number: number;
     }>;
@@ -220,7 +222,7 @@ export function registerCommentRoutes(
         comment: { id: commentId, body: validation.body, createdAt: insertedAt },
         mentionedUserIds: cleanedMentions,
         participantUserIds,
-        uploaderUserId: null,
+        uploaderUserId: threadCtx.uploader_id,
         actorUserId: user.id,
       })
       .catch((err) => logger.error({ err, commentId }, 'notifier failed'));

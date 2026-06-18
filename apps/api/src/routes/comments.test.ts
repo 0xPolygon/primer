@@ -49,6 +49,43 @@ async function seedDocVersionThread({
   return { documentId, versionId, threadId, commentId };
 }
 
+async function seedDocVersionThreadAs({
+  uploaderId,
+  authorId = 'mock-user-1',
+}: { uploaderId: string; authorId?: string }) {
+  const documentId = uuidv7();
+  const versionId = uuidv7();
+  const threadId = uuidv7();
+  const commentId = uuidv7();
+  await db.insert(documents).values({
+    id: documentId,
+    title: 'Seed',
+    description: null,
+    uploaderId,
+  });
+  await db.insert(versions).values({
+    id: versionId,
+    documentId,
+    versionNumber: 1,
+    storageKey: `v1/${versionId}.html`,
+    sizeBytes: 0,
+    versionNote: null,
+  });
+  await db.insert(threads).values({
+    id: threadId,
+    versionId,
+    anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+  });
+  await db.insert(comments).values({
+    id: commentId,
+    threadId,
+    authorId,
+    body: 'seed',
+    mentions: [],
+  });
+  return { documentId, versionId, threadId, commentId };
+}
+
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-comments-test-'));
   try {
@@ -175,6 +212,36 @@ describe('POST /api/threads/:tid/comments — mentions', () => {
       expect(((await res.json()) as { error: string }).error).toBe('invalid_mention');
     });
   });
+
+  it('forwards the document uploader id to notifyComment on a reply', async () => {
+    await db
+      .insert(users)
+      .values({ id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' })
+      .onConflictDoNothing();
+    // Uploader is user-2; the first comment author is also user-2 so user-1's reply is the only new event.
+    const { threadId } = await seedDocVersionThreadAs({ uploaderId: 'mock-user-2', authorId: 'mock-user-2' });
+
+    const captured: { uploaderUserId: string | null; actorUserId: string }[] = [];
+    const spyApp = createApp({
+      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-reply-uploader-spy-'))),
+      notifier: {
+        async notifyComment(args: unknown) {
+          captured.push(args as never);
+        },
+      } as never,
+    });
+
+    const res = await spyApp.request(`/api/threads/${threadId}/comments`, {
+      method: 'POST',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: 'plain reply, no mentions' }),
+    });
+    expect(res.status).toBe(201);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captured).toHaveLength(1);
+    expect(captured[0].uploaderUserId).toBe('mock-user-2');
+    expect(captured[0].actorUserId).toBe('mock-user-1');
+  });
 });
 
 describe('PATCH /api/comments/:cid', () => {
@@ -277,6 +344,39 @@ describe('PATCH /api/comments/:cid', () => {
     expect(captured).toHaveLength(1);
     expect(captured[0].mentionedUserIds).toEqual(['mock-user-3']); // diff only
     expect(captured[0].participantUserIds).toEqual([]);            // edits never re-notify participants
+  });
+
+  it('passes uploaderUserId: null to notifyComment on edit (edits never notify the uploader)', async () => {
+    await db
+      .insert(users)
+      .values([
+        { id: 'mock-user-2', email: 'two@p.t', displayName: 'Two' },
+        { id: 'mock-user-3', email: 'three@p.t', displayName: 'Three' },
+      ])
+      .onConflictDoNothing();
+    // Uploader is user-2; the comment author (editor) is user-1.
+    const { commentId } = await seedDocVersionThreadAs({ uploaderId: 'mock-user-2', authorId: 'mock-user-1' });
+
+    const captured: { uploaderUserId: string | null }[] = [];
+    const spyApp = createApp({
+      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-edit-uploader-spy-'))),
+      notifier: {
+        async notifyComment(args: unknown) {
+          captured.push(args as never);
+        },
+      } as never,
+    });
+
+    // An edit that adds a new mention so notifyComment actually fires.
+    const res = await spyApp.request(`/api/comments/${commentId}`, {
+      method: 'PATCH',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '@Three look', mentions: ['mock-user-3'] }),
+    });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(captured).toHaveLength(1);
+    expect(captured[0].uploaderUserId).toBeNull();
   });
 
   it('does not fire notifyComment on edits that only remove mentions', async () => {
