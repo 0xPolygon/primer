@@ -15,6 +15,7 @@ function args(over: Partial<NotifyCommentArgs> = {}): NotifyCommentArgs {
     comment: { id: 'c-1', body: 'hello @Alice', createdAt: NOW },
     mentionedUserIds: ['mock-user-2'],
     participantUserIds: [],
+    uploaderUserId: null,
     actorUserId: 'mock-user-1',
     ...over,
   };

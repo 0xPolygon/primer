@@ -8,6 +8,7 @@ const ARGS: NotifyCommentArgs = {
   comment: { id: 'c-1', body: 'hi', createdAt: new Date() },
   mentionedUserIds: [],
   participantUserIds: [],
+  uploaderUserId: null,
   actorUserId: 'mock-user-1',
 };
 

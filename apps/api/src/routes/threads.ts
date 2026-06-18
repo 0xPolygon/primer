@@ -333,6 +333,7 @@ export function registerThreadRoutes(
         comment: { id: commentId, body: bodyValidation.body, createdAt: insertedAt },
         mentionedUserIds: cleanedMentions,
         participantUserIds: [],
+        uploaderUserId: null,
         actorUserId: user.id,
       })
       .catch((err) => logger.error({ err, commentId }, 'notifier failed'));

@@ -7,6 +7,7 @@ export interface NotifyCommentArgs {
   comment: { id: string; body: string; createdAt: Date };
   mentionedUserIds: string[];
   participantUserIds: string[];
+  uploaderUserId: string | null;
   actorUserId: string;
 }
 

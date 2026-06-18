@@ -220,6 +220,7 @@ export function registerCommentRoutes(
         comment: { id: commentId, body: validation.body, createdAt: insertedAt },
         mentionedUserIds: cleanedMentions,
         participantUserIds,
+        uploaderUserId: null,
         actorUserId: user.id,
       })
       .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
@@ -303,6 +304,7 @@ export function registerCommentRoutes(
             comment: { id: commentId, body: validation.body, createdAt: existing.createdAt },
             mentionedUserIds: newlyAdded,
             participantUserIds: [],   // edits never re-notify participants
+            uploaderUserId: null,
             actorUserId: user.id,
           })
           .catch((err) => logger.error({ err, commentId }, 'notifier failed (edit)'));
