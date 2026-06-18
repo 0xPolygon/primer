@@ -558,15 +558,29 @@
 
   let lastEmittedFingerprint = '';
   let lastEmittedAt = 0;
+  let hasActiveCapture = false;
+
+  function emitSelectionCleared() {
+    if (!port || !hasActiveCapture) return;
+    hasActiveCapture = false;
+    lastEmittedFingerprint = '';
+    port.postMessage({ type: 'selection_cleared' });
+  }
 
   function onPossibleSelection() {
     if (!port) return;
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+      emitSelectionCleared();
+      return;
+    }
 
     const range = sel.getRangeAt(0);
     const selectorText = sel.toString();
-    if (selectorText.trim().length === 0) return;
+    if (selectorText.trim().length === 0) {
+      emitSelectionCleared();
+      return;
+    }
 
     // Reject selections that started or ended inside companion-injected
     // DOM (overlay badges, pick banner). endpointToOffset would return
@@ -604,6 +618,7 @@
       },
       clientRects,
     });
+    hasActiveCapture = true;
   }
 
   /** True if `node` is inside any companion-injected subtree. Shares

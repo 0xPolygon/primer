@@ -131,6 +131,10 @@ function DocumentPageInner() {
   const iframeWrapperRef = useRef<HTMLDivElement>(null);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
+  // True iff the new-thread composer currently holds non-whitespace input.
+  // Read by the iframe message handler to decide whether `selection_cleared`
+  // should auto-dismiss a still-empty composer.
+  const composerDirtyRef = useRef(false);
 
   const anchorsForCompanion = useMemo(
     () => threads.filter(hasLiveComments).map((t) => ({ id: t.id, data: t.anchor })),
@@ -139,6 +143,10 @@ function DocumentPageInner() {
 
   const send = useCallback((msg: OutboundProtocolMessage) => {
     senderRef.current?.(msg);
+  }, []);
+
+  const onComposerDirtyChange = useCallback((dirty: boolean) => {
+    composerDirtyRef.current = dirty;
   }, []);
 
   const registerSender = useCallback(
@@ -171,6 +179,11 @@ function DocumentPageInner() {
           if (!readMostly) {
             setPendingSelection({ anchor: msg.anchor, clientRects: msg.clientRects });
             setPendingPick(null);
+          }
+          break;
+        case 'selection_cleared':
+          if (!composerDirtyRef.current) {
+            setPendingSelection(null);
           }
           break;
         case 'element_picked':
@@ -651,6 +664,7 @@ function DocumentPageInner() {
               setPendingPick(null);
             }}
             onSubmitPending={submitPending}
+            onComposerDirtyChange={onComposerDirtyChange}
             onHighlight={onHighlight}
             positionsByAnchorId={positionsByAnchorId}
             collapsed={sidebarCollapsed}
@@ -690,6 +704,7 @@ function DocumentPageInner() {
               setPendingPick(null);
             }}
             onSubmitPending={submitPending}
+            onComposerDirtyChange={onComposerDirtyChange}
             onHighlight={onHighlight}
             positionsByAnchorId={positionsByAnchorId}
             focusedThreadId={focusedThreadId}
