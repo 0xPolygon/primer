@@ -233,7 +233,7 @@ describe('MailgunNotifier.notifyComment', () => {
     expect(body.text).not.toContain('mentioned you');
   });
 
-  it('renders an uploader-aware footer in both text and HTML', async () => {
+  it('renders the updated footer copy in both text and HTML', async () => {
     const n = new MailgunNotifier({ apiKey: 'k', domain: 'd.x', fromAddress: 'p@d.x', appBaseUrl: 'https://p.x' });
     await n.notifyComment(args());
     const body = parseForm((fetchMock.mock.calls[0][1] as RequestInit).body as string);
