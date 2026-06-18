@@ -462,8 +462,8 @@ function DocumentPageInner() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-60px)]">
-      <header className="flex items-baseline justify-between border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
-        <div>
+      <header className="flex items-baseline justify-between gap-3 border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
+        <div className="min-w-0 flex-1">
           <EditableField
             value={document.title}
             placeholder="Add a title"
@@ -483,7 +483,7 @@ function DocumentPageInner() {
             placeholder="Add a description"
             canEdit={isUploader}
             multiline
-            displayClassName="text-sm text-neutral-600 dark:text-neutral-400"
+            displayClassName="inline-block max-w-[60ch] truncate align-middle text-sm text-neutral-600 dark:text-neutral-400"
             maxLength={2000}
             ariaLabel="Document description"
             onSave={async (next) => {
@@ -491,7 +491,7 @@ function DocumentPageInner() {
             }}
           />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           {versions.length > 0 && (
             <VersionSelector
               docId={docId!}
