@@ -483,7 +483,7 @@ function DocumentPageInner() {
             placeholder="Add a description"
             canEdit={isUploader}
             multiline
-            displayClassName="inline-block max-w-[60ch] truncate align-middle text-sm text-neutral-600 dark:text-neutral-400"
+            displayClassName="inline-block max-w-[60ch] break-words align-top text-sm text-neutral-600 dark:text-neutral-400"
             maxLength={2000}
             ariaLabel="Document description"
             onSave={async (next) => {
