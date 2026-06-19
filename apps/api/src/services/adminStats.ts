@@ -237,7 +237,7 @@ function bucketFor(n: number): string {
 }
 
 export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngagementBlock> {
-  const since30d = sql`now() - interval '30 days'`;
+  const since30d = windowStart(new Date(), RANGE_DAYS);
 
   const topDocsQ = sql<{ document_id: string; title: string; viewers: number }[]>`
     select d.id as document_id, d.title, count(distinct v.user_id)::int as viewers
@@ -318,7 +318,9 @@ export async function buildOperational(db: Db = defaultDb): Promise<AdminOperati
   const spine = buildDateSpine(now, RANGE_DAYS);
 
   // ---- O1: storageBytesPerDay (cumulative) ---------------------------------
-  // UTC-shift the column BEFORE truncating, per established pattern.
+  // O1 sums all version bytes regardless of document soft-delete state — the
+  // blobs still occupy storage until the soft-delete is hard-purged, so the
+  // chart reflects actual storage footprint, not "live" content size.
   const inWindowStorage = sql<{ d: string; c: number }[]>`
     select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
            coalesce(sum(size_bytes), 0)::bigint::float8 as c
