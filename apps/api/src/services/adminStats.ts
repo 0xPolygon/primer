@@ -238,7 +238,7 @@ export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngageme
   const since30d = sql`now() - interval '30 days'`;
 
   const topDocsQ = sql<{ document_id: string; title: string; viewers: number }[]>`
-    select d.id as document_id, d.title, count(*)::int as viewers
+    select d.id as document_id, d.title, count(distinct v.user_id)::int as viewers
       from document_views v
       join documents d on d.id = v.document_id
      where d.deleted_at is null
