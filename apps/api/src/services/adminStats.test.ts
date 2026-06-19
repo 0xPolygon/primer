@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
-import { utcDateString, buildDateSpine, leftJoinDailyCounts, buildAdoption, buildEngagement } from './adminStats.ts';
+import { utcDateString, buildDateSpine, leftJoinDailyCounts, buildAdoption, buildEngagement, buildOperational } from './adminStats.ts';
 import { db } from '../db/client.ts';
 import { users, documents, versions, threads, comments, documentViews } from '@primer/shared/schema';
 
@@ -258,5 +258,103 @@ describe('buildEngagement', () => {
     const oneTwo = res.viewersPerDocHistogram.find((b) => b.bucket === '1-2')!;
     expect(zero.count).toBeGreaterThanOrEqual(1);
     expect(oneTwo.count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('buildOperational', () => {
+  it('returns exactly 30 entries per series', async () => {
+    const res = await buildOperational();
+    expect(res.storageBytesPerDay).toHaveLength(30);
+    expect(res.threadsOpenedVsResolved).toHaveLength(30);
+    expect(res.openThreadsAgingOver14d.sparkline).toHaveLength(30);
+  });
+
+  it('storageBytesPerDay is monotonic non-decreasing and seeded by pre-window versions', async () => {
+    const userId = `t-${uuidv7()}`;
+    const docId = uuidv7();
+    await db.insert(users).values({ id: userId, email: 's@p.t', displayName: 'S' });
+    await db.insert(documents).values({ id: docId, title: 'S', uploaderId: userId });
+
+    const preVersionId = uuidv7();
+    await db.insert(versions).values({
+      id: preVersionId, documentId: docId, versionNumber: 1,
+      storageKey: `v1/${preVersionId}.html`, sizeBytes: 1_000_000, versionNote: null,
+      createdAt: daysAgo(60),
+    });
+    const inWindowVersionId = uuidv7();
+    await db.insert(versions).values({
+      id: inWindowVersionId, documentId: docId, versionNumber: 2,
+      storageKey: `v1/${inWindowVersionId}.html`, sizeBytes: 500_000, versionNote: null,
+      createdAt: daysAgo(5),
+    });
+
+    const res = await buildOperational();
+    for (let i = 1; i < res.storageBytesPerDay.length; i++) {
+      expect(res.storageBytesPerDay[i].value).toBeGreaterThanOrEqual(res.storageBytesPerDay[i - 1].value);
+    }
+    expect(res.storageBytesPerDay[0].value).toBeGreaterThanOrEqual(1_000_000);
+    expect(res.storageBytesPerDay[29].value).toBeGreaterThanOrEqual(1_500_000);
+  });
+
+  it('threadsOpenedVsResolved counts opens by created_at and resolves by resolved_at', async () => {
+    const userId = `t-${uuidv7()}`;
+    const docId = uuidv7();
+    const versionId = uuidv7();
+    await db.insert(users).values({ id: userId, email: 't@p.t', displayName: 'T' });
+    await db.insert(documents).values({ id: docId, title: 'T', uploaderId: userId });
+    await db.insert(versions).values({
+      id: versionId, documentId: docId, versionNumber: 1,
+      storageKey: `v1/${versionId}.html`, sizeBytes: 0, versionNote: null,
+    });
+    const threadOpenedDay = daysAgo(5);
+    const threadResolvedDay = daysAgo(2);
+    await db.insert(threads).values({
+      id: uuidv7(), versionId,
+      anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+      createdAt: threadOpenedDay,
+      resolvedAt: threadResolvedDay,
+      resolvedBy: userId,
+    });
+
+    const res = await buildOperational();
+    const opens = res.threadsOpenedVsResolved.reduce((s, p) => s + p.opened, 0);
+    const resolves = res.threadsOpenedVsResolved.reduce((s, p) => s + p.resolved, 0);
+    expect(opens).toBeGreaterThanOrEqual(1);
+    expect(resolves).toBeGreaterThanOrEqual(1);
+  });
+
+  it('openThreadsAgingOver14d counts unresolved threads older than 14 days', async () => {
+    const userId = `t-${uuidv7()}`;
+    const docId = uuidv7();
+    const versionId = uuidv7();
+    await db.insert(users).values({ id: userId, email: 'a@p.t', displayName: 'A' });
+    await db.insert(documents).values({ id: docId, title: 'A', uploaderId: userId });
+    await db.insert(versions).values({
+      id: versionId, documentId: docId, versionNumber: 1,
+      storageKey: `v1/${versionId}.html`, sizeBytes: 0, versionNote: null,
+    });
+    // Aged & unresolved → counts.
+    await db.insert(threads).values({
+      id: uuidv7(), versionId,
+      anchor: { type: 'text-range', selectorText: 'a', prefix: '', suffix: '', containerPath: 'body' },
+      createdAt: daysAgo(20),
+    });
+    // Aged & resolved → does NOT count.
+    await db.insert(threads).values({
+      id: uuidv7(), versionId,
+      anchor: { type: 'text-range', selectorText: 'b', prefix: '', suffix: '', containerPath: 'body' },
+      createdAt: daysAgo(20),
+      resolvedAt: daysAgo(1),
+      resolvedBy: userId,
+    });
+    // Young & unresolved → does NOT count.
+    await db.insert(threads).values({
+      id: uuidv7(), versionId,
+      anchor: { type: 'text-range', selectorText: 'c', prefix: '', suffix: '', containerPath: 'body' },
+      createdAt: daysAgo(5),
+    });
+
+    const res = await buildOperational();
+    expect(res.openThreadsAgingOver14d.count).toBeGreaterThanOrEqual(1);
   });
 });

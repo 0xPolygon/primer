@@ -3,6 +3,8 @@ import type {
   AdminStatsBucket,
   AdminAdoptionBlock,
   AdminEngagementBlock,
+  AdminOperationalBlock,
+  ThreadFlowPoint,
   HistogramBucket,
   DailyPoint,
   DailyStackPoint,
@@ -298,5 +300,101 @@ export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngageme
       comments: Number(r.comments),
     })),
     viewersPerDocHistogram,
+  };
+}
+
+export async function buildOperational(db: Db = defaultDb): Promise<AdminOperationalBlock> {
+  const now = new Date();
+  const start = windowStart(now, RANGE_DAYS);
+  const spine = buildDateSpine(now, RANGE_DAYS);
+
+  // ---- O1: storageBytesPerDay (cumulative) ---------------------------------
+  // UTC-shift the column BEFORE truncating, per established pattern.
+  const inWindowStorage = sql<{ d: string; c: number }[]>`
+    select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
+           coalesce(sum(size_bytes), 0)::bigint::float8 as c
+      from versions
+     where created_at >= ${start}
+     group by 1
+  `;
+  const preWindowStorage = sql<{ c: number }[]>`
+    select coalesce(sum(size_bytes), 0)::bigint::float8 as c
+      from versions
+     where created_at < ${start}
+  `;
+
+  // ---- O2: threadsOpenedVsResolved ----------------------------------------
+  const opensByDay = sql<{ d: string; c: number }[]>`
+    select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
+           count(*)::int as c
+      from threads
+     where created_at >= ${start}
+     group by 1
+  `;
+  const resolvesByDay = sql<{ d: string; c: number }[]>`
+    select to_char(date_trunc('day', resolved_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
+           count(*)::int as c
+      from threads
+     where resolved_at >= ${start}
+     group by 1
+  `;
+
+  // ---- O3: openThreadsAgingOver14d ----------------------------------------
+  const agingCountQ = sql<{ c: number }[]>`
+    select count(*)::int as c
+      from threads
+     where resolved_at is null
+       and created_at < now() - interval '14 days'
+  `;
+  // Sparkline: for each day d in the spine, count threads where
+  // created_at < (d - 14 days) AND (resolved_at IS NULL OR resolved_at > d).
+  const agingSparkQ = sql<{ d: string; c: number }[]>`
+    with spine as (
+      select to_char(d at time zone 'UTC', 'YYYY-MM-DD') as d, d as ts
+        from generate_series(${start}::timestamptz, ${now.toISOString()}::timestamptz, '1 day'::interval) d
+    )
+    select s.d, count(t.*)::int as c
+      from spine s
+      left join threads t
+        on t.created_at < s.ts - interval '14 days'
+       and (t.resolved_at is null or t.resolved_at > s.ts)
+     group by s.d
+  `;
+
+  const [stoRows, stoSeedRows, openRows, resRows, agingRows, sparkRows] = await Promise.all([
+    db.execute(inWindowStorage),
+    db.execute(preWindowStorage),
+    db.execute(opensByDay),
+    db.execute(resolvesByDay),
+    db.execute(agingCountQ),
+    db.execute(agingSparkQ),
+  ]);
+
+  const stoMap = new Map(stoRows.map((r) => [r.d as string, Number(r.c)]));
+  const seed = Number(stoSeedRows[0]?.c ?? 0);
+  let running = seed;
+  const storageBytesPerDay: DailyPoint[] = spine.map((date) => {
+    running += stoMap.get(date) ?? 0;
+    return { date, value: running };
+  });
+
+  const openMap = new Map(openRows.map((r) => [r.d as string, Number(r.c)]));
+  const resMap = new Map(resRows.map((r) => [r.d as string, Number(r.c)]));
+  const threadsOpenedVsResolved: ThreadFlowPoint[] = spine.map((date) => ({
+    date,
+    opened: openMap.get(date) ?? 0,
+    resolved: resMap.get(date) ?? 0,
+  }));
+
+  const sparkMap = new Map(sparkRows.map((r) => [r.d as string, Number(r.c)]));
+  const sparkline = leftJoinDailyCounts(spine, sparkMap);
+
+  return {
+    storageBytesPerDay,
+    threadsOpenedVsResolved,
+    openThreadsAgingOver14d: {
+      count: Number(agingRows[0]?.c ?? 0),
+      sparkline,
+    },
   };
 }
