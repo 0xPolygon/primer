@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
-import { utcDateString, buildDateSpine, leftJoinDailyCounts, buildAdoption } from './adminStats.ts';
+import { utcDateString, buildDateSpine, leftJoinDailyCounts, buildAdoption, buildEngagement } from './adminStats.ts';
 import { db } from '../db/client.ts';
 import { users, documents, versions, threads, comments, documentViews } from '@primer/shared/schema';
 
@@ -157,5 +157,106 @@ describe('buildAdoption', () => {
     expect(res.cumulativeUsers[0].value).toBeGreaterThanOrEqual(1);
     // The last day's count must be >= first day + 1 (the today user).
     expect(res.cumulativeUsers[29].value).toBeGreaterThanOrEqual(res.cumulativeUsers[0].value + 1);
+  });
+});
+
+describe('buildEngagement', () => {
+  const HIST_BUCKETS = ['0', '1-2', '3-5', '6-10', '11-25', '26+'];
+
+  it('returns the six histogram buckets in canonical order, even when empty', async () => {
+    const res = await buildEngagement();
+    expect(res.viewersPerDocHistogram.map((b) => b.bucket)).toEqual(HIST_BUCKETS);
+  });
+
+  it('topDocumentsByViewers respects deleted_at and counts distinct viewers', async () => {
+    const u1 = `t-${uuidv7()}`;
+    const u2 = `t-${uuidv7()}`;
+    const u3 = `t-${uuidv7()}`;
+    const aliveDoc = uuidv7();
+    const deadDoc = uuidv7();
+
+    await db.insert(users).values([
+      { id: u1, email: '1@p.t', displayName: '1' },
+      { id: u2, email: '2@p.t', displayName: '2' },
+      { id: u3, email: '3@p.t', displayName: '3' },
+    ]);
+    await db.insert(documents).values({ id: aliveDoc, title: 'Alive', uploaderId: u1 });
+    await db.insert(documents).values({ id: deadDoc,  title: 'Dead',  uploaderId: u1, deletedAt: new Date() });
+
+    // Alive doc: three distinct viewers. Dead doc: three viewers but soft-deleted.
+    await db.insert(documentViews).values([
+      { userId: u1, documentId: aliveDoc },
+      { userId: u2, documentId: aliveDoc },
+      { userId: u3, documentId: aliveDoc },
+      { userId: u1, documentId: deadDoc },
+      { userId: u2, documentId: deadDoc },
+      { userId: u3, documentId: deadDoc },
+    ]);
+
+    const res = await buildEngagement();
+    const found = res.topDocumentsByViewers.find((d) => d.documentId === aliveDoc);
+    expect(found).toBeDefined();
+    expect(found?.viewers).toBe(3);
+    expect(res.topDocumentsByViewers.find((d) => d.documentId === deadDoc)).toBeUndefined();
+    expect(res.topDocumentsByViewers.length).toBeLessThanOrEqual(10);
+  });
+
+  it('topCommenters is windowed to last 30d and excludes deleted comments', async () => {
+    const userId = `t-${uuidv7()}`;
+    const docId = uuidv7();
+    const versionId = uuidv7();
+    const threadId = uuidv7();
+
+    await db.insert(users).values({ id: userId, email: 'c@p.t', displayName: 'Commenter' });
+    await db.insert(documents).values({ id: docId, title: 'D', uploaderId: userId });
+    await db.insert(versions).values({
+      id: versionId, documentId: docId, versionNumber: 1,
+      storageKey: `v1/${versionId}.html`, sizeBytes: 0, versionNote: null,
+    });
+    await db.insert(threads).values({
+      id: threadId, versionId,
+      anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+    });
+
+    // 1 alive in-window comment, 1 deleted in-window comment, 1 old comment.
+    await db.insert(comments).values({ id: uuidv7(), threadId, authorId: userId, body: 'kept' });
+    await db.insert(comments).values({
+      id: uuidv7(), threadId, authorId: userId, body: 'gone', deletedAt: new Date(),
+    });
+    await db.insert(comments).values({
+      id: uuidv7(), threadId, authorId: userId, body: 'too old',
+      createdAt: daysAgo(60),
+    });
+
+    const res = await buildEngagement();
+    const me = res.topCommenters.find((c) => c.userId === userId);
+    expect(me).toBeDefined();
+    expect(me?.comments).toBe(1);
+  });
+
+  it('viewersPerDocHistogram includes documents with zero viewers in the 0 bucket', async () => {
+    const u1 = `t-${uuidv7()}`;
+    const u2 = `t-${uuidv7()}`;
+    const docNoViews = uuidv7();
+    const docTwoViews = uuidv7();
+
+    await db.insert(users).values([
+      { id: u1, email: '1@p.t', displayName: '1' },
+      { id: u2, email: '2@p.t', displayName: '2' },
+    ]);
+    await db.insert(documents).values([
+      { id: docNoViews, title: 'No Views', uploaderId: u1 },
+      { id: docTwoViews, title: 'Two Views', uploaderId: u1 },
+    ]);
+    await db.insert(documentViews).values([
+      { userId: u1, documentId: docTwoViews },
+      { userId: u2, documentId: docTwoViews },
+    ]);
+
+    const res = await buildEngagement();
+    const zero = res.viewersPerDocHistogram.find((b) => b.bucket === '0')!;
+    const oneTwo = res.viewersPerDocHistogram.find((b) => b.bucket === '1-2')!;
+    expect(zero.count).toBeGreaterThanOrEqual(1);
+    expect(oneTwo.count).toBeGreaterThanOrEqual(1);
   });
 });

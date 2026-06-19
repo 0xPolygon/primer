@@ -2,6 +2,8 @@ import { count, isNull, gt, and, sql } from 'drizzle-orm';
 import type {
   AdminStatsBucket,
   AdminAdoptionBlock,
+  AdminEngagementBlock,
+  HistogramBucket,
   DailyPoint,
   DailyStackPoint,
 } from '@primer/shared';
@@ -214,4 +216,87 @@ export async function buildAdoption(db: Db = defaultDb): Promise<AdminAdoptionBl
   });
 
   return { createdPerDay, activeUsersPerDay, cumulativeUsers };
+}
+
+const HISTOGRAM_EDGES: { bucket: string; min: number; max: number }[] = [
+  { bucket: '0',     min: 0,  max: 0   },
+  { bucket: '1-2',   min: 1,  max: 2   },
+  { bucket: '3-5',   min: 3,  max: 5   },
+  { bucket: '6-10',  min: 6,  max: 10  },
+  { bucket: '11-25', min: 11, max: 25  },
+  { bucket: '26+',   min: 26, max: Infinity },
+];
+
+function bucketFor(n: number): string {
+  for (const e of HISTOGRAM_EDGES) {
+    if (n >= e.min && n <= e.max) return e.bucket;
+  }
+  return '26+';
+}
+
+export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngagementBlock> {
+  const since30d = sql`now() - interval '30 days'`;
+
+  const topDocsQ = sql<{ document_id: string; title: string; viewers: number }[]>`
+    select d.id as document_id, d.title, count(*)::int as viewers
+      from document_views v
+      join documents d on d.id = v.document_id
+     where d.deleted_at is null
+     group by d.id, d.title
+     order by viewers desc
+     limit 10
+  `;
+  const topCommentersQ = sql<{ user_id: string; display_name: string; comments: number }[]>`
+    select c.author_id as user_id, u.display_name, count(*)::int as comments
+      from comments c
+      join users u on u.id = c.author_id
+     where c.deleted_at is null
+       and c.created_at >= ${since30d}
+     group by c.author_id, u.display_name
+     order by comments desc
+     limit 10
+  `;
+  // Per-document viewer counts (LEFT JOIN so docs with zero viewers appear as 0).
+  const perDocQ = sql<{ viewers: number }[]>`
+    select coalesce(v.viewers, 0)::int as viewers
+      from documents d
+      left join (
+        select document_id, count(*) as viewers
+          from document_views
+         group by document_id
+      ) v on v.document_id = d.id
+     where d.deleted_at is null
+  `;
+
+  const [topDocs, topCommenters, perDoc] = await Promise.all([
+    db.execute(topDocsQ),
+    db.execute(topCommentersQ),
+    db.execute(perDocQ),
+  ]);
+
+  const histogramCounts = new Map<string, number>(
+    HISTOGRAM_EDGES.map((e) => [e.bucket, 0]),
+  );
+  for (const row of perDoc) {
+    const b = bucketFor(Number(row.viewers));
+    histogramCounts.set(b, (histogramCounts.get(b) ?? 0) + 1);
+  }
+  const viewersPerDocHistogram: HistogramBucket[] = HISTOGRAM_EDGES.map((e) => ({
+    bucket: e.bucket,
+    count: histogramCounts.get(e.bucket) ?? 0,
+  }));
+
+  return {
+    topDocumentsByViewers: topDocs.map((r) => ({
+      documentId: r.document_id,
+      title: r.title,
+      viewers: Number(r.viewers),
+    })),
+    topCommenters: topCommenters.map((r) => ({
+      userId: r.user_id,
+      displayName: r.display_name,
+      comments: Number(r.comments),
+    })),
+    viewersPerDocHistogram,
+  };
 }
