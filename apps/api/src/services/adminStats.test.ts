@@ -317,10 +317,14 @@ describe('buildOperational', () => {
     });
 
     const res = await buildOperational();
-    const opens = res.threadsOpenedVsResolved.reduce((s, p) => s + p.opened, 0);
-    const resolves = res.threadsOpenedVsResolved.reduce((s, p) => s + p.resolved, 0);
-    expect(opens).toBeGreaterThanOrEqual(1);
-    expect(resolves).toBeGreaterThanOrEqual(1);
+    const openedTarget = threadOpenedDay.toISOString().slice(0, 10);
+    const resolvedTarget = threadResolvedDay.toISOString().slice(0, 10);
+    const openedPoint = res.threadsOpenedVsResolved.find((p) => p.date === openedTarget);
+    const resolvedPoint = res.threadsOpenedVsResolved.find((p) => p.date === resolvedTarget);
+    expect(openedPoint).toBeDefined();
+    expect(resolvedPoint).toBeDefined();
+    expect(openedPoint!.opened).toBeGreaterThanOrEqual(1);
+    expect(resolvedPoint!.resolved).toBeGreaterThanOrEqual(1);
   });
 
   it('openThreadsAgingOver14d counts unresolved threads older than 14 days', async () => {

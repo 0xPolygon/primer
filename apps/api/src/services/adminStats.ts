@@ -304,7 +304,16 @@ export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngageme
 }
 
 export async function buildOperational(db: Db = defaultDb): Promise<AdminOperationalBlock> {
-  const now = new Date();
+  // Snap "now" to today's midnight UTC so the scalar count and sparkline last
+  // point share the same reference timestamp (the boundary between "today" and
+  // the future for aging-thread classification).
+  const rawNow = new Date();
+  const now = new Date(Date.UTC(
+    rawNow.getUTCFullYear(),
+    rawNow.getUTCMonth(),
+    rawNow.getUTCDate(),
+  ));
+  const nowIso = now.toISOString();
   const start = windowStart(now, RANGE_DAYS);
   const spine = buildDateSpine(now, RANGE_DAYS);
 
@@ -344,14 +353,14 @@ export async function buildOperational(db: Db = defaultDb): Promise<AdminOperati
     select count(*)::int as c
       from threads
      where resolved_at is null
-       and created_at < now() - interval '14 days'
+       and created_at < ${nowIso}::timestamptz - interval '14 days'
   `;
   // Sparkline: for each day d in the spine, count threads where
   // created_at < (d - 14 days) AND (resolved_at IS NULL OR resolved_at > d).
   const agingSparkQ = sql<{ d: string; c: number }[]>`
     with spine as (
       select to_char(d at time zone 'UTC', 'YYYY-MM-DD') as d, d as ts
-        from generate_series(${start}::timestamptz, ${now.toISOString()}::timestamptz, '1 day'::interval) d
+        from generate_series(${start}::timestamptz, ${nowIso}::timestamptz, '1 day'::interval) d
     )
     select s.d, count(t.*)::int as c
       from spine s
