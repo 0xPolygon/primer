@@ -1,36 +1,7 @@
 import { useAdminStats } from '../queries/admin.ts';
-import type { AdminStatsBucket, AdminStatsResponse } from '@primer/shared';
+import type { AdminStatsResponse } from '@primer/shared';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
-
-interface StatCardProps {
-  label: string;
-  bucket: AdminStatsBucket;
-}
-
-function StatCard({ label, bucket }: StatCardProps) {
-  const deltaClass = bucket.last7d > 0 ? 'text-neutral-500' : 'text-neutral-400 dark:text-neutral-500';
-  return (
-    <div className="rounded border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-      <div className="text-xs uppercase tracking-wider text-neutral-600 dark:text-neutral-400">{label}</div>
-      <div className="mt-1 text-3xl font-semibold text-neutral-900 dark:text-neutral-100">
-        {bucket.total.toLocaleString()}
-      </div>
-      <div className={`mt-1 text-xs ${deltaClass}`}>
-        +{bucket.last7d.toLocaleString()} this week
-      </div>
-    </div>
-  );
-}
-
-function SkeletonCard() {
-  return (
-    <div className="rounded border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-      <div className="h-3 w-20 rounded bg-neutral-200 dark:bg-neutral-700" />
-      <div className="mt-2 h-8 w-16 rounded bg-neutral-200 dark:bg-neutral-700" />
-      <div className="mt-2 h-3 w-24 rounded bg-neutral-200 dark:bg-neutral-700" />
-    </div>
-  );
-}
+import { StatCard, SkeletonCard } from '../components/admin/StatCard.tsx';
 
 const METRICS: { key: 'users' | 'documents' | 'versions' | 'threads' | 'comments' | 'documentViews'; label: string }[] = [
   { key: 'users',         label: 'Users' },
