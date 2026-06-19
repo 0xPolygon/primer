@@ -1,6 +1,7 @@
 import { count, isNull, gt, and, sql } from 'drizzle-orm';
 import type {
   AdminStatsBucket,
+  DailyPoint,
 } from '@primer/shared';
 import { db as defaultDb, type Db } from '../db/client.ts';
 import {
@@ -61,4 +62,38 @@ export async function buildTotals(db: Db = defaultDb): Promise<AdminTotals> {
     comments:      { total: commentsTotal[0].c,  last7d: commentsLast[0].c },
     documentViews: { total: viewsTotal[0].c,     last7d: viewsLast[0].c },
   };
+}
+
+const MS_PER_DAY = 86_400_000;
+
+export function utcDateString(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Build an ascending list of UTC YYYY-MM-DD strings ending at `endDate`.
+ * `days` is inclusive: buildDateSpine(today, 30) returns 30 strings, the
+ * last of which is today's UTC date.
+ */
+export function buildDateSpine(endDate: Date, days: number): string[] {
+  const endUtcMidnight = Date.UTC(
+    endDate.getUTCFullYear(),
+    endDate.getUTCMonth(),
+    endDate.getUTCDate(),
+  );
+  const result: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    result.push(utcDateString(new Date(endUtcMidnight - i * MS_PER_DAY)));
+  }
+  return result;
+}
+
+/**
+ * Left-join a date spine against a count map, zero-filling missing days.
+ */
+export function leftJoinDailyCounts(
+  spine: string[],
+  counts: Map<string, number>,
+): DailyPoint[] {
+  return spine.map((date) => ({ date, value: counts.get(date) ?? 0 }));
 }
