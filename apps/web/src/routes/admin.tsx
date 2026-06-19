@@ -32,7 +32,7 @@ function SkeletonCard() {
   );
 }
 
-const METRICS: { key: keyof AdminStatsResponse; label: string }[] = [
+const METRICS: { key: 'users' | 'documents' | 'versions' | 'threads' | 'comments' | 'documentViews'; label: string }[] = [
   { key: 'users',         label: 'Users' },
   { key: 'documents',     label: 'Documents' },
   { key: 'versions',      label: 'Versions' },

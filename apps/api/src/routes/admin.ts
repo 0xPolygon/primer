@@ -51,6 +51,23 @@ export function registerAdminRoute(app: Hono<{ Variables: AppVariables }>): void
       threads:       { total: threadsTotal[0].c,   last7d: threadsLast[0].c },
       comments:      { total: commentsTotal[0].c,  last7d: commentsLast[0].c },
       documentViews: { total: viewsTotal[0].c,     last7d: viewsLast[0].c },
+
+      rangeDays: 30,
+      adoption: {
+        createdPerDay: [],
+        activeUsersPerDay: [],
+        cumulativeUsers: [],
+      },
+      engagement: {
+        topDocumentsByViewers: [],
+        topCommenters: [],
+        viewersPerDocHistogram: [],
+      },
+      operational: {
+        storageBytesPerDay: [],
+        threadsOpenedVsResolved: [],
+        openThreadsAgingOver14d: { count: 0, sparkline: [] },
+      },
     };
     return c.json(body, 200);
   });
