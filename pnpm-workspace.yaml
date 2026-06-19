@@ -8,11 +8,7 @@ minimumReleaseAge: 20160 # 14 days, in minutes
 # only for well-established packages with active security maintenance — the
 # point of the gate is to catch malicious publishes during their first two
 # weeks of life. Each entry needs a one-line justification.
-minimumReleaseAgeExclude:
-  # Hono ships frequent security patches; 4.12.18 (May 6) clears three audit
-  # findings affecting features we don't use (cache middleware, JSX SSR, JWT
-  # verify). 14-day gate clears May 20; this excludes hono only.
-  - hono
+minimumReleaseAgeExclude: []
 blockExoticSubdeps: true
 # Packages allowed to run postinstall/preinstall scripts.
 # Each entry is reviewed individually. NEVER approve sight-unseen.
