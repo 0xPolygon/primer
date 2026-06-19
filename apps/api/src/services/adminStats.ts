@@ -288,13 +288,13 @@ export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngageme
 
   return {
     topDocumentsByViewers: topDocs.map((r) => ({
-      documentId: r.document_id,
-      title: r.title,
+      documentId: r.document_id as string,
+      title: r.title as string,
       viewers: Number(r.viewers),
     })),
     topCommenters: topCommenters.map((r) => ({
-      userId: r.user_id,
-      displayName: r.display_name,
+      userId: r.user_id as string,
+      displayName: r.display_name as string,
       comments: Number(r.comments),
     })),
     viewersPerDocHistogram,
