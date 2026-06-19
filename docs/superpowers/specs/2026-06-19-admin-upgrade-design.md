@@ -183,11 +183,13 @@ six last-7d). Kept for back-compat.
   (alive), each `WHERE created_at >= now()::date - 29`. Combined in JS into
   the stacked shape after left-joining against the 30-day series spine.
 - **A2 `activeUsersPerDay`** — one query: `UNION ALL` of `(uploader_id,
-  created_at::date)` from `documents` (alive), `(uploader_id,
-  created_at::date)` from `versions`, `(author_id, created_at::date)` from
-  `comments` (alive), `(user_id, viewed_at::date)` from `documentViews`,
-  filtered to the 30-day window; outer query groups by day with
-  `count(distinct user_id)`.
+  created_at::date)` from `documents` (alive), `(author_id,
+  created_at::date)` from `comments` (alive), `(user_id, viewed_at::date)`
+  from `documentViews`, filtered to the 30-day window; outer query groups
+  by day with `count(distinct user_id)`. (Note: `versions` has no uploader
+  column, so version uploads don't directly count as user activity — but
+  every version implies a document edit by some user who would also be
+  registered via view/comment activity if they're truly active.)
 - **A3 `cumulativeUsers`** — one query for new users per day in the window,
   one `preWindowTotal()` helper query for the count of users created strictly
   before the window. Cumulative sum computed in JS and seeded with the pre-
