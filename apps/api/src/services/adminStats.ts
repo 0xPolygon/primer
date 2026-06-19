@@ -1,7 +1,9 @@
 import { count, isNull, gt, and, sql } from 'drizzle-orm';
 import type {
   AdminStatsBucket,
+  AdminAdoptionBlock,
   DailyPoint,
+  DailyStackPoint,
 } from '@primer/shared';
 import { db as defaultDb, type Db } from '../db/client.ts';
 import {
@@ -96,4 +98,114 @@ export function leftJoinDailyCounts(
   counts: Map<string, number>,
 ): DailyPoint[] {
   return spine.map((date) => ({ date, value: counts.get(date) ?? 0 }));
+}
+
+const RANGE_DAYS = 30;
+
+function windowStart(endDate: Date, days: number): string {
+  const ms = Date.UTC(
+    endDate.getUTCFullYear(),
+    endDate.getUTCMonth(),
+    endDate.getUTCDate(),
+  ) - (days - 1) * MS_PER_DAY;
+  return new Date(ms).toISOString();
+}
+
+export async function buildAdoption(db: Db = defaultDb): Promise<AdminAdoptionBlock> {
+  const now = new Date();
+  const start = windowStart(now, RANGE_DAYS);
+  const spine = buildDateSpine(now, RANGE_DAYS);
+
+  // ---- A1: createdPerDay ---------------------------------------------------
+  const docsByDay = sql<{ d: string; c: number }[]>`
+    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+           count(*)::int as c
+      from documents
+     where deleted_at is null
+       and created_at >= ${start}
+     group by 1
+  `;
+  const versionsByDay = sql<{ d: string; c: number }[]>`
+    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+           count(*)::int as c
+      from versions
+     where created_at >= ${start}
+     group by 1
+  `;
+  const commentsByDay = sql<{ d: string; c: number }[]>`
+    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+           count(*)::int as c
+      from comments
+     where deleted_at is null
+       and created_at >= ${start}
+     group by 1
+  `;
+
+  // ---- A2: activeUsersPerDay ----------------------------------------------
+  // UNION ALL of (user_id, date) tuples across activity sources, then
+  // count(distinct user_id) per day.
+  const activeByDay = sql<{ d: string; c: number }[]>`
+    select d, count(distinct user_id)::int as c from (
+      select uploader_id as user_id,
+             to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d
+        from documents
+       where deleted_at is null and created_at >= ${start}
+      union all
+      select author_id as user_id,
+             to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d
+        from comments
+       where deleted_at is null and created_at >= ${start}
+      union all
+      select user_id,
+             to_char(date_trunc('day', viewed_at) at time zone 'UTC', 'YYYY-MM-DD') as d
+        from document_views
+       where viewed_at >= ${start}
+    ) s
+    group by d
+  `;
+
+  // ---- A3: cumulativeUsers ------------------------------------------------
+  const usersByDay = sql<{ d: string; c: number }[]>`
+    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+           count(*)::int as c
+      from users
+     where created_at >= ${start}
+     group by 1
+  `;
+  const usersBefore = sql<{ c: number }[]>`
+    select count(*)::int as c from users where created_at < ${start}
+  `;
+
+  const [docRows, verRows, comRows, actRows, userRows, beforeRows] = await Promise.all([
+    db.execute(docsByDay),
+    db.execute(versionsByDay),
+    db.execute(commentsByDay),
+    db.execute(activeByDay),
+    db.execute(usersByDay),
+    db.execute(usersBefore),
+  ]);
+
+  const docMap = new Map(docRows.map((r) => [r.d as string, r.c as number]));
+  const verMap = new Map(verRows.map((r) => [r.d as string, r.c as number]));
+  const comMap = new Map(comRows.map((r) => [r.d as string, r.c as number]));
+  const actMap = new Map(actRows.map((r) => [r.d as string, r.c as number]));
+  const userMap = new Map(userRows.map((r) => [r.d as string, r.c as number]));
+  const seed = (beforeRows[0]?.c as number) ?? 0;
+
+  const createdPerDay: DailyStackPoint[] = spine.map((date) => ({
+    date,
+    documents: docMap.get(date) ?? 0,
+    versions: verMap.get(date) ?? 0,
+    comments: comMap.get(date) ?? 0,
+  }));
+
+  const activeUsersPerDay = leftJoinDailyCounts(spine, actMap);
+
+  let running = seed;
+  const cumulativeUsers: DailyPoint[] = spine.map((date) => {
+    running += userMap.get(date) ?? 0;
+    return { date, value: running };
+  });
+
+  return { createdPerDay, activeUsersPerDay, cumulativeUsers };
 }
