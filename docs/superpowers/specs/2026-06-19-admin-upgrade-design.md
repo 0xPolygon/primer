@@ -54,9 +54,9 @@ Web:
   - `AreaChart.tsx` — stacked area (A1 createdPerDay).
   - `LineChart.tsx` — single line (A2 activeUsers, A3 cumulativeUsers,
     O1 storageBytesPerDay).
-  - `BarList.tsx` — horizontal bar list with label + count (E1 top documents,
-    E2 top commenters).
-  - `Histogram.tsx` — vertical histogram with bucket labels (E3 views per
+  - `BarList.tsx` — horizontal bar list with label + count (E1 top documents
+    by viewers, E2 top commenters).
+  - `Histogram.tsx` — vertical histogram with bucket labels (E3 viewers per
     document).
   - `StackedBar.tsx` — grouped/stacked vertical bars per day (O2 threads
     opened vs resolved).
@@ -111,7 +111,7 @@ interface ThreadFlowPoint {
 interface TopDocument {
   documentId: string;
   title: string;
-  views: number;
+  viewers: number;             // distinct viewers; `document_views` is a (user,doc) pair table
 }
 
 interface TopCommenter {
@@ -142,9 +142,9 @@ interface AdminStatsResponse {
     cumulativeUsers: DailyPoint[];         // exactly 30 entries, monotonic non-decreasing
   };
   engagement: {
-    topDocumentsByViews: TopDocument[];    // up to 10, all-time, alive docs only
+    topDocumentsByViewers: TopDocument[];  // up to 10, all-time, alive docs only
     topCommenters: TopCommenter[];         // up to 10, last 30d, alive comments only
-    viewsPerDocHistogram: HistogramBucket[]; // exactly 6 buckets, in defined order
+    viewersPerDocHistogram: HistogramBucket[]; // exactly 6 buckets, in defined order
   };
   operational: {
     storageBytesPerDay: DailyPoint[];      // exactly 30 entries, cumulative
@@ -197,19 +197,21 @@ six last-7d). Kept for back-compat.
 
 `buildEngagement()`:
 
-- **E1 `topDocumentsByViews`** — `SELECT document_id, count(*) FROM
+- **E1 `topDocumentsByViewers`** — `SELECT document_id, count(*) FROM
   document_views v JOIN documents d ON d.id = v.document_id WHERE d.deleted_at
   IS NULL GROUP BY document_id, d.title ORDER BY count DESC LIMIT 10`. All-
-  time, not windowed.
+  time, not windowed. The composite PK on `(user_id, document_id)` means
+  each row is a distinct viewer.
 - **E2 `topCommenters`** — `SELECT author_id, count(*) FROM comments c JOIN
   users u ON u.id = c.author_id WHERE c.deleted_at IS NULL AND c.created_at
   >= now() - interval '30 days' GROUP BY author_id, u.display_name ORDER BY
   count DESC LIMIT 10`.
-- **E3 `viewsPerDocHistogram`** — subquery `SELECT document_id, count(*) AS
-  v FROM document_views JOIN documents ON … WHERE deleted_at IS NULL GROUP
-  BY document_id`, returns one row per alive document. Bucketed in JS into
-  the predefined edges `[0, 1–2, 3–5, 6–10, 11–25, 26+]`. Documents with
-  zero views are included by left-joining `documents` against the subquery.
+- **E3 `viewersPerDocHistogram`** — subquery `SELECT document_id, count(*)
+  AS v FROM document_views JOIN documents ON … WHERE deleted_at IS NULL
+  GROUP BY document_id`, returns one row per alive document (count of
+  distinct viewers due to the composite PK). Bucketed in JS into the
+  predefined edges `[0, 1–2, 3–5, 6–10, 11–25, 26+]`. Documents with zero
+  viewers are included by left-joining `documents` against the subquery.
 
 `buildOperational()`:
 
@@ -371,8 +373,12 @@ No new e2e / Playwright tests.
   resolved_at > d)`, not just `resolved_at IS NULL`, so historical points
   reflect threads that were open *at that time*, not threads still open
   now.
-- `viewsPerDocHistogram` must left-join from documents → views so the `0`
-  bucket includes never-viewed documents.
+- `viewersPerDocHistogram` must left-join from documents → views so the `0`
+  bucket includes documents nobody has viewed.
+- `document_views` has a composite PK on `(user_id, document_id)` — it is a
+  "last-viewed" record per user+doc, not an event log. All "viewers"-named
+  fields are distinct-viewer counts, not raw views. Re-viewing the same
+  document only updates `viewed_at`.
 - `activeUsersPerDay` uses `count(distinct user_id)` per day, *not* the
   sum of per-source distincts — a user uploading and commenting on the
   same day counts once.
