@@ -174,14 +174,16 @@ describe('buildEngagement', () => {
     const u3 = `t-${uuidv7()}`;
     const aliveDoc = uuidv7();
     const deadDoc = uuidv7();
+    const aliveTitle = `Alive-${aliveDoc}`;
+    const deadTitle = `Dead-${deadDoc}`;
 
     await db.insert(users).values([
       { id: u1, email: '1@p.t', displayName: '1' },
       { id: u2, email: '2@p.t', displayName: '2' },
       { id: u3, email: '3@p.t', displayName: '3' },
     ]);
-    await db.insert(documents).values({ id: aliveDoc, title: 'Alive', uploaderId: u1 });
-    await db.insert(documents).values({ id: deadDoc,  title: 'Dead',  uploaderId: u1, deletedAt: new Date() });
+    await db.insert(documents).values({ id: aliveDoc, title: aliveTitle, uploaderId: u1 });
+    await db.insert(documents).values({ id: deadDoc,  title: deadTitle,  uploaderId: u1, deletedAt: new Date() });
 
     // Alive doc: three distinct viewers. Dead doc: three viewers but soft-deleted.
     await db.insert(documentViews).values([
@@ -194,20 +196,21 @@ describe('buildEngagement', () => {
     ]);
 
     const res = await buildEngagement();
-    const found = res.topDocumentsByViewers.find((d) => d.documentId === aliveDoc);
+    const found = res.topDocumentsByViewers.find((d) => d.title === aliveTitle);
     expect(found).toBeDefined();
     expect(found?.viewers).toBe(3);
-    expect(res.topDocumentsByViewers.find((d) => d.documentId === deadDoc)).toBeUndefined();
+    expect(res.topDocumentsByViewers.find((d) => d.title === deadTitle)).toBeUndefined();
     expect(res.topDocumentsByViewers.length).toBeLessThanOrEqual(10);
   });
 
   it('topCommenters is windowed to last 30d and excludes deleted comments', async () => {
     const userId = `t-${uuidv7()}`;
+    const displayName = `Commenter-${userId}`;
     const docId = uuidv7();
     const versionId = uuidv7();
     const threadId = uuidv7();
 
-    await db.insert(users).values({ id: userId, email: 'c@p.t', displayName: 'Commenter' });
+    await db.insert(users).values({ id: userId, email: 'c@p.t', displayName });
     await db.insert(documents).values({ id: docId, title: 'D', uploaderId: userId });
     await db.insert(versions).values({
       id: versionId, documentId: docId, versionNumber: 1,
@@ -229,7 +232,7 @@ describe('buildEngagement', () => {
     });
 
     const res = await buildEngagement();
-    const me = res.topCommenters.find((c) => c.userId === userId);
+    const me = res.topCommenters.find((c) => c.displayName === displayName);
     expect(me).toBeDefined();
     expect(me?.comments).toBe(1);
   });

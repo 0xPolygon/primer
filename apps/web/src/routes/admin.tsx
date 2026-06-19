@@ -98,8 +98,8 @@ export function AdminPage() {
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <Card title="Top 10 documents by viewers">
                   <BarList
-                    items={q.data.engagement.topDocumentsByViewers.map((d) => ({
-                      key: d.documentId,
+                    items={q.data.engagement.topDocumentsByViewers.map((d, i) => ({
+                      key: String(i),
                       label: d.title,
                       value: d.viewers,
                     }))}
@@ -107,8 +107,8 @@ export function AdminPage() {
                 </Card>
                 <Card title="Top 10 commenters (last 30d)">
                   <BarList
-                    items={q.data.engagement.topCommenters.map((c) => ({
-                      key: c.userId,
+                    items={q.data.engagement.topCommenters.map((c, i) => ({
+                      key: String(i),
                       label: c.displayName,
                       value: c.comments,
                     }))}
