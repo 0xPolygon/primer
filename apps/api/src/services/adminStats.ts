@@ -102,6 +102,12 @@ export function leftJoinDailyCounts(
 
 const RANGE_DAYS = 30;
 
+/**
+ * Start-of-window timestamp matching spine[0] midnight UTC.
+ * Returned as an ISO-8601 string because postgres-js cannot bind a JS Date
+ * through drizzle's sql tag — it must be a string that Postgres implicitly
+ * casts to TIMESTAMPTZ.
+ */
 function windowStart(endDate: Date, days: number): string {
   const ms = Date.UTC(
     endDate.getUTCFullYear(),
@@ -118,7 +124,7 @@ export async function buildAdoption(db: Db = defaultDb): Promise<AdminAdoptionBl
 
   // ---- A1: createdPerDay ---------------------------------------------------
   const docsByDay = sql<{ d: string; c: number }[]>`
-    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+    select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
            count(*)::int as c
       from documents
      where deleted_at is null
@@ -126,14 +132,14 @@ export async function buildAdoption(db: Db = defaultDb): Promise<AdminAdoptionBl
      group by 1
   `;
   const versionsByDay = sql<{ d: string; c: number }[]>`
-    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+    select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
            count(*)::int as c
       from versions
      where created_at >= ${start}
      group by 1
   `;
   const commentsByDay = sql<{ d: string; c: number }[]>`
-    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+    select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
            count(*)::int as c
       from comments
      where deleted_at is null
@@ -147,17 +153,17 @@ export async function buildAdoption(db: Db = defaultDb): Promise<AdminAdoptionBl
   const activeByDay = sql<{ d: string; c: number }[]>`
     select d, count(distinct user_id)::int as c from (
       select uploader_id as user_id,
-             to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d
+             to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d
         from documents
        where deleted_at is null and created_at >= ${start}
       union all
       select author_id as user_id,
-             to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d
+             to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d
         from comments
        where deleted_at is null and created_at >= ${start}
       union all
       select user_id,
-             to_char(date_trunc('day', viewed_at) at time zone 'UTC', 'YYYY-MM-DD') as d
+             to_char(date_trunc('day', viewed_at at time zone 'UTC'), 'YYYY-MM-DD') as d
         from document_views
        where viewed_at >= ${start}
     ) s
@@ -166,7 +172,7 @@ export async function buildAdoption(db: Db = defaultDb): Promise<AdminAdoptionBl
 
   // ---- A3: cumulativeUsers ------------------------------------------------
   const usersByDay = sql<{ d: string; c: number }[]>`
-    select to_char(date_trunc('day', created_at) at time zone 'UTC', 'YYYY-MM-DD') as d,
+    select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
            count(*)::int as c
       from users
      where created_at >= ${start}
