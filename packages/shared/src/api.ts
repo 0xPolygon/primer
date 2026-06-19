@@ -158,6 +158,62 @@ export interface AdminStatsBucket {
   last7d: number;
 }
 
+export interface DailyPoint {
+  date: string;     // 'YYYY-MM-DD' UTC
+  value: number;
+}
+
+export interface DailyStackPoint {
+  date: string;     // 'YYYY-MM-DD' UTC
+  documents: number;
+  versions: number;
+  comments: number;
+}
+
+export interface ThreadFlowPoint {
+  date: string;
+  opened: number;
+  resolved: number;
+}
+
+export interface TopDocument {
+  documentId: string;
+  title: string;
+  viewers: number;
+}
+
+export interface TopCommenter {
+  userId: string;
+  displayName: string;
+  comments: number;
+}
+
+export interface HistogramBucket {
+  bucket: string;
+  count: number;
+}
+
+export interface AdminAdoptionBlock {
+  createdPerDay: DailyStackPoint[];
+  activeUsersPerDay: DailyPoint[];
+  cumulativeUsers: DailyPoint[];
+}
+
+export interface AdminEngagementBlock {
+  topDocumentsByViewers: TopDocument[];
+  topCommenters: TopCommenter[];
+  viewersPerDocHistogram: HistogramBucket[];
+}
+
+export interface AdminOperationalBlock {
+  storageBytesPerDay: DailyPoint[];
+  threadsOpenedVsResolved: ThreadFlowPoint[];
+  openThreadsAgingOver14d: {
+    count: number;
+    sparkline: DailyPoint[];
+  };
+}
+
 export interface AdminStatsResponse {
   users: AdminStatsBucket;
   documents: AdminStatsBucket;
@@ -165,6 +221,11 @@ export interface AdminStatsResponse {
   threads: AdminStatsBucket;
   comments: AdminStatsBucket;
   documentViews: AdminStatsBucket;
+
+  rangeDays: 30;
+  adoption: AdminAdoptionBlock;
+  engagement: AdminEngagementBlock;
+  operational: AdminOperationalBlock;
 }
 
 export interface DeviceAuthorizeResponse {

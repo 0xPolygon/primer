@@ -10,6 +10,6 @@ export function useAdminStats() {
       if (!res.ok) throw new Error(`admin stats fetch failed: ${res.status}`);
       return res.json();
     },
-    staleTime: 30_000,
+    staleTime: 60_000,
   });
 }

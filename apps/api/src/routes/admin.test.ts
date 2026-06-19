@@ -179,4 +179,26 @@ describe('GET /api/admin/stats', () => {
       expect(after.users.last7d - before.users.last7d).toBe(1);
     });
   });
+
+  it('returns the expanded admin shape with 30-entry daily series and 6 histogram buckets', async () => {
+    await withApp(async (app) => {
+      const body = await snapshot(app);
+      expect(body.rangeDays).toBe(30);
+      expect(body.adoption.createdPerDay).toHaveLength(30);
+      expect(body.adoption.activeUsersPerDay).toHaveLength(30);
+      expect(body.adoption.cumulativeUsers).toHaveLength(30);
+      expect(body.engagement.viewersPerDocHistogram).toHaveLength(6);
+      expect(body.engagement.viewersPerDocHistogram.map((b) => b.bucket)).toEqual([
+        '0', '1-2', '3-5', '6-10', '11-25', '26+',
+      ]);
+      expect(body.operational.storageBytesPerDay).toHaveLength(30);
+      expect(body.operational.threadsOpenedVsResolved).toHaveLength(30);
+      expect(body.operational.openThreadsAgingOver14d.sparkline).toHaveLength(30);
+      // Spine is sorted ascending.
+      for (let i = 1; i < body.adoption.createdPerDay.length; i++) {
+        expect(body.adoption.createdPerDay[i].date >
+          body.adoption.createdPerDay[i - 1].date).toBe(true);
+      }
+    });
+  });
 });
