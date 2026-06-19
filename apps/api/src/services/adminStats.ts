@@ -239,8 +239,8 @@ function bucketFor(n: number): string {
 export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngagementBlock> {
   const since30d = windowStart(new Date(), RANGE_DAYS);
 
-  const topDocsQ = sql<{ document_id: string; title: string; viewers: number }[]>`
-    select d.id as document_id, d.title, count(distinct v.user_id)::int as viewers
+  const topDocsQ = sql<{ title: string; viewers: number }[]>`
+    select d.title, count(distinct v.user_id)::int as viewers
       from document_views v
       join documents d on d.id = v.document_id
      where d.deleted_at is null
@@ -248,8 +248,8 @@ export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngageme
      order by viewers desc
      limit 10
   `;
-  const topCommentersQ = sql<{ user_id: string; display_name: string; comments: number }[]>`
-    select c.author_id as user_id, u.display_name, count(*)::int as comments
+  const topCommentersQ = sql<{ display_name: string; comments: number }[]>`
+    select u.display_name, count(*)::int as comments
       from comments c
       join users u on u.id = c.author_id
      where c.deleted_at is null
@@ -290,12 +290,10 @@ export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngageme
 
   return {
     topDocumentsByViewers: topDocs.map((r) => ({
-      documentId: r.document_id as string,
       title: r.title as string,
       viewers: Number(r.viewers),
     })),
     topCommenters: topCommenters.map((r) => ({
-      userId: r.user_id as string,
       displayName: r.display_name as string,
       comments: Number(r.comments),
     })),

@@ -177,13 +177,11 @@ export interface ThreadFlowPoint {
 }
 
 export interface TopDocument {
-  documentId: string;
   title: string;
   viewers: number;
 }
 
 export interface TopCommenter {
-  userId: string;
   displayName: string;
   comments: number;
 }
