@@ -86,6 +86,111 @@
     return false;
   }
 
+  // ── Mermaid rendering ────────────────────────────────────────────
+  // Loaded lazily — only when at least one matched block is present
+  // AND the document doesn't already bootstrap Mermaid itself.
+
+  /** Module-local id counter for mermaid.render. */
+  let mermaidRenderCounter = 0;
+
+  /** Cached mermaid module after first dynamic import, or null. */
+  let mermaidModule = null;
+
+  /** @returns {'dark' | 'default'} */
+  function pickMermaidTheme() {
+    return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default';
+  }
+
+  async function loadMermaidOnce() {
+    if (mermaidModule !== null) return mermaidModule;
+    // The vendored UMD bundle attaches `mermaid` to `window` as a side effect.
+    // We import it for side effects, then pick the global up off `window`.
+    try {
+      await import(MERMAID_BUNDLE_URL);
+    } catch (e) {
+      log.warn('mermaid bundle import failed:', e && e.message ? e.message : e);
+      throw e;
+    }
+    if (typeof window.mermaid === 'undefined') {
+      throw new Error('mermaid global missing after bundle load');
+    }
+    mermaidModule = window.mermaid;
+    mermaidModule.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: pickMermaidTheme(),
+      fontFamily: 'inherit',
+    });
+    return mermaidModule;
+  }
+
+  /** Renders one <pre> block in place. Never throws — failures are inline. */
+  async function renderOneMermaidBlock(preEl, mermaid) {
+    const source = preEl.textContent || '';
+    const id = 'primer-mermaid-' + (++mermaidRenderCounter);
+    try {
+      const result = await mermaid.render(id, source);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'primer-mermaid';
+      wrapper.setAttribute('data-mermaid-source', source);
+      wrapper.innerHTML = result.svg;
+      // Replace ALL children of <pre> with the wrapper.
+      while (preEl.firstChild) preEl.removeChild(preEl.firstChild);
+      preEl.appendChild(wrapper);
+    } catch (e) {
+      const msg = e && e.message ? e.message : 'render failed';
+      // Leave the original block content intact; append a small error note.
+      const note = document.createElement('div');
+      note.className = 'primer-mermaid-error';
+      note.textContent = 'Mermaid render failed: ' + msg;
+      preEl.appendChild(note);
+      log.warn('mermaid render failed for block', id, ':', msg);
+    }
+  }
+
+  async function renderAllMermaidBlocks() {
+    const blocks = findMermaidBlocks();
+    if (blocks.length === 0) return;
+    if (documentHasMermaidBootstrap()) {
+      log.info('mermaid bootstrap detected in document, skipping');
+      return;
+    }
+    let mermaid;
+    try {
+      mermaid = await loadMermaidOnce();
+    } catch (_e) {
+      // already logged in loadMermaidOnce
+      return;
+    }
+    for (const pre of blocks) {
+      await renderOneMermaidBlock(pre, mermaid);
+    }
+  }
+
+  /** Re-render every already-rendered block using the current theme. */
+  async function reRenderMermaidForTheme() {
+    if (mermaidModule === null) return;
+    const wrappers = document.querySelectorAll('[data-mermaid-source]');
+    if (wrappers.length === 0) return;
+    mermaidModule.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: pickMermaidTheme(),
+      fontFamily: 'inherit',
+    });
+    for (const wrapper of wrappers) {
+      const source = wrapper.getAttribute('data-mermaid-source') || '';
+      const id = 'primer-mermaid-' + (++mermaidRenderCounter);
+      try {
+        const result = await mermaidModule.render(id, source);
+        wrapper.innerHTML = result.svg;
+      } catch (e) {
+        // On theme-rerender failure, leave the prior SVG in place — silent.
+        log.warn('mermaid re-render failed:', e && e.message ? e.message : e);
+      }
+    }
+  }
+
   /** True when running in a UA without a hover-capable pointer (phones/tablets). */
   function isTouchUA() {
     try {
@@ -197,6 +302,11 @@
       renderElementBadges();
     }
 
+    // Fire-and-forget — never blocks init or anchor rendering.
+    renderAllMermaidBlocks().catch((e) =>
+      log.warn('mermaid init render error:', e && e.message ? e.message : e),
+    );
+
     // Apply parent-provided theme. Field is optional for backward-compat with
     // parents that haven't been updated yet (they won't set anything).
     if (incoming.theme === 'light' || incoming.theme === 'dark') {
@@ -205,6 +315,10 @@
       } catch (e) {
         // documentElement should always exist; defensive catch.
       }
+      // Re-render any Mermaid diagrams that finished before init resolved.
+      reRenderMermaidForTheme().catch((e) =>
+        log.warn('mermaid init theme re-render error:', e && e.message ? e.message : e),
+      );
     }
 
     flushLogBuffer();
@@ -257,6 +371,10 @@
           } catch (e) {
             // defensive
           }
+          // Re-render any existing Mermaid diagrams with the new theme.
+          reRenderMermaidForTheme().catch((e) =>
+            log.warn('mermaid theme re-render error:', e && e.message ? e.message : e),
+          );
         }
         break;
       default:
