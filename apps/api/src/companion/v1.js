@@ -48,6 +48,44 @@
     }
   }
 
+  // ── Mermaid detection ────────────────────────────────────────────
+  // Mirrored in mermaidScanner.test.ts; keep in sync.
+  // Pinned bundle version is duplicated here as a string literal because the
+  // companion is plain JS and can't import mermaidVersion.ts. See
+  // apps/api/src/companion/mermaidVersion.ts.
+  const MERMAID_BUNDLE_VERSION = '11.4.1';
+  const MERMAID_BUNDLE_URL = '/companion/mermaid-v' + MERMAID_BUNDLE_VERSION + '.js';
+
+  /** @returns {HTMLElement[]} block roots (always <pre>). */
+  function findMermaidBlocks() {
+    const matches = document.querySelectorAll(
+      'pre > code.language-mermaid, pre.mermaid'
+    );
+    /** @type {HTMLElement[]} */
+    const out = [];
+    matches.forEach((el) => {
+      const root = el.tagName === 'PRE' ? el : el.parentElement;
+      if (!root || root.tagName !== 'PRE') return;
+      if (root.querySelector(':scope > svg, :scope > div > svg')) return;
+      if (out.indexOf(root) === -1) out.push(root);
+    });
+    return out;
+  }
+
+  /** @returns {boolean} */
+  function documentHasMermaidBootstrap() {
+    if (typeof window.mermaid !== 'undefined') return true;
+    const scripts = document.querySelectorAll('script');
+    for (const s of scripts) {
+      const src = s.getAttribute('src') || '';
+      if (src && /mermaid/i.test(src)) return true;
+      const text = s.textContent || '';
+      if (text.indexOf('mermaid.initialize') !== -1) return true;
+      if (text.indexOf('mermaid.run') !== -1) return true;
+    }
+    return false;
+  }
+
   /** True when running in a UA without a hover-capable pointer (phones/tablets). */
   function isTouchUA() {
     try {
