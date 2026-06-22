@@ -12,6 +12,7 @@ import { registerDocumentRoutes } from './routes/documents.ts';
 import { registerVersionContentRoute } from './routes/versionContent.ts';
 import { registerCompanionRoute } from './routes/companion.ts';
 import { registerMermaidAssetRoute } from './routes/mermaidAsset.ts';
+import { registerDompurifyAssetRoute } from './routes/dompurifyAsset.ts';
 import { registerDevFixtureRoute } from './routes/devFixture.ts';
 import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
@@ -71,6 +72,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerVersionContentRoute(app, deps);
   registerCompanionRoute(app);
   registerMermaidAssetRoute(app);
+  registerDompurifyAssetRoute(app);
   registerThreadRoutes(app, deps);
   registerCommentRoutes(app, deps);
   registerDashboardRoute(app);

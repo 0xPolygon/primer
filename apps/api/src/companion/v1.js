@@ -50,11 +50,13 @@
 
   // ── Mermaid detection ────────────────────────────────────────────
   // Mirrored in mermaidScanner.test.ts; keep in sync.
-  // Pinned bundle version is duplicated here as a string literal because the
-  // companion is plain JS and can't import mermaidVersion.ts. See
-  // apps/api/src/companion/mermaidVersion.ts.
+  // Pinned bundle versions are duplicated here as string literals because the
+  // companion is plain JS and can't import the TS modules. See
+  // apps/api/src/companion/mermaidVersion.ts and dompurifyVersion.ts.
   const MERMAID_BUNDLE_VERSION = '11.4.1';
   const MERMAID_BUNDLE_URL = '/companion/mermaid-v' + MERMAID_BUNDLE_VERSION + '.js';
+  const DOMPURIFY_BUNDLE_VERSION = '3.4.8';
+  const DOMPURIFY_BUNDLE_URL = '/companion/dompurify-v' + DOMPURIFY_BUNDLE_VERSION + '.js';
 
   /** @returns {HTMLElement[]} block roots (always <pre>). */
   function findMermaidBlocks() {
@@ -121,22 +123,29 @@
     if (mermaidLoadPromise) return mermaidLoadPromise;
     mermaidLoadPromise = (async () => {
       try {
-        // The vendored bundle ends with
-        //   globalThis.mermaid = globalThis.__esbuild_esm_mermaid.default;
-        // This only works when the bundle is loaded as a CLASSICAL script —
-        // its top-level `var __esbuild_esm_mermaid = ...` must alias to
-        // globalThis, which happens only at classical-script top level (not
-        // under dynamic import(), where top-level var is module-local). So
-        // we inject a <script src> tag rather than using import().
-        await injectClassicalScript(MERMAID_BUNDLE_URL);
+        // Load Mermaid and DOMPurify in parallel — both are required before
+        // we can render. They're independent UMD/IIFE bundles that attach
+        // their globals (`window.mermaid` and `window.DOMPurify`) when
+        // loaded as classical scripts. We inject <script src> tags rather
+        // than using import() because the Mermaid bundle relies on
+        // classical-script top-level `var` aliasing to globalThis (which
+        // module scripts don't do).
+        await Promise.all([
+          injectClassicalScript(MERMAID_BUNDLE_URL),
+          injectClassicalScript(DOMPURIFY_BUNDLE_URL),
+        ]);
       } catch (e) {
-        log.warn('mermaid bundle load failed:', e && e.message ? e.message : e);
+        log.warn('companion bundle load failed:', e && e.message ? e.message : e);
         mermaidLoadPromise = null;
         throw e;
       }
       if (typeof window.mermaid === 'undefined') {
         mermaidLoadPromise = null;
         throw new Error('mermaid global missing after bundle load');
+      }
+      if (typeof window.DOMPurify === 'undefined') {
+        mermaidLoadPromise = null;
+        throw new Error('DOMPurify global missing after bundle load');
       }
       mermaidModule = window.mermaid;
       mermaidModule.initialize({
@@ -151,46 +160,21 @@
   }
 
   /**
-   * Recursively strip `on*` event-handler attributes and `javascript:` /
-   * `vbscript:` URLs from an element subtree. Defense-in-depth for
-   * sanitized-but-still-string SVG inserted from Mermaid output.
-   * Mirrored in mermaidSanitize.test.ts; keep in sync.
-   */
-  function scrubMermaidSvgAttributes(node) {
-    if (node.nodeType !== 1) return;  // ELEMENT_NODE
-    const attrs = [];
-    for (const attr of node.attributes) attrs.push(attr);
-    for (const attr of attrs) {
-      const name = attr.name.toLowerCase();
-      const value = String(attr.value || '').trim().toLowerCase();
-      if (name.indexOf('on') === 0 ||
-          value.indexOf('javascript:') === 0 ||
-          value.indexOf('vbscript:') === 0) {
-        node.removeAttributeNode(attr);
-      }
-    }
-    for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
-      scrubMermaidSvgAttributes(child);
-    }
-  }
-
-  /**
-   * Parse the SVG string from `mermaid.render()` via DOMParser, strip any
-   * `on*` handlers and `javascript:` URLs that survived Mermaid's own
-   * sanitization, then replace `wrapper`'s children with the cleaned tree.
-   * Avoids the textContent → innerHTML sink entirely.
-   * Mirrored in mermaidSanitize.test.ts; keep in sync.
+   * Sanitize `mermaid.render()`'s SVG string with DOMPurify and replace
+   * `wrapper`'s children with the resulting fragment. DOMPurify is the
+   * defense-in-depth pass on top of Mermaid's own `securityLevel: 'strict'`
+   * sanitization — and the only sanitizer CodeQL's js/xss-through-dom rule
+   * recognizes, so it clears the static-analysis flag in one move.
+   * `RETURN_DOM_FRAGMENT: true` hands back a DocumentFragment we can
+   * appendChild directly — no innerHTML sink, no DOMParser hop.
    */
   function safelySetSvgContent(wrapper, svgString) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(svgString, 'text/html');
-    const svgEl = doc.body.querySelector('svg');
-    if (!svgEl) {
-      throw new Error('no <svg> root found in render output');
-    }
-    scrubMermaidSvgAttributes(svgEl);
+    const fragment = window.DOMPurify.sanitize(svgString, {
+      USE_PROFILES: { svg: true, svgFilters: true },
+      RETURN_DOM_FRAGMENT: true,
+    });
     while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
-    wrapper.appendChild(document.adoptNode(svgEl));
+    wrapper.appendChild(fragment);
   }
 
   /** Renders one <pre> block in place. Never throws — failures are inline. */
