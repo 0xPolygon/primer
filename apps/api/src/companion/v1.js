@@ -104,18 +104,33 @@
     return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default';
   }
 
+  /** Inject a classical <script src> and resolve when load fires. */
+  function injectClassicalScript(url) {
+    return new Promise(function (resolve, reject) {
+      const el = document.createElement('script');
+      el.src = url;
+      // No async/defer needed — we append at runtime and wait on the events.
+      el.addEventListener('load', () => resolve());
+      el.addEventListener('error', () => reject(new Error('script load failed: ' + url)));
+      document.head.appendChild(el);
+    });
+  }
+
   async function loadMermaidOnce() {
     if (mermaidModule !== null) return mermaidModule;
     if (mermaidLoadPromise) return mermaidLoadPromise;
     mermaidLoadPromise = (async () => {
       try {
-        // The vendored bundle ends with `globalThis.mermaid = <default-export>;`
-        // We import for that side effect, then read the global off `window`.
-        // If a future bundle build doesn't set the global, the typeof check
-        // below throws and we surface a clear error instead of silent failure.
-        await import(MERMAID_BUNDLE_URL);
+        // The vendored bundle ends with
+        //   globalThis.mermaid = globalThis.__esbuild_esm_mermaid.default;
+        // This only works when the bundle is loaded as a CLASSICAL script —
+        // its top-level `var __esbuild_esm_mermaid = ...` must alias to
+        // globalThis, which happens only at classical-script top level (not
+        // under dynamic import(), where top-level var is module-local). So
+        // we inject a <script src> tag rather than using import().
+        await injectClassicalScript(MERMAID_BUNDLE_URL);
       } catch (e) {
-        log.warn('mermaid bundle import failed:', e && e.message ? e.message : e);
+        log.warn('mermaid bundle load failed:', e && e.message ? e.message : e);
         mermaidLoadPromise = null;
         throw e;
       }
