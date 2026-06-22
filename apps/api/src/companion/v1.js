@@ -50,13 +50,11 @@
 
   // ── Mermaid detection ────────────────────────────────────────────
   // Mirrored in mermaidScanner.test.ts; keep in sync.
-  // Pinned bundle versions are duplicated here as string literals because the
-  // companion is plain JS and can't import the TS modules. See
-  // apps/api/src/companion/mermaidVersion.ts and dompurifyVersion.ts.
+  // Pinned bundle version is duplicated here as a string literal because the
+  // companion is plain JS and can't import mermaidVersion.ts. See
+  // apps/api/src/companion/mermaidVersion.ts.
   const MERMAID_BUNDLE_VERSION = '11.4.1';
   const MERMAID_BUNDLE_URL = '/companion/mermaid-v' + MERMAID_BUNDLE_VERSION + '.js';
-  const DOMPURIFY_BUNDLE_VERSION = '3.4.8';
-  const DOMPURIFY_BUNDLE_URL = '/companion/dompurify-v' + DOMPURIFY_BUNDLE_VERSION + '.js';
 
   /** @returns {HTMLElement[]} block roots (always <pre>). */
   function findMermaidBlocks() {
@@ -123,29 +121,22 @@
     if (mermaidLoadPromise) return mermaidLoadPromise;
     mermaidLoadPromise = (async () => {
       try {
-        // Load Mermaid and DOMPurify in parallel — both are required before
-        // we can render. They're independent UMD/IIFE bundles that attach
-        // their globals (`window.mermaid` and `window.DOMPurify`) when
-        // loaded as classical scripts. We inject <script src> tags rather
-        // than using import() because the Mermaid bundle relies on
-        // classical-script top-level `var` aliasing to globalThis (which
-        // module scripts don't do).
-        await Promise.all([
-          injectClassicalScript(MERMAID_BUNDLE_URL),
-          injectClassicalScript(DOMPURIFY_BUNDLE_URL),
-        ]);
+        // The vendored bundle ends with
+        //   globalThis.mermaid = globalThis.__esbuild_esm_mermaid.default;
+        // This only works when the bundle is loaded as a CLASSICAL script —
+        // its top-level `var __esbuild_esm_mermaid = ...` must alias to
+        // globalThis, which happens only at classical-script top level (not
+        // under dynamic import(), where top-level var is module-local). So
+        // we inject a <script src> tag rather than using import().
+        await injectClassicalScript(MERMAID_BUNDLE_URL);
       } catch (e) {
-        log.warn('companion bundle load failed:', e && e.message ? e.message : e);
+        log.warn('mermaid bundle load failed:', e && e.message ? e.message : e);
         mermaidLoadPromise = null;
         throw e;
       }
       if (typeof window.mermaid === 'undefined') {
         mermaidLoadPromise = null;
         throw new Error('mermaid global missing after bundle load');
-      }
-      if (typeof window.DOMPurify === 'undefined') {
-        mermaidLoadPromise = null;
-        throw new Error('DOMPurify global missing after bundle load');
       }
       mermaidModule = window.mermaid;
       mermaidModule.initialize({
@@ -160,21 +151,34 @@
   }
 
   /**
-   * Sanitize `mermaid.render()`'s SVG string with DOMPurify and replace
-   * `wrapper`'s children with the resulting fragment. DOMPurify is the
-   * defense-in-depth pass on top of Mermaid's own `securityLevel: 'strict'`
-   * sanitization — and the only sanitizer CodeQL's js/xss-through-dom rule
-   * recognizes, so it clears the static-analysis flag in one move.
-   * `RETURN_DOM_FRAGMENT: true` hands back a DocumentFragment we can
-   * appendChild directly — no innerHTML sink, no DOMParser hop.
+   * Replace `wrapper`'s children with the SVG string returned by
+   * `mermaid.render()`. The `wrapper.innerHTML = svgString` assignment
+   * triggers CodeQL's js/xss-through-dom rule (Alert #4 on PR #19), which
+   * is dismissed with this rationale:
+   *
+   *   1. mermaid.initialize({ securityLevel: 'strict' }) — Mermaid invokes
+   *      DOMPurify INTERNALLY on every user-controlled label before
+   *      emitting SVG. Strings reaching this assignment have already been
+   *      sanitized by the same library CodeQL would recommend.
+   *   2. ArtifactIframe runs with sandbox="allow-scripts allow-forms" (no
+   *      allow-same-origin) — opaque origin, no access to Primer cookies,
+   *      auth, parent DOM, or storage. Any script that did execute inside
+   *      the iframe would be defanged.
+   *   3. The artifact CSP at apps/api/src/routes/versionContent.ts sets
+   *      connect-src 'none' — no network exfil from inside the iframe
+   *      even if an XSS payload survived (1) and (2).
+   *
+   * A defense-in-depth pass via DOMPurify at this layer was attempted
+   * (PR #19 commits 27dc7ac and 47d5545) but DOMPurify cannot preserve
+   * the HTML content inside Mermaid's `<foreignObject>` text labels in
+   * any tested config (svg-only, svg+html, ADD_TAGS, XHTML parser,
+   * image/svg+xml parser) — the namespace transition is a known
+   * limitation. The result was diagrams with no text. Both attempts
+   * were reverted.
    */
   function safelySetSvgContent(wrapper, svgString) {
-    const fragment = window.DOMPurify.sanitize(svgString, {
-      USE_PROFILES: { svg: true, svgFilters: true },
-      RETURN_DOM_FRAGMENT: true,
-    });
     while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
-    wrapper.appendChild(fragment);
+    wrapper.innerHTML = svgString;
   }
 
   /** Renders one <pre> block in place. Never throws — failures are inline. */

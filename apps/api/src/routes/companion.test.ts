@@ -22,7 +22,6 @@ describe('GET /companion/v1.js', () => {
       expect(body).toContain('renderAllMermaidBlocks');
       expect(body).toContain('reRenderMermaidForTheme');
       expect(body).toContain('/companion/mermaid-v');
-      expect(body).toContain('/companion/dompurify-v');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
