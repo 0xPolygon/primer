@@ -17,6 +17,11 @@ describe('GET /companion/v1.js', () => {
       expect(res.headers.get('cache-control')).toBe('public, max-age=3600');
       const body = await res.text();
       expect(body).toContain('[primer/companion]'); // tag emitted by the v1 IIFE
+      // Sanity: the Mermaid hooks are present in the served bytes.
+      expect(body).toContain('findMermaidBlocks');
+      expect(body).toContain('renderAllMermaidBlocks');
+      expect(body).toContain('reRenderMermaidForTheme');
+      expect(body).toContain('/companion/mermaid-v');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -48,6 +48,206 @@
     }
   }
 
+  // ── Mermaid detection ────────────────────────────────────────────
+  // Mirrored in mermaidScanner.test.ts; keep in sync.
+  // Pinned bundle version is duplicated here as a string literal because the
+  // companion is plain JS and can't import mermaidVersion.ts. See
+  // apps/api/src/companion/mermaidVersion.ts.
+  const MERMAID_BUNDLE_VERSION = '11.4.1';
+  const MERMAID_BUNDLE_URL = '/companion/mermaid-v' + MERMAID_BUNDLE_VERSION + '.js';
+
+  /** @returns {HTMLElement[]} block roots (always <pre>). */
+  function findMermaidBlocks() {
+    const matches = document.querySelectorAll(
+      'pre > code.language-mermaid, pre.mermaid'
+    );
+    /** @type {HTMLElement[]} */
+    const out = [];
+    matches.forEach((el) => {
+      const root = el.tagName === 'PRE' ? el : el.parentElement;
+      if (!root || root.tagName !== 'PRE') return;
+      if (root.querySelector(':scope > svg, :scope > div > svg')) return;
+      if (out.indexOf(root) === -1) out.push(root);
+    });
+    return out;
+  }
+
+  /** @returns {boolean} */
+  function documentHasMermaidBootstrap() {
+    if (typeof window.mermaid !== 'undefined') return true;
+    const scripts = document.querySelectorAll('script');
+    for (const s of scripts) {
+      const src = s.getAttribute('src') || '';
+      if (src && /mermaid/i.test(src)) return true;
+      const text = s.textContent || '';
+      if (text.indexOf('mermaid.initialize') !== -1) return true;
+      if (text.indexOf('mermaid.run') !== -1) return true;
+    }
+    return false;
+  }
+
+  // ── Mermaid rendering ────────────────────────────────────────────
+  // Loaded lazily — only when at least one matched block is present
+  // AND the document doesn't already bootstrap Mermaid itself.
+
+  /** Module-local id counter for mermaid.render. */
+  let mermaidRenderCounter = 0;
+
+  /** Cached mermaid module after first dynamic import, or null. */
+  let mermaidModule = null;
+
+  /** In-flight import promise so concurrent callers share one fetch. */
+  let mermaidLoadPromise = null;
+
+  /** @returns {'dark' | 'default'} */
+  function pickMermaidTheme() {
+    return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default';
+  }
+
+  /** Inject a classical <script src> and resolve when load fires. */
+  function injectClassicalScript(url) {
+    return new Promise(function (resolve, reject) {
+      const el = document.createElement('script');
+      el.src = url;
+      // No async/defer needed — we append at runtime and wait on the events.
+      el.addEventListener('load', () => resolve());
+      el.addEventListener('error', () => reject(new Error('script load failed: ' + url)));
+      document.head.appendChild(el);
+    });
+  }
+
+  async function loadMermaidOnce() {
+    if (mermaidModule !== null) return mermaidModule;
+    if (mermaidLoadPromise) return mermaidLoadPromise;
+    mermaidLoadPromise = (async () => {
+      try {
+        // The vendored bundle ends with
+        //   globalThis.mermaid = globalThis.__esbuild_esm_mermaid.default;
+        // This only works when the bundle is loaded as a CLASSICAL script —
+        // its top-level `var __esbuild_esm_mermaid = ...` must alias to
+        // globalThis, which happens only at classical-script top level (not
+        // under dynamic import(), where top-level var is module-local). So
+        // we inject a <script src> tag rather than using import().
+        await injectClassicalScript(MERMAID_BUNDLE_URL);
+      } catch (e) {
+        log.warn('mermaid bundle load failed:', e && e.message ? e.message : e);
+        mermaidLoadPromise = null;
+        throw e;
+      }
+      if (typeof window.mermaid === 'undefined') {
+        mermaidLoadPromise = null;
+        throw new Error('mermaid global missing after bundle load');
+      }
+      mermaidModule = window.mermaid;
+      mermaidModule.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: pickMermaidTheme(),
+        fontFamily: 'inherit',
+      });
+      return mermaidModule;
+    })();
+    return mermaidLoadPromise;
+  }
+
+  /**
+   * Replace `wrapper`'s children with the SVG string returned by
+   * `mermaid.render()`. The `wrapper.innerHTML = svgString` assignment
+   * triggers CodeQL's js/xss-through-dom rule (Alert #4 on PR #19), which
+   * is dismissed with this rationale:
+   *
+   *   1. mermaid.initialize({ securityLevel: 'strict' }) — Mermaid invokes
+   *      DOMPurify INTERNALLY on every user-controlled label before
+   *      emitting SVG. Strings reaching this assignment have already been
+   *      sanitized by the same library CodeQL would recommend.
+   *   2. ArtifactIframe runs with sandbox="allow-scripts allow-forms" (no
+   *      allow-same-origin) — opaque origin, no access to Primer cookies,
+   *      auth, parent DOM, or storage. Any script that did execute inside
+   *      the iframe would be defanged.
+   *   3. The artifact CSP at apps/api/src/routes/versionContent.ts sets
+   *      connect-src 'none' — no network exfil from inside the iframe
+   *      even if an XSS payload survived (1) and (2).
+   *
+   * A defense-in-depth pass via DOMPurify at this layer was attempted
+   * (PR #19 commits 27dc7ac and 47d5545) but DOMPurify cannot preserve
+   * the HTML content inside Mermaid's `<foreignObject>` text labels in
+   * any tested config (svg-only, svg+html, ADD_TAGS, XHTML parser,
+   * image/svg+xml parser) — the namespace transition is a known
+   * limitation. The result was diagrams with no text. Both attempts
+   * were reverted.
+   */
+  function safelySetSvgContent(wrapper, svgString) {
+    while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
+    wrapper.innerHTML = svgString;
+  }
+
+  /** Renders one <pre> block in place. Never throws — failures are inline. */
+  async function renderOneMermaidBlock(preEl, mermaid) {
+    const source = preEl.textContent || '';
+    const id = 'primer-mermaid-' + (++mermaidRenderCounter);
+    try {
+      const result = await mermaid.render(id, source);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'primer-mermaid';
+      wrapper.setAttribute('data-mermaid-source', source);
+      safelySetSvgContent(wrapper, result.svg);
+      // Replace ALL children of <pre> with the wrapper.
+      while (preEl.firstChild) preEl.removeChild(preEl.firstChild);
+      preEl.appendChild(wrapper);
+    } catch (e) {
+      const msg = e && e.message ? e.message : 'render failed';
+      // Leave the original block content intact; append a small error note.
+      const note = document.createElement('div');
+      note.className = 'primer-mermaid-error';
+      note.textContent = 'Mermaid render failed: ' + msg;
+      preEl.appendChild(note);
+      log.warn('mermaid render failed for block', id, ':', msg);
+    }
+  }
+
+  async function renderAllMermaidBlocks() {
+    const blocks = findMermaidBlocks();
+    if (blocks.length === 0) return;
+    if (documentHasMermaidBootstrap()) {
+      log.info('mermaid bootstrap detected in document, skipping');
+      return;
+    }
+    let mermaid;
+    try {
+      mermaid = await loadMermaidOnce();
+    } catch (_e) {
+      // already logged in loadMermaidOnce
+      return;
+    }
+    for (const pre of blocks) {
+      await renderOneMermaidBlock(pre, mermaid);
+    }
+  }
+
+  /** Re-render every already-rendered block using the current theme. */
+  async function reRenderMermaidForTheme() {
+    if (mermaidModule === null) return;
+    const wrappers = document.querySelectorAll('[data-mermaid-source]');
+    if (wrappers.length === 0) return;
+    mermaidModule.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: pickMermaidTheme(),
+      fontFamily: 'inherit',
+    });
+    for (const wrapper of wrappers) {
+      const source = wrapper.getAttribute('data-mermaid-source') || '';
+      const id = 'primer-mermaid-' + (++mermaidRenderCounter);
+      try {
+        const result = await mermaidModule.render(id, source);
+        safelySetSvgContent(wrapper, result.svg);
+      } catch (e) {
+        // On theme-rerender failure, leave the prior SVG in place — silent.
+        log.warn('mermaid re-render failed:', e && e.message ? e.message : e);
+      }
+    }
+  }
+
   /** True when running in a UA without a hover-capable pointer (phones/tablets). */
   function isTouchUA() {
     try {
@@ -159,6 +359,11 @@
       renderElementBadges();
     }
 
+    // Fire-and-forget — never blocks init or anchor rendering.
+    renderAllMermaidBlocks().catch((e) =>
+      log.warn('mermaid init render error:', e && e.message ? e.message : e),
+    );
+
     // Apply parent-provided theme. Field is optional for backward-compat with
     // parents that haven't been updated yet (they won't set anything).
     if (incoming.theme === 'light' || incoming.theme === 'dark') {
@@ -167,6 +372,10 @@
       } catch (e) {
         // documentElement should always exist; defensive catch.
       }
+      // Re-render any Mermaid diagrams that finished before init resolved.
+      reRenderMermaidForTheme().catch((e) =>
+        log.warn('mermaid init theme re-render error:', e && e.message ? e.message : e),
+      );
     }
 
     flushLogBuffer();
@@ -219,6 +428,10 @@
           } catch (e) {
             // defensive
           }
+          // Re-render any existing Mermaid diagrams with the new theme.
+          reRenderMermaidForTheme().catch((e) =>
+            log.warn('mermaid theme re-render error:', e && e.message ? e.message : e),
+          );
         }
         break;
       default:

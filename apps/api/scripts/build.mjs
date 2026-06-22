@@ -58,14 +58,30 @@ await build({
 });
 
 // Copy static assets that the runtime reads directly from disk.
-// The companion script is served byte-for-byte by /companion/v1.js — esbuild
-// won't bundle it because nothing imports it as a module.
+// The companion script and the vendored Mermaid bundle are served byte-for-byte
+// by their respective routes — esbuild won't bundle them because nothing imports
+// them as a module.
 await mkdir(resolve(apiRoot, 'dist/companion'), { recursive: true });
 await copyFile(
   resolve(apiRoot, 'src/companion/v1.js'),
   resolve(apiRoot, 'dist/companion/v1.js'),
 );
+// Read the pinned version from the TS constant so this script stays in sync
+// without duplicating the literal.
+const versionModule = await readFile(
+  resolve(apiRoot, 'src/companion/mermaidVersion.ts'),
+  'utf-8',
+);
+const versionMatch = versionModule.match(/MERMAID_VERSION\s*=\s*['"]([^'"]+)['"]/);
+if (!versionMatch) {
+  throw new Error('Could not extract MERMAID_VERSION from mermaidVersion.ts');
+}
+const mermaidVersion = versionMatch[1];
+await copyFile(
+  resolve(apiRoot, `src/companion/mermaid-v${mermaidVersion}.js`),
+  resolve(apiRoot, `dist/companion/mermaid-v${mermaidVersion}.js`),
+);
 
 console.log(
-  'api build complete: dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js',
+  `api build complete: dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
 );
