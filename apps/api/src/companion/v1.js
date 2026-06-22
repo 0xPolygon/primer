@@ -96,6 +96,9 @@
   /** Cached mermaid module after first dynamic import, or null. */
   let mermaidModule = null;
 
+  /** In-flight import promise so concurrent callers share one fetch. */
+  let mermaidLoadPromise = null;
+
   /** @returns {'dark' | 'default'} */
   function pickMermaidTheme() {
     return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default';
@@ -103,25 +106,31 @@
 
   async function loadMermaidOnce() {
     if (mermaidModule !== null) return mermaidModule;
-    // The vendored UMD bundle attaches `mermaid` to `window` as a side effect.
-    // We import it for side effects, then pick the global up off `window`.
-    try {
-      await import(MERMAID_BUNDLE_URL);
-    } catch (e) {
-      log.warn('mermaid bundle import failed:', e && e.message ? e.message : e);
-      throw e;
-    }
-    if (typeof window.mermaid === 'undefined') {
-      throw new Error('mermaid global missing after bundle load');
-    }
-    mermaidModule = window.mermaid;
-    mermaidModule.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: pickMermaidTheme(),
-      fontFamily: 'inherit',
-    });
-    return mermaidModule;
+    if (mermaidLoadPromise) return mermaidLoadPromise;
+    mermaidLoadPromise = (async () => {
+      try {
+        // The vendored UMD bundle attaches `mermaid` to `window` as a side effect.
+        // We import it for side effects, then pick the global up off `window`.
+        await import(MERMAID_BUNDLE_URL);
+      } catch (e) {
+        log.warn('mermaid bundle import failed:', e && e.message ? e.message : e);
+        mermaidLoadPromise = null;
+        throw e;
+      }
+      if (typeof window.mermaid === 'undefined') {
+        mermaidLoadPromise = null;
+        throw new Error('mermaid global missing after bundle load');
+      }
+      mermaidModule = window.mermaid;
+      mermaidModule.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: pickMermaidTheme(),
+        fontFamily: 'inherit',
+      });
+      return mermaidModule;
+    })();
+    return mermaidLoadPromise;
   }
 
   /** Renders one <pre> block in place. Never throws — failures are inline. */
