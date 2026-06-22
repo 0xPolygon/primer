@@ -150,6 +150,49 @@
     return mermaidLoadPromise;
   }
 
+  /**
+   * Recursively strip `on*` event-handler attributes and `javascript:` /
+   * `vbscript:` URLs from an element subtree. Defense-in-depth for
+   * sanitized-but-still-string SVG inserted from Mermaid output.
+   * Mirrored in mermaidSanitize.test.ts; keep in sync.
+   */
+  function scrubMermaidSvgAttributes(node) {
+    if (node.nodeType !== 1) return;  // ELEMENT_NODE
+    const attrs = [];
+    for (const attr of node.attributes) attrs.push(attr);
+    for (const attr of attrs) {
+      const name = attr.name.toLowerCase();
+      const value = String(attr.value || '').trim().toLowerCase();
+      if (name.indexOf('on') === 0 ||
+          value.indexOf('javascript:') === 0 ||
+          value.indexOf('vbscript:') === 0) {
+        node.removeAttributeNode(attr);
+      }
+    }
+    for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
+      scrubMermaidSvgAttributes(child);
+    }
+  }
+
+  /**
+   * Parse the SVG string from `mermaid.render()` via DOMParser, strip any
+   * `on*` handlers and `javascript:` URLs that survived Mermaid's own
+   * sanitization, then replace `wrapper`'s children with the cleaned tree.
+   * Avoids the textContent → innerHTML sink entirely.
+   * Mirrored in mermaidSanitize.test.ts; keep in sync.
+   */
+  function safelySetSvgContent(wrapper, svgString) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svgString, 'text/html');
+    const svgEl = doc.body.querySelector('svg');
+    if (!svgEl) {
+      throw new Error('no <svg> root found in render output');
+    }
+    scrubMermaidSvgAttributes(svgEl);
+    while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
+    wrapper.appendChild(document.adoptNode(svgEl));
+  }
+
   /** Renders one <pre> block in place. Never throws — failures are inline. */
   async function renderOneMermaidBlock(preEl, mermaid) {
     const source = preEl.textContent || '';
@@ -159,7 +202,7 @@
       const wrapper = document.createElement('div');
       wrapper.className = 'primer-mermaid';
       wrapper.setAttribute('data-mermaid-source', source);
-      wrapper.innerHTML = result.svg;
+      safelySetSvgContent(wrapper, result.svg);
       // Replace ALL children of <pre> with the wrapper.
       while (preEl.firstChild) preEl.removeChild(preEl.firstChild);
       preEl.appendChild(wrapper);
@@ -209,7 +252,7 @@
       const id = 'primer-mermaid-' + (++mermaidRenderCounter);
       try {
         const result = await mermaidModule.render(id, source);
-        wrapper.innerHTML = result.svg;
+        safelySetSvgContent(wrapper, result.svg);
       } catch (e) {
         // On theme-rerender failure, leave the prior SVG in place — silent.
         log.warn('mermaid re-render failed:', e && e.message ? e.message : e);
