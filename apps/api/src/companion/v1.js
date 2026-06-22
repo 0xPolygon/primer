@@ -109,8 +109,10 @@
     if (mermaidLoadPromise) return mermaidLoadPromise;
     mermaidLoadPromise = (async () => {
       try {
-        // The vendored UMD bundle attaches `mermaid` to `window` as a side effect.
-        // We import it for side effects, then pick the global up off `window`.
+        // The vendored bundle ends with `globalThis.mermaid = <default-export>;`
+        // We import for that side effect, then read the global off `window`.
+        // If a future bundle build doesn't set the global, the typeof check
+        // below throws and we surface a clear error instead of silent failure.
         await import(MERMAID_BUNDLE_URL);
       } catch (e) {
         log.warn('mermaid bundle import failed:', e && e.message ? e.message : e);

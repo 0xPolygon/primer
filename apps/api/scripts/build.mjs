@@ -72,7 +72,7 @@ const versionModule = await readFile(
   resolve(apiRoot, 'src/companion/mermaidVersion.ts'),
   'utf-8',
 );
-const versionMatch = versionModule.match(/MERMAID_VERSION\s*=\s*'([^']+)'/);
+const versionMatch = versionModule.match(/MERMAID_VERSION\s*=\s*['"]([^'"]+)['"]/);
 if (!versionMatch) {
   throw new Error('Could not extract MERMAID_VERSION from mermaidVersion.ts');
 }
