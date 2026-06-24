@@ -1,6 +1,6 @@
 // Primer companion script v1.
 // Loaded by the upload pipeline into every artifact iframe.
-// Lives in the iframe (sandbox: allow-scripts allow-forms, opaque-origin "null").
+// Lives in the iframe (sandbox: allow-scripts allow-forms allow-modals allow-downloads, opaque-origin "null").
 // Talks to the parent ONLY via a MessageChannel port transferred at init.
 (() => {
   /** @type {MessagePort | null} */
@@ -160,8 +160,9 @@
    *      DOMPurify INTERNALLY on every user-controlled label before
    *      emitting SVG. Strings reaching this assignment have already been
    *      sanitized by the same library CodeQL would recommend.
-   *   2. ArtifactIframe runs with sandbox="allow-scripts allow-forms" (no
-   *      allow-same-origin) — opaque origin, no access to Primer cookies,
+   *   2. ArtifactIframe runs with sandbox="allow-scripts allow-forms
+   *      allow-modals allow-downloads" (no allow-same-origin) — opaque
+   *      origin, no access to Primer cookies,
    *      auth, parent DOM, or storage. Any script that did execute inside
    *      the iframe would be defanged.
    *   3. The artifact CSP at apps/api/src/routes/versionContent.ts sets

@@ -157,10 +157,12 @@ Anchor (embedded JSON in Thread.anchor)
 Even though Railway isolation removes the cross-contamination risk with other Polygon infrastructure, uploaded HTML is rendered inside a sandboxed iframe to prevent LLM-generated JS from faking the app's chrome (e.g., a fake "session expired, log in again" overlay). The iframe sandbox attributes:
 
 ```
-sandbox="allow-scripts allow-forms"
+sandbox="allow-scripts allow-forms allow-modals allow-downloads"
 ```
 
 Notably *not* `allow-same-origin` (prevents iframe access to parent cookies, localStorage, or DOM) and notably *not* `allow-popups` or `allow-popups-to-escape-sandbox` (prevents the in-iframe fake-SSO-popup phishing vector). External links from artifacts are handled instead by the companion script forwarding `<a target="_blank">` clicks and `window.open()` calls to the parent via postMessage, which validates and opens the new tab from the trusted parent context.
+
+`allow-modals` is included because LLM-generated artifacts commonly expose a "Print / Save as PDF" button that calls `window.print()`; sandboxed iframes block all modal-dialog APIs (`alert`/`confirm`/`prompt`/`print`/`beforeunload`) without this token. The dialogs are scoped to the iframe's opaque origin — they cannot read or write parent cookies, storage, or DOM, so the worst case is a nuisance dialog inside the artifact's own viewport. `allow-downloads` is included because the same class of artifacts often build a file in memory (XLSX, CSV, PDF) and trigger `<a download>.click()` on a blob URL; without this token, those clicks are a silent no-op. The artifact already executes arbitrary JS in the sandbox and can construct any in-memory blob; `allow-downloads` only governs whether the user can persist a user-initiated build to disk, and browser-level download safety (file-type warnings, Safe Browsing) still applies.
 
 ### Iframe CSP
 

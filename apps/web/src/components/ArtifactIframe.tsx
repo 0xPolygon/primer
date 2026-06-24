@@ -22,7 +22,15 @@ interface Props {
 // `allow-popups`, or `allow-popups-to-escape-sandbox`. Adding any of these
 // would re-open phishing / cookie-theft / fake-SSO vectors described in
 // docs/prd-primer.md ("Iframe sandboxing"). If you find yourself needing
-// to widen the sandbox, stop and consult the threat model first.
+// to widen the sandbox further, stop and consult the threat model first.
+//
+// `allow-modals` enables `window.print()` (and alert/confirm/prompt) inside
+// the iframe — required for in-artifact "Print / Save as PDF" buttons.
+// `allow-downloads` enables `<a download>.click()` on blob URLs — required
+// for in-artifact "Export to Excel/CSV" buttons that build a file in memory.
+// Both tokens are scoped to the iframe's opaque origin: they do not grant
+// access to parent cookies, storage, or DOM and do not open the
+// fake-SSO-popup vector that the three forbidden tokens above would.
 export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
@@ -118,7 +126,7 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender 
     <iframe
       ref={iframeRef}
       src={src}
-      sandbox="allow-scripts allow-forms"
+      sandbox="allow-scripts allow-forms allow-modals allow-downloads"
       title="Artifact"
       style={{ width: '100%', height: 'calc(100vh - 120px)', border: 0 }}
     />

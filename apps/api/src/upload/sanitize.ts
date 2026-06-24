@@ -30,7 +30,8 @@ const SVG_PRESENTATION_ATTRS = [
 ];
 
 // Threat model: uploaded HTML executes inside ArtifactIframe's
-// `sandbox="allow-scripts allow-forms"` (no `allow-same-origin`), so any
+// `sandbox="allow-scripts allow-forms allow-modals allow-downloads"`
+// (no `allow-same-origin`), so any
 // script that runs is on an opaque origin — no access to Primer cookies,
 // storage, parent DOM, or the app's auth surface. The artifact CSP also
 // pins `connect-src 'none'` and `form-action 'none'`, so even hostile JS
