@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { VersionSummaryDTO } from '@primer/shared';
 import { useVersionsQuery } from '../queries/versions.ts';
@@ -34,14 +34,15 @@ export default function CompareSelectPage() {
   const [toV, setToV] = useState<number | null>(null);
 
   // Apply defaults once versions arrive (after first render to avoid setState-in-render).
-  // Only fires when `latest` first becomes available; subsequent refetches do not
-  // overwrite the user's picks.
+  // Runs exactly once when `latest` first becomes available; subsequent refetches and
+  // user radio clicks do not re-enter.
+  const initialized = useRef(false);
   useEffect(() => {
-    if (!latest) return;
-    if (fromV !== null || toV !== null) return;
+    if (!latest || initialized.current) return;
+    initialized.current = true;
     if (defaultFrom) setFromV(defaultFrom.versionNumber);
     setToV(latest.versionNumber);
-  }, [latest?.versionNumber, defaultFrom, fromV, toV]);
+  }, [latest?.versionNumber, defaultFrom]);
 
   const canCompare = fromV !== null && toV !== null && fromV !== toV;
 
