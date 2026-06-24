@@ -112,12 +112,12 @@ New file: `apps/web/src/lib/extractText.ts`. Pure function, no DOM dependencies 
 1. Parse with `new DOMParser().parseFromString(html, 'text/html')`.
 2. Walk the document body. Emit:
    - `textContent` of inline nodes.
-   - A trailing `\n` after each block-level boundary: `p`, `h1`–`h6`, `li`, `tr`, `pre`, `blockquote`, `div`, `section`, `article`, `figure`, `hr`. `<br>` emits exactly `\n`.
+   - A trailing `\n` after each block-level boundary: `p`, `h1`–`h6`, `li`, `tr`, `pre`, `blockquote`, `hr`. `<br>` emits exactly `\n`. `<div>`, `<section>`, `<article>`, `<figure>` are deliberately NOT block boundaries — they are invisible structural containers in rendered text, and treating them as block emitters produces spurious newlines around nested layout wrappers.
    - Inline `<code>` stays inline. `<pre>`/`<pre><code>` contents are preserved verbatim (including internal newlines) and terminated with a single `\n`.
 3. Skip entirely (no text emitted) for:
    - `<script>` and `<style>`.
    - `<svg>` and its descendants — these come from Mermaid post-render. Replaced with the literal token `[diagram]` followed by `\n` so the user can see a diagram changed without diffing SVG soup.
-4. Normalize whitespace at the end: collapse any run of 3+ blank lines down to 2; trim leading/trailing whitespace on the final string.
+4. Normalize whitespace at the end: collapse any run of 3+ consecutive newlines down to 2 (i.e., at most one blank line between blocks); trim leading/trailing whitespace on the final string.
 
 ### Determinism
 
