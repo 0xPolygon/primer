@@ -87,6 +87,15 @@ export default function ComparePage() {
   const fromContent = useVersionContent(fromId);
   const toContent = useVersionContent(toId);
 
+  const fromText = useMemo(
+    () => extractText(fromContent.data ?? ''),
+    [fromContent.data],
+  );
+  const toText = useMemo(
+    () => extractText(toContent.data ?? ''),
+    [toContent.data],
+  );
+
   const docQuery = useDocument(docId);
   const { effective } = useTheme();
   const isDark = effective === 'dark';
@@ -242,15 +251,6 @@ export default function ComparePage() {
       </div>
     );
   }
-
-  const fromText = useMemo(
-    () => extractText(fromContent.data ?? ''),
-    [fromContent.data],
-  );
-  const toText = useMemo(
-    () => extractText(toContent.data ?? ''),
-    [toContent.data],
-  );
 
   if (fromText === toText) {
     return (
