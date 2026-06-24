@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
 import { useVersionsQuery } from '../queries/versions.ts';
+import { useDocument } from '../queries/documents.ts';
 import { useTheme } from '../lib/useTheme.ts';
 import { api } from '../lib/fetch.ts';
 import { extractText } from '../lib/extractText.ts';
@@ -86,6 +87,7 @@ export default function ComparePage() {
   const fromContent = useVersionContent(fromId);
   const toContent = useVersionContent(toId);
 
+  const docQuery = useDocument(docId);
   const { effective } = useTheme();
   const isDark = effective === 'dark';
 
@@ -102,6 +104,11 @@ export default function ComparePage() {
         <Link to={`/d/${docId}`} className="text-xs text-neutral-500 underline">
           ← Back
         </Link>
+        {docQuery.data?.document.title && (
+          <span className="truncate text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            {docQuery.data.document.title}
+          </span>
+        )}
         {resolution.kind === 'ok' && (
           <span className="font-mono text-sm text-neutral-700 dark:text-neutral-300">
             v{resolution.from.versionNumber} → v{resolution.to.versionNumber}
@@ -197,7 +204,10 @@ export default function ComparePage() {
       <div>
         {header}
         <div className="p-6 text-sm text-neutral-700 dark:text-neutral-300">
-          These two versions render to identical text.
+          <p>These two versions render to identical text.</p>
+          <Link to={`/d/${docId}/compare`} className="mt-2 inline-block underline">
+            Pick versions to compare →
+          </Link>
         </div>
       </div>
     );
@@ -233,15 +243,24 @@ export default function ComparePage() {
     );
   }
 
-  const fromText = extractText(fromContent.data ?? '');
-  const toText = extractText(toContent.data ?? '');
+  const fromText = useMemo(
+    () => extractText(fromContent.data ?? ''),
+    [fromContent.data],
+  );
+  const toText = useMemo(
+    () => extractText(toContent.data ?? ''),
+    [toContent.data],
+  );
 
   if (fromText === toText) {
     return (
       <div>
         {header}
         <div className="p-6 text-sm text-neutral-700 dark:text-neutral-300">
-          These two versions render to identical text.
+          <p>These two versions render to identical text.</p>
+          <Link to={`/d/${docId}/compare`} className="mt-2 inline-block underline">
+            Pick versions to compare →
+          </Link>
         </div>
       </div>
     );

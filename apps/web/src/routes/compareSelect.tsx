@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { VersionSummaryDTO } from '@primer/shared';
 import { useVersionsQuery } from '../queries/versions.ts';
+import { useDocument } from '../queries/documents.ts';
 import { pickDefaultFromVersion } from '../lib/compareParams.ts';
+
+const EMPTY_VERSIONS: VersionSummaryDTO[] = [];
 
 function relativeTime(iso: string): string {
   const d = new Date(iso);
@@ -22,8 +25,9 @@ export default function CompareSelectPage() {
   const { docId = '' } = useParams<{ docId: string }>();
   const navigate = useNavigate();
   const query = useVersionsQuery(docId);
+  const docQuery = useDocument(docId);
 
-  const versions: VersionSummaryDTO[] = query.data?.versions ?? [];
+  const versions: VersionSummaryDTO[] = query.data?.versions ?? EMPTY_VERSIONS;
   const latest = versions[0];
   const defaultFrom = useMemo(
     () => (latest ? pickDefaultFromVersion(versions, latest.versionNumber) : null),
@@ -61,19 +65,41 @@ export default function CompareSelectPage() {
   }
 
   if (query.isLoading) {
-    return <div className="p-6 text-sm text-neutral-500">Loading versions…</div>;
+    return (
+      <div className="mx-auto max-w-2xl p-6">
+        <Link to={`/d/${docId}`} className="text-xs text-neutral-500 underline">
+          ← Back to document
+        </Link>
+        {docQuery.data?.document.title && (
+          <div className="mt-2 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            {docQuery.data.document.title}
+          </div>
+        )}
+        <div className="mt-4 text-sm text-neutral-500">Loading versions…</div>
+      </div>
+    );
   }
   if (query.isError) {
     return (
-      <div className="p-6 text-sm text-red-600 dark:text-red-400">
-        Failed to load versions.{' '}
-        <button
-          type="button"
-          onClick={() => query.refetch()}
-          className="underline"
-        >
-          Retry
-        </button>
+      <div className="mx-auto max-w-2xl p-6">
+        <Link to={`/d/${docId}`} className="text-xs text-neutral-500 underline">
+          ← Back to document
+        </Link>
+        {docQuery.data?.document.title && (
+          <div className="mt-2 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            {docQuery.data.document.title}
+          </div>
+        )}
+        <div className="mt-4 text-sm text-red-600 dark:text-red-400">
+          Failed to load versions.{' '}
+          <button
+            type="button"
+            onClick={() => query.refetch()}
+            className="underline"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -84,6 +110,11 @@ export default function CompareSelectPage() {
         <Link to={`/d/${docId}`} className="text-xs text-neutral-500 underline">
           ← Back to document
         </Link>
+        {docQuery.data?.document.title && (
+          <div className="mt-2 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+            {docQuery.data.document.title}
+          </div>
+        )}
         <h1 className="mt-4 text-lg font-semibold">Compare versions</h1>
         <p className="mt-4 text-sm text-neutral-600 dark:text-neutral-400">
           This document only has one version. Add another version to compare.
@@ -97,6 +128,11 @@ export default function CompareSelectPage() {
       <Link to={`/d/${docId}`} className="text-xs text-neutral-500 underline">
         ← Back to document
       </Link>
+      {docQuery.data?.document.title && (
+        <div className="mt-2 text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          {docQuery.data.document.title}
+        </div>
+      )}
       <h1 className="mt-4 text-lg font-semibold">Compare versions</h1>
       <p className="mt-1 text-xs text-neutral-500">
         Pick two versions to see a diff of their rendered text.
