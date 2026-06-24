@@ -150,7 +150,16 @@ export default function ComparePage() {
     return (
       <div>
         {header}
-        <div className="p-6 text-sm text-red-600 dark:text-red-400">Failed to load versions.</div>
+        <div className="p-6 text-sm text-red-600 dark:text-red-400">
+          <p>Failed to load versions.</p>
+          <button
+            type="button"
+            onClick={() => versionsQuery.refetch()}
+            className="mt-2 underline"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
