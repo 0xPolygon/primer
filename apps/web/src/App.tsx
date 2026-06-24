@@ -8,6 +8,8 @@ import { AdminPage } from './routes/admin.tsx';
 import { DevicePage } from './routes/device.tsx';
 import { TokenSettingsPage } from './routes/settings-tokens.tsx';
 import { NotFoundPage } from './routes/notFound.tsx';
+import CompareSelectPage from './routes/compareSelect.tsx';
+import ComparePage from './routes/compare.tsx';
 
 const router = createBrowserRouter([
   {
@@ -17,6 +19,8 @@ const router = createBrowserRouter([
       { path: '/upload', element: <UploadPage /> },
       { path: '/d/:docId', element: <DocumentPage /> },
       { path: '/d/:docId/v/:versionNumber', element: <DocumentPage /> },
+      { path: '/d/:docId/compare', element: <CompareSelectPage /> },
+      { path: '/d/:docId/compare/:fromV/:toV', element: <ComparePage /> },
       { path: '/dev/harness', element: <DevHarnessPage /> },
       { path: '/admin', element: <AdminPage /> },
       { path: '/device', element: <DevicePage /> },
