@@ -50,6 +50,12 @@ describe('resolveCompareParams', () => {
     expect(resolveCompareParams(VERSIONS, '-1', '3')).toEqual({ kind: 'invalid' });
     expect(resolveCompareParams(VERSIONS, '1.5', '3')).toEqual({ kind: 'invalid' });
   });
+  it('is invalid when toV is not a positive integer', () => {
+    expect(resolveCompareParams(VERSIONS, '3', 'abc')).toEqual({ kind: 'invalid' });
+    expect(resolveCompareParams(VERSIONS, '3', '0')).toEqual({ kind: 'invalid' });
+    expect(resolveCompareParams(VERSIONS, '3', '-1')).toEqual({ kind: 'invalid' });
+    expect(resolveCompareParams(VERSIONS, '3', '1.5')).toEqual({ kind: 'invalid' });
+  });
   it('returns not-found when fromV does not exist', () => {
     expect(resolveCompareParams(VERSIONS, '99', '3')).toEqual({ kind: 'not-found', missing: 99 });
   });
