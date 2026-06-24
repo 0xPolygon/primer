@@ -74,16 +74,18 @@ export function VersionSelector({
       </button>
       {open && (
         <div className="absolute right-0 z-10 mt-1 w-72 overflow-hidden rounded border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-md">
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              navigate(`/d/${docId}/compare`);
-            }}
-            className="block w-full border-b border-neutral-200 px-3 py-2 text-left text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            Compare…
-          </button>
+          {versions.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                navigate(`/d/${docId}/compare`);
+              }}
+              className="block w-full border-b border-neutral-200 px-3 py-2 text-left text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            >
+              Compare…
+            </button>
+          )}
           {onAddVersion && (
             <button
               type="button"
