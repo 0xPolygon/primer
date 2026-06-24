@@ -16,7 +16,6 @@ const BLOCK_TAGS = new Set([
   'H6',
   'LI',
   'TR',
-  'PRE',
   'BLOCKQUOTE',
   'HR',
 ]);
