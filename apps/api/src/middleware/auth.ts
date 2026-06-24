@@ -15,7 +15,8 @@ function isApiPath(path: string): boolean {
 }
 
 // The companion script is loaded as a subresource by the sandboxed artifact
-// iframe (`sandbox="allow-scripts allow-forms"`, no allow-same-origin).
+// iframe (`sandbox="allow-scripts allow-forms allow-modals allow-downloads"`,
+// no allow-same-origin).
 // Sandboxed iframes make subresource requests as cross-site, which strips
 // SameSite=Lax cookies — so the companion fetch arrives without a session.
 // The script is static, identical for every viewer, and contains no secrets
