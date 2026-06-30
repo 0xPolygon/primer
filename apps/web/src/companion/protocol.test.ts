@@ -157,6 +157,40 @@ describe('parseInboundMessage', () => {
     });
     expect(parsed).toBeNull();
   });
+
+  // Companion re-emits selection_captured with the same anchor but fresh
+  // clientRects whenever the iframe scrolls or its body reflows, so the
+  // parent's "Add comment" pill keeps tracking the selection. See
+  // apps/api/src/companion/v1.js scheduleSelectionRectsRefresh().
+  // Lock in that the parser accepts repeated emissions with the same
+  // anchor + different rects.
+  it('round-trips repeated selection_captured with same anchor, fresh rects', () => {
+    const anchor = {
+      type: 'text-range',
+      selectorText: 'hello',
+      start: 100,
+      end: 105,
+    };
+    const first = {
+      type: 'selection_captured',
+      anchor,
+      clientRects: [{ x: 10, y: 20, width: 50, height: 18 }],
+    };
+    const second = {
+      type: 'selection_captured',
+      anchor,
+      clientRects: [{ x: 10, y: 120, width: 50, height: 18 }],
+    };
+    const parsedFirst = parseInboundMessage(first);
+    const parsedSecond = parseInboundMessage(second);
+    expect(parsedFirst).toEqual(first);
+    expect(parsedSecond).toEqual(second);
+    // Anchor identity is preserved across both emissions.
+    if (parsedFirst?.type === 'selection_captured' &&
+        parsedSecond?.type === 'selection_captured') {
+      expect(parsedFirst.anchor).toEqual(parsedSecond.anchor);
+    }
+  });
 });
 
 describe('parseInboundMessage — companion_log', () => {

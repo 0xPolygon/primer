@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Navigate, useParams, useNavigate } from 'react-router-dom';
 import type {
   AnchorData,
@@ -28,6 +35,10 @@ import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
 import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
 import { extractCanonicalDocId } from '../lib/docIdParam.ts';
+import {
+  computePillPosition,
+  type PillPosition,
+} from '../lib/computePillPosition.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -129,6 +140,8 @@ function DocumentPageInner() {
 
   const senderRef = useRef<((m: OutboundProtocolMessage) => void) | null>(null);
   const iframeWrapperRef = useRef<HTMLDivElement>(null);
+  const pillRef = useRef<HTMLDivElement | null>(null);
+  const [pillPos, setPillPos] = useState<PillPosition | null>(null);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   // True iff the new-thread composer currently holds non-whitespace input.
@@ -419,6 +432,41 @@ function DocumentPageInner() {
     }
   }, [isMobile, pickMode, composerPending]);
 
+  // Position the "Add comment in sidebar →" pill relative to the
+  // selection. Recomputed whenever the selection's clientRects change
+  // (mouseup + scroll-driven refreshes from the companion) or the host
+  // window resizes. Two-pass measurement: first render uses a
+  // conservative fallback size, then re-measures via pillRef.
+  useLayoutEffect(() => {
+    if (
+      readMostly ||
+      isMobile ||
+      !pendingSelection ||
+      pendingSelection.clientRects.length === 0
+    ) {
+      setPillPos(null);
+      return;
+    }
+    const compute = () => {
+      const iframe = iframeWrapperRef.current?.querySelector('iframe');
+      if (!iframe) return;
+      const pill = pillRef.current;
+      const pillSize = pill
+        ? { width: pill.offsetWidth, height: pill.offsetHeight }
+        : { width: 220, height: 32 };
+      const next = computePillPosition({
+        rects: pendingSelection.clientRects,
+        iframeRect: iframe.getBoundingClientRect(),
+        pillSize,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      });
+      setPillPos(next);
+    };
+    compute();
+    window.addEventListener('resize', compute, { passive: true });
+    return () => window.removeEventListener('resize', compute);
+  }, [readMostly, isMobile, pendingSelection]);
+
   if (docQuery.isLoading) return <div className="text-neutral-500">Loading…</div>;
   if (docQuery.error) {
     return (
@@ -448,17 +496,6 @@ function DocumentPageInner() {
   }
 
   const { document } = docQuery.data;
-
-  let pillPos: { left: number; top: number } | null = null;
-  if (!readMostly && pendingSelection && pendingSelection.clientRects.length > 0) {
-    const iframeEl = iframeWrapperRef.current?.querySelector('iframe');
-    const iframeRect = iframeEl?.getBoundingClientRect();
-    const r = pendingSelection.clientRects[0];
-    pillPos = {
-      left: (iframeRect?.left ?? 0) + r.x,
-      top: (iframeRect?.top ?? 0) + r.y + r.height + 4,
-    };
-  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-60px)]">
@@ -714,9 +751,17 @@ function DocumentPageInner() {
         </BottomSheet>
       )}
 
-      {!isMobile && pillPos && pendingSelection && composerPending && (
+      {!isMobile && pendingSelection && composerPending && (
         <div
-          style={{ position: 'fixed', left: pillPos.left, top: pillPos.top, zIndex: 1000 }}
+          ref={pillRef}
+          style={{
+            position: 'fixed',
+            left: pillPos?.left ?? 0,
+            top: pillPos?.top ?? 0,
+            zIndex: 1000,
+            visibility:
+              pillPos && !pillPos.hidden ? 'visible' : 'hidden',
+          }}
           className="flex items-center gap-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs text-white shadow-lg"
         >
           <span>Add comment in sidebar →</span>
