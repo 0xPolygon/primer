@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { transformHtml } from './htmlPipeline.ts';
+import { STORAGE_POLYFILL_JS } from './storagePolyfill.ts';
 
 describe('transformHtml', () => {
   it('returns serialized HTML with dangerous content stripped, user script preserved, and companion script injected', () => {
@@ -15,6 +16,9 @@ describe('transformHtml', () => {
     expect(out.html).toContain('document.querySelector("h1").click();');
     // Companion script is injected by inject.ts after sanitization.
     expect(out.html).toContain('<script src="/companion/v1.js"');
+    // Storage polyfill is injected at the top of <head>.
+    expect(out.html).toContain(STORAGE_POLYFILL_JS);
+    expect(out.html).toMatch(/<head><script>/);
   });
 
   it('returns parse_failed when input is not parseable as HTML', () => {
@@ -47,5 +51,6 @@ describe('transformHtml', () => {
     expect(out.html).toContain('marker-end="url(#ah)"');
     expect(out.html).toContain('data-theme="light"');
     expect(out.html).toContain('<script src="/companion/v1.js"');
+    expect(out.html).toContain(STORAGE_POLYFILL_JS);
   });
 });
