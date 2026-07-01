@@ -10,6 +10,7 @@ import { db } from '../db/client.ts';
 import { documents, versions } from '@primer/shared/schema';
 import type { UploadResponse } from '@primer/shared/api';
 import { CSRF_HEADERS } from '../test/harness.ts';
+import { STORAGE_POLYFILL_JS } from '../upload/storagePolyfill.ts';
 
 async function withTmpStorage<T>(
   fn: (storage: FilesystemStorage, root: string) => Promise<T>
@@ -69,6 +70,7 @@ describe('POST /api/upload — happy path', () => {
       expect(combined).toContain('<h1>Hi</h1>');
       expect(combined).not.toContain('<iframe');
       expect(combined).toContain('<script src="/companion/v1.js"');
+      expect(combined).toContain(STORAGE_POLYFILL_JS);
     });
   });
 });
@@ -169,6 +171,7 @@ describe('POST /api/upload — markdown', () => {
       expect(combined).toContain('<p>World.</p>');
       expect(combined).toContain('data-theme="light"');
       expect(combined).toContain('<script src="/companion/v1.js"'); // companion still injected
+      expect(combined).toContain(STORAGE_POLYFILL_JS); // polyfill on markdown path too
       expect(combined).not.toContain('---'); // frontmatter stripped
     });
   });
