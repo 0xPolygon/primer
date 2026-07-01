@@ -38,9 +38,18 @@ function err(code: PrimerErrorCode, message: string): ToolResult {
 }
 
 // Inline port of apps/mcp/src/format.ts — avoids cross-package import.
-function formatCommentsMarkdown(threadsResponse: ThreadsListResponse): string {
+function formatCommentsMarkdown(
+  threadsResponse: ThreadsListResponse,
+  docTitle?: string,
+  versionNumber?: number,
+): string {
   const list = threadsResponse.threads;
   if (list.length === 0) return 'No comments on this version.';
+
+  const header =
+    docTitle !== undefined && versionNumber !== undefined
+      ? `# Comments on ${docTitle} (v${versionNumber})`
+      : '# Comments';
 
   const open = list.filter((t) => t.resolvedAt === null).length;
   const resolved = list.length - open;
@@ -64,7 +73,7 @@ function formatCommentsMarkdown(threadsResponse: ThreadsListResponse): string {
     return [`> ${quote}`, badge, ...commentLines, ''].join('\n');
   });
 
-  return ['# Comments', counts, '', ...sections].join('\n').trimEnd() + '\n';
+  return [header, counts, '', ...sections].join('\n').trimEnd() + '\n';
 }
 
 export const TOOL_NAMES = [
@@ -192,6 +201,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       // Mirror GET /api/versions/:versionId/threads from routes/threads.ts.
       // Accepts { versionId } OR { documentId } (resolves to latest version).
       let versionId: string | undefined;
+      let docTitle: string | undefined;
+      let versionNumber: number | undefined;
 
       if (typeof args.versionId === 'string' && args.versionId.length > 0) {
         versionId = args.versionId;
@@ -206,6 +217,15 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           .limit(1);
         if (!latestVersion) return err('not_found', 'document has no versions');
         versionId = latestVersion.id;
+        versionNumber = latestVersion.versionNumber;
+
+        // Also fetch the document title
+        const [doc] = await db
+          .select({ title: documents.title })
+          .from(documents)
+          .where(eq(documents.id, docId))
+          .limit(1);
+        if (doc) docTitle = doc.title;
       } else {
         return err('bad_request', 'versionId or documentId is required');
       }
@@ -305,7 +325,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         asOf: new Date().toISOString(),
       };
 
-      const markdown = formatCommentsMarkdown(threadsResponse);
+      const markdown = formatCommentsMarkdown(threadsResponse, docTitle, versionNumber);
       return ok({ markdown, threadCount: threadDTOs.length });
     },
 
