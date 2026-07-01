@@ -47,11 +47,12 @@ export interface AppDeps {
 export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
 
-  const issuer =
+  const issuer = (
     process.env.OAUTH_ISSUER ??
     deps.authBaseUrl ??
     process.env.AUTH_BASE_URL ??
-    '';
+    ''
+  ).replace(/\/$/, '');
 
   const resolver = deps.userResolver ?? mockResolver;
   app.use('*', authMiddleware(resolver, issuer.length > 0 ? { issuer } : undefined));

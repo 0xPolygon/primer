@@ -28,6 +28,11 @@ describe('isRedirectUriAllowed', () => {
     expect(isRedirectUriAllowed('http://127.0.0.1:65535/whatever')).toBe(true);
   });
 
+  it('accepts localhost loopback URIs on any port', () => {
+    expect(isRedirectUriAllowed('http://localhost:8123/cb')).toBe(true);
+    expect(isRedirectUriAllowed('http://localhost:65535/whatever')).toBe(true);
+  });
+
   it('rejects unlisted hosts', () => {
     expect(isRedirectUriAllowed('https://evil.example.com/cb')).toBe(false);
   });

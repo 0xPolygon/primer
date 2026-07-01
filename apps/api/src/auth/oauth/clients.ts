@@ -19,7 +19,10 @@ export function isRedirectUriAllowed(uri: string): boolean {
   } catch {
     return false;
   }
-  if (parsed.protocol === 'http:' && parsed.hostname === '127.0.0.1') return true;
+  if (parsed.protocol === 'http:' &&
+      (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) {
+    return true;
+  }
   return REDIRECT_URI_ALLOWLIST.includes(uri);
 }
 
