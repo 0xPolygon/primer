@@ -157,3 +157,92 @@ export const deviceAuthorizations = pgTable(
     byExpiry: index('device_auth_expires_at_idx').on(t.expiresAt),
   }),
 );
+
+export const oauthClients = pgTable(
+  'oauth_clients',
+  {
+    id: uuid('id').primaryKey(),
+    clientId: text('client_id').notNull(),                               // public identifier
+    clientName: text('client_name').notNull(),                            // from DCR metadata
+    redirectUris: jsonb('redirect_uris').$type<string[]>().notNull(),
+    grantTypes: jsonb('grant_types').$type<string[]>().notNull(),
+    tokenEndpointAuthMethod: text('token_endpoint_auth_method').notNull().default('none'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byClientId: uniqueIndex('oauth_clients_client_id_unique').on(t.clientId),
+  }),
+);
+
+export const oauthConsents = pgTable(
+  'oauth_consents',
+  {
+    id: uuid('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    clientId: text('client_id').notNull().references(() => oauthClients.clientId, { onDelete: 'cascade' }),
+    scopes: jsonb('scopes').$type<string[]>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byUserClient: uniqueIndex('oauth_consents_user_client_unique').on(t.userId, t.clientId),
+  }),
+);
+
+export const oauthAuthorizationCodes = pgTable(
+  'oauth_authorization_codes',
+  {
+    id: uuid('id').primaryKey(),
+    codeHash: text('code_hash').notNull(),                                 // sha256 hex
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    clientId: text('client_id').notNull().references(() => oauthClients.clientId, { onDelete: 'cascade' }),
+    redirectUri: text('redirect_uri').notNull(),
+    codeChallenge: text('code_challenge').notNull(),
+    codeChallengeMethod: text('code_challenge_method').notNull(),          // 'S256'
+    scopes: jsonb('scopes').$type<string[]>().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byCodeHash: uniqueIndex('oauth_auth_codes_hash_unique').on(t.codeHash),
+    byExpiry: index('oauth_auth_codes_expires_at_idx').on(t.expiresAt),
+  }),
+);
+
+export const oauthAccessTokens = pgTable(
+  'oauth_access_tokens',
+  {
+    id: uuid('id').primaryKey(),
+    tokenHash: text('token_hash').notNull(),                               // sha256 hex
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    clientId: text('client_id').notNull().references(() => oauthClients.clientId, { onDelete: 'cascade' }),
+    scopes: jsonb('scopes').$type<string[]>().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byTokenHash: uniqueIndex('oauth_access_tokens_hash_unique').on(t.tokenHash),
+    byExpiry: index('oauth_access_tokens_expires_at_idx').on(t.expiresAt),
+  }),
+);
+
+export const oauthRefreshTokens = pgTable(
+  'oauth_refresh_tokens',
+  {
+    id: uuid('id').primaryKey(),
+    familyId: uuid('family_id').notNull(),                                 // rotation-chain grouping
+    tokenHash: text('token_hash').notNull(),                               // sha256 hex
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    clientId: text('client_id').notNull().references(() => oauthClients.clientId, { onDelete: 'cascade' }),
+    scopes: jsonb('scopes').$type<string[]>().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    rotatedAt: timestamp('rotated_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byTokenHash: uniqueIndex('oauth_refresh_tokens_hash_unique').on(t.tokenHash),
+    byFamily: index('oauth_refresh_tokens_family_idx').on(t.familyId),
+  }),
+);
