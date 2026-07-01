@@ -1,11 +1,8 @@
 {
   "name": "primer",
+  "version": "2.0.1",
   "description": "Publish HTML/Markdown artifacts to Primer from Claude Web, Desktop, or Code. Browser-based OAuth login, create/version documents, pull reviewer comments.",
-  "version": "2.0.0",
-  "mcpServers": {
-    "primer": {
-      "type": "http",
-      "url": "https://primer-polygon.up.railway.app/mcp"
-    }
+  "author": {
+    "name": "Polygon"
   }
 }
