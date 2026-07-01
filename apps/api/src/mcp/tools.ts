@@ -8,7 +8,7 @@ import { documents, versions, threads, comments, users } from '@primer/shared/sc
 import { markdownToHtml } from '../upload/markdown.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
-import type { ThreadsListResponse, ThreadDTO, CommentDTO } from '@primer/shared/api';
+import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary } from '@primer/shared/api';
 import { isTextRangeAnchor, isElementPathAnchor } from '@primer/shared';
 
 export type PrimerErrorCode =
@@ -85,7 +85,25 @@ export const TOOL_NAMES = [
   'primer_create_document',
   'primer_add_version',
   'primer_resolve_url',
+  'primer_list_documents',
+  'primer_find_document',
+  'primer_get_document_comments',
+  'primer_get_all_comments',
 ] as const;
+
+// Default and maximum page sizes for paginated tools.
+const DEFAULT_PAGE_LIMIT = 25;
+const MAX_PAGE_LIMIT = 100;
+
+/**
+ * Parse a `limit` arg, clamping into [1, MAX_PAGE_LIMIT] and defaulting to
+ * DEFAULT_PAGE_LIMIT when absent or invalid.
+ */
+function parseLimit(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_PAGE_LIMIT;
+  return Math.min(Math.floor(n), MAX_PAGE_LIMIT);
+}
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandler> {
@@ -312,95 +330,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         return err('bad_request', 'versionId or documentId is required');
       }
 
-      // Load thread + comment rows, same query shape as routes/threads.ts
-      interface ThreadRow {
-        id: string;
-        versionId: string;
-        anchor: unknown;
-        resolvedAt: Date | null;
-        resolvedBy: string | null;
-        resolvedByDisplayName: string | null;
-        createdAt: Date;
-      }
-      interface CommentRow {
-        id: string;
-        threadId: string;
-        authorId: string;
-        authorDisplayName: string;
-        body: string;
-        mentions: string[];
-        createdAt: Date;
-        updatedAt: Date | null;
-        deletedAt: Date | null;
-      }
-
-      const threadRows = (await db
-        .select({
-          id: threads.id,
-          versionId: threads.versionId,
-          anchor: threads.anchor,
-          resolvedAt: threads.resolvedAt,
-          resolvedBy: threads.resolvedBy,
-          resolvedByDisplayName: users.displayName,
-          createdAt: threads.createdAt,
-        })
-        .from(threads)
-        .leftJoin(users, eq(users.id, threads.resolvedBy))
-        .where(eq(threads.versionId, versionId))
-        .orderBy(threads.createdAt)) as ThreadRow[];
-
-      const commentRows: CommentRow[] =
-        threadRows.length === 0
-          ? []
-          : ((await db
-              .select({
-                id: comments.id,
-                threadId: comments.threadId,
-                authorId: comments.authorId,
-                authorDisplayName: users.displayName,
-                body: comments.body,
-                mentions: comments.mentions,
-                createdAt: comments.createdAt,
-                updatedAt: comments.updatedAt,
-                deletedAt: comments.deletedAt,
-              })
-              .from(comments)
-              .innerJoin(users, eq(users.id, comments.authorId))
-              .where(
-                sql`${comments.threadId} IN (${sql.join(
-                  threadRows.map((t) => sql`${t.id}`),
-                  sql`, `
-                )})`
-              )
-              .orderBy(comments.createdAt)) as CommentRow[]);
-
-      const commentsByThread = new Map<string, CommentRow[]>();
-      for (const cr of commentRows) {
-        const list = commentsByThread.get(cr.threadId);
-        if (list) list.push(cr);
-        else commentsByThread.set(cr.threadId, [cr]);
-      }
-
-      const threadDTOs: ThreadDTO[] = threadRows.map((t) => ({
-        id: t.id,
-        versionId: t.versionId,
-        anchor: t.anchor as ThreadDTO['anchor'],
-        resolvedAt: t.resolvedAt?.toISOString() ?? null,
-        resolvedBy: t.resolvedBy,
-        resolvedByDisplayName: t.resolvedByDisplayName,
-        createdAt: t.createdAt.toISOString(),
-        comments: (commentsByThread.get(t.id) ?? []).map((c) => ({
-          id: c.id,
-          threadId: c.threadId,
-          authorId: c.authorId,
-          authorDisplayName: c.authorDisplayName,
-          body: c.deletedAt !== null ? '' : c.body,
-          createdAt: c.createdAt.toISOString(),
-          updatedAt: c.updatedAt?.toISOString() ?? null,
-          deletedAt: c.deletedAt?.toISOString() ?? null,
-          mentions: c.mentions,
-        })),
-      }));
+      // Load thread + comment rows via the shared helper.
+      const { threadDTOs } = await loadThreadsForVersions([versionId]);
 
       const threadsResponse: ThreadsListResponse = {
         threads: threadDTOs,
@@ -564,7 +495,389 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         url: `${deps.apiBaseUrl}/d/${documentId}`,
       });
     },
+
+    primer_list_documents: async (args, _user) => {
+      // List all (non-deleted) documents, newest first, keyset-paginated.
+      // No ownership gate — Primer is share-by-URL, any authenticated user can list.
+      // Cursor is the last document id from the previous page (uuidv7 is
+      // time-sortable, so ordering by (createdAt DESC, id DESC) is stable).
+      const limit = parseLimit(args.limit);
+      const cursor = typeof args.cursor === 'string' && args.cursor.length > 0 ? args.cursor : undefined;
+
+      // Resolve the cursor row's (createdAt, id) to build the keyset predicate.
+      let cursorCreatedAt: Date | undefined;
+      if (cursor) {
+        const [cursorRow] = await db
+          .select({ createdAt: documents.createdAt })
+          .from(documents)
+          .where(eq(documents.id, cursor))
+          .limit(1);
+        if (!cursorRow) return err('bad_request', 'invalid cursor');
+        cursorCreatedAt = cursorRow.createdAt;
+      }
+
+      const rows = await db
+        .select({
+          id: documents.id,
+          title: documents.title,
+          description: documents.description,
+          uploaderId: documents.uploaderId,
+          createdAt: documents.createdAt,
+          uploaderDisplayName: users.displayName,
+        })
+        .from(documents)
+        .innerJoin(users, eq(users.id, documents.uploaderId))
+        .where(
+          cursorCreatedAt
+            ? and(
+                sql`${documents.deletedAt} IS NULL`,
+                sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`,
+              )
+            : sql`${documents.deletedAt} IS NULL`,
+        )
+        .orderBy(desc(documents.createdAt), desc(documents.id))
+        .limit(limit + 1);
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+
+      const items: DocumentSummary[] = page.map((r) => ({
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        uploaderId: r.uploaderId,
+        uploaderDisplayName: r.uploaderDisplayName,
+        createdAt: r.createdAt.toISOString(),
+      }));
+
+      return ok({
+        documents: items,
+        nextCursor: hasMore ? page[page.length - 1].id : null,
+        hasMore,
+      });
+    },
+
+    primer_find_document: async (args, _user) => {
+      // Case-insensitive substring search over title and description.
+      // Non-deleted only, newest first, keyset-paginated like list_documents.
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      if (!query) return err('bad_request', 'query is required');
+      const limit = parseLimit(args.limit);
+      const cursor = typeof args.cursor === 'string' && args.cursor.length > 0 ? args.cursor : undefined;
+
+      let cursorCreatedAt: Date | undefined;
+      if (cursor) {
+        const [cursorRow] = await db
+          .select({ createdAt: documents.createdAt })
+          .from(documents)
+          .where(eq(documents.id, cursor))
+          .limit(1);
+        if (!cursorRow) return err('bad_request', 'invalid cursor');
+        cursorCreatedAt = cursorRow.createdAt;
+      }
+
+      // Escape LIKE wildcards in the user query so they are matched literally.
+      const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      const pattern = `%${escaped}%`;
+      const matchPredicate = sql`(${documents.title} ILIKE ${pattern} ESCAPE '\\' OR ${documents.description} ILIKE ${pattern} ESCAPE '\\')`;
+
+      const rows = await db
+        .select({
+          id: documents.id,
+          title: documents.title,
+          description: documents.description,
+          uploaderId: documents.uploaderId,
+          createdAt: documents.createdAt,
+          uploaderDisplayName: users.displayName,
+        })
+        .from(documents)
+        .innerJoin(users, eq(users.id, documents.uploaderId))
+        .where(
+          cursorCreatedAt
+            ? and(
+                sql`${documents.deletedAt} IS NULL`,
+                matchPredicate,
+                sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`,
+              )
+            : and(sql`${documents.deletedAt} IS NULL`, matchPredicate),
+        )
+        .orderBy(desc(documents.createdAt), desc(documents.id))
+        .limit(limit + 1);
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+
+      const items: DocumentSummary[] = page.map((r) => ({
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        uploaderId: r.uploaderId,
+        uploaderDisplayName: r.uploaderDisplayName,
+        createdAt: r.createdAt.toISOString(),
+      }));
+
+      return ok({
+        query,
+        documents: items,
+        nextCursor: hasMore ? page[page.length - 1].id : null,
+        hasMore,
+      });
+    },
+
+    primer_get_document_comments: async (args, _user) => {
+      // All comment threads across ALL versions of a document (not just latest),
+      // grouped by version. Newest version first, threads oldest first.
+      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      if (!documentId) return err('bad_request', 'documentId is required');
+
+      const [doc] = await db
+        .select({ title: documents.title, deletedAt: documents.deletedAt })
+        .from(documents)
+        .where(eq(documents.id, documentId))
+        .limit(1);
+      if (!doc) return err('not_found', 'document not found');
+      if (doc.deletedAt !== null) return err('not_found', 'document not found');
+
+      const versionRows = await db
+        .select({ id: versions.id, versionNumber: versions.versionNumber })
+        .from(versions)
+        .where(eq(versions.documentId, documentId))
+        .orderBy(desc(versions.versionNumber));
+
+      if (versionRows.length === 0) {
+        return ok({ documentId, title: doc.title, versions: [], threadCount: 0 });
+      }
+
+      const versionIds = versionRows.map((v) => v.id);
+      const { threadDTOs } = await loadThreadsForVersions(versionIds);
+
+      const threadsByVersion = new Map<string, ThreadDTO[]>();
+      for (const t of threadDTOs) {
+        const list = threadsByVersion.get(t.versionId);
+        if (list) list.push(t);
+        else threadsByVersion.set(t.versionId, [t]);
+      }
+
+      const versionsOut = versionRows.map((v) => {
+        const vThreads = threadsByVersion.get(v.id) ?? [];
+        const threadsResponse: ThreadsListResponse = {
+          threads: vThreads,
+          asOf: new Date().toISOString(),
+        };
+        return {
+          versionId: v.id,
+          versionNumber: v.versionNumber,
+          threadCount: vThreads.length,
+          markdown: formatCommentsMarkdown(threadsResponse, doc.title, v.versionNumber),
+        };
+      });
+
+      return ok({
+        documentId,
+        title: doc.title,
+        versions: versionsOut,
+        threadCount: threadDTOs.length,
+      });
+    },
+
+    primer_get_all_comments: async (args, _user) => {
+      // Every comment across every (non-deleted) document, paginated by comment.
+      // Ordered by comment createdAt DESC, id DESC (keyset). Each item is
+      // flattened with its document/version context for agent consumption.
+      const limit = parseLimit(args.limit);
+      const cursor = typeof args.cursor === 'string' && args.cursor.length > 0 ? args.cursor : undefined;
+
+      let cursorCreatedAt: Date | undefined;
+      if (cursor) {
+        const [cursorRow] = await db
+          .select({ createdAt: comments.createdAt })
+          .from(comments)
+          .where(eq(comments.id, cursor))
+          .limit(1);
+        if (!cursorRow) return err('bad_request', 'invalid cursor');
+        cursorCreatedAt = cursorRow.createdAt;
+      }
+
+      interface AllCommentRow {
+        id: string;
+        threadId: string;
+        versionId: string;
+        versionNumber: number;
+        documentId: string;
+        documentTitle: string;
+        authorId: string;
+        authorDisplayName: string;
+        body: string;
+        mentions: string[];
+        createdAt: Date;
+        updatedAt: Date | null;
+        deletedAt: Date | null;
+        threadResolvedAt: Date | null;
+      }
+
+      const keyset = cursorCreatedAt
+        ? sql`AND (c.created_at, c.id) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
+        : sql``;
+
+      const rows = (await db.execute(sql`
+        SELECT c.id AS "id",
+               c.thread_id AS "threadId",
+               t.version_id AS "versionId",
+               v.version_number AS "versionNumber",
+               v.document_id AS "documentId",
+               d.title AS "documentTitle",
+               c.author_id AS "authorId",
+               u.display_name AS "authorDisplayName",
+               c.body AS "body",
+               c.mentions AS "mentions",
+               c.created_at AS "createdAt",
+               c.updated_at AS "updatedAt",
+               c.deleted_at AS "deletedAt",
+               t.resolved_at AS "threadResolvedAt"
+        FROM comments c
+        INNER JOIN threads t ON t.id = c.thread_id
+        INNER JOIN versions v ON v.id = t.version_id
+        INNER JOIN documents d ON d.id = v.document_id
+        INNER JOIN users u ON u.id = c.author_id
+        WHERE d.deleted_at IS NULL
+        ${keyset}
+        ORDER BY c.created_at DESC, c.id DESC
+        LIMIT ${limit + 1}
+      `)) as unknown as AllCommentRow[];
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+
+      const items = page.map((r) => ({
+        id: r.id,
+        threadId: r.threadId,
+        versionId: r.versionId,
+        versionNumber: r.versionNumber,
+        documentId: r.documentId,
+        documentTitle: r.documentTitle,
+        authorId: r.authorId,
+        authorDisplayName: r.authorDisplayName,
+        body: r.deletedAt !== null ? '' : r.body,
+        mentions: r.mentions,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt?.toISOString() ?? null,
+        deletedAt: r.deletedAt?.toISOString() ?? null,
+        threadResolved: r.threadResolvedAt !== null,
+      }));
+
+      return ok({
+        comments: items,
+        nextCursor: hasMore ? page[page.length - 1].id : null,
+        hasMore,
+      });
+    },
   };
+}
+
+/**
+ * Load all threads (with their comments) for a set of version ids and return
+ * fully-hydrated ThreadDTOs. Shared by the comment-listing tools.
+ */
+async function loadThreadsForVersions(
+  versionIds: string[],
+): Promise<{ threadDTOs: ThreadDTO[] }> {
+  if (versionIds.length === 0) return { threadDTOs: [] };
+
+  interface ThreadRow {
+    id: string;
+    versionId: string;
+    anchor: unknown;
+    resolvedAt: Date | null;
+    resolvedBy: string | null;
+    resolvedByDisplayName: string | null;
+    createdAt: Date;
+  }
+  interface CommentRow {
+    id: string;
+    threadId: string;
+    authorId: string;
+    authorDisplayName: string;
+    body: string;
+    mentions: string[];
+    createdAt: Date;
+    updatedAt: Date | null;
+    deletedAt: Date | null;
+  }
+
+  const threadRows = (await db
+    .select({
+      id: threads.id,
+      versionId: threads.versionId,
+      anchor: threads.anchor,
+      resolvedAt: threads.resolvedAt,
+      resolvedBy: threads.resolvedBy,
+      resolvedByDisplayName: users.displayName,
+      createdAt: threads.createdAt,
+    })
+    .from(threads)
+    .leftJoin(users, eq(users.id, threads.resolvedBy))
+    .where(
+      sql`${threads.versionId} IN (${sql.join(
+        versionIds.map((id) => sql`${id}`),
+        sql`, `,
+      )})`,
+    )
+    .orderBy(threads.createdAt)) as ThreadRow[];
+
+  const commentRows: CommentRow[] =
+    threadRows.length === 0
+      ? []
+      : ((await db
+          .select({
+            id: comments.id,
+            threadId: comments.threadId,
+            authorId: comments.authorId,
+            authorDisplayName: users.displayName,
+            body: comments.body,
+            mentions: comments.mentions,
+            createdAt: comments.createdAt,
+            updatedAt: comments.updatedAt,
+            deletedAt: comments.deletedAt,
+          })
+          .from(comments)
+          .innerJoin(users, eq(users.id, comments.authorId))
+          .where(
+            sql`${comments.threadId} IN (${sql.join(
+              threadRows.map((t) => sql`${t.id}`),
+              sql`, `,
+            )})`,
+          )
+          .orderBy(comments.createdAt)) as CommentRow[]);
+
+  const commentsByThread = new Map<string, CommentRow[]>();
+  for (const cr of commentRows) {
+    const list = commentsByThread.get(cr.threadId);
+    if (list) list.push(cr);
+    else commentsByThread.set(cr.threadId, [cr]);
+  }
+
+  const threadDTOs: ThreadDTO[] = threadRows.map((t) => ({
+    id: t.id,
+    versionId: t.versionId,
+    anchor: t.anchor as ThreadDTO['anchor'],
+    resolvedAt: t.resolvedAt?.toISOString() ?? null,
+    resolvedBy: t.resolvedBy,
+    resolvedByDisplayName: t.resolvedByDisplayName,
+    createdAt: t.createdAt.toISOString(),
+    comments: (commentsByThread.get(t.id) ?? []).map((c) => ({
+      id: c.id,
+      threadId: c.threadId,
+      authorId: c.authorId,
+      authorDisplayName: c.authorDisplayName,
+      body: c.deletedAt !== null ? '' : c.body,
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt?.toISOString() ?? null,
+      deletedAt: c.deletedAt?.toISOString() ?? null,
+      mentions: c.mentions,
+    })),
+  }));
+
+  return { threadDTOs };
 }
 
 export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: Record<string, ZodTypeAny> }> = {
@@ -613,6 +926,36 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
       content: z.string(),
       format: z.enum(['html', 'markdown']),
       versionNote: z.string().optional(),
+    },
+  },
+  primer_list_documents: {
+    description:
+      'List all Primer documents (newest first), paginated. Pass an optional limit (1-100, default 25) and a cursor from a previous page\'s nextCursor to fetch the next page. Returns { documents, nextCursor, hasMore }.',
+    inputSchema: {
+      limit: z.number().int().positive().max(MAX_PAGE_LIMIT).optional(),
+      cursor: z.string().optional(),
+    },
+  },
+  primer_find_document: {
+    description:
+      'Search Primer documents by a case-insensitive substring over title and description. Paginated like primer_list_documents. Returns { query, documents, nextCursor, hasMore }.',
+    inputSchema: {
+      query: z.string(),
+      limit: z.number().int().positive().max(MAX_PAGE_LIMIT).optional(),
+      cursor: z.string().optional(),
+    },
+  },
+  primer_get_document_comments: {
+    description:
+      'Fetch all comment threads across ALL versions of a document (not just the latest), grouped by version, each as a markdown summary. Returns { documentId, title, versions, threadCount }.',
+    inputSchema: { documentId: z.string() },
+  },
+  primer_get_all_comments: {
+    description:
+      'List every comment across every document, newest first, paginated. Each item is flattened with its document/version context. Pass an optional limit (1-100, default 25) and a cursor from a previous page\'s nextCursor. Returns { comments, nextCursor, hasMore }.',
+    inputSchema: {
+      limit: z.number().int().positive().max(MAX_PAGE_LIMIT).optional(),
+      cursor: z.string().optional(),
     },
   },
 };

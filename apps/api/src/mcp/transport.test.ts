@@ -68,7 +68,7 @@ describe('POST /mcp', () => {
     });
   });
 
-  it('lists the seven tools for an authenticated request', async () => {
+  it('lists the registered tools for an authenticated request', async () => {
     const { token } = await seedAccessToken();
     await withApp(async (app) => {
       const res = await app.request('/mcp', {
@@ -90,6 +90,10 @@ describe('POST /mcp', () => {
         'primer_create_document',
         'primer_add_version',
         'primer_resolve_url',
+        'primer_list_documents',
+        'primer_find_document',
+        'primer_get_document_comments',
+        'primer_get_all_comments',
       ];
       for (const name of expected) {
         expect(text).toContain(name);
