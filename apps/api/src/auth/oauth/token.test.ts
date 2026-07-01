@@ -68,6 +68,7 @@ beforeEach(async () => {
   await db.delete(oauthRefreshTokens);
   await db.delete(oauthAuthorizationCodes);
   await db.delete(oauthClients);
+  await db.execute(sql`DELETE FROM users WHERE id LIKE 'u-%' OR id LIKE 'mcp-%'`);
 });
 
 describe('POST /oauth/token — grant_type=authorization_code', () => {

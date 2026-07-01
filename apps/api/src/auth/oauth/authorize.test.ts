@@ -40,6 +40,7 @@ beforeEach(async () => {
   await db.delete(oauthConsents);
   await db.delete(oauthClients);
   await db.delete(sessions);
+  await db.execute(sql`DELETE FROM users WHERE id LIKE 'u-%' OR id LIKE 'mcp-%'`);
 });
 
 function authorizeUrl(clientId: string, extra: Record<string, string> = {}): string {

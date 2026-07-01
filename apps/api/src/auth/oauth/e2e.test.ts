@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
+import { sql } from 'drizzle-orm';
 import { createApp } from '../../app.ts';
 import { FilesystemStorage } from '../../storage/filesystem.ts';
 import { NoopNotifier } from '../../notifications/notifier.ts';
@@ -45,6 +46,7 @@ beforeEach(async () => {
   ]) {
     await db.delete(table);
   }
+  await db.execute(sql`DELETE FROM users WHERE id LIKE 'u-%' OR id LIKE 'mcp-%'`);
 });
 
 describe('OAuth end-to-end (register → authorize → token)', () => {
