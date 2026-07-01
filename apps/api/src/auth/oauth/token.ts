@@ -151,7 +151,6 @@ async function handleRefresh(c: Context, body: URLSearchParams) {
 
   const row = rows[0];
   if (!row) return err(c, 'invalid_grant', 'unknown refresh_token');
-  if (row.clientId !== clientId) return err(c, 'invalid_client', 'client_id mismatch');
 
   // Reuse detection: a rotated token being presented again means somebody
   // captured a used token. Nuke the whole family and return invalid_grant.
@@ -169,12 +168,28 @@ async function handleRefresh(c: Context, body: URLSearchParams) {
     return err(c, 'invalid_grant', 'refresh_token no longer valid');
   }
 
-  // Mark this row rotated, then mint a fresh pair in the same family.
-  await db.execute(sql`
+  if (row.clientId !== clientId) return err(c, 'invalid_client', 'client_id mismatch');
+
+  // Mark this row rotated atomically: use a conditional UPDATE with rotated_at IS NULL
+  // in the WHERE clause. If another request rotated the same token between our SELECT and
+  // UPDATE, rowCount = 0 and we treat it as a race-condition reuse.
+  const rotated = (await db.execute(sql`
     UPDATE oauth_refresh_tokens
     SET rotated_at = now()
-    WHERE id = ${row.id}
-  `);
+    WHERE id = ${row.id} AND rotated_at IS NULL
+    RETURNING id
+  `)) as unknown as { id: string }[];
+
+  if (rotated.length === 0) {
+    // Race: another request rotated the same token between our SELECT and UPDATE.
+    // Treat as reuse.
+    await db.execute(sql`
+      UPDATE oauth_refresh_tokens
+      SET revoked_at = now()
+      WHERE family_id = ${row.familyId} AND revoked_at IS NULL
+    `);
+    return err(c, 'invalid_grant', 'refresh_token reuse detected');
+  }
 
   const pair = await issueTokens({
     userId: row.userId,
