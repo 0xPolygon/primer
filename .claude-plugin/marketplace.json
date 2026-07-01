@@ -5,12 +5,13 @@
   },
   "metadata": {
     "description": "Publish and iterate on HTML/Markdown artifacts at a stable URL via Claude Web, Desktop, or Code. Browser-based OAuth login.",
-    "version": "2.0.0",
+    "version": "2.0.1",
     "pluginRoot": "./plugins"
   },
   "plugins": [
     {
       "name": "primer",
+      "displayName": "Primer",
       "source": "./plugins/primer",
       "description": "Publish HTML/Markdown artifacts to Primer from Claude Web, Desktop, or Code. Browser-based OAuth login, create/version documents, pull reviewer comments.",
       "author": {
