@@ -85,8 +85,8 @@ describe('GET /oauth/authorize', () => {
     expect(html).toContain('Claude');
     expect(html).toContain('Allow');
     expect(html).toContain('Deny');
-    // CSRF token round-trips through the form as a hidden input.
-    expect(html).toMatch(/name="csrf"/);
+    // Session id must not be leaked into the rendered HTML.
+    expect(html).not.toContain(sid);
   });
 
   it('skips the form and 302s with a code when consent already exists', async () => {

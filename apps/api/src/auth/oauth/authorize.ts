@@ -63,15 +63,16 @@ function errorRedirect(c: Context, redirectUri: string, error: string, descripti
   return c.redirect(u.toString(), 302);
 }
 
+const esc = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 function errorPage(c: Context, error: string, description: string) {
   const html = `<!doctype html><meta charset="utf-8"><title>OAuth error</title>
-<h1>Authorization error</h1><p><code>${error}</code>: ${description}</p>`;
+<h1>Authorization error</h1><p><code>${esc(error)}</code>: ${esc(description)}</p>`;
   return c.html(html, 400);
 }
 
-function renderConsent(c: Context, client: OAuthClientRow, p: AuthorizeParams, csrfToken: string) {
-  const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function renderConsent(c: Context, client: OAuthClientRow, p: AuthorizeParams) {
   const hidden = (name: string, value: string) =>
     `<input type="hidden" name="${esc(name)}" value="${esc(value)}">`;
   const html = `<!doctype html><meta charset="utf-8">
@@ -89,7 +90,6 @@ ${hidden('code_challenge', p.codeChallenge)}
 ${hidden('code_challenge_method', p.codeChallengeMethod)}
 ${hidden('state', p.state)}
 ${hidden('scope', p.scope)}
-${hidden('csrf', csrfToken)}
 <button type="submit" name="decision" value="allow">Allow</button>
 <button type="submit" name="decision" value="deny">Deny</button>
 </form>`;
@@ -152,7 +152,7 @@ export function registerOAuthAuthorizationRoutes(app: Hono, opts: AuthorizeOptio
       return mintCodeAndRedirect(c, { userId: session.user.id, clientId: p.clientId, p });
     }
 
-    return renderConsent(c, client, p, sid);
+    return renderConsent(c, client, p);
   });
 
   app.post('/oauth/consent', async (c) => {
