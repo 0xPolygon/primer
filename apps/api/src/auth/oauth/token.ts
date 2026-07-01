@@ -17,8 +17,8 @@ import {
 const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-function err(c: Context, error: string, description: string, status = 400) {
-  return c.json({ error, error_description: description }, status);
+function err(c: Context, error: string, description: string, status: number = 400) {
+  return c.json({ error, error_description: description }, status as any);
 }
 
 async function readForm(c: Context): Promise<URLSearchParams> {

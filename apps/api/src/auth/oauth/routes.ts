@@ -11,7 +11,7 @@ export interface OAuthRoutesDeps {
   sessionCookieName: string;
 }
 
-export function registerOAuthRoutes(app: Hono, deps: OAuthRoutesDeps): void {
+export function registerOAuthRoutes(app: Hono<any>, deps: OAuthRoutesDeps): void {
   // Rate limits — mounted per-endpoint so bucket keys stay scoped.
   app.use('/oauth/register', oauthRateLimitMiddleware({ capacity: 5, refillPerSecond: 1 / 60 }));
   app.use('/oauth/authorize', oauthRateLimitMiddleware({ capacity: 20, refillPerSecond: 1 / 3 }));
