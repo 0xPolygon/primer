@@ -35,8 +35,18 @@ function isPublicWellKnown(path: string): boolean {
   return path.startsWith('/.well-known/oauth-');
 }
 
+export interface AuthMiddlewareOptions {
+  /**
+   * OAuth issuer URL. When set, unauthenticated requests to /mcp will
+   * receive a `WWW-Authenticate: Bearer resource_metadata=...` header
+   * pointing clients to the protected-resource metadata document.
+   */
+  issuer?: string;
+}
+
 export function authMiddleware(
-  resolver: UserResolver
+  resolver: UserResolver,
+  options?: AuthMiddlewareOptions,
 ): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (c, next) => {
     const path = c.req.path;
@@ -48,7 +58,20 @@ export function authMiddleware(
       return next();
     }
 
-    if (isApiPath(path) || path.startsWith('/auth/')) {
+    if (isApiPath(path) || path.startsWith('/auth/') || path === '/mcp') {
+      if (path === '/mcp') {
+        const issuer =
+          options?.issuer ??
+          process.env.OAUTH_ISSUER ??
+          process.env.AUTH_BASE_URL ??
+          '';
+        if (issuer) {
+          c.header(
+            'www-authenticate',
+            `Bearer resource_metadata="${issuer}/.well-known/oauth-protected-resource"`,
+          );
+        }
+      }
       return c.json({ error: 'unauthenticated' }, 401);
     }
     const returnTo = encodeURIComponent(path);
