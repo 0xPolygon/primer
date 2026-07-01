@@ -10,6 +10,7 @@ import { startPurgeInterval } from './jobs/purge.ts';
 import { mockResolver, makeOktaResolver, type UserResolver } from './auth/resolver.ts';
 import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from './auth/okta.ts';
 import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
+import { makeOAuthBearerResolver } from './auth/oauth/bearer.ts';
 
 const port = Number(process.env.PORT ?? 3000);
 const storageRoot = process.env.STORAGE_ROOT ?? './storage';
@@ -93,9 +94,9 @@ if (authMode === 'okta') {
   oktaAdapter = makeDisabledOktaAdapter();
 }
 
-// Bearer (PAT) auth runs first; falls through to the session/mock resolver
-// when no `Authorization: Bearer primer_pat_...` header is present.
-userResolver = composeResolvers(makeBearerResolver(), userResolver);
+// OAuth bearer runs first (primer_oat_ tokens), then PAT bearer (primer_pat_),
+// then the session/mock resolver as fallback.
+userResolver = composeResolvers(makeOAuthBearerResolver(), makeBearerResolver(), userResolver);
 
 const app = createApp({
   storage,
