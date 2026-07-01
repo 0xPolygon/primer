@@ -99,7 +99,6 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
       storage: deps.storage,
       notifier: deps.notifier,
       apiBaseUrl: issuer,
-      issuer,
     });
   }
 

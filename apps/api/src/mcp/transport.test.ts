@@ -82,9 +82,18 @@ describe('POST /mcp', () => {
       });
       expect(res.status).toBe(200);
       const text = await res.text();
-      expect(text).toContain('primer_whoami');
-      expect(text).toContain('primer_get_document');
-      expect(text).toContain('primer_resolve_url');
+      const expected = [
+        'primer_whoami',
+        'primer_get_document',
+        'primer_list_versions',
+        'primer_get_comments',
+        'primer_create_document',
+        'primer_add_version',
+        'primer_resolve_url',
+      ];
+      for (const name of expected) {
+        expect(text).toContain(name);
+      }
     });
   });
 });
