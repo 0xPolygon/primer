@@ -773,11 +773,19 @@
   let lastEmittedFingerprint = '';
   let lastEmittedAt = 0;
   let hasActiveCapture = false;
+  /** Cached anchor of the most recent selection_captured emission. Used
+   *  by scheduleSelectionRectsRefresh to re-emit fresh clientRects on
+   *  scroll/resize WITHOUT recomputing the (start, end) offsets — those
+   *  don't change when the viewport scrolls. Cleared on selection_cleared.
+   *  @type {{ type: 'text-range', start: number, end: number, selectorText: string } | null}
+   */
+  let lastCapturedAnchor = null;
 
   function emitSelectionCleared() {
     if (!port || !hasActiveCapture) return;
     hasActiveCapture = false;
     lastEmittedFingerprint = '';
+    lastCapturedAnchor = null;
     port.postMessage({ type: 'selection_cleared' });
   }
 
@@ -821,18 +829,48 @@
     lastEmittedAt = Date.now();
 
     const clientRects = Array.from(range.getClientRects()).map(serializeRect);
+    lastCapturedAnchor = {
+      type: 'text-range',
+      start,
+      end,
+      selectorText,
+    };
 
     port.postMessage({
       type: 'selection_captured',
-      anchor: {
-        type: 'text-range',
-        start,
-        end,
-        selectorText,
-      },
+      anchor: lastCapturedAnchor,
       clientRects,
     });
     hasActiveCapture = true;
+  }
+
+  // Scroll- and resize-driven re-emission of the current selection's
+  // clientRects. The parent positions the "Add comment" pill from these
+  // rects; when the iframe scrolls or its body reflows, the rects shift
+  // but no mouseup fires, so onPossibleSelection() doesn't run.
+  //
+  // We bypass the fingerprint dedup at lines above because we're
+  // intentionally re-emitting the same (start, end) with refreshed
+  // geometry; the dedup is for mouseup chatter, not layout updates.
+  // Throttled to rAF so a fast scroll doesn't saturate the port.
+  let rectsRefreshRafPending = false;
+  function scheduleSelectionRectsRefresh() {
+    if (rectsRefreshRafPending) return;
+    if (!hasActiveCapture || !lastCapturedAnchor || !port) return;
+    rectsRefreshRafPending = true;
+    requestAnimationFrame(() => {
+      rectsRefreshRafPending = false;
+      if (!port || !hasActiveCapture || !lastCapturedAnchor) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      const range = sel.getRangeAt(0);
+      const clientRects = Array.from(range.getClientRects()).map(serializeRect);
+      port.postMessage({
+        type: 'selection_captured',
+        anchor: lastCapturedAnchor,
+        clientRects,
+      });
+    });
   }
 
   /** True if `node` is inside any companion-injected subtree. Shares
@@ -1529,6 +1567,7 @@
 
   const ro = new ResizeObserver(() => {
     repositionElementBadges();
+    scheduleSelectionRectsRefresh();
     if (port) {
       const h = document.documentElement.scrollHeight || document.body.scrollHeight;
       port.postMessage({ type: 'resize', height: h });
@@ -1536,14 +1575,17 @@
   });
   ro.observe(document.body);
 
-  // ── Scroll tracking for element-pick badges ─────────────────────
+  // ── Scroll tracking for element-pick badges + pending selection ──
   // Scroll doesn't bubble; capture-phase on window picks up scrolls from
   // any scrollable ancestor. CSS Custom Highlights follow scroll on their
-  // own (browser-rendered), so only the overlay badges need this.
+  // own (browser-rendered), so only the overlay badges need repositioning.
+  // The pending selection's clientRects also shift on scroll — we re-emit
+  // them so the parent's "Add comment" pill tracks the selection.
   window.addEventListener(
     'scroll',
     () => {
       repositionElementBadges();
+      scheduleSelectionRectsRefresh();
     },
     { passive: true, capture: true }
   );
