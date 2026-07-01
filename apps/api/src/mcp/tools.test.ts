@@ -125,3 +125,148 @@ describe('primer_get_document — open access path', () => {
     });
   });
 });
+
+describe('primer_get_version_content', () => {
+  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+
+  it('returns HTML content when given a versionId', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const created = await handlers.primer_create_document(
+        { title: 'C1', content: '<p>hello world</p>', format: 'html' },
+        owner,
+      );
+      const { versionId, documentId } = JSON.parse(created.content[0].text);
+
+      const res = await handlers.primer_get_version_content({ versionId }, owner);
+      expect(res.isError).toBeFalsy();
+      const body = JSON.parse(res.content[0].text);
+      expect(body.documentId).toBe(documentId);
+      expect(body.versionId).toBe(versionId);
+      expect(body.versionNumber).toBe(1);
+      expect(typeof body.sizeBytes).toBe('number');
+      expect(body.content).toContain('hello world');
+    });
+  });
+
+  it('returns the latest version when given only documentId', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const created = await handlers.primer_create_document(
+        { title: 'C2', content: '<p>v1 body</p>', format: 'html' },
+        owner,
+      );
+      const { documentId } = JSON.parse(created.content[0].text);
+
+      const v2 = await handlers.primer_add_version(
+        { documentId, content: '<p>v2 body</p>', format: 'html' },
+        owner,
+      );
+      const { versionId: v2Id } = JSON.parse(v2.content[0].text);
+
+      const res = await handlers.primer_get_version_content({ documentId }, owner);
+      const body = JSON.parse(res.content[0].text);
+      expect(body.versionId).toBe(v2Id);
+      expect(body.versionNumber).toBe(2);
+      expect(body.content).toContain('v2 body');
+    });
+  });
+
+  it('returns a specific version when given a URL with /v/<n>', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const created = await handlers.primer_create_document(
+        { title: 'C3', content: '<p>v1 body</p>', format: 'html' },
+        owner,
+      );
+      const { documentId, versionId: v1Id, url } = JSON.parse(created.content[0].text);
+      await handlers.primer_add_version(
+        { documentId, content: '<p>v2 body</p>', format: 'html' },
+        owner,
+      );
+
+      const res = await handlers.primer_get_version_content({ url: `${url}/v/1` }, owner);
+      const body = JSON.parse(res.content[0].text);
+      expect(body.versionId).toBe(v1Id);
+      expect(body.versionNumber).toBe(1);
+      expect(body.content).toContain('v1 body');
+    });
+  });
+
+  it('returns latest when given a URL without /v/<n>', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const created = await handlers.primer_create_document(
+        { title: 'C4', content: '<p>v1 body</p>', format: 'html' },
+        owner,
+      );
+      const { documentId, url } = JSON.parse(created.content[0].text);
+      const v2 = await handlers.primer_add_version(
+        { documentId, content: '<p>v2 body</p>', format: 'html' },
+        owner,
+      );
+      const { versionId: v2Id } = JSON.parse(v2.content[0].text);
+
+      const res = await handlers.primer_get_version_content({ url }, owner);
+      const body = JSON.parse(res.content[0].text);
+      expect(body.versionId).toBe(v2Id);
+      expect(body.versionNumber).toBe(2);
+      expect(body.content).toContain('v2 body');
+    });
+  });
+
+  it('returns bad_request when no input given', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_version_content({}, owner);
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('bad_request');
+    });
+  });
+
+  it('returns bad_request on a malformed URL', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_version_content(
+        { url: 'not a Primer URL' },
+        owner,
+      );
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('bad_request');
+    });
+  });
+
+  it('returns not_found for an unknown versionId', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_version_content(
+        { versionId: '00000000-0000-0000-0000-000000000000' },
+        owner,
+      );
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+    });
+  });
+
+  it('returns not_found when the URL specifies a versionNumber that does not exist', async () => {
+    await seedUser('tools-owner');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const created = await handlers.primer_create_document(
+        { title: 'C5', content: '<p>only v1</p>', format: 'html' },
+        owner,
+      );
+      const { url } = JSON.parse(created.content[0].text);
+      const res = await handlers.primer_get_version_content({ url: `${url}/v/9` }, owner);
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+    });
+  });
+});

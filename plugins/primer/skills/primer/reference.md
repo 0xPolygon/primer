@@ -36,7 +36,19 @@ Upload a new version of an existing document.
 ### `primer_get_document`
 
 - **Input:** exactly one of `{ documentId: string }` or `{ url: string }`. If `url` is passed, the server resolves it via the same rules as `primer_resolve_url`.
-- **Output:** `{ document: { id, title, description, uploaderId, uploaderDisplayName, createdAt }, latestVersion: { id, versionNumber, versionNote, sizeBytes, createdAt } }`.
+- **Output:** `{ document: { id, title, description, uploaderId, uploaderDisplayName, createdAt }, latestVersion: { id, versionNumber, versionNote, sizeBytes, createdAt } }`. Metadata only — for the raw HTML content use `primer_get_version_content`.
+
+### `primer_get_version_content`
+
+Fetch the raw HTML content of a Primer version. Use when you need the actual document body — not just metadata — to summarize, iterate on, or reason about existing content.
+
+- **Input:** any one of:
+  - `{ versionId: string }` — direct lookup.
+  - `{ documentId: string }` — resolves to the latest version.
+  - `{ url: string }` — a Primer URL. If it carries `/v/<n>`, that specific version; otherwise the latest.
+- **Output:** `{ documentId, versionId, versionNumber, sizeBytes, content }`. `content` is the HTML exactly as stored (already sanitized at upload time — safe to feed straight back into the model).
+- Errors with `code: 'bad_request'` when no input is given or the URL doesn't parse; `code: 'not_found'` for unknown versionIds, soft-deleted documents, or `/v/<n>` values that don't exist on the doc.
+- No ownership gate — mirrors the API's share-by-URL read model.
 
 ### `primer_list_versions`
 

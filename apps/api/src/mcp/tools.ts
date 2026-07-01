@@ -1,6 +1,6 @@
 import { z, type ZodTypeAny } from 'zod';
 import { v7 as uuidv7 } from 'uuid';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Storage } from '@primer/shared/storage';
 import type { Notifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
@@ -79,6 +79,7 @@ function formatCommentsMarkdown(
 export const TOOL_NAMES = [
   'primer_whoami',
   'primer_get_document',
+  'primer_get_version_content',
   'primer_list_versions',
   'primer_get_comments',
   'primer_create_document',
@@ -159,6 +160,87 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           sizeBytes: v.sizeBytes,
           createdAt: v.createdAt.toISOString(),
         },
+      });
+    },
+
+    primer_get_version_content: async (args, _user) => {
+      // Accepts { versionId } OR { documentId } (latest) OR { url } (specific or latest).
+      // No ownership gate — mirrors GET /api/versions/:versionId/content (share-by-URL model).
+      let versionId: string | undefined;
+      let documentId: string | undefined;
+      let requestedVersionNumber: number | undefined;
+
+      if (typeof args.versionId === 'string' && args.versionId.length > 0) {
+        versionId = args.versionId;
+      } else if (typeof args.documentId === 'string' && args.documentId.length > 0) {
+        documentId = args.documentId;
+      } else if (typeof args.url === 'string') {
+        const parsed = parsePrimerUrl(args.url);
+        if (!parsed) return err('bad_request', 'not a Primer URL');
+        documentId = parsed.documentId;
+        requestedVersionNumber = parsed.versionNumber;
+      } else {
+        return err('bad_request', 'versionId, documentId, or url is required');
+      }
+
+      // Resolve versionId if we only have documentId (± requestedVersionNumber).
+      if (!versionId) {
+        const [existingDoc] = await db
+          .select({ deletedAt: documents.deletedAt })
+          .from(documents)
+          .where(eq(documents.id, documentId!));
+        if (!existingDoc) return err('not_found', 'document not found');
+        if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
+
+        if (requestedVersionNumber !== undefined) {
+          const [v] = await db
+            .select({ id: versions.id })
+            .from(versions)
+            .where(and(eq(versions.documentId, documentId!), eq(versions.versionNumber, requestedVersionNumber)))
+            .limit(1);
+          if (!v) return err('not_found', `version ${requestedVersionNumber} not found`);
+          versionId = v.id;
+        } else {
+          const [latest] = await db
+            .select({ id: versions.id })
+            .from(versions)
+            .where(eq(versions.documentId, documentId!))
+            .orderBy(desc(versions.versionNumber))
+            .limit(1);
+          if (!latest) return err('not_found', 'document has no versions');
+          versionId = latest.id;
+        }
+      }
+
+      // Load the version row + soft-delete check via JOIN, same shape as
+      // apps/api/src/routes/versionContent.ts.
+      const [row] = (await db.execute(sql`
+        SELECT v.storage_key AS "storageKey", v.document_id AS "documentId",
+               v.version_number AS "versionNumber", v.size_bytes AS "sizeBytes",
+               d.deleted_at AS "deletedAt"
+        FROM versions v
+        INNER JOIN documents d ON d.id = v.document_id
+        WHERE v.id = ${versionId}
+        LIMIT 1
+      `)) as unknown as {
+        storageKey: string;
+        documentId: string;
+        versionNumber: number;
+        sizeBytes: number | string;
+        deletedAt: Date | null;
+      }[];
+      if (!row) return err('not_found', 'version not found');
+      if (row.deletedAt !== null) return err('not_found', 'version not found');
+
+      const stream = await deps.storage.get(row.storageKey);
+      const html = await new Response(stream).text();
+
+      return ok({
+        documentId: row.documentId,
+        versionId,
+        versionNumber: row.versionNumber,
+        sizeBytes: typeof row.sizeBytes === 'string' ? Number(row.sizeBytes) : row.sizeBytes,
+        content: html,
       });
     },
 
@@ -497,6 +579,15 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   primer_get_document: {
     description: 'Fetch a Primer document by documentId OR by its URL.',
     inputSchema: { documentId: z.string().optional(), url: z.string().optional() },
+  },
+  primer_get_version_content: {
+    description:
+      'Fetch the raw HTML content of a Primer version. Accepts a versionId, a documentId (returns latest version), or a Primer URL (specific /v/<n> or latest).',
+    inputSchema: {
+      versionId: z.string().optional(),
+      documentId: z.string().optional(),
+      url: z.string().optional(),
+    },
   },
   primer_list_versions: {
     description: 'List all versions of a Primer document, newest first.',
