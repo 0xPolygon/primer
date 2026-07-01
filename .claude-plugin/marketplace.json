@@ -4,15 +4,15 @@
     "name": "Polygon"
   },
   "metadata": {
-    "description": "Publish and iterate on HTML/Markdown artifacts at a stable URL via Claude Code or any MCP-capable agent.",
-    "version": "1.0.0",
+    "description": "Publish and iterate on HTML/Markdown artifacts at a stable URL via Claude Web, Desktop, or Code. Browser-based OAuth login.",
+    "version": "2.0.0",
     "pluginRoot": "./plugins"
   },
   "plugins": [
     {
       "name": "primer",
       "source": "./plugins/primer",
-      "description": "Publish HTML/Markdown artifacts to Primer from your agent: device-flow login, create document, push new versions, pull reviewer comments.",
+      "description": "Publish HTML/Markdown artifacts to Primer from Claude Web, Desktop, or Code. Browser-based OAuth login, create/version documents, pull reviewer comments.",
       "author": {
         "name": "Polygon"
       }
