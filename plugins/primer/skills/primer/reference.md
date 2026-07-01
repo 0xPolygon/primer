@@ -6,42 +6,22 @@ Progressive-disclosure detail for the `primer` skill. Read this when you need ex
 
 Every MCP tool returns `{ content: [{ type: 'text', text: ... }] }`. On error it also sets `isError: true` and the text is JSON `{ code, message }` (parse it; branch on `code`, never on the message string). On success the text is either JSON (most tools) or a markdown summary (`primer_get_comments`).
 
-### `primer_login`
-
-Start a device-authorization flow.
-
-- **Input:** `{ clientLabel?: string }`. Omit `clientLabel` — the server uses `os.hostname()` as a default and renders it on the approval page (labeled "claimed by the requesting tool, not verified", per the phishing-hardening rules). The skill should not synthesize a hostname.
-- **Output:** `{ deviceCode, userCode, verificationUri, expiresIn, interval }`.
-  - `deviceCode` — opaque secret; you must keep it and pass it to every `primer_login_status` call in this flow. Never show it to the user.
-  - `userCode` — short human-typable code (e.g. `WDJB-MZHT`). Show to the user.
-  - `verificationUri` — bare URL the user opens in a browser. Show to the user.
-  - `expiresIn` — seconds until the device row expires (typically 600).
-  - `interval` — recommended poll interval in seconds (the tool already honors this internally; informational).
-- The tool deliberately **omits `verificationUriComplete`** (the RFC's pre-filled-code URL). Do not try to construct it. The user must type the `userCode` on the page — that's the anti-phishing posture.
-
-### `primer_login_status`
-
-Long-poll for completion of an in-flight login.
-
-- **Input:** `{ deviceCode: string }` — the `deviceCode` from `primer_login`.
-- **Output:** `{ status: "approved" | "pending" | "denied" | "expired" }`. On `approved`, also `{ tokenPrefix, expiresAt }` (display-only — the token itself is written to the local store and never returned).
-- Long-polls server-side up to ~90 seconds per call. `pending` means the long-poll timed out before the user approved; call again with the same `deviceCode`.
-
-### `primer_logout`
-
-Revoke the stored token server-side (`DELETE /api/tokens/:tokenId`) and clear the local store entry.
-
-- **Input:** `{}`.
-- **Output:** `{ ok: true }`. Idempotent — succeeds even if the token is already revoked or missing.
-
 ### `primer_whoami`
 
 - **Input:** `{}`.
-- **Output:** `{ id, email, displayName }`. Errors with `code: 'not_authenticated'` if no valid token — the trigger for the login flow.
+- **Output:** `{ id, email, displayName }`. Errors with `code: 'not_authenticated'` if the OAuth token is missing or invalid — the trigger to tell the user to reconnect the connector.
+
+### `primer_resolve_url`
+
+Parse a Primer document URL into ids the other tools can use.
+
+- **Input:** `{ url: string }`.
+- **Output:** `{ documentId: string, versionNumber?: number }`. `versionNumber` is set when the URL includes `/v/<n>`; absent for a plain `/d/<id>` URL.
+- Errors with `code: 'bad_request'` and message `"not a Primer URL"` if the input doesn't parse. Errors with `code: 'not_found'` if the resolved id doesn't correspond to a live document.
 
 ### `primer_create_document`
 
-Create a new document and upload its first version. Multipart upload built server-side; you only pass strings.
+Create a new document and upload its first version.
 
 - **Input:** `{ title: string, description?: string, content: string, format: "html" | "markdown" }`.
 - **Output:** `{ documentId, versionId, url }`.
@@ -55,7 +35,7 @@ Upload a new version of an existing document.
 
 ### `primer_get_document`
 
-- **Input:** `{ documentId: string }`.
+- **Input:** exactly one of `{ documentId: string }` or `{ url: string }`. If `url` is passed, the server resolves it via the same rules as `primer_resolve_url`.
 - **Output:** `{ document: { id, title, description, uploaderId, uploaderDisplayName, createdAt }, latestVersion: { id, versionNumber, versionNote, sizeBytes, createdAt } }`.
 
 ### `primer_list_versions`
@@ -84,11 +64,11 @@ Fetch threads on a version (or the latest version of a document) and format them
 
   **The quoted line is the anchored selection text — the literal text the reviewer pinned the comment to.** Use it as the locator back to your source content. The tool does not emit CSS paths; do not try to parse rendered HTML to map comments back.
 
-## Login sequence (stateless)
+## Auth model
 
-`primer_login` and `primer_login_status` carry no per-server state between calls — the `deviceCode` returned by the first call flows into every subsequent `primer_login_status` call. This makes the login flow survive MCP server restarts: if the agent already has the `deviceCode`, it can resume polling after a reconnect without restarting the device-authorization handshake.
+Auth is OAuth 2.1 handled by the Claude client at connector-install time. The user goes through a one-time browser handshake (Okta login → consent screen → token issued to the client). Tokens rotate automatically via refresh grant; the skill never sees them. There is no in-agent login flow.
 
-Server stays responsive to `slow_down` and `interval` internally; the skill just keeps calling `primer_login_status` until it gets a terminal status.
+If `primer_whoami` returns `code: 'not_authenticated'`, the token was revoked (user disconnected the connector, an admin action, or refresh-token reuse detection tripped). Tell the user to reconnect the Primer connector in their Claude client's Settings; that reruns OAuth cleanly.
 
 ## Format selection
 
@@ -98,7 +78,7 @@ Server stays responsive to `slow_down` and `interval` internally; the skill just
 
 ## 10 MB inline limit
 
-`content` is sent inline (no file paths). The API rejects uploads larger than 10 MB with `code: 'bad_request'`. If the artifact is genuinely large, ask the user to trim it before retrying — there is no file-path input in v1.
+`content` is sent inline (no file paths). The API rejects uploads larger than 10 MB with `code: 'bad_request'`. If the artifact is genuinely large, ask the user to trim it before retrying — there is no file-path input.
 
 ## Upload mutations Primer makes
 
@@ -106,7 +86,7 @@ When Primer ingests HTML, it strips `<iframe>` and `<meta http-equiv="refresh">`
 
 ## `.primer/document.json`
 
-Persisted state so iterations on the same artifact target the same document across agent turns.
+Persisted state so iterations on the same artifact target the same document across agent turns. Only meaningful in environments with filesystem access (Claude Code, Codex). Claude Web/Desktop do not use this file — instead, the user hands the agent a Primer URL, which `primer_resolve_url` (or `primer_get_document`'s URL-mode) turns back into ids.
 
 - **Location:** `process.cwd()/.primer/document.json` — the directory the agent was invoked from. **Not** the repo root. If the agent is invoked from `~/work/charts/` and asked to publish `report.html`, the file is `~/work/charts/.primer/document.json`.
 - **Before write:** `mkdir -p .primer`.
@@ -123,33 +103,25 @@ Persisted state so iterations on the same artifact target the same document acro
 
 - **404 handling:** if a tool call against the recorded `documentId` returns `code: 'not_found'`, the document was deleted on the server. **Prompt the user before creating a replacement** — never silently overwrite the file. Confirm with the user, then call `primer_create_document` and write the new ids over the old file.
 
-## Never echo the token
-
-The MCP tools do not return the bearer token to the agent — only a `tokenPrefix` for display. Do not try to read `~/.config/primer/tokens.json`, do not surface anything that looks like `primer_pat_…`, do not include it in messages, logs, or chain-of-thought summaries. The token is stored at mode `0600` and the skill stays out of it entirely.
-
 ## Error taxonomy
 
 Codes returned in the `code` field of tool error payloads:
 
 | code | meaning | skill action |
 |---|---|---|
-| `not_authenticated` | No token, or API returned 401. | Run the login flow. |
+| `not_authenticated` | No token, expired, or revoked. | Tell the user to reconnect the Primer connector in their Claude client. Stop. |
 | `forbidden` | API returned 403 (e.g. not the uploader of the document). | Tell the user the document isn't theirs. Stop. |
-| `not_found` | API returned 404 (document/version id stale, or unknown id). | If from `.primer/document.json`, prompt before overwriting. Otherwise surface. |
-| `bad_request` | API returned 400 (validation, size, format, missing required arg). | Surface the server's `message`. |
-| `rate_limited` | Reserved; the device endpoints emit `slow_down` only. | Wait and retry. |
+| `not_found` | API returned 404 (document/version id stale, unknown id, or URL didn't resolve). | If from `.primer/document.json`, prompt before overwriting. Otherwise surface. |
+| `bad_request` | API returned 400 (validation, size, format, missing required arg, or URL didn't parse as a Primer URL). | Surface the server's `message`. |
+| `rate_limited` | API returned 429. | Wait a few seconds, retry once, then surface. |
 | `network` | Fetch failed before getting a response. | Retry once, then surface. |
-| `login_denied` | User clicked Deny on the approval page. | Tell the user and stop. |
-| `login_expired` | Device row expired before approval. | Offer to start again from `primer_login`. |
 
 ## MCP not configured
 
-If the MCP server isn't installed in the user's Claude Code, tell them to install the Primer plugin:
+If the Primer tools aren't available, tell the user to install/reconnect the Primer connector in their Claude client:
 
-```
-/plugin marketplace add 0xPolygon/primer
-/plugin install primer@primer
-/reload-plugins
-```
+- **Claude Web:** Settings → Connectors → Primer → Install / Reconnect. Approves via OAuth in a browser popup.
+- **Claude Desktop:** Same path — Settings → Connectors → Primer.
+- **Claude Code:** `/plugin install primer@primer` (from the `0xPolygon/primer` marketplace), then `/reload-plugins`. Approves via OAuth in the system browser.
 
-The plugin's `plugin.json` declares the MCP server with the prod `PRIMER_API_URL` baked in, so there is nothing else to configure. The token store keys by this URL, so a user can also have separate dev/staging entries side-by-side if they manually register additional MCP instances against other Primer deployments.
+The plugin's `plugin.json` declares the MCP as an HTTP-transport server pointing at the prod `/mcp` endpoint. Users who need a different Primer deployment (dev/staging) can add it manually through their client's custom-connector UI with the appropriate `https://<host>/mcp` URL.

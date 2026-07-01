@@ -1,14 +1,11 @@
 {
   "name": "primer",
-  "description": "Publish HTML/Markdown artifacts to Primer from your agent: device-flow login, create document, push new versions, pull reviewer comments.",
-  "version": "1.0.0",
+  "description": "Publish HTML/Markdown artifacts to Primer from Claude Web, Desktop, or Code. Browser-based OAuth login, create/version documents, pull reviewer comments.",
+  "version": "2.0.0",
   "mcpServers": {
     "primer": {
-      "command": "npx",
-      "args": ["-y", "@polygonlabs/primer-mcp@1.0.0"],
-      "env": {
-        "PRIMER_API_URL": "https://primer-polygon.up.railway.app"
-      }
+      "type": "http",
+      "url": "https://primer-polygon.up.railway.app/mcp"
     }
   }
 }
