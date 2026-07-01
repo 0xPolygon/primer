@@ -8,6 +8,11 @@ export const PUBLIC_PATHS = new Set([
   '/auth/callback',
   '/api/device/authorize',
   '/api/device/token',
+  '/oauth/register',
+  '/oauth/authorize',
+  '/oauth/consent',
+  '/oauth/token',
+  '/oauth/revoke',
 ]);
 
 function isApiPath(path: string): boolean {
@@ -26,12 +31,16 @@ function isPublicCompanionAsset(path: string): boolean {
   return path.startsWith('/companion/');
 }
 
+function isPublicWellKnown(path: string): boolean {
+  return path.startsWith('/.well-known/oauth-');
+}
+
 export function authMiddleware(
   resolver: UserResolver
 ): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (c, next) => {
     const path = c.req.path;
-    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path)) return next();
+    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path) || isPublicWellKnown(path)) return next();
 
     const user = await resolver(c);
     if (user) {
