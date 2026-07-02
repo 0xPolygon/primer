@@ -293,3 +293,13 @@ export interface AddCollaboratorRequest {
 export interface UpdateCollaboratorRequest {
   role: 'commenter' | 'editor';
 }
+
+export interface UserSearchHit {
+  id: string;
+  displayName: string;
+  email: string;
+}
+
+export interface UserSearchResponse {
+  users: UserSearchHit[];
+}
