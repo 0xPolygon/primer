@@ -8,13 +8,35 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { documents, versions, threads, comments, documentViews, users } from '@primer/shared/schema';
+import { documents, versions, threads, comments, documentViews, users, documentCollaborators } from '@primer/shared/schema';
 import type { DashboardResponse } from '@primer/shared';
+import { asUser } from '../test/harness.ts';
+import { uploadFixture } from './upload.testlib.ts';
+import { mockMultiResolver } from '../auth/resolver.ts';
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-dashboard-test-'));
   try {
     const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+    return await fn(app);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function withMultiUserApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'primer-dashboard-multiuser-test-'));
+  try {
+    const app = createApp({
+      storage: new FilesystemStorage(root),
+      notifier: new NoopNotifier(),
+      userResolver: mockMultiResolver,
+    });
+    // Seed the two users we'll use.
+    await db.insert(users).values([
+      { id: 'mock-user-1', email: 'one@p.t', displayName: 'User One' },
+      { id: 'mock-user-2', email: 'two@p.t', displayName: 'User Two' },
+    ]).onConflictDoNothing();
     return await fn(app);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -209,6 +231,61 @@ describe('GET /api/dashboard — recentlyDeleted', () => {
       const res = await app.request('/api/dashboard');
       const body = (await res.json()) as DashboardResponse;
       expect(body.myDocuments.find((m) => m.id === d.documentId)).toBeUndefined();
+    });
+  });
+});
+
+describe('dashboard filters private docs the user cannot read', () => {
+  async function uploadFixtureAsUser1(app: ReturnType<typeof createApp>): Promise<{ documentId: string; versionId: string }> {
+    const fd = new FormData();
+    fd.append('file', new Blob(['<html><body><h1>fixture</h1></body></html>'], { type: 'text/html' }), 'fixture.html');
+    fd.append('title', 'Fixture doc');
+    const res = await app.request('/api/upload', {
+      method: 'POST',
+      headers: { ...asUser('mock-user-1'), 'x-primer-csrf': '1' },
+      body: fd,
+    });
+    if (!res.ok) throw new Error(`uploadFixture failed: ${res.status}`);
+    return (await res.json()) as { documentId: string; versionId: string };
+  }
+
+  it('excludes private docs from "Recently viewed or commented" for non-collab', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixtureAsUser1(app);          // owned by mock-user-1
+      // mock-user-2 views the doc while it's still org-visible
+      const viewRes = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-2'),
+      });
+      expect(viewRes.status).toBe(200);
+      // owner flips to private
+      await db.update(documents)
+        .set({ visibility: 'private' })
+        .where(eq(documents.id, upload.documentId));
+
+      const res = await app.request('/api/dashboard', { headers: asUser('mock-user-2') });
+      const body = (await res.json()) as { recentlyViewedOrCommented: Array<{ id: string }> };
+      expect(body.recentlyViewedOrCommented.find((r) => r.id === upload.documentId)).toBeUndefined();
+    });
+  });
+
+  it('includes private docs where the user has a collab row', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixtureAsUser1(app);
+      const viewRes = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-2'),
+      });
+      expect(viewRes.status).toBe(200);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'commenter',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request('/api/dashboard', { headers: asUser('mock-user-2') });
+      const body = (await res.json()) as { recentlyViewedOrCommented: Array<{ id: string }> };
+      expect(body.recentlyViewedOrCommented.find((r) => r.id === upload.documentId)).toBeDefined();
     });
   });
 });
