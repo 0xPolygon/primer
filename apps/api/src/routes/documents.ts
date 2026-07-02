@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 import { eq, desc, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
-import type { DocumentDetailResponse, AddVersionResponse } from '@primer/shared/api';
+import type { DocumentDetailResponse, AddVersionResponse, DocumentSummary } from '@primer/shared/api';
 import { documents, versions, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
@@ -73,6 +73,7 @@ export function registerDocumentRoutes(
         description: doc.description,
         uploaderId: doc.uploaderId,
         uploaderDisplayName: doc.uploaderDisplayName,
+        visibility: doc.visibility as 'org' | 'private',
         createdAt: doc.createdAt.toISOString(),
       },
       latestVersion: {
@@ -181,6 +182,7 @@ export function registerDocumentRoutes(
         title: documents.title,
         description: documents.description,
         uploaderId: documents.uploaderId,
+        visibility: documents.visibility,
         createdAt: documents.createdAt,
       })
       .from(documents)
@@ -198,6 +200,7 @@ export function registerDocumentRoutes(
         description: updated.description,
         uploaderId: updated.uploaderId,
         uploaderDisplayName: uploader?.displayName ?? '',
+        visibility: updated.visibility as 'org' | 'private',
         createdAt: updated.createdAt.toISOString(),
       },
       200
@@ -278,8 +281,9 @@ export function registerDocumentRoutes(
         description: existing.description,
         uploaderId: existing.uploaderId,
         uploaderDisplayName: uploader?.displayName ?? '',
+        visibility: existing.visibility as 'org' | 'private',
         createdAt: existing.createdAt.toISOString(),
-      },
+      } satisfies DocumentSummary,
       200
     );
   });

@@ -160,6 +160,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           description: doc.description,
           uploaderId: doc.uploaderId,
           uploaderDisplayName: doc.uploaderDisplayName,
+          visibility: doc.visibility,
           createdAt: doc.createdAt.toISOString(),
         },
         latestVersion: {

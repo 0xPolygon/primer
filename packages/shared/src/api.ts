@@ -27,6 +27,7 @@ export interface DocumentSummary {
   description: string | null;
   uploaderId: string;             // NEW in SP5
   uploaderDisplayName: string;
+  visibility: 'org' | 'private';
   createdAt: string;          // ISO timestamp
 }
 

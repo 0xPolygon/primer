@@ -124,6 +124,8 @@ describe('primer_get_document — open access path', () => {
       // Open access: other user can read
       expect(res.isError).toBeFalsy();
       expect(res).toBeDefined();
+      const body = JSON.parse(res.content[0].text);
+      expect(body.document.visibility).toBe('org');
     });
   });
 });
