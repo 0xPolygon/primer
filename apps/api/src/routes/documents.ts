@@ -73,6 +73,7 @@ export function registerDocumentRoutes(
         description: doc.description,
         uploaderId: doc.uploaderId,
         uploaderDisplayName: doc.uploaderDisplayName,
+        visibility: doc.visibility as 'org' | 'private',
         createdAt: doc.createdAt.toISOString(),
       },
       latestVersion: {
@@ -181,6 +182,7 @@ export function registerDocumentRoutes(
         title: documents.title,
         description: documents.description,
         uploaderId: documents.uploaderId,
+        visibility: documents.visibility,
         createdAt: documents.createdAt,
       })
       .from(documents)
@@ -198,6 +200,7 @@ export function registerDocumentRoutes(
         description: updated.description,
         uploaderId: updated.uploaderId,
         uploaderDisplayName: uploader?.displayName ?? '',
+        visibility: updated.visibility as 'org' | 'private',
         createdAt: updated.createdAt.toISOString(),
       },
       200

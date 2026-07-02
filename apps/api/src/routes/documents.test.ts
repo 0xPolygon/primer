@@ -38,6 +38,7 @@ describe('GET /api/documents/:docId', () => {
       expect(body.document.title).toBe('Fixture');
       expect(body.document.description).toBe('desc');
       expect(body.document.uploaderDisplayName).toBe('Mock User');
+      expect(body.document.visibility).toBe('org');
       expect(body.latestVersion.id).toBe(upload.versionId);
       expect(body.latestVersion.versionNumber).toBe(1);
     } finally {
@@ -772,6 +773,8 @@ describe('PATCH /api/documents/:docId visibility', () => {
         body: JSON.stringify({ visibility: 'private' }),
       });
       expect(res.status).toBe(200);
+      const patchBody = (await res.json()) as { visibility: 'org' | 'private' };
+      expect(patchBody.visibility).toBe('private');
       const [row] = await db
         .select({ visibility: documents.visibility })
         .from(documents)
