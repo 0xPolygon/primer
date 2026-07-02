@@ -8,9 +8,10 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { documents, versions, threads, comments, users } from '@primer/shared/schema';
+import { documents, versions, threads, comments, users, documentCollaborators } from '@primer/shared/schema';
 import type { CommentDTO, ThreadDTO } from '@primer/shared';
-import { CSRF_HEADERS } from '../test/harness.ts';
+import { CSRF_HEADERS, asUserJson } from '../test/harness.ts';
+import { mockMultiResolver } from '../auth/resolver.ts';
 
 async function seedDocVersionThread({
   authorId = 'mock-user-1',
@@ -419,6 +420,32 @@ describe('comment endpoints respect soft-delete', () => {
   });
 });
 
+async function withMultiUserApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'primer-comments-multi-'));
+  try {
+    const app = createApp({
+      storage: new FilesystemStorage(root),
+      notifier: new NoopNotifier(),
+      userResolver: mockMultiResolver,
+    });
+    await db.insert(users).values([
+      { id: 'mock-user-1', email: 'one@p.t', displayName: 'User One' },
+      { id: 'mock-user-2', email: 'two@p.t', displayName: 'User Two' },
+    ]).onConflictDoNothing();
+    return await fn(app);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function uploadFixture(app: ReturnType<typeof createApp>) {
+  const fd = new FormData();
+  fd.append('file', new Blob(['<html><body><p>x</p></body></html>'], { type: 'text/html' }), 'r.html');
+  fd.append('title', 'Fixture');
+  const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
+  return (await res.json()) as { documentId: string; versionId: string };
+}
+
 describe('DELETE /api/comments/:cid', () => {
   it('soft-deletes by author and returns tombstone', async () => {
     await withApp(async (app) => {
@@ -468,6 +495,62 @@ describe('DELETE /api/comments/:cid', () => {
       const res = await app.request(`/api/comments/${firstCommentId}`, { method: 'DELETE', headers: CSRF_HEADERS });
       expect(res.status).toBe(200);
       expect(((await res.json()) as CommentDTO).deletedAt).not.toBeNull();
+    });
+  });
+});
+
+describe('comment routes under visibility + collab', () => {
+  it('POST reply on private doc as stranger returns 404', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db.select({ id: versions.id }).from(versions).where(eq(versions.documentId, upload.documentId));
+      // owner creates a thread
+      const createRes = await app.request(`/api/versions/${v.id}/threads`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'seed',
+        }),
+      });
+      const { id: threadId } = (await createRes.json()) as { id: string };
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      const res = await app.request(`/api/threads/${threadId}/comments`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ body: 'sneak' }),
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('POST reply on private doc as commenter collab returns 201', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db.select({ id: versions.id }).from(versions).where(eq(versions.documentId, upload.documentId));
+      const createRes = await app.request(`/api/versions/${v.id}/threads`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'seed',
+        }),
+      });
+      const { id: threadId } = (await createRes.json()) as { id: string };
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'commenter',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(`/api/threads/${threadId}/comments`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ body: 'hey' }),
+      });
+      expect(res.status).toBe(201);
     });
   });
 });

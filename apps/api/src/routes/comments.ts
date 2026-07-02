@@ -7,30 +7,55 @@ import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@primer/shared';
 import { threads, comments, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
+import {
+  type Visibility,
+  effectiveRole,
+  canRead,
+  canComment,
+  loadCollaboratorRole,
+} from '../lib/permissions.ts';
 
-async function ensureLiveDocumentForThread(threadId: string): Promise<{ ok: true } | { ok: false }> {
+async function loadDocContextForThread(
+  threadId: string,
+): Promise<
+  | { ok: false }
+  | { ok: true; docId: string; uploaderId: string; visibility: Visibility }
+> {
   const [r] = (await db.execute(sql`
-    SELECT d.deleted_at FROM threads t
+    SELECT d.id AS "docId", d.uploader_id AS "uploaderId",
+           d.visibility AS "visibility", d.deleted_at AS "deletedAt"
+    FROM threads t
     INNER JOIN versions v ON v.id = t.version_id
     INNER JOIN documents d ON d.id = v.document_id
     WHERE t.id = ${threadId}
     LIMIT 1
-  `)) as unknown as { deleted_at: Date | null }[];
-  if (!r) return { ok: false };
-  return r.deleted_at === null ? { ok: true } : { ok: false };
+  `)) as unknown as {
+    docId: string; uploaderId: string; visibility: Visibility; deletedAt: Date | null;
+  }[];
+  if (!r || r.deletedAt !== null) return { ok: false };
+  return { ok: true, docId: r.docId, uploaderId: r.uploaderId, visibility: r.visibility };
 }
 
-async function ensureLiveDocumentForComment(commentId: string): Promise<{ ok: true } | { ok: false }> {
+async function loadDocContextForComment(
+  commentId: string,
+): Promise<
+  | { ok: false }
+  | { ok: true; docId: string; uploaderId: string; visibility: Visibility }
+> {
   const [r] = (await db.execute(sql`
-    SELECT d.deleted_at FROM comments c
+    SELECT d.id AS "docId", d.uploader_id AS "uploaderId",
+           d.visibility AS "visibility", d.deleted_at AS "deletedAt"
+    FROM comments c
     INNER JOIN threads t ON t.id = c.thread_id
     INNER JOIN versions v ON v.id = t.version_id
     INNER JOIN documents d ON d.id = v.document_id
     WHERE c.id = ${commentId}
     LIMIT 1
-  `)) as unknown as { deleted_at: Date | null }[];
-  if (!r) return { ok: false };
-  return r.deleted_at === null ? { ok: true } : { ok: false };
+  `)) as unknown as {
+    docId: string; uploaderId: string; visibility: Visibility; deletedAt: Date | null;
+  }[];
+  if (!r || r.deletedAt !== null) return { ok: false };
+  return { ok: true, docId: r.docId, uploaderId: r.uploaderId, visibility: r.visibility };
 }
 
 const MAX_BODY = 5000;
@@ -131,8 +156,12 @@ export function registerCommentRoutes(
   app.post('/api/threads/:threadId/comments', async (c) => {
     const threadId = c.req.param('threadId');
 
-    const live = await ensureLiveDocumentForThread(threadId);
-    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+    const ctx = await loadDocContextForThread(threadId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
+    const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canComment(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     let payload: Partial<CommentBodyRequest>;
     try {
@@ -165,8 +194,6 @@ export function registerCommentRoutes(
     if (!threadCtx) {
       return c.json({ error: 'not_found', message: 'thread not found' }, 404);
     }
-
-    const user = c.get('user');
 
     // Validate mentions before touching the DB.
     const rawMentions = (payload as { mentions?: unknown }).mentions;
@@ -236,8 +263,12 @@ export function registerCommentRoutes(
   app.patch('/api/comments/:commentId', async (c) => {
     const commentId = c.req.param('commentId');
 
-    const live = await ensureLiveDocumentForComment(commentId);
-    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+    const ctx = await loadDocContextForComment(commentId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
+    const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     let payload: Partial<CommentBodyRequest>;
     try {
@@ -249,7 +280,6 @@ export function registerCommentRoutes(
     if (!validation.ok) {
       return c.json({ error: 'invalid_body', message: `Body must be 1–${MAX_BODY} chars after trim.` }, 400);
     }
-    const user = c.get('user');
 
     // Validate mentions before touching the DB.
     const rawMentions = (payload as { mentions?: unknown }).mentions;
@@ -334,10 +364,12 @@ export function registerCommentRoutes(
   app.delete('/api/comments/:commentId', async (c) => {
     const commentId = c.req.param('commentId');
 
-    const live = await ensureLiveDocumentForComment(commentId);
-    if (!live.ok) return c.json({ error: 'not_found' }, 404);
-
+    const ctx = await loadDocContextForComment(commentId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
     const [existing] = await db.select().from(comments).where(eq(comments.id, commentId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
     if (existing.authorId !== user.id) return c.json({ error: 'forbidden' }, 403);
