@@ -100,20 +100,17 @@ export function registerDocumentRoutes(
     const docId = c.req.param('docId');
     const user = c.get('user');
 
-    let payload: { title?: unknown; description?: unknown };
+    let payload: { title?: unknown; description?: unknown; visibility?: unknown };
     try {
-      payload = (await c.req.json()) as { title?: unknown; description?: unknown };
+      payload = (await c.req.json()) as { title?: unknown; description?: unknown; visibility?: unknown };
     } catch {
       return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
     }
 
     const hasTitle = Object.prototype.hasOwnProperty.call(payload, 'title');
     const hasDescription = Object.prototype.hasOwnProperty.call(payload, 'description');
-    if (!hasTitle && !hasDescription) {
-      return c.json({ error: 'invalid_body', message: 'Provide title or description.' }, 400);
-    }
 
-    const updates: { title?: string; description?: string | null } = {};
+    const updates: { title?: string; description?: string | null; visibility?: 'org' | 'private' } = {};
 
     if (hasTitle) {
       if (typeof payload.title !== 'string') {
@@ -140,6 +137,21 @@ export function registerDocumentRoutes(
       }
     }
 
+    const hasVisibility = Object.prototype.hasOwnProperty.call(payload, 'visibility');
+    if (hasVisibility) {
+      if (payload.visibility !== 'org' && payload.visibility !== 'private') {
+        return c.json(
+          { error: 'invalid_body', message: "visibility must be 'org' or 'private'" },
+          400,
+        );
+      }
+      updates.visibility = payload.visibility;
+    }
+
+    if (!hasTitle && !hasDescription && !hasVisibility) {
+      return c.json({ error: 'invalid_body', message: 'Provide title, description, or visibility.' }, 400);
+    }
+
     const [existing] = await db
       .select({ uploaderId: documents.uploaderId, visibility: documents.visibility, deletedAt: documents.deletedAt })
       .from(documents)
@@ -152,7 +164,14 @@ export function registerDocumentRoutes(
     if (!canRead(existing.visibility as Visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }
-    if (!canEdit(eff)) return c.json({ error: 'forbidden' }, 403);
+    // Sub 1 wired this to canEdit. Sub 2: if the body includes any manage-only
+    // field, require canManage instead.
+    const requiresManage = hasVisibility;
+    if (requiresManage) {
+      if (!canManage(eff)) return c.json({ error: 'forbidden' }, 403);
+    } else {
+      if (!canEdit(eff)) return c.json({ error: 'forbidden' }, 403);
+    }
 
     await db.update(documents).set(updates).where(eq(documents.id, docId));
 

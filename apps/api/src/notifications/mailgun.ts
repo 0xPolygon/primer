@@ -2,7 +2,7 @@ import { inArray } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { users } from '@primer/shared/schema';
 import { logger } from '../logger.ts';
-import type { Notifier, NotifyCommentArgs } from './notifier.ts';
+import type { Notifier, NotifyCommentArgs, NotifyCollaboratorAddedArgs } from './notifier.ts';
 
 export interface MailgunConfig {
   apiKey: string;
@@ -109,6 +109,49 @@ function renderHtml(
 </body></html>`;
 }
 
+function renderCollabSubject(docTitle: string): string {
+  return `You were added to '${truncate(docTitle, SUBJECT_TITLE_LIMIT)}' on Primer`;
+}
+
+function renderCollabText(
+  actorName: string,
+  role: 'commenter' | 'editor',
+  docTitle: string,
+  url: string,
+): string {
+  const article = role === 'editor' ? 'an' : 'a';
+  return [
+    `${actorName} added you as ${article} ${role} on '${docTitle}'.`,
+    '',
+    `Open the doc: ${url}`,
+    '',
+    'You received this because you were added as a collaborator on this document.',
+  ].join('\n');
+}
+
+function renderCollabHtml(
+  actorName: string,
+  role: 'commenter' | 'editor',
+  docTitle: string,
+  url: string,
+): string {
+  const safeActor = escapeHtml(actorName);
+  const safeTitle = escapeHtml(docTitle);
+  const article = role === 'editor' ? 'an' : 'a';
+  return `<!doctype html>
+<html><body style="font-family:-apple-system,system-ui,sans-serif;color:#171717;background:#fafafa;margin:0;padding:24px;">
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:8px;">
+  <tr><td style="padding:24px;">
+    <p style="margin:0 0 12px;font-size:14px;color:#525252;">${safeActor} added you as ${article} <strong>${role}</strong> on '<strong style="color:#171717;">${safeTitle}</strong>'.</p>
+    <p style="margin:24px 0;">
+      <a href="${url}" style="display:inline-block;padding:10px 18px;background:#171717;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;">Open the doc</a>
+    </p>
+    <p style="margin:24px 0 0;font-size:11px;color:#a3a3a3;">You received this because you were added as a collaborator on this document.</p>
+  </td></tr>
+</table>
+</body></html>`;
+}
+
 export class MailgunNotifier implements Notifier {
   constructor(private readonly cfg: MailgunConfig) {}
 
@@ -171,6 +214,54 @@ export class MailgunNotifier implements Notifier {
       } catch (err) {
         logger.error({ err, recipientId }, 'mailgun fetch threw');
       }
+    }
+  }
+
+  async notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void> {
+    if (args.addedUserId === args.addedByUserId) return;
+
+    const rows = (await db
+      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(inArray(users.id, [args.addedUserId, args.addedByUserId]))) as UserRow[];
+    const recipient = rows.find((u) => u.id === args.addedUserId);
+    if (!recipient) {
+      logger.warn({ addedUserId: args.addedUserId }, 'collab: added user not in users table, skipping');
+      return;
+    }
+    const actor = rows.find((u) => u.id === args.addedByUserId);
+    const actorName = actor?.displayName ?? 'Someone';
+
+    const url = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.docId}`;
+    const subject = renderCollabSubject(args.docTitle);
+    const text = renderCollabText(actorName, args.role, args.docTitle, url);
+    const html = renderCollabHtml(actorName, args.role, args.docTitle, url);
+
+    const apiBase = (this.cfg.apiBaseUrl ?? DEFAULT_API_BASE_URL).replace(/\/$/, '');
+    const endpoint = `${apiBase}/v3/${encodeURIComponent(this.cfg.domain)}/messages`;
+    const authHeader = `Basic ${Buffer.from(`api:${this.cfg.apiKey}`).toString('base64')}`;
+
+    const form = new URLSearchParams();
+    form.set('from', this.cfg.fromAddress);
+    form.set('to', recipient.email);
+    form.set('subject', subject);
+    form.set('text', text);
+    form.set('html', html);
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: authHeader, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        logger.error(
+          { status: res.status, addedUserId: args.addedUserId, errBody: errBody.slice(0, 300) },
+          'mailgun collab-add send failed',
+        );
+      }
+    } catch (err) {
+      logger.error({ err, addedUserId: args.addedUserId }, 'mailgun collab-add fetch threw');
     }
   }
 }
