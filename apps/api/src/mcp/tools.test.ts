@@ -361,6 +361,44 @@ describe('primer_list_documents', () => {
       expect(JSON.parse(res.content[0].text).code).toBe('bad_request');
     });
   });
+
+  it("scope 'mine' returns only the caller's own documents; 'all' returns everyone's", async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-other');
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const mine = await handlers.primer_create_document({ title: 'Mine', content: '<p>a</p>', format: 'html' }, owner);
+      const theirs = await handlers.primer_create_document(
+        { title: 'Theirs', content: '<p>b</p>', format: 'html' },
+        owner2,
+      );
+      const mineId = JSON.parse(mine.content[0].text).documentId;
+      const theirsId = JSON.parse(theirs.content[0].text).documentId;
+
+      const scoped = JSON.parse((await handlers.primer_list_documents({ scope: 'mine' }, owner)).content[0].text);
+      expect(scoped.scope).toBe('mine');
+      expect(scoped.documents.map((d: { id: string }) => d.id)).toEqual([mineId]);
+
+      const all = JSON.parse((await handlers.primer_list_documents({ scope: 'all' }, owner)).content[0].text);
+      expect(all.scope).toBe('all');
+      expect(all.documents.map((d: { id: string }) => d.id).sort()).toEqual([mineId, theirsId].sort());
+    });
+  });
+
+  it("defaults to scope 'all' when scope is omitted", async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-other');
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      await handlers.primer_create_document({ title: 'Mine', content: '<p>a</p>', format: 'html' }, owner);
+      await handlers.primer_create_document({ title: 'Theirs', content: '<p>b</p>', format: 'html' }, owner2);
+      const body = JSON.parse((await handlers.primer_list_documents({}, owner)).content[0].text);
+      expect(body.scope).toBe('all');
+      expect(body.documents.length).toBe(2);
+    });
+  });
 });
 
 describe('primer_find_document', () => {
@@ -411,6 +449,28 @@ describe('primer_find_document', () => {
       const res = await handlers.primer_find_document({}, owner);
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('bad_request');
+    });
+  });
+
+  it("scope 'mine' restricts search to the caller's own documents", async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-other');
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      await handlers.primer_create_document({ title: 'Roadmap mine', content: '<p>a</p>', format: 'html' }, owner);
+      await handlers.primer_create_document({ title: 'Roadmap theirs', content: '<p>b</p>', format: 'html' }, owner2);
+
+      const scoped = JSON.parse(
+        (await handlers.primer_find_document({ query: 'roadmap', scope: 'mine' }, owner)).content[0].text,
+      );
+      expect(scoped.scope).toBe('mine');
+      expect(scoped.documents.map((d: { title: string }) => d.title)).toEqual(['Roadmap mine']);
+
+      const all = JSON.parse(
+        (await handlers.primer_find_document({ query: 'roadmap', scope: 'all' }, owner)).content[0].text,
+      );
+      expect(all.documents.map((d: { title: string }) => d.title).sort()).toEqual(['Roadmap mine', 'Roadmap theirs']);
     });
   });
 });
@@ -550,6 +610,34 @@ describe('primer_get_all_comments', () => {
       );
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('bad_request');
+    });
+  });
+
+  it("scope 'mine' returns only comments authored by the caller", async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-other');
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      // A single shared doc with comments from two different authors.
+      const d = JSON.parse(
+        (await handlers.primer_create_document({ title: 'Shared', content: '<p>1</p>', format: 'html' }, owner)).content[0].text,
+      );
+      const mine = await seedThreadWithComment(d.versionId, 'tools-owner', 'from owner');
+      const theirs = await seedThreadWithComment(d.versionId, 'tools-other', 'from other');
+
+      const scoped = JSON.parse((await handlers.primer_get_all_comments({ scope: 'mine' }, owner)).content[0].text);
+      expect(scoped.scope).toBe('mine');
+      expect(scoped.comments.map((c: { id: string }) => c.id)).toEqual([mine.commentId]);
+
+      const all = JSON.parse((await handlers.primer_get_all_comments({ scope: 'all' }, owner)).content[0].text);
+      expect(all.comments.map((c: { id: string }) => c.id).sort()).toEqual(
+        [mine.commentId, theirs.commentId].sort(),
+      );
+
+      // owner2 scoped to their own comments sees only theirs.
+      const scoped2 = JSON.parse((await handlers.primer_get_all_comments({ scope: 'mine' }, owner2)).content[0].text);
+      expect(scoped2.comments.map((c: { id: string }) => c.id)).toEqual([theirs.commentId]);
     });
   });
 });

@@ -104,6 +104,20 @@ function parseLimit(raw: unknown): number {
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_PAGE_LIMIT;
   return Math.min(Math.floor(n), MAX_PAGE_LIMIT);
 }
+
+/**
+ * Opt-in scoping for the list/search/aggregate tools.
+ * - 'all'  (default): the documented share-by-URL model — every authenticated
+ *   user sees all documents/comments.
+ * - 'mine': restrict to the current user's own documents (by uploaderId) or
+ *   authored comments (by authorId).
+ * The agent is expected to ask the user which scope they want; 'all' is the
+ * safe default that preserves prior behavior.
+ */
+export type ListScope = 'all' | 'mine';
+function parseScope(raw: unknown): ListScope {
+  return raw === 'mine' ? 'mine' : 'all';
+}
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandler> {
@@ -496,12 +510,14 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_list_documents: async (args, _user) => {
-      // List all (non-deleted) documents, newest first, keyset-paginated.
-      // No ownership gate — Primer is share-by-URL, any authenticated user can list.
+    primer_list_documents: async (args, user) => {
+      // List (non-deleted) documents, newest first, keyset-paginated.
+      // scope 'all' (default) is the share-by-URL model — any authenticated user
+      // can list every document. scope 'mine' restricts to the caller's uploads.
       // Cursor is the last document id from the previous page (uuidv7 is
       // time-sortable, so ordering by (createdAt DESC, id DESC) is stable).
       const limit = parseLimit(args.limit);
+      const scope = parseScope(args.scope);
       const cursor = typeof args.cursor === 'string' && args.cursor.length > 0 ? args.cursor : undefined;
 
       // Resolve the cursor row's (createdAt, id) to build the keyset predicate.
@@ -516,6 +532,12 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         cursorCreatedAt = cursorRow.createdAt;
       }
 
+      const scopePredicate =
+        scope === 'mine' ? sql`${documents.uploaderId} = ${user.id}` : undefined;
+      const keysetPredicate = cursorCreatedAt
+        ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
+        : undefined;
+
       const rows = await db
         .select({
           id: documents.id,
@@ -527,14 +549,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
-        .where(
-          cursorCreatedAt
-            ? and(
-                sql`${documents.deletedAt} IS NULL`,
-                sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`,
-              )
-            : sql`${documents.deletedAt} IS NULL`,
-        )
+        .where(and(sql`${documents.deletedAt} IS NULL`, scopePredicate, keysetPredicate))
         .orderBy(desc(documents.createdAt), desc(documents.id))
         .limit(limit + 1);
 
@@ -551,18 +566,22 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       }));
 
       return ok({
+        scope,
         documents: items,
         nextCursor: hasMore ? page[page.length - 1].id : null,
         hasMore,
       });
     },
 
-    primer_find_document: async (args, _user) => {
+    primer_find_document: async (args, user) => {
       // Case-insensitive substring search over title and description.
       // Non-deleted only, newest first, keyset-paginated like list_documents.
+      // scope 'all' (default) searches every document; 'mine' restricts to the
+      // caller's own uploads.
       const query = typeof args.query === 'string' ? args.query.trim() : '';
       if (!query) return err('bad_request', 'query is required');
       const limit = parseLimit(args.limit);
+      const scope = parseScope(args.scope);
       const cursor = typeof args.cursor === 'string' && args.cursor.length > 0 ? args.cursor : undefined;
 
       let cursorCreatedAt: Date | undefined;
@@ -580,6 +599,11 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
       const pattern = `%${escaped}%`;
       const matchPredicate = sql`(${documents.title} ILIKE ${pattern} ESCAPE '\\' OR ${documents.description} ILIKE ${pattern} ESCAPE '\\')`;
+      const scopePredicate =
+        scope === 'mine' ? sql`${documents.uploaderId} = ${user.id}` : undefined;
+      const keysetPredicate = cursorCreatedAt
+        ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
+        : undefined;
 
       const rows = await db
         .select({
@@ -592,15 +616,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
-        .where(
-          cursorCreatedAt
-            ? and(
-                sql`${documents.deletedAt} IS NULL`,
-                matchPredicate,
-                sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`,
-              )
-            : and(sql`${documents.deletedAt} IS NULL`, matchPredicate),
-        )
+        .where(and(sql`${documents.deletedAt} IS NULL`, matchPredicate, scopePredicate, keysetPredicate))
         .orderBy(desc(documents.createdAt), desc(documents.id))
         .limit(limit + 1);
 
@@ -618,6 +634,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
 
       return ok({
         query,
+        scope,
         documents: items,
         nextCursor: hasMore ? page[page.length - 1].id : null,
         hasMore,
@@ -680,11 +697,14 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_get_all_comments: async (args, _user) => {
+    primer_get_all_comments: async (args, user) => {
       // Every comment across every (non-deleted) document, paginated by comment.
       // Ordered by comment createdAt DESC, id DESC (keyset). Each item is
       // flattened with its document/version context for agent consumption.
+      // scope 'all' (default) returns comments by any author; 'mine' restricts
+      // to comments the caller authored.
       const limit = parseLimit(args.limit);
+      const scope = parseScope(args.scope);
       const cursor = typeof args.cursor === 'string' && args.cursor.length > 0 ? args.cursor : undefined;
 
       let cursorCreatedAt: Date | undefined;
@@ -718,6 +738,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const keyset = cursorCreatedAt
         ? sql`AND (c.created_at, c.id) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : sql``;
+      const scopeFilter = scope === 'mine' ? sql`AND c.author_id = ${user.id}` : sql``;
 
       const rows = (await db.execute(sql`
         SELECT c.id AS "id",
@@ -740,6 +761,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         INNER JOIN documents d ON d.id = v.document_id
         INNER JOIN users u ON u.id = c.author_id
         WHERE d.deleted_at IS NULL
+        ${scopeFilter}
         ${keyset}
         ORDER BY c.created_at DESC, c.id DESC
         LIMIT ${limit + 1}
@@ -766,6 +788,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       }));
 
       return ok({
+        scope,
         comments: items,
         nextCursor: hasMore ? page[page.length - 1].id : null,
         hasMore,
@@ -930,17 +953,19 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_list_documents: {
     description:
-      'List all Primer documents (newest first), paginated. Pass an optional limit (1-100, default 25) and a cursor from a previous page\'s nextCursor to fetch the next page. Returns { documents, nextCursor, hasMore }.',
+      "List Primer documents (newest first), paginated. scope controls whose documents are returned: 'all' (default) lists every document (Primer's share-by-URL model), 'mine' lists only documents uploaded by the current user. ASK THE USER whether they want their own documents or all documents before choosing scope. Pass an optional limit (1-100, default 25) and a cursor from a previous page's nextCursor to fetch the next page. Returns { scope, documents, nextCursor, hasMore }.",
     inputSchema: {
+      scope: z.enum(['all', 'mine']).optional(),
       limit: z.number().int().positive().max(MAX_PAGE_LIMIT).optional(),
       cursor: z.string().optional(),
     },
   },
   primer_find_document: {
     description:
-      'Search Primer documents by a case-insensitive substring over title and description. Paginated like primer_list_documents. Returns { query, documents, nextCursor, hasMore }.',
+      "Search Primer documents by a case-insensitive substring over title and description. scope controls whose documents are searched: 'all' (default) searches every document, 'mine' searches only the current user's own uploads. ASK THE USER whether they want to search their own documents or all documents before choosing scope. Paginated like primer_list_documents. Returns { query, scope, documents, nextCursor, hasMore }.",
     inputSchema: {
       query: z.string(),
+      scope: z.enum(['all', 'mine']).optional(),
       limit: z.number().int().positive().max(MAX_PAGE_LIMIT).optional(),
       cursor: z.string().optional(),
     },
@@ -952,8 +977,9 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_get_all_comments: {
     description:
-      'List every comment across every document, newest first, paginated. Each item is flattened with its document/version context. Pass an optional limit (1-100, default 25) and a cursor from a previous page\'s nextCursor. Returns { comments, nextCursor, hasMore }.',
+      "List comments across documents, newest first, paginated. scope controls whose comments are returned: 'all' (default) returns comments by any author on every document, 'mine' returns only comments authored by the current user. ASK THE USER whether they want their own comments or all comments before choosing scope. Each item is flattened with its document/version context. Pass an optional limit (1-100, default 25) and a cursor from a previous page's nextCursor. Returns { scope, comments, nextCursor, hasMore }.",
     inputSchema: {
+      scope: z.enum(['all', 'mine']).optional(),
       limit: z.number().int().positive().max(MAX_PAGE_LIMIT).optional(),
       cursor: z.string().optional(),
     },
