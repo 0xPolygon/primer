@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 import { eq, desc, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
-import type { DocumentDetailResponse, AddVersionResponse } from '@primer/shared/api';
+import type { DocumentDetailResponse, AddVersionResponse, DocumentSummary } from '@primer/shared/api';
 import { documents, versions, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
@@ -281,8 +281,9 @@ export function registerDocumentRoutes(
         description: existing.description,
         uploaderId: existing.uploaderId,
         uploaderDisplayName: uploader?.displayName ?? '',
+        visibility: existing.visibility as 'org' | 'private',
         createdAt: existing.createdAt.toISOString(),
-      },
+      } satisfies DocumentSummary,
       200
     );
   });
