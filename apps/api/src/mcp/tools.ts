@@ -10,6 +10,9 @@ import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO } from '@primer/shared/api';
 import { isTextRangeAnchor, isElementPathAnchor } from '@primer/shared';
+import {
+  canRead, canEdit, effectiveRole, loadCollaboratorRole, type Visibility,
+} from '../lib/permissions.ts';
 
 export type PrimerErrorCode =
   | 'not_authenticated'
@@ -99,7 +102,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       return ok(parsed);
     },
 
-    primer_get_document: async (args, _user) => {
+    primer_get_document: async (args, user) => {
       // Accepts { documentId } OR { url }.
       let documentId: string | undefined;
       if (typeof args.documentId === 'string' && args.documentId.length > 0) {
@@ -113,13 +116,13 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       }
 
       // Mirror GET /api/documents/:docId from routes/documents.ts.
-      // No ownership gate — Primer is share-by-URL, any authenticated user can read.
       const docRows = await db
         .select({
           id: documents.id,
           title: documents.title,
           description: documents.description,
           uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
           createdAt: documents.createdAt,
           deletedAt: documents.deletedAt,
           uploaderDisplayName: users.displayName,
@@ -131,6 +134,12 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
 
       if (docRows.length === 0) return err('not_found', 'document not found');
       if (docRows[0].deletedAt !== null) return err('not_found', 'document not found');
+
+      const collabRole = await loadCollaboratorRole(documentId!, user.id);
+      const eff = effectiveRole(docRows[0], user.id, collabRole);
+      if (!canRead(docRows[0].visibility as Visibility, eff)) {
+        return err('not_found', 'document not found');
+      }
 
       const versionRows = await db
         .select()
@@ -163,9 +172,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_get_version_content: async (args, _user) => {
+    primer_get_version_content: async (args, user) => {
       // Accepts { versionId } OR { documentId } (latest) OR { url } (specific or latest).
-      // No ownership gate — mirrors GET /api/versions/:versionId/content (share-by-URL model).
       let versionId: string | undefined;
       let documentId: string | undefined;
       let requestedVersionNumber: number | undefined;
@@ -232,6 +240,17 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!row) return err('not_found', 'version not found');
       if (row.deletedAt !== null) return err('not_found', 'version not found');
 
+      const [docRow] = await db
+        .select({ uploaderId: documents.uploaderId, visibility: documents.visibility })
+        .from(documents)
+        .where(eq(documents.id, row.documentId));
+      if (!docRow) return err('not_found', 'document not found');
+      const collabRole = await loadCollaboratorRole(row.documentId, user.id);
+      const eff = effectiveRole(docRow, user.id, collabRole);
+      if (!canRead(docRow.visibility as Visibility, eff)) {
+        return err('not_found', 'version not found');
+      }
+
       const stream = await deps.storage.get(row.storageKey);
       const html = await new Response(stream).text();
 
@@ -244,17 +263,27 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_list_versions: async (args, _user) => {
+    primer_list_versions: async (args, user) => {
       // Mirror GET /api/documents/:docId/versions from routes/documents.ts.
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       if (!documentId) return err('bad_request', 'documentId is required');
 
       const [existingDoc] = await db
-        .select({ deletedAt: documents.deletedAt })
+        .select({
+          uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
+          deletedAt: documents.deletedAt,
+        })
         .from(documents)
         .where(eq(documents.id, documentId));
       if (!existingDoc) return err('not_found', 'document not found');
       if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
+
+      const collabRole = await loadCollaboratorRole(documentId, user.id);
+      const eff = effectiveRole(existingDoc, user.id, collabRole);
+      if (!canRead(existingDoc.visibility as Visibility, eff)) {
+        return err('not_found', 'document not found');
+      }
 
       const rows = await db
         .select({
@@ -279,7 +308,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_get_comments: async (args, _user) => {
+    primer_get_comments: async (args, user) => {
       // Mirror GET /api/versions/:versionId/threads from routes/threads.ts.
       // Accepts { versionId } OR { documentId } (resolves to latest version).
       let versionId: string | undefined;
@@ -310,6 +339,25 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         if (doc) docTitle = doc.title;
       } else {
         return err('bad_request', 'versionId or documentId is required');
+      }
+
+      // Load the doc-of-record for permission gate. If we came in via documentId, we
+      // already have `docTitle`; otherwise we haven't touched documents yet.
+      const [docRow] = (await db.execute(sql`
+        SELECT d.id AS "documentId", d.uploader_id AS "uploaderId", d.visibility AS "visibility"
+        FROM versions v
+        INNER JOIN documents d ON d.id = v.document_id
+        WHERE v.id = ${versionId}
+        LIMIT 1
+      `)) as unknown as {
+        documentId: string; uploaderId: string; visibility: Visibility;
+      }[];
+      if (!docRow) return err('not_found', 'version not found');
+
+      const collabRole = await loadCollaboratorRole(docRow.documentId, user.id);
+      const eff = effectiveRole(docRow, user.id, collabRole);
+      if (!canRead(docRow.visibility, eff)) {
+        return err('not_found', 'version not found');
       }
 
       // Load thread + comment rows, same query shape as routes/threads.ts
@@ -491,12 +539,24 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!content) return err('bad_request', 'content is required');
 
       const [existingDoc] = await db
-        .select({ uploaderId: documents.uploaderId, deletedAt: documents.deletedAt })
+        .select({
+          uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
+          deletedAt: documents.deletedAt,
+        })
         .from(documents)
         .where(eq(documents.id, documentId));
       if (!existingDoc) return err('not_found', 'document not found');
       if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
-      if (existingDoc.uploaderId !== user.id) return err('forbidden', 'only the document owner can add versions');
+
+      const collabRole = await loadCollaboratorRole(documentId, user.id);
+      const eff = effectiveRole(existingDoc, user.id, collabRole);
+      if (!canRead(existingDoc.visibility as Visibility, eff)) {
+        return err('not_found', 'document not found');
+      }
+      if (!canEdit(eff)) {
+        return err('forbidden', 'only the document owner or editor collaborators can add versions');
+      }
 
       let preparedHtml: string;
       if (format === 'markdown') {

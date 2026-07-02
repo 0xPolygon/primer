@@ -2,12 +2,13 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
-import { documents, users, versions } from '@primer/shared/schema';
+import { documents, documentCollaborators, users, versions } from '@primer/shared/schema';
 import { buildMcpToolHandlers, type ToolDeps } from './tools.ts';
+import { v7 as uuidv7 } from 'uuid';
 
 async function seedUser(id: string): Promise<void> {
   await db.insert(users).values({ id, email: `${id}@x.test`, displayName: id });
@@ -28,6 +29,7 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM comments`);
   await db.execute(sql`DELETE FROM threads`);
   await db.execute(sql`DELETE FROM versions`);
+  await db.execute(sql`DELETE FROM document_collaborators`);
   await db.execute(sql`DELETE FROM documents`);
   await db.execute(sql`DELETE FROM users WHERE id LIKE 'tools-%'`);
 });
@@ -267,6 +269,100 @@ describe('primer_get_version_content', () => {
       const res = await handlers.primer_get_version_content({ url: `${url}/v/9` }, owner);
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+    });
+  });
+});
+
+async function seedDocOwnedBy(ownerId: string): Promise<{ docId: string; versionId: string }> {
+  const docId = uuidv7();
+  const versionId = uuidv7();
+  await db.insert(documents).values({
+    id: docId,
+    title: 'X',
+    description: null,
+    uploaderId: ownerId,
+  });
+  await db.insert(versions).values({
+    id: versionId,
+    documentId: docId,
+    versionNumber: 1,
+    storageKey: `v1/${versionId}.html`,
+    sizeBytes: 0,
+    versionNote: null,
+  });
+  return { docId, versionId };
+}
+
+describe('MCP tools respect visibility + collab', () => {
+  it('primer_get_document on private doc as stranger returns not_found', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-stranger');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, docId));
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_document(
+        { documentId: docId },
+        { id: 'tools-stranger', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+    });
+  });
+
+  it('primer_get_document on private doc as commenter returns ok', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-commenter');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, docId));
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-commenter',
+      role: 'commenter', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_document(
+        { documentId: docId },
+        { id: 'tools-commenter', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBeFalsy();
+    });
+  });
+
+  it('primer_add_version as editor collab returns ok', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-editor');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-editor',
+      role: 'editor', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_add_version(
+        { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
+        { id: 'tools-editor', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBeFalsy();
+    });
+  });
+
+  it('primer_add_version as commenter collab returns forbidden', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-commenter');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-commenter',
+      role: 'commenter', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_add_version(
+        { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
+        { id: 'tools-commenter', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('forbidden');
     });
   });
 });
