@@ -30,3 +30,46 @@ export function canEdit(role: EffectiveRole): boolean {
 export function canManage(role: EffectiveRole): boolean {
   return role === 'owner';
 }
+
+import { and, eq, inArray } from 'drizzle-orm';
+import { db } from '../db/client.ts';
+import { documentCollaborators } from '@primer/shared/schema';
+
+export async function loadCollaboratorRole(
+  docId: string,
+  userId: string,
+): Promise<CollaboratorRole | null> {
+  const [row] = await db
+    .select({ role: documentCollaborators.role })
+    .from(documentCollaborators)
+    .where(
+      and(
+        eq(documentCollaborators.documentId, docId),
+        eq(documentCollaborators.userId, userId),
+      ),
+    )
+    .limit(1);
+  return (row?.role as CollaboratorRole | undefined) ?? null;
+}
+
+export async function loadCollaboratorRoles(
+  docIds: string[],
+  userId: string,
+): Promise<Map<string, CollaboratorRole>> {
+  const out = new Map<string, CollaboratorRole>();
+  if (docIds.length === 0) return out;
+  const rows = await db
+    .select({
+      documentId: documentCollaborators.documentId,
+      role: documentCollaborators.role,
+    })
+    .from(documentCollaborators)
+    .where(
+      and(
+        eq(documentCollaborators.userId, userId),
+        inArray(documentCollaborators.documentId, docIds),
+      ),
+    );
+  for (const r of rows) out.set(r.documentId, r.role as CollaboratorRole);
+  return out;
+}

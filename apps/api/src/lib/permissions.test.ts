@@ -73,3 +73,74 @@ describe('canManage', () => {
     expect(canManage('stranger')).toBe(false);
   });
 });
+
+import { v7 as uuidv7 } from 'uuid';
+import { db } from '../db/client.ts';
+import { documents, users, documentCollaborators } from '@primer/shared/schema';
+import { loadCollaboratorRole, loadCollaboratorRoles } from './permissions.ts';
+
+async function seedUser(id: string): Promise<void> {
+  await db
+    .insert(users)
+    .values({ id, email: `${id}@x.test`, displayName: id })
+    .onConflictDoNothing();
+}
+
+async function seedDoc(ownerId: string): Promise<string> {
+  const docId = uuidv7();
+  await db.insert(documents).values({
+    id: docId,
+    title: 't',
+    description: null,
+    uploaderId: ownerId,
+  });
+  return docId;
+}
+
+describe('loadCollaboratorRole', () => {
+  it('returns null when no row exists', async () => {
+    await seedUser('perm-owner');
+    await seedUser('perm-other');
+    const docId = await seedDoc('perm-owner');
+    const role = await loadCollaboratorRole(docId, 'perm-other');
+    expect(role).toBeNull();
+  });
+
+  it('returns the stored role when a row exists', async () => {
+    await seedUser('perm-owner');
+    await seedUser('perm-editor');
+    const docId = await seedDoc('perm-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(),
+      documentId: docId,
+      userId: 'perm-editor',
+      role: 'editor',
+      grantedBy: 'perm-owner',
+    });
+    const role = await loadCollaboratorRole(docId, 'perm-editor');
+    expect(role).toBe('editor');
+  });
+});
+
+describe('loadCollaboratorRoles (bulk)', () => {
+  it('returns a map keyed by documentId for docs the user collaborates on', async () => {
+    await seedUser('perm-owner');
+    await seedUser('perm-both');
+    const docA = await seedDoc('perm-owner');
+    const docB = await seedDoc('perm-owner');
+    const docC = await seedDoc('perm-owner');
+    await db.insert(documentCollaborators).values([
+      { id: uuidv7(), documentId: docA, userId: 'perm-both', role: 'editor', grantedBy: 'perm-owner' },
+      { id: uuidv7(), documentId: docB, userId: 'perm-both', role: 'commenter', grantedBy: 'perm-owner' },
+    ]);
+    const roles = await loadCollaboratorRoles([docA, docB, docC], 'perm-both');
+    expect(roles.get(docA)).toBe('editor');
+    expect(roles.get(docB)).toBe('commenter');
+    expect(roles.has(docC)).toBe(false);
+  });
+
+  it('returns an empty map when the id list is empty', async () => {
+    const roles = await loadCollaboratorRoles([], 'perm-owner');
+    expect(roles.size).toBe(0);
+  });
+});
