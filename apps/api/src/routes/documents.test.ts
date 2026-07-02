@@ -761,3 +761,81 @@ describe('doc access under visibility + collaborators', () => {
     });
   });
 });
+
+describe('PATCH /api/documents/:docId visibility', () => {
+  it('owner can flip visibility to private', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ visibility: 'private' }),
+      });
+      expect(res.status).toBe(200);
+      const [row] = await db
+        .select({ visibility: documents.visibility })
+        .from(documents)
+        .where(eq(documents.id, upload.documentId));
+      expect(row.visibility).toBe('private');
+    });
+  });
+
+  it('editor collab CANNOT flip visibility (canManage owner-only)', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'editor',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ visibility: 'private' }),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it('mixed body (title + visibility) requires canManage', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'editor',
+        grantedBy: 'mock-user-1',
+      });
+      // Editor can PATCH title alone (canEdit)…
+      const okRes = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ title: 'Edited by editor' }),
+      });
+      expect(okRes.status).toBe(200);
+      // …but not title + visibility (mixed body is manage).
+      const denyRes = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ title: 'Sneak', visibility: 'private' }),
+      });
+      expect(denyRes.status).toBe(403);
+    });
+  });
+
+  it('invalid visibility value → 400', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ visibility: 'public' }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_body');
+    });
+  });
+});
