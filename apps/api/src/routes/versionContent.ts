@@ -1,7 +1,6 @@
 import type { Hono } from 'hono';
-import { eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
-import { versions } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 import {
   canRead, effectiveRole, loadCollaboratorRole,
@@ -71,12 +70,7 @@ export function registerVersionContentRoute(
       return c.json({ error: 'not_found' }, 404);
     }
 
-    const rows = await db.select().from(versions).where(eq(versions.id, versionId)).limit(1);
-    if (rows.length === 0) {
-      return c.json({ error: 'not_found' }, 404);
-    }
-
-    const stream = await deps.storage.get(rows[0].storageKey);
+    const stream = await deps.storage.get(versionWithDoc.storageKey);
 
     return new Response(stream, {
       status: 200,
