@@ -272,3 +272,24 @@ export interface ApiTokenSummary {
 export interface ApiTokensListResponse {
   tokens: ApiTokenSummary[];
 }
+
+export interface Collaborator {
+  userId: string;
+  displayName: string;
+  role: 'commenter' | 'editor';
+  grantedBy: string;
+  createdAt: string;
+}
+
+export interface CollaboratorsListResponse {
+  collaborators: Collaborator[];
+}
+
+export interface AddCollaboratorRequest {
+  userId: string;
+  role: 'commenter' | 'editor';
+}
+
+export interface UpdateCollaboratorRequest {
+  role: 'commenter' | 'editor';
+}
