@@ -9,28 +9,60 @@ import type { CommentDTO, CreateThreadRequest, ThreadDTO, ThreadsListResponse } 
 import { threads, comments, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
+import type { Visibility } from '../lib/permissions.ts';
+import { effectiveRole, canRead, canComment, loadCollaboratorRole } from '../lib/permissions.ts';
 
-async function ensureLiveDocumentForVersion(versionId: string): Promise<{ ok: true } | { ok: false }> {
+async function loadDocContextForVersion(
+  versionId: string,
+): Promise<
+  | { ok: false }
+  | { ok: true; docId: string; uploaderId: string; visibility: Visibility }
+> {
   const [r] = (await db.execute(sql`
-    SELECT d.deleted_at FROM versions v
+    SELECT d.id AS "docId",
+           d.uploader_id AS "uploaderId",
+           d.visibility   AS "visibility",
+           d.deleted_at   AS "deletedAt"
+    FROM versions v
     INNER JOIN documents d ON d.id = v.document_id
     WHERE v.id = ${versionId}
     LIMIT 1
-  `)) as unknown as { deleted_at: Date | null }[];
+  `)) as unknown as {
+    docId: string;
+    uploaderId: string;
+    visibility: Visibility;
+    deletedAt: Date | null;
+  }[];
   if (!r) return { ok: false };
-  return r.deleted_at === null ? { ok: true } : { ok: false };
+  if (r.deletedAt !== null) return { ok: false };
+  return { ok: true, docId: r.docId, uploaderId: r.uploaderId, visibility: r.visibility };
 }
 
-async function ensureLiveDocumentForThread(threadId: string): Promise<{ ok: true } | { ok: false }> {
+async function loadDocContextForThread(
+  threadId: string,
+): Promise<
+  | { ok: false }
+  | { ok: true; docId: string; uploaderId: string; visibility: Visibility }
+> {
   const [r] = (await db.execute(sql`
-    SELECT d.deleted_at FROM threads t
+    SELECT d.id AS "docId",
+           d.uploader_id AS "uploaderId",
+           d.visibility   AS "visibility",
+           d.deleted_at   AS "deletedAt"
+    FROM threads t
     INNER JOIN versions v ON v.id = t.version_id
     INNER JOIN documents d ON d.id = v.document_id
     WHERE t.id = ${threadId}
     LIMIT 1
-  `)) as unknown as { deleted_at: Date | null }[];
+  `)) as unknown as {
+    docId: string;
+    uploaderId: string;
+    visibility: Visibility;
+    deletedAt: Date | null;
+  }[];
   if (!r) return { ok: false };
-  return r.deleted_at === null ? { ok: true } : { ok: false };
+  if (r.deletedAt !== null) return { ok: false };
+  return { ok: true, docId: r.docId, uploaderId: r.uploaderId, visibility: r.visibility };
 }
 
 interface ThreadRow {
@@ -161,8 +193,12 @@ export function registerThreadRoutes(
   app.get('/api/versions/:versionId/threads', async (c) => {
     const versionId = c.req.param('versionId');
 
-    const live = await ensureLiveDocumentForVersion(versionId);
-    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+    const ctx = await loadDocContextForVersion(versionId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
+    const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     const currentEtag = await computeVersionEtag(versionId);
     const ifNoneMatch = c.req.header('if-none-match');
@@ -237,8 +273,12 @@ export function registerThreadRoutes(
   app.post('/api/versions/:versionId/threads', async (c) => {
     const versionId = c.req.param('versionId');
 
-    const live = await ensureLiveDocumentForVersion(versionId);
-    if (!live.ok) return c.json({ error: 'not_found' }, 404);
+    const ctx = await loadDocContextForVersion(versionId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
+    const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canComment(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     let payload: Partial<CreateThreadRequest>;
     try {
@@ -290,8 +330,6 @@ export function registerThreadRoutes(
     if (latestRow.this_n !== latestRow.max_n) {
       return c.json({ error: 'not_latest_version', message: 'Cannot post to a non-latest version.' }, 409);
     }
-
-    const user = c.get('user');
 
     // Validate mentions before touching the DB.
     const rawMentions = (payload as { mentions?: unknown }).mentions;
@@ -348,10 +386,13 @@ export function registerThreadRoutes(
   app.post('/api/threads/:threadId/resolve', async (c) => {
     const threadId = c.req.param('threadId');
 
-    const live = await ensureLiveDocumentForThread(threadId);
-    if (!live.ok) return c.json({ error: 'not_found' }, 404);
-
+    const ctx = await loadDocContextForThread(threadId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
+
     const authz = await authorizeThreadMutation(threadId, user.id);
     if (authz === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (authz === 'forbidden') return c.json({ error: 'forbidden' }, 403);
@@ -368,10 +409,13 @@ export function registerThreadRoutes(
   app.post('/api/threads/:threadId/reopen', async (c) => {
     const threadId = c.req.param('threadId');
 
-    const live = await ensureLiveDocumentForThread(threadId);
-    if (!live.ok) return c.json({ error: 'not_found' }, 404);
-
+    const ctx = await loadDocContextForThread(threadId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
+
     const authz = await authorizeThreadMutation(threadId, user.id);
     if (authz === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (authz === 'forbidden') return c.json({ error: 'forbidden' }, 403);

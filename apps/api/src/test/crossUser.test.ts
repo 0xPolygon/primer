@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { v7 as uuidv7 } from 'uuid';
 import { eq } from 'drizzle-orm';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { documents, users, versions } from '@primer/shared/schema';
+import { documents, documentCollaborators, users, versions } from '@primer/shared/schema';
 import { asUser, asUserJson, CSRF_HEADERS } from './harness.ts';
 import { uploadFixture } from '../routes/upload.testlib.ts';
 
@@ -172,6 +173,84 @@ describe('cross-user ownership boundaries (multi-user)', () => {
         headers: asUser('mock-user-2'),
       });
       expect(res.status).toBe(403);
+    });
+  });
+});
+
+describe('collaborators × visibility — end-to-end', () => {
+  it('editor can add a version to a private doc; commenter cannot; stranger 404s', async () => {
+    await withMultiUserApp(async (app) => {
+      // owner = mock-user-1 uploads
+      const upload = await uploadFixture(app);
+      // add mock-user-2 as editor, seed a third user as commenter, leave a fourth as stranger
+      await db.insert(users).values([
+        { id: 'mock-user-3', email: 'three@p.t', displayName: 'User Three' },
+        { id: 'mock-user-4', email: 'four@p.t', displayName: 'User Four' },
+      ]).onConflictDoNothing();
+      await db.insert(documentCollaborators).values([
+        {
+          id: uuidv7(),
+          documentId: upload.documentId,
+          userId: 'mock-user-2',
+          role: 'editor',
+          grantedBy: 'mock-user-1',
+        },
+        {
+          id: uuidv7(),
+          documentId: upload.documentId,
+          userId: 'mock-user-3',
+          role: 'commenter',
+          grantedBy: 'mock-user-1',
+        },
+      ]);
+      await db.update(documents)
+        .set({ visibility: 'private' })
+        .where(eq(documents.id, upload.documentId));
+
+      // editor: can read + add version
+      const readAsEditor = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-2'),
+      });
+      expect(readAsEditor.status).toBe(200);
+
+      const fd = new FormData();
+      fd.append('file', new Blob(['<html><body><h1>v2</h1></body></html>'], { type: 'text/html' }), 'v.html');
+      const addAsEditor = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: asUser('mock-user-2'),
+        body: fd,
+      });
+      expect(addAsEditor.status).toBe(201);
+
+      // commenter: can read but cannot add a version
+      const readAsCommenter = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-3'),
+      });
+      expect(readAsCommenter.status).toBe(200);
+
+      const fd2 = new FormData();
+      fd2.append('file', new Blob(['<html><body></body></html>'], { type: 'text/html' }), 'v.html');
+      const addAsCommenter = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: asUser('mock-user-3'),
+        body: fd2,
+      });
+      expect(addAsCommenter.status).toBe(403);
+
+      // stranger: 404 on read, 404 on write
+      const readAsStranger = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-4'),
+      });
+      expect(readAsStranger.status).toBe(404);
+
+      const fd3 = new FormData();
+      fd3.append('file', new Blob(['<html><body></body></html>'], { type: 'text/html' }), 'v.html');
+      const addAsStranger = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: asUser('mock-user-4'),
+        body: fd3,
+      });
+      expect(addAsStranger.status).toBe(404);
     });
   });
 });

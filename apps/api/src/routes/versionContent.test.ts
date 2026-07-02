@@ -3,13 +3,15 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
+import { v7 as uuidv7 } from 'uuid';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
+import { mockMultiResolver } from '../auth/resolver.ts';
 import { ARTIFACT_CSP } from './versionContent.ts';
 import { db } from '../db/client.ts';
-import { documents, versions as versionsTable } from '@primer/shared/schema';
-import { CSRF_HEADERS } from '../test/harness.ts';
+import { documents, versions as versionsTable, users, documentCollaborators } from '@primer/shared/schema';
+import { CSRF_HEADERS, asUser } from '../test/harness.ts';
 
 async function upload(app: ReturnType<typeof createApp>): Promise<string> {
   const fd = new FormData();
@@ -79,5 +81,65 @@ describe('GET /api/versions/:versionId/content', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+// helper reusing the same multi-user pattern as documents.test.ts
+async function withMultiUserApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'primer-vc-multi-'));
+  try {
+    const app = createApp({
+      storage: new FilesystemStorage(root),
+      notifier: new NoopNotifier(),
+      userResolver: mockMultiResolver,
+    });
+    await db.insert(users).values([
+      { id: 'mock-user-1', email: 'one@p.t', displayName: 'User One' },
+      { id: 'mock-user-2', email: 'two@p.t', displayName: 'User Two' },
+    ]).onConflictDoNothing();
+    return await fn(app);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function uploadFixture(app: ReturnType<typeof createApp>) {
+  const fd = new FormData();
+  fd.append('file', new Blob(['<html><body><p>x</p></body></html>'], { type: 'text/html' }), 'r.html');
+  fd.append('title', 'Fixture');
+  const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
+  return (await res.json()) as { documentId: string; versionId: string };
+}
+
+describe('GET /api/versions/:versionId/content under visibility + collab', () => {
+  it('private doc + non-collab: 404', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db.select({ id: versionsTable.id }).from(versionsTable).where(eq(versionsTable.documentId, upload.documentId));
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      const res = await app.request(`/api/versions/${v.id}/content`, {
+        headers: asUser('mock-user-2'),
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('private doc + commenter collab: 200', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db.select({ id: versionsTable.id }).from(versionsTable).where(eq(versionsTable.documentId, upload.documentId));
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'commenter',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(`/api/versions/${v.id}/content`, {
+        headers: asUser('mock-user-2'),
+      });
+      expect(res.status).toBe(200);
+    });
   });
 });

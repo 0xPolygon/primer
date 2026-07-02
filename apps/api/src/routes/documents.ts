@@ -9,6 +9,10 @@ import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { markdownToHtml } from '../upload/markdown.ts';
+import {
+  canRead, canEdit, canManage, effectiveRole, loadCollaboratorRole,
+  type Visibility,
+} from '../lib/permissions.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -23,6 +27,7 @@ export function registerDocumentRoutes(
         title: documents.title,
         description: documents.description,
         uploaderId: documents.uploaderId,
+        visibility: documents.visibility,
         createdAt: documents.createdAt,
         deletedAt: documents.deletedAt,
         uploaderDisplayName: users.displayName,
@@ -37,6 +42,13 @@ export function registerDocumentRoutes(
     }
 
     if (docRows[0].deletedAt !== null) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+
+    const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(docId, user.id);
+    const eff = effectiveRole(docRows[0], user.id, collabRole);
+    if (!canRead(docRows[0].visibility as Visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }
 
@@ -74,11 +86,11 @@ export function registerDocumentRoutes(
     try {
       await db.execute(sql`
         INSERT INTO document_views (user_id, document_id)
-        VALUES (${c.get('user').id}, ${docId})
+        VALUES (${user.id}, ${docId})
         ON CONFLICT (user_id, document_id) DO UPDATE SET viewed_at = excluded.viewed_at
       `);
     } catch (err) {
-      logger.warn({ err, docId, userId: c.get('user').id }, 'failed to upsert document_views');
+      logger.warn({ err, docId, userId: user.id }, 'failed to upsert document_views');
     }
 
     return c.json(body, 200);
@@ -129,12 +141,18 @@ export function registerDocumentRoutes(
     }
 
     const [existing] = await db
-      .select({ uploaderId: documents.uploaderId, deletedAt: documents.deletedAt })
+      .select({ uploaderId: documents.uploaderId, visibility: documents.visibility, deletedAt: documents.deletedAt })
       .from(documents)
       .where(eq(documents.id, docId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
     if (existing.deletedAt !== null) return c.json({ error: 'not_found' }, 404);
-    if (existing.uploaderId !== user.id) return c.json({ error: 'forbidden' }, 403);
+
+    const collabRole = await loadCollaboratorRole(docId, user.id);
+    const eff = effectiveRole(existing, user.id, collabRole);
+    if (!canRead(existing.visibility as Visibility, eff)) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    if (!canEdit(eff)) return c.json({ error: 'forbidden' }, 403);
 
     await db.update(documents).set(updates).where(eq(documents.id, docId));
 
@@ -172,11 +190,17 @@ export function registerDocumentRoutes(
     const user = c.get('user');
 
     const [existing] = await db
-      .select({ uploaderId: documents.uploaderId, deletedAt: documents.deletedAt })
+      .select({ uploaderId: documents.uploaderId, visibility: documents.visibility, deletedAt: documents.deletedAt })
       .from(documents)
       .where(eq(documents.id, docId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
-    if (existing.uploaderId !== user.id) return c.json({ error: 'forbidden' }, 403);
+
+    const collabRole = await loadCollaboratorRole(docId, user.id);
+    const eff = effectiveRole(existing, user.id, collabRole);
+    if (!canRead(existing.visibility as Visibility, eff)) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    if (!canManage(eff)) return c.json({ error: 'forbidden' }, 403);
 
     let deletedAt: Date;
     if (existing.deletedAt !== null) {
@@ -199,13 +223,20 @@ export function registerDocumentRoutes(
         title: documents.title,
         description: documents.description,
         uploaderId: documents.uploaderId,
+        visibility: documents.visibility,
         createdAt: documents.createdAt,
         deletedAt: documents.deletedAt,
       })
       .from(documents)
       .where(eq(documents.id, docId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
-    if (existing.uploaderId !== user.id) return c.json({ error: 'forbidden' }, 403);
+
+    const collabRole = await loadCollaboratorRole(docId, user.id);
+    const eff = effectiveRole(existing, user.id, collabRole);
+    if (!canRead(existing.visibility as Visibility, eff)) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    if (!canManage(eff)) return c.json({ error: 'forbidden' }, 403);
 
     if (existing.deletedAt !== null) {
       const ageMs = Date.now() - existing.deletedAt.getTime();
@@ -236,13 +267,20 @@ export function registerDocumentRoutes(
 
   app.get('/api/documents/:docId/versions', async (c) => {
     const docId = c.req.param('docId');
+    const user = c.get('user');
 
     const [existingDoc] = await db
-      .select({ deletedAt: documents.deletedAt })
+      .select({ uploaderId: documents.uploaderId, visibility: documents.visibility, deletedAt: documents.deletedAt })
       .from(documents)
       .where(eq(documents.id, docId));
     if (!existingDoc) return c.json({ error: 'not_found' }, 404);
     if (existingDoc.deletedAt !== null) return c.json({ error: 'not_found' }, 404);
+
+    const collabRole = await loadCollaboratorRole(docId, user.id);
+    const eff = effectiveRole(existingDoc, user.id, collabRole);
+    if (!canRead(existingDoc.visibility as Visibility, eff)) {
+      return c.json({ error: 'not_found' }, 404);
+    }
 
     const rows = await db
       .select({
@@ -275,12 +313,18 @@ export function registerDocumentRoutes(
     const user = c.get('user');
 
     const [existingDoc] = await db
-      .select({ uploaderId: documents.uploaderId, deletedAt: documents.deletedAt })
+      .select({ uploaderId: documents.uploaderId, visibility: documents.visibility, deletedAt: documents.deletedAt })
       .from(documents)
       .where(eq(documents.id, docId));
     if (!existingDoc) return c.json({ error: 'not_found' }, 404);
     if (existingDoc.deletedAt !== null) return c.json({ error: 'not_found' }, 404);
-    if (existingDoc.uploaderId !== user.id) return c.json({ error: 'forbidden' }, 403);
+
+    const collabRole = await loadCollaboratorRole(docId, user.id);
+    const eff = effectiveRole(existingDoc, user.id, collabRole);
+    if (!canRead(existingDoc.visibility as Visibility, eff)) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    if (!canEdit(eff)) return c.json({ error: 'forbidden' }, 403);
 
     const form = await c.req.parseBody();
     const file = form['file'];

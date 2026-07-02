@@ -4,6 +4,10 @@ import type { AppVariables } from '../app.ts';
 import type { VersionSummaryDTO } from '@primer/shared';
 import { documents, versions } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
+import {
+  canRead, canEdit, effectiveRole, loadCollaboratorRole,
+  type Visibility,
+} from '../lib/permissions.ts';
 
 export function registerVersionRoutes(app: Hono<{ Variables: AppVariables }>): void {
   app.patch('/api/versions/:versionId', async (c) => {
@@ -39,6 +43,7 @@ export function registerVersionRoutes(app: Hono<{ Variables: AppVariables }>): v
         versionId: versions.id,
         documentId: versions.documentId,
         uploaderId: documents.uploaderId,
+        visibility: documents.visibility,
         docDeletedAt: documents.deletedAt,
       })
       .from(versions)
@@ -46,7 +51,15 @@ export function registerVersionRoutes(app: Hono<{ Variables: AppVariables }>): v
       .where(eq(versions.id, versionId));
     if (!row) return c.json({ error: 'not_found' }, 404);
     if (row.docDeletedAt !== null) return c.json({ error: 'not_found' }, 404);
-    if (row.uploaderId !== user.id) return c.json({ error: 'forbidden' }, 403);
+
+    const collabRole = await loadCollaboratorRole(row.documentId, user.id);
+    const eff = effectiveRole(
+      { uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
+      user.id,
+      collabRole,
+    );
+    if (!canRead(row.visibility as Visibility, eff)) return c.json({ error: 'not_found' }, 404);
+    if (!canEdit(eff)) return c.json({ error: 'forbidden' }, 403);
 
     await db.update(versions).set({ versionNote }).where(eq(versions.id, versionId));
 
