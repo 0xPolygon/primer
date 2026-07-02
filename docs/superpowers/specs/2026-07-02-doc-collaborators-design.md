@@ -21,9 +21,10 @@ This spec captures the full feature (data model, permission semantics, wire-thro
 - **External / non-org collaborators.** Everyone is a Polygon Okta user; no invite-by-email flow, no pending invites.
 - **Per-version collaborators.** Permissions attach to the document, not to individual versions.
 - **Audit log of permission changes.** Nice-to-have; not in scope.
-- **Notification of a new collaborator.** Slack notification when you're added is a natural follow-up but is not part of #29.
 - **Ownership by anyone other than the uploader.** `documents.uploaderId` stays authoritative for "owner."
 - **MCP tools for collaborator management.** MCP tools honor permissions (that's mandatory) but the *management* surface is UI + HTTP API only for now.
+- **Slack notification** when you're added as a collaborator. Email is in scope (see [Notifications](#notifications)); Slack is a natural follow-up but not part of #29.
+- **Notification on collaborator role change or removal.** Only *add* triggers an email in this scope.
 
 ## Roles and visibility
 
@@ -153,6 +154,42 @@ Existing docs default to `visibility='org'` with an empty `document_collaborator
 
 Sub-issue 1 is therefore behavior-preserving on ship. Sub-issues 2–4 enable the new capabilities.
 
+## Notifications
+
+When a user is added as a collaborator, we send them a one-off email so they know the doc exists and can find it.
+
+### Trigger
+
+Only on **add**. Role changes (commenter → editor and vice versa) and removals do **not** trigger email. Follow-up issues can revisit if the pattern justifies it.
+
+If the added user is the same as the actor (self-add), the email is **suppressed**. The API already rejects owner-adds-self, but we suppress at the notifier layer as a belt-and-braces policy so this doesn't have to be re-thought if that validation rule ever changes.
+
+### Interface
+
+Extend the existing `Notifier` abstraction (`apps/api/src/notifications/notifier.ts`) with one new method, mirroring the shape of `notifyComment`:
+
+```ts
+notifyCollaboratorAdded({
+  docId: string;
+  docTitle: string;
+  addedUserId: string;
+  addedByUserId: string;
+  role: 'commenter' | 'editor';
+}): Promise<void>
+```
+
+- **`NoopNotifier`** — no-op, same as its `notifyComment` implementation.
+- **`MailgunNotifier`** — one email to the added user's `users.email`. Subject `You were added to "<docTitle>" on Primer`. Body includes the role, who added them (`users.displayName`), and a link to the doc (`<AUTH_BASE_URL>/d/<docId>`). Plaintext + HTML, same rendering approach as the existing comment notification path.
+- Self-suppression is enforced in the *notifier implementations*, not at the call site, so it's a single place regardless of how many call sites exist in the future.
+
+### Call site
+
+Fire-and-forget after a successful commit inside `POST /api/documents/:docId/collaborators`. Matches the fire-and-forget pattern used by the thread/comment routes for `notifyComment`. A notifier failure never fails the HTTP request; it's logged.
+
+### Delivery in prod
+
+Whether an email actually goes out is a config concern — `buildNotifier()` picks `MailgunNotifier` when `MAILGUN_API_KEY`, `EMAIL_FROM`, `AUTH_BASE_URL`, and `MAILGUN_DOMAIN` (or an inferable domain) are set; otherwise it falls back to `NoopNotifier`. The wiring is code-complete regardless of whether the env is provisioned. Provisioning is outside the scope of this spec.
+
 ## Sub-issue decomposition
 
 Four sub-issues, ordered by dependency. Each is one session-sized unit and ships as its own PR under #29 as the tracking issue.
@@ -181,13 +218,14 @@ Four sub-issues, ordered by dependency. Each is one session-sized unit and ships
 - `DELETE /api/documents/:docId/collaborators/:userId` — remove, owner-only.
 - Extend `PATCH /api/documents/:docId` to accept `visibility`; owner-only via `canManage`.
 - User-search endpoint scoped to typeahead: `GET /api/users?q=<name-prefix>&docId=<uuid>` — returns up to 20 Polygon users matching a display-name prefix, minus the current owner and any existing collaborators of that doc when `docId` is provided. Used by the Sub 3 modal.
-- Tests: owner-only enforcement, role-vs-visibility validation, dup/self-collab rejection, typeahead behavior.
+- Extend the `Notifier` interface with `notifyCollaboratorAdded(...)` per the [Notifications](#notifications) section; update `NoopNotifier` and `MailgunNotifier`; fire fire-and-forget from the add endpoint after commit.
+- Tests: owner-only enforcement, role-vs-visibility validation, dup/self-collab rejection, typeahead behavior; a `NotifierSpy` covers "add fires exactly once with the right args," "role change and remove do not fire," and "self-add is suppressed at the notifier layer."
 
 **Depends on:** Sub 1.
 
-**Exit criteria:** New endpoints tested; visibility toggle works through the existing PATCH; existing UI/UX unaffected (no consumer yet). All permission enforcement flows through Sub 1's helpers.
+**Exit criteria:** New endpoints tested; visibility toggle works through the existing PATCH; existing UI/UX unaffected (no consumer yet). All permission enforcement flows through Sub 1's helpers. `notifyCollaboratorAdded` is invoked from the add endpoint and covered by spy-based tests; actual email delivery is gated on the existing Mailgun config.
 
-**Deferred:** UI, dashboard integration, MCP tools for collaborator management.
+**Deferred:** UI, dashboard integration, MCP tools for collaborator management, email on role change / removal, Slack delivery.
 
 ### Sub 3 — Sharing UI
 
@@ -244,3 +282,4 @@ None outstanding at spec time. Interaction rules (visibility × role) are pinned
 - Current auth model: `apps/api/src/middleware/auth.ts`
 - Current permission checks (all owner-only, all inline): `apps/api/src/routes/documents.ts`, `apps/api/src/routes/versions.ts`, `apps/api/src/mcp/tools.ts`
 - Current schema: `packages/shared/src/schema.ts`
+- Existing notifier abstraction: `apps/api/src/notifications/notifier.ts`, `apps/api/src/notifications/mailgun.ts`, `apps/api/src/notifications/index.ts`
