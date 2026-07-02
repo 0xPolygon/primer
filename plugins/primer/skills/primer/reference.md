@@ -55,6 +55,37 @@ Fetch the raw HTML content of a Primer version. Use when you need the actual doc
 - **Input:** `{ documentId: string }`.
 - **Output:** `{ versions: VersionSummaryDTO[] }`, newest first.
 
+### `primer_list_documents`
+
+List documents, newest first, keyset-paginated.
+
+- **Input:** `{ scope?: "all" | "mine", limit?: number, cursor?: string }`. `limit` is clamped to 1–100 (default 25). `cursor` is the `nextCursor` from the previous page.
+- **`scope`:** `"all"` (default) lists every document (share-by-URL model); `"mine"` lists only documents the current user uploaded. **Ask the user which they want** — their own documents or everyone's — before choosing. Default is `"all"`.
+- **Output:** `{ scope, documents: DocumentSummaryDTO[], nextCursor: string | null, hasMore: boolean }`. Pass `nextCursor` back as `cursor` to page; stop when `hasMore` is `false`. An unknown `cursor` errors with `code: 'bad_request'`.
+
+### `primer_find_document`
+
+Case-insensitive substring search over document title and description. Paginated like `primer_list_documents`.
+
+- **Input:** `{ query: string, scope?: "all" | "mine", limit?: number, cursor?: string }`. LIKE wildcards in `query` are matched literally. Errors with `code: 'bad_request'` when `query` is empty.
+- **`scope`:** same semantics as `primer_list_documents` — `"all"` (default) searches every document; `"mine"` searches only the caller's uploads. **Ask the user** before scoping.
+- **Output:** `{ query, scope, documents: DocumentSummaryDTO[], nextCursor, hasMore }`.
+
+### `primer_get_document_comments`
+
+All comment threads across **every** version of a document (not just the latest), grouped by version.
+
+- **Input:** `{ documentId: string }`.
+- **Output:** `{ documentId, title, versions: [{ versionId, versionNumber, threadCount, markdown }], threadCount }`. Each version's `markdown` uses the same format as `primer_get_comments`. `threadCount` at the top level is the total across all versions.
+
+### `primer_get_all_comments`
+
+List comments across documents, newest first, keyset-paginated by comment.
+
+- **Input:** `{ scope?: "all" | "mine", limit?: number, cursor?: string }`.
+- **`scope`:** `"all"` (default) returns comments by any author on every document; `"mine"` returns only comments the current user authored. **Ask the user** whether they want their own comments or all comments before scoping.
+- **Output:** `{ scope, comments: [{ id, threadId, versionId, versionNumber, documentId, documentTitle, authorId, authorDisplayName, body, mentions, createdAt, updatedAt, deletedAt, threadResolved }], nextCursor, hasMore }`. Deleted comments have an empty `body`. An unknown `cursor` errors with `code: 'bad_request'`.
+
 ### `primer_get_comments`
 
 Fetch threads on a version (or the latest version of a document) and format them as markdown.
