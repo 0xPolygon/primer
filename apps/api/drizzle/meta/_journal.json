@@ -57,6 +57,13 @@
       "when": 1782933528604,
       "tag": "0007_aromatic_xorn",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783002967040,
+      "tag": "0008_dry_shatterstar",
+      "breakpoints": true
     }
   ]
 }
