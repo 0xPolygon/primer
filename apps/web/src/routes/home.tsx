@@ -13,6 +13,7 @@ import { DocRow } from '../components/DocRow.tsx';
 import { DocCard } from '../components/DocCard.tsx';
 import { DeletedDocumentRow } from '../components/DocumentListRow.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
+import { MobileFoldersSheet } from '../components/MobileFoldersSheet.tsx';
 
 const LAYOUT_KEY = 'primer.library.layout';
 const SORT_KEY = 'primer.library.sort';
@@ -47,6 +48,7 @@ export function HomePage() {
   const q = useLibraryQuery();
   const [params, setParams] = useSearchParams();
   const [showAddVersion, setShowAddVersion] = useState(false);
+  const [foldersOpen, setFoldersOpen] = useState(false);
   const [chip, setChip] = useState<Chip>('all');
   const [layout, setLayout] = useState<'list' | 'cards'>(() => readLayout());
   const [sortKey, setSortKey] = useState<SortKey>(() => readSort());
@@ -146,6 +148,8 @@ export function HomePage() {
               onSortKeyChange={setSortKey}
               layout={layout}
               onLayoutChange={setLayout}
+              showFoldersButton={true}
+              onOpenFolders={() => setFoldersOpen(true)}
             />
 
             {chip === 'deleted' ? (
@@ -189,6 +193,20 @@ export function HomePage() {
       )}
 
       <AddVersionModal open={showAddVersion} onClose={() => setShowAddVersion(false)} />
+      {data && (
+        <MobileFoldersSheet
+          open={foldersOpen}
+          folders={data.folders}
+          uncategorizedCount={uncategorizedCount}
+          totalCount={data.documents.length}
+          selectedFolderId={folderId}
+          onSelect={(id) => {
+            setFolderId(id);
+            setFoldersOpen(false);
+          }}
+          onClose={() => setFoldersOpen(false)}
+        />
+      )}
     </div>
   );
 }
