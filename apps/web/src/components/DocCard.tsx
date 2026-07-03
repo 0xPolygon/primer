@@ -28,8 +28,8 @@ export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
       : undefined;
 
   return (
-    <div className="relative flex flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white hover:shadow-md dark:border-neutral-800 dark:bg-neutral-900">
-      <Link to={`/d/${doc.id}`} className="block">
+    <div className="relative flex flex-col rounded-lg border border-neutral-200 bg-white hover:shadow-md dark:border-neutral-800 dark:bg-neutral-900">
+      <Link to={`/d/${doc.id}`} className="block overflow-hidden rounded-lg">
         <div className="h-9 w-full relative" style={banner}>
           {doc.visibility === 'private' && (
             <span className="absolute left-2 top-2 flex items-center gap-1 text-xs text-white">
