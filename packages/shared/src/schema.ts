@@ -270,3 +270,38 @@ export const oauthRefreshTokens = pgTable(
     byFamily: index('oauth_refresh_tokens_family_idx').on(t.familyId),
   }),
 );
+
+export const folders = pgTable(
+  'folders',
+  {
+    id: uuid('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqUserName: uniqueIndex('folders_user_name_lower_unique').on(t.userId, sql`lower(${t.name})`),
+    byUser: index('folders_user_id_idx').on(t.userId),
+  }),
+);
+
+export const documentFolders = pgTable(
+  'document_folders',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    folderId: uuid('folder_id')
+      .notNull()
+      .references(() => folders.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.documentId] }),
+    byFolder: index('document_folders_folder_id_idx').on(t.folderId),
+  }),
+);

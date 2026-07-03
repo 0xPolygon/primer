@@ -99,33 +99,11 @@ export interface MentionableUsersResponse {
   users: MentionableUser[];
 }
 
-export interface DashboardDocumentSummary {
-  id: string;
-  title: string;
-  description: string | null;
-  uploaderDisplayName: string;
-  visibility: 'org' | 'private';
-  threadCount: number;
-  activeThreadCount: number;
-  lastActivityAt: string;
-}
-
-export interface DashboardActivityEntry extends DashboardDocumentSummary {
-  signal: 'viewed' | 'commented';
-  signalAt: string;
-}
-
 export interface DeletedDocumentEntry {
   id: string;
   title: string;
   deletedAt: string;
   daysRemaining: number;
-}
-
-export interface DashboardResponse {
-  myDocuments: DashboardDocumentSummary[];
-  recentlyViewedOrCommented: DashboardActivityEntry[];
-  recentlyDeleted: DeletedDocumentEntry[];   // NEW in SP4
 }
 
 export interface VersionSummaryDTO {
@@ -304,4 +282,31 @@ export interface UserSearchHit {
 
 export interface UserSearchResponse {
   users: UserSearchHit[];
+}
+
+export interface FolderDTO {
+  id: string;
+  name: string;
+  docCount: number;
+}
+
+export interface LibraryDocument {
+  id: string;
+  title: string;
+  description: string | null;
+  uploaderId: string;
+  uploaderDisplayName: string;
+  visibility: 'org' | 'private';
+  ownership: 'mine' | 'collaborator' | 'org';
+  threadCount: number;
+  activeThreadCount: number;
+  lastActivityAt: string;
+  createdAt: string;
+  folderId: string | null;
+}
+
+export interface LibraryResponse {
+  folders: FolderDTO[];
+  documents: LibraryDocument[];
+  recentlyDeleted: DeletedDocumentEntry[];
 }

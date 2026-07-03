@@ -1,20 +1,111 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useDashboardQuery } from '../queries/dashboard.ts';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useLibraryQuery } from '../queries/library.ts';
 import {
-  ActivityRow,
-  DeletedDocumentRow,
-  MyDocumentRow,
-} from '../components/DocumentListRow.tsx';
+  filterAndSort,
+  FOLDER_UNCATEGORIZED,
+  type Chip,
+  type SortKey,
+} from '../lib/library.ts';
+import { LibraryToolbar } from '../components/LibraryToolbar.tsx';
+import { LibrarySidebar } from '../components/LibrarySidebar.tsx';
+import { DocRow } from '../components/DocRow.tsx';
+import { DocCard } from '../components/DocCard.tsx';
+import { DeletedDocumentRow } from '../components/DocumentListRow.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
+import { MobileFoldersSheet } from '../components/MobileFoldersSheet.tsx';
+
+const LAYOUT_KEY = 'primer.library.layout';
+const SORT_KEY = 'primer.library.sort';
+
+function readLayout(): 'list' | 'cards' {
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY);
+    return v === 'cards' ? 'cards' : 'list';
+  } catch {
+    return 'list';
+  }
+}
+
+function readSort(): SortKey {
+  try {
+    const v = localStorage.getItem(SORT_KEY);
+    if (v === 'activity' || v === 'uploaded' || v === 'title-asc' || v === 'title-desc') return v;
+  } catch { /* ignore */ }
+  return 'activity';
+}
+
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(t);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 export function HomePage() {
-  const q = useDashboardQuery();
+  const q = useLibraryQuery();
+  const [params, setParams] = useSearchParams();
   const [showAddVersion, setShowAddVersion] = useState(false);
-  const [showDeleted, setShowDeleted] = useState(false);
+  const [foldersOpen, setFoldersOpen] = useState(false);
+  const [chip, setChip] = useState<Chip>('all');
+  const [layout, setLayout] = useState<'list' | 'cards'>(() => readLayout());
+  const [sortKey, setSortKey] = useState<SortKey>(() => readSort());
+  const [qInput, setQInput] = useState('');
+  const qDebounced = useDebounced(qInput, 150);
+
+  // URL-synced folder selection.
+  const folderIdRaw = params.get('folder');
+  const folderId: string | null =
+    folderIdRaw === null ? null : folderIdRaw === '' ? FOLDER_UNCATEGORIZED : folderIdRaw;
+
+  const setFolderId = (next: string | null) => {
+    const p = new URLSearchParams(params);
+    if (next === null) p.delete('folder');
+    else p.set('folder', next);
+    setParams(p, { replace: true });
+  };
+
+  // Persist layout + sort.
+  useEffect(() => {
+    try { localStorage.setItem(LAYOUT_KEY, layout); } catch { /* ignore */ }
+  }, [layout]);
+  useEffect(() => {
+    try { localStorage.setItem(SORT_KEY, sortKey); } catch { /* ignore */ }
+  }, [sortKey]);
+
+  // 'Deleted' chip → reset folder highlight to All docs.
+  useEffect(() => {
+    if (chip === 'deleted' && folderId !== null) setFolderId(null);
+    // setFolderId is a local closure over params; we deliberately don't include it
+    // in the deps to avoid re-running when params change independently. The guard
+    // above keeps this a no-op after the first reset.
+  }, [chip, folderId]);
+
+  const data = q.data;
+
+  const uncategorizedCount = useMemo(
+    () => (data ? data.documents.filter((d) => d.folderId === null).length : 0),
+    [data],
+  );
+
+  const visibleDocs = useMemo(() => {
+    if (!data) return [];
+    if (chip === 'deleted') return [];
+    return filterAndSort(data.documents, { folderId, chip, q: qDebounced, sortKey });
+  }, [data, folderId, chip, qDebounced, sortKey]);
+
+  const deletedFiltered = useMemo(() => {
+    if (!data || chip !== 'deleted') return [];
+    const needle = qDebounced.trim().toLowerCase();
+    return needle
+      ? data.recentlyDeleted.filter((d) => d.title.toLowerCase().includes(needle))
+      : data.recentlyDeleted;
+  }, [data, chip, qDebounced]);
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-4">
       <header className="flex items-center justify-between border-b border-neutral-200 pb-3 dark:border-neutral-800">
         <h1 className="text-2xl font-semibold">Primer</h1>
         <div className="hidden md:flex items-center gap-2">
@@ -37,98 +128,148 @@ export function HomePage() {
       {q.isLoading && <div className="text-sm text-neutral-500">Loading…</div>}
       {q.error && (
         <div className="text-sm text-red-600 dark:text-red-400">
-          Could not load dashboard: {(q.error as Error).message}
+          Could not load library: {(q.error as Error).message}
         </div>
       )}
 
-      {q.data && (
-        <>
-          <section>
-            <div className="mb-2 flex items-baseline justify-between border-b border-neutral-200 pb-1 dark:border-neutral-800">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
-                My documents
-              </h2>
-              <span className="text-xs text-neutral-500">
-                {q.data.myDocuments.length}{' '}
-                {q.data.myDocuments.length === 1 ? 'doc' : 'docs'}
-              </span>
-            </div>
-            {q.data.myDocuments.length === 0 ? (
-              <div className="px-2 py-8 text-center">
-                <blockquote className="mx-auto max-w-lg text-sm italic leading-relaxed text-neutral-600 dark:text-neutral-400">
-                  &ldquo;The Primer was a book in appearance only. Its interior was a tissue of
-                  paper, but each page was a separate flat-panel display, which formed itself into
-                  pictures, words, and animations responsive to the reader.&rdquo;
-                </blockquote>
-                <p className="mt-2 text-xs text-neutral-400 dark:text-neutral-500">
-                  — Neal Stephenson, <em>The Diamond Age</em>
-                </p>
-                <p className="mt-6 text-sm text-neutral-500">
-                  No documents yet.{' '}
-                  <Link to="/upload" className="font-medium text-neutral-700 underline hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-100">
-                    Upload your first one
-                  </Link>
-                  .
-                </p>
+      {data && (
+        <div className="flex gap-6">
+          <LibrarySidebar
+            folders={data.folders}
+            uncategorizedCount={uncategorizedCount}
+            totalCount={data.documents.length}
+            selectedFolderId={folderId}
+            onSelect={setFolderId}
+          />
+          <main className="flex-1 min-w-0 space-y-3">
+            <LibraryToolbar
+              q={qInput}
+              onQChange={setQInput}
+              chip={chip}
+              onChipChange={setChip}
+              sortKey={sortKey}
+              onSortKeyChange={setSortKey}
+              layout={layout}
+              onLayoutChange={setLayout}
+              showFoldersButton={true}
+              onOpenFolders={() => setFoldersOpen(true)}
+            />
+
+            {chip === 'deleted' ? (
+              deletedFiltered.length === 0 ? (
+                <EmptyState message="No recently deleted documents." />
+              ) : (
+                <div>
+                  {deletedFiltered.map((entry) => (
+                    <DeletedDocumentRow key={entry.id} entry={entry} />
+                  ))}
+                </div>
+              )
+            ) : visibleDocs.length === 0 ? (
+              <LibraryEmpty
+                totalDocs={data.documents.length}
+                folderId={folderId}
+                folderName={data.folders.find((f) => f.id === folderId)?.name ?? null}
+                chip={chip}
+                q={qDebounced}
+                onClearSearch={() => setQInput('')}
+                onClearFilters={() => {
+                  setChip('all');
+                  setFolderId(null);
+                }}
+              />
+            ) : layout === 'list' ? (
+              <div>
+                {visibleDocs.map((d) => (
+                  <DocRow key={d.id} doc={d} folders={data.folders} selectedFolderId={folderId} />
+                ))}
               </div>
             ) : (
-              q.data.myDocuments.map((doc) => <MyDocumentRow key={doc.id} doc={doc} />)
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                {visibleDocs.map((d) => (
+                  <DocCard key={d.id} doc={d} folders={data.folders} selectedFolderId={folderId} />
+                ))}
+              </div>
             )}
-          </section>
-
-          <section>
-            <div className="mb-2 flex items-baseline justify-between border-b border-neutral-200 pb-1 dark:border-neutral-800">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
-                Recently viewed or commented
-              </h2>
-              <span className="text-xs text-neutral-500">Last 30 days</span>
-            </div>
-            {q.data.recentlyViewedOrCommented.length === 0 ? (
-              <div className="px-1 py-4 text-sm italic text-neutral-500">Nothing recent.</div>
-            ) : (
-              q.data.recentlyViewedOrCommented.map((entry) => (
-                <ActivityRow key={entry.id} entry={entry} />
-              ))
-            )}
-          </section>
-
-          <section>
-            <button
-              type="button"
-              onClick={() => setShowDeleted((s) => !s)}
-              className="flex w-full items-baseline justify-between border-b border-neutral-200 pb-1 text-left dark:border-neutral-800"
-              aria-expanded={showDeleted}
-            >
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-900 dark:text-neutral-100">
-                Recently deleted
-              </h2>
-              <span className="text-xs text-neutral-500">
-                {q.data.recentlyDeleted.length === 0
-                  ? showDeleted
-                    ? 'none'
-                    : '—'
-                  : `${q.data.recentlyDeleted.length}`}{' '}
-                {showDeleted ? '▾' : '▸'}
-              </span>
-            </button>
-            {showDeleted && (
-              <>
-                {q.data.recentlyDeleted.length === 0 ? (
-                  <div className="px-1 py-4 text-sm italic text-neutral-500">
-                    No deleted documents.
-                  </div>
-                ) : (
-                  q.data.recentlyDeleted.map((entry) => (
-                    <DeletedDocumentRow key={entry.id} entry={entry} />
-                  ))
-                )}
-              </>
-            )}
-          </section>
-        </>
+          </main>
+        </div>
       )}
 
       <AddVersionModal open={showAddVersion} onClose={() => setShowAddVersion(false)} />
+      {data && (
+        <MobileFoldersSheet
+          open={foldersOpen}
+          folders={data.folders}
+          uncategorizedCount={uncategorizedCount}
+          totalCount={data.documents.length}
+          selectedFolderId={folderId}
+          onSelect={(id) => {
+            setFolderId(id);
+            setFoldersOpen(false);
+          }}
+          onClose={() => setFoldersOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return <div className="px-1 py-4 text-sm italic text-neutral-500">{message}</div>;
+}
+
+function LibraryEmpty(props: {
+  totalDocs: number;
+  folderId: string | null;
+  folderName: string | null;
+  chip: Chip;
+  q: string;
+  onClearSearch: () => void;
+  onClearFilters: () => void;
+}) {
+  // Zero docs library-wide (new user).
+  if (props.totalDocs === 0) {
+    return (
+      <div className="px-2 py-8 text-center">
+        <blockquote className="mx-auto max-w-lg text-sm italic leading-relaxed text-neutral-600 dark:text-neutral-400">
+          &ldquo;The Primer was a book in appearance only. Its interior was a tissue of paper, but each page was a
+          separate flat-panel display, which formed itself into pictures, words, and animations responsive to the
+          reader.&rdquo;
+        </blockquote>
+        <p className="mt-2 text-xs text-neutral-400 dark:text-neutral-500">— Neal Stephenson, <em>The Diamond Age</em></p>
+        <p className="mt-6 text-sm text-neutral-500">
+          No documents yet.{' '}
+          <Link to="/upload" className="font-medium text-neutral-700 underline hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-100">
+            Upload your first one
+          </Link>
+          .
+        </p>
+      </div>
+    );
+  }
+  if (props.q.length > 0) {
+    return (
+      <div className="px-1 py-4 text-sm text-neutral-500">
+        No docs matching &ldquo;{props.q}&rdquo;.{' '}
+        <button type="button" onClick={props.onClearSearch} className="underline">
+          Clear search
+        </button>
+      </div>
+    );
+  }
+  if (props.folderName) {
+    return (
+      <div className="px-1 py-4 text-sm text-neutral-500">
+        Nothing in <strong>{props.folderName}</strong> yet. Move docs here from the ⋯ menu.
+      </div>
+    );
+  }
+  return (
+    <div className="px-1 py-4 text-sm text-neutral-500">
+      No documents match this view.{' '}
+      <button type="button" onClick={props.onClearFilters} className="underline">
+        Clear filters
+      </button>
     </div>
   );
 }
