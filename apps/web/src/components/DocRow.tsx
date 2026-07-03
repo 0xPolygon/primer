@@ -2,18 +2,25 @@ import { Link } from 'react-router-dom';
 import type { LibraryDocument, FolderDTO } from '@primer/shared';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 import { DocKebabMenu } from './DocKebabMenu.tsx';
+import { DocFolderChip } from './DocFolderChip.tsx';
 import { relativeTime } from '../lib/relativeTime.ts';
 
 export interface DocRowProps {
   doc: LibraryDocument;
   folders: FolderDTO[];
+  selectedFolderId: string | null;
 }
 
-export function DocRow({ doc, folders }: DocRowProps) {
+export function DocRow({ doc, folders, selectedFolderId }: DocRowProps) {
   const subtitle =
     doc.ownership === 'mine'
       ? doc.description ?? ''
       : `by ${doc.uploaderDisplayName}${doc.description ? ` · ${doc.description}` : ''}`;
+
+  const assignedFolder =
+    doc.folderId !== null && doc.folderId !== selectedFolderId
+      ? folders.find((f) => f.id === doc.folderId)
+      : undefined;
 
   return (
     <div className="group flex items-center justify-between border-b border-neutral-100 px-1 py-2.5 hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-800">
@@ -39,7 +46,11 @@ export function DocRow({ doc, folders }: DocRowProps) {
         <span className="hidden sm:inline w-20 text-right text-xs text-neutral-500">
           {relativeTime(doc.lastActivityAt)}
         </span>
-        <DocKebabMenu doc={doc} folders={folders} />
+        {assignedFolder ? (
+          <DocFolderChip doc={doc} folderName={assignedFolder.name} folders={folders} />
+        ) : (
+          <DocKebabMenu doc={doc} folders={folders} />
+        )}
       </div>
     </div>
   );

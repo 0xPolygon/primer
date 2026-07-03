@@ -2,15 +2,17 @@ import { Link } from 'react-router-dom';
 import type { LibraryDocument, FolderDTO } from '@primer/shared';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 import { DocKebabMenu } from './DocKebabMenu.tsx';
+import { DocFolderChip } from './DocFolderChip.tsx';
 import { hashHue } from '../lib/library.ts';
 import { relativeTime } from '../lib/relativeTime.ts';
 
 export interface DocCardProps {
   doc: LibraryDocument;
   folders: FolderDTO[];
+  selectedFolderId: string | null;
 }
 
-export function DocCard({ doc, folders }: DocCardProps) {
+export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
   const hue = hashHue(doc.id);
   const hue2 = (hue + 40) % 360;
   const banner =
@@ -19,6 +21,11 @@ export function DocCard({ doc, folders }: DocCardProps) {
       : { background: `linear-gradient(135deg, hsl(${hue}, 65%, 55%), hsl(${hue2}, 65%, 55%))` };
 
   const byline = doc.ownership === 'mine' ? 'just you' : `by ${doc.uploaderDisplayName}`;
+
+  const assignedFolder =
+    doc.folderId !== null && doc.folderId !== selectedFolderId
+      ? folders.find((f) => f.id === doc.folderId)
+      : undefined;
 
   return (
     <div className="relative flex flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white hover:shadow-md dark:border-neutral-800 dark:bg-neutral-900">
@@ -48,8 +55,12 @@ export function DocCard({ doc, folders }: DocCardProps) {
           </div>
         </div>
       </Link>
-      <div className="absolute right-2 top-2">
-        <DocKebabMenu doc={doc} folders={folders} />
+      <div className="absolute right-2 top-1">
+        {assignedFolder ? (
+          <DocFolderChip doc={doc} folderName={assignedFolder.name} folders={folders} />
+        ) : (
+          <DocKebabMenu doc={doc} folders={folders} />
+        )}
       </div>
     </div>
   );

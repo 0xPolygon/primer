@@ -181,13 +181,13 @@ export function HomePage() {
             ) : layout === 'list' ? (
               <div>
                 {visibleDocs.map((d) => (
-                  <DocRow key={d.id} doc={d} folders={data.folders} />
+                  <DocRow key={d.id} doc={d} folders={data.folders} selectedFolderId={folderId} />
                 ))}
               </div>
             ) : (
               <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {visibleDocs.map((d) => (
-                  <DocCard key={d.id} doc={d} folders={data.folders} />
+                  <DocCard key={d.id} doc={d} folders={data.folders} selectedFolderId={folderId} />
                 ))}
               </div>
             )}

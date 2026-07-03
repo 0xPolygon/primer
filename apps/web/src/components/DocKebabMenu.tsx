@@ -45,7 +45,7 @@ export function DocKebabMenu({ doc, folders }: DocKebabMenuProps) {
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className="rounded px-1.5 py-0.5 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        className="rounded px-1.5 py-0.5 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
       >
         ⋯
       </button>
