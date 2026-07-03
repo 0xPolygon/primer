@@ -168,7 +168,7 @@ export function ShareModal({ open, docId, onClose }: Props) {
                 onClick={() => onToggleVisibility('org')}
                 className={
                   visibility === 'org'
-                    ? 'rounded border border-neutral-900 bg-neutral-900 px-3 py-1.5 text-sm text-white'
+                    ? 'rounded border border-purple-600 bg-purple-600 px-3 py-1.5 text-sm text-white'
                     : 'rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
                 }
               >
@@ -179,7 +179,7 @@ export function ShareModal({ open, docId, onClose }: Props) {
                 onClick={() => onToggleVisibility('private')}
                 className={
                   visibility === 'private'
-                    ? 'rounded border border-neutral-900 bg-neutral-900 px-3 py-1.5 text-sm text-white'
+                    ? 'rounded border border-purple-600 bg-purple-600 px-3 py-1.5 text-sm text-white'
                     : 'rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
                 }
               >
@@ -214,7 +214,7 @@ export function ShareModal({ open, docId, onClose }: Props) {
                       key={u.id}
                       className={
                         pendingUserId === u.id
-                          ? 'cursor-pointer bg-neutral-100 px-3 py-2 text-sm dark:bg-neutral-800'
+                          ? 'cursor-pointer bg-purple-100 px-3 py-2 text-sm dark:bg-purple-900/50'
                           : 'cursor-pointer px-3 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800'
                       }
                       onClick={() => {
