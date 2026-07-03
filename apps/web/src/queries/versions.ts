@@ -40,7 +40,7 @@ export function useAddVersion(docId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['versions', docId] });
       qc.invalidateQueries({ queryKey: ['document', docId] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['library'] });
     },
   });
 }

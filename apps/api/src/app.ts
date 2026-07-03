@@ -15,7 +15,6 @@ import { registerMermaidAssetRoute } from './routes/mermaidAsset.ts';
 import { registerDevFixtureRoute } from './routes/devFixture.ts';
 import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
-import { registerDashboardRoute } from './routes/dashboard.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
@@ -90,7 +89,6 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
   registerLibraryRoute(app);
-  registerDashboardRoute(app);
   registerAdminRoute(app);
   registerVersionRoutes(app);
   registerAuthRoutes(app, deps);

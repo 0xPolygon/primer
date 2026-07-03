@@ -99,33 +99,11 @@ export interface MentionableUsersResponse {
   users: MentionableUser[];
 }
 
-export interface DashboardDocumentSummary {
-  id: string;
-  title: string;
-  description: string | null;
-  uploaderDisplayName: string;
-  visibility: 'org' | 'private';
-  threadCount: number;
-  activeThreadCount: number;
-  lastActivityAt: string;
-}
-
-export interface DashboardActivityEntry extends DashboardDocumentSummary {
-  signal: 'viewed' | 'commented';
-  signalAt: string;
-}
-
 export interface DeletedDocumentEntry {
   id: string;
   title: string;
   deletedAt: string;
   daysRemaining: number;
-}
-
-export interface DashboardResponse {
-  myDocuments: DashboardDocumentSummary[];
-  recentlyViewedOrCommented: DashboardActivityEntry[];
-  recentlyDeleted: DeletedDocumentEntry[];   // NEW in SP4
 }
 
 export interface VersionSummaryDTO {

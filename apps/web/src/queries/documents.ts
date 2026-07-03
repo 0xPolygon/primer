@@ -36,7 +36,7 @@ export function useEditDocument(docId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['document', docId] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['library'] });
     },
   });
 }
@@ -51,7 +51,7 @@ export function useDeleteDocument(docId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['document', docId] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['library'] });
     },
   });
 }
@@ -69,7 +69,7 @@ export function useRestoreDocument(docId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['document', docId] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['library'] });
     },
   });
 }

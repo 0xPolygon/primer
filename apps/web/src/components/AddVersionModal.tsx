@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { DashboardDocumentSummary } from '@primer/shared';
-import { useDashboardQuery } from '../queries/dashboard.ts';
+import type { LibraryDocument } from '@primer/shared';
+import { useLibraryQuery } from '../queries/library.ts';
 import { useAddVersion } from '../queries/versions.ts';
 import { FileDropZone } from './FileDropZone.tsx';
 
@@ -9,7 +9,7 @@ interface Props {
   open: boolean;
   /** If provided, the doc combobox is pre-filled and the user can swap via the change-doc link. */
   preselectedDocId?: string;
-  /** Title to show while the dashboard query hasn't (yet) confirmed the preselected doc. */
+  /** Title to show while the library query hasn't (yet) confirmed the preselected doc. */
   preselectedDocTitle?: string;
   onClose: () => void;
 }
@@ -28,8 +28,8 @@ function relativeTime(iso: string): string {
 
 export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, onClose }: Props) {
   const navigate = useNavigate();
-  const dashboard = useDashboardQuery();
-  const myDocs = dashboard.data?.myDocuments ?? [];
+  const library = useLibraryQuery();
+  const myDocs = (library.data?.documents ?? []).filter((d) => d.ownership === 'mine');
 
   const [selectedDocId, setSelectedDocId] = useState<string | undefined>(preselectedDocId);
   const [file, setFile] = useState<File | null>(null);
@@ -74,7 +74,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
     return myDocs.filter((d) => d.title.toLowerCase().includes(lower)).slice(0, 8);
   }, [myDocs, query]);
 
-  const selectedDoc: DashboardDocumentSummary | undefined = useMemo(
+  const selectedDoc: LibraryDocument | undefined = useMemo(
     () => myDocs.find((d) => d.id === selectedDocId),
     [myDocs, selectedDocId]
   );

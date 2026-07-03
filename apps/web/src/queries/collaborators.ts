@@ -113,7 +113,7 @@ export function useSetVisibility(docId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['document', docId] });
       qc.invalidateQueries({ queryKey: ['collaborators', docId] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      qc.invalidateQueries({ queryKey: ['library'] });
     },
   });
 }
