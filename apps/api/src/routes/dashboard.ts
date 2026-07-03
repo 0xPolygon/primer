@@ -118,6 +118,13 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
       INNER JOIN users u ON u.id = d.uploader_id
       LEFT JOIN versions v ON v.document_id = d.id
       LEFT JOIN threads t ON t.version_id = v.id
+      WHERE
+        d.visibility = 'org'
+        OR d.uploader_id = ${userId}
+        OR EXISTS (
+          SELECT 1 FROM document_collaborators dc
+          WHERE dc.document_id = d.id AND dc.user_id = ${userId}
+        )
       GROUP BY d.id, d.title, d.description, u.display_name, latest.signal_at, latest.signal
       ORDER BY latest.signal_at DESC
     `)) as unknown as ActivityRow[];

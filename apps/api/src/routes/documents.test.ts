@@ -7,11 +7,12 @@ import { v7 as uuidv7 } from 'uuid';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
+import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { documents, documentViews, versions, users } from '@primer/shared/schema';
+import { documents, documentViews, versions, users, documentCollaborators } from '@primer/shared/schema';
 import type { DocumentDetailResponse, UploadResponse } from '@primer/shared/api';
 import type { DocumentPatchRequest } from '@primer/shared';
-import { CSRF_HEADERS } from '../test/harness.ts';
+import { CSRF_HEADERS, asUser, asUserJson } from '../test/harness.ts';
 
 async function uploadFixture(app: ReturnType<typeof createApp>): Promise<UploadResponse> {
   const fd = new FormData();
@@ -37,6 +38,7 @@ describe('GET /api/documents/:docId', () => {
       expect(body.document.title).toBe('Fixture');
       expect(body.document.description).toBe('desc');
       expect(body.document.uploaderDisplayName).toBe('Mock User');
+      expect(body.document.visibility).toBe('org');
       expect(body.latestVersion.id).toBe(upload.versionId);
       expect(body.latestVersion.versionNumber).toBe(1);
     } finally {
@@ -643,5 +645,200 @@ describe('POST /api/documents/:docId/restore', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+async function withMultiUserApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'primer-docs-multi-'));
+  try {
+    const app = createApp({
+      storage: new FilesystemStorage(root),
+      notifier: new NoopNotifier(),
+      userResolver: mockMultiResolver,
+    });
+    await db.insert(users).values([
+      { id: 'mock-user-1', email: 'one@p.t', displayName: 'User One' },
+      { id: 'mock-user-2', email: 'two@p.t', displayName: 'User Two' },
+    ]).onConflictDoNothing();
+    return await fn(app);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+describe('doc access under visibility + collaborators', () => {
+  it('GET private doc as non-collab returns 404', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);          // owned by mock-user-1
+      await db.update(documents)
+        .set({ visibility: 'private' })
+        .where(eq(documents.id, upload.documentId));
+      const res = await app.request(
+        `/api/documents/${upload.documentId}`,
+        { headers: asUser('mock-user-2') },
+      );
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('GET private doc as commenter collab returns 200', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.update(documents)
+        .set({ visibility: 'private' })
+        .where(eq(documents.id, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'commenter',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(
+        `/api/documents/${upload.documentId}`,
+        { headers: asUser('mock-user-2') },
+      );
+      expect(res.status).toBe(200);
+    });
+  });
+
+  it('POST version as editor collab returns 201', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'editor',
+        grantedBy: 'mock-user-1',
+      });
+      const fd = new FormData();
+      fd.append('file', new Blob(['<html><body><h1>v2</h1></body></html>'], { type: 'text/html' }), 'v2.html');
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: asUser('mock-user-2'),
+        body: fd,
+      });
+      expect(res.status).toBe(201);
+    });
+  });
+
+  it('POST version as commenter collab returns 403', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'commenter',
+        grantedBy: 'mock-user-1',
+      });
+      const fd = new FormData();
+      fd.append('file', new Blob(['<html><body></body></html>'], { type: 'text/html' }), 'v.html');
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: asUser('mock-user-2'),
+        body: fd,
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it('DELETE as editor collab returns 403 (manage is owner-only)', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'editor',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'DELETE',
+        headers: asUser('mock-user-2'),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+});
+
+describe('PATCH /api/documents/:docId visibility', () => {
+  it('owner can flip visibility to private', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ visibility: 'private' }),
+      });
+      expect(res.status).toBe(200);
+      const patchBody = (await res.json()) as { visibility: 'org' | 'private' };
+      expect(patchBody.visibility).toBe('private');
+      const [row] = await db
+        .select({ visibility: documents.visibility })
+        .from(documents)
+        .where(eq(documents.id, upload.documentId));
+      expect(row.visibility).toBe('private');
+    });
+  });
+
+  it('editor collab CANNOT flip visibility (canManage owner-only)', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'editor',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ visibility: 'private' }),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it('mixed body (title + visibility) requires canManage', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'editor',
+        grantedBy: 'mock-user-1',
+      });
+      // Editor can PATCH title alone (canEdit)…
+      const okRes = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ title: 'Edited by editor' }),
+      });
+      expect(okRes.status).toBe(200);
+      // …but not title + visibility (mixed body is manage).
+      const denyRes = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ title: 'Sneak', visibility: 'private' }),
+      });
+      expect(denyRes.status).toBe(403);
+    });
+  });
+
+  it('invalid visibility value → 400', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ visibility: 'public' }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_body');
+    });
   });
 });

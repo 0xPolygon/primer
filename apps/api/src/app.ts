@@ -23,6 +23,7 @@ import { registerMeRoute } from './routes/me.ts';
 import { registerUserRoutes } from './routes/users.ts';
 import { registerDeviceRoutes } from './routes/device.ts';
 import { registerTokenRoutes } from './routes/tokens.ts';
+import { registerCollaboratorRoutes } from './routes/collaborators.ts';
 import { registerOAuthRoutes } from './auth/oauth/routes.ts';
 import { registerMcpRoute } from './mcp/routes.ts';
 import type { Storage } from '@primer/shared/storage';
@@ -77,6 +78,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   app.get('/api/health', (c) => c.json({ ok: true }));
   registerUploadRoute(app, deps);
   registerDocumentRoutes(app, deps);
+  registerCollaboratorRoutes(app, deps);
   registerVersionContentRoute(app, deps);
   registerCompanionRoute(app);
   registerMermaidAssetRoute(app);

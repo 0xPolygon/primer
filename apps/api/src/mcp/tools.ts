@@ -10,6 +10,9 @@ import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary } from '@primer/shared/api';
 import { isTextRangeAnchor, isElementPathAnchor } from '@primer/shared';
+import {
+  canRead, canEdit, effectiveRole, loadCollaboratorRole, type Visibility,
+} from '../lib/permissions.ts';
 
 export type PrimerErrorCode =
   | 'not_authenticated'
@@ -131,7 +134,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       return ok(parsed);
     },
 
-    primer_get_document: async (args, _user) => {
+    primer_get_document: async (args, user) => {
       // Accepts { documentId } OR { url }.
       let documentId: string | undefined;
       if (typeof args.documentId === 'string' && args.documentId.length > 0) {
@@ -145,13 +148,13 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       }
 
       // Mirror GET /api/documents/:docId from routes/documents.ts.
-      // No ownership gate — Primer is share-by-URL, any authenticated user can read.
       const docRows = await db
         .select({
           id: documents.id,
           title: documents.title,
           description: documents.description,
           uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
           createdAt: documents.createdAt,
           deletedAt: documents.deletedAt,
           uploaderDisplayName: users.displayName,
@@ -163,6 +166,12 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
 
       if (docRows.length === 0) return err('not_found', 'document not found');
       if (docRows[0].deletedAt !== null) return err('not_found', 'document not found');
+
+      const collabRole = await loadCollaboratorRole(documentId!, user.id);
+      const eff = effectiveRole(docRows[0], user.id, collabRole);
+      if (!canRead(docRows[0].visibility as Visibility, eff)) {
+        return err('not_found', 'document not found');
+      }
 
       const versionRows = await db
         .select()
@@ -183,6 +192,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           description: doc.description,
           uploaderId: doc.uploaderId,
           uploaderDisplayName: doc.uploaderDisplayName,
+          visibility: doc.visibility,
           createdAt: doc.createdAt.toISOString(),
         },
         latestVersion: {
@@ -195,9 +205,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_get_version_content: async (args, _user) => {
+    primer_get_version_content: async (args, user) => {
       // Accepts { versionId } OR { documentId } (latest) OR { url } (specific or latest).
-      // No ownership gate — mirrors GET /api/versions/:versionId/content (share-by-URL model).
       let versionId: string | undefined;
       let documentId: string | undefined;
       let requestedVersionNumber: number | undefined;
@@ -264,6 +273,17 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!row) return err('not_found', 'version not found');
       if (row.deletedAt !== null) return err('not_found', 'version not found');
 
+      const [docRow] = await db
+        .select({ uploaderId: documents.uploaderId, visibility: documents.visibility })
+        .from(documents)
+        .where(eq(documents.id, row.documentId));
+      if (!docRow) return err('not_found', 'document not found');
+      const collabRole = await loadCollaboratorRole(row.documentId, user.id);
+      const eff = effectiveRole(docRow, user.id, collabRole);
+      if (!canRead(docRow.visibility as Visibility, eff)) {
+        return err('not_found', 'version not found');
+      }
+
       const stream = await deps.storage.get(row.storageKey);
       const html = await new Response(stream).text();
 
@@ -276,17 +296,27 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_list_versions: async (args, _user) => {
+    primer_list_versions: async (args, user) => {
       // Mirror GET /api/documents/:docId/versions from routes/documents.ts.
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       if (!documentId) return err('bad_request', 'documentId is required');
 
       const [existingDoc] = await db
-        .select({ deletedAt: documents.deletedAt })
+        .select({
+          uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
+          deletedAt: documents.deletedAt,
+        })
         .from(documents)
         .where(eq(documents.id, documentId));
       if (!existingDoc) return err('not_found', 'document not found');
       if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
+
+      const collabRole = await loadCollaboratorRole(documentId, user.id);
+      const eff = effectiveRole(existingDoc, user.id, collabRole);
+      if (!canRead(existingDoc.visibility as Visibility, eff)) {
+        return err('not_found', 'document not found');
+      }
 
       const rows = await db
         .select({
@@ -311,7 +341,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_get_comments: async (args, _user) => {
+    primer_get_comments: async (args, user) => {
       // Mirror GET /api/versions/:versionId/threads from routes/threads.ts.
       // Accepts { versionId } OR { documentId } (resolves to latest version).
       let versionId: string | undefined;
@@ -342,6 +372,25 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         if (doc) docTitle = doc.title;
       } else {
         return err('bad_request', 'versionId or documentId is required');
+      }
+
+      // Load the doc-of-record for the permission gate. Both branches (versionId
+      // direct and documentId-resolved) converge here with `versionId` set.
+      const [docRow] = (await db.execute(sql`
+        SELECT d.id AS "documentId", d.uploader_id AS "uploaderId", d.visibility AS "visibility"
+        FROM versions v
+        INNER JOIN documents d ON d.id = v.document_id
+        WHERE v.id = ${versionId}
+        LIMIT 1
+      `)) as unknown as {
+        documentId: string; uploaderId: string; visibility: Visibility;
+      }[];
+      if (!docRow) return err('not_found', 'version not found');
+
+      const collabRole = await loadCollaboratorRole(docRow.documentId, user.id);
+      const eff = effectiveRole(docRow, user.id, collabRole);
+      if (!canRead(docRow.visibility, eff)) {
+        return err('not_found', 'version not found');
       }
 
       // Load thread + comment rows via the shared helper.
@@ -436,12 +485,24 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!content) return err('bad_request', 'content is required');
 
       const [existingDoc] = await db
-        .select({ uploaderId: documents.uploaderId, deletedAt: documents.deletedAt })
+        .select({
+          uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
+          deletedAt: documents.deletedAt,
+        })
         .from(documents)
         .where(eq(documents.id, documentId));
       if (!existingDoc) return err('not_found', 'document not found');
       if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
-      if (existingDoc.uploaderId !== user.id) return err('forbidden', 'only the document owner can add versions');
+
+      const collabRole = await loadCollaboratorRole(documentId, user.id);
+      const eff = effectiveRole(existingDoc, user.id, collabRole);
+      if (!canRead(existingDoc.visibility as Visibility, eff)) {
+        return err('not_found', 'document not found');
+      }
+      if (!canEdit(eff)) {
+        return err('forbidden', 'only the document owner or editor collaborators can add versions');
+      }
 
       let preparedHtml: string;
       if (format === 'markdown') {
@@ -537,6 +598,9 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const keysetPredicate = cursorCreatedAt
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
+      // canRead filter: private docs the caller neither owns nor collaborates
+      // on are excluded. Mirrors the dashboard "Recently viewed" predicate.
+      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}))`;
 
       const rows = await db
         .select({
@@ -544,12 +608,13 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           title: documents.title,
           description: documents.description,
           uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
           createdAt: documents.createdAt,
           uploaderDisplayName: users.displayName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
-        .where(and(sql`${documents.deletedAt} IS NULL`, scopePredicate, keysetPredicate))
+        .where(and(sql`${documents.deletedAt} IS NULL`, canReadPredicate, scopePredicate, keysetPredicate))
         .orderBy(desc(documents.createdAt), desc(documents.id))
         .limit(limit + 1);
 
@@ -562,6 +627,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         description: r.description,
         uploaderId: r.uploaderId,
         uploaderDisplayName: r.uploaderDisplayName,
+        visibility: r.visibility as 'org' | 'private',
         createdAt: r.createdAt.toISOString(),
       }));
 
@@ -604,6 +670,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const keysetPredicate = cursorCreatedAt
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
+      // canRead filter: exclude private docs the caller cannot read.
+      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}))`;
 
       const rows = await db
         .select({
@@ -611,12 +679,13 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           title: documents.title,
           description: documents.description,
           uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
           createdAt: documents.createdAt,
           uploaderDisplayName: users.displayName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
-        .where(and(sql`${documents.deletedAt} IS NULL`, matchPredicate, scopePredicate, keysetPredicate))
+        .where(and(sql`${documents.deletedAt} IS NULL`, canReadPredicate, matchPredicate, scopePredicate, keysetPredicate))
         .orderBy(desc(documents.createdAt), desc(documents.id))
         .limit(limit + 1);
 
@@ -629,6 +698,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         description: r.description,
         uploaderId: r.uploaderId,
         uploaderDisplayName: r.uploaderDisplayName,
+        visibility: r.visibility as 'org' | 'private',
         createdAt: r.createdAt.toISOString(),
       }));
 
@@ -641,19 +711,34 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       });
     },
 
-    primer_get_document_comments: async (args, _user) => {
+    primer_get_document_comments: async (args, user) => {
       // All comment threads across ALL versions of a document (not just latest),
       // grouped by version. Newest version first, threads oldest first.
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       if (!documentId) return err('bad_request', 'documentId is required');
 
       const [doc] = await db
-        .select({ title: documents.title, deletedAt: documents.deletedAt })
+        .select({
+          title: documents.title,
+          uploaderId: documents.uploaderId,
+          visibility: documents.visibility,
+          deletedAt: documents.deletedAt,
+        })
         .from(documents)
         .where(eq(documents.id, documentId))
         .limit(1);
       if (!doc) return err('not_found', 'document not found');
       if (doc.deletedAt !== null) return err('not_found', 'document not found');
+
+      const collabRole = await loadCollaboratorRole(documentId, user.id);
+      const eff = effectiveRole(
+        { uploaderId: doc.uploaderId, visibility: doc.visibility as Visibility },
+        user.id,
+        collabRole,
+      );
+      if (!canRead(doc.visibility as Visibility, eff)) {
+        return err('not_found', 'document not found');
+      }
 
       const versionRows = await db
         .select({ id: versions.id, versionNumber: versions.versionNumber })
@@ -718,6 +803,9 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         cursorCreatedAt = cursorRow.createdAt;
       }
 
+      // db.execute returns TIMESTAMPTZ as either a Date or an ISO string
+      // depending on the postgres-js parser context. Coerce below to keep
+      // the response shape stable.
       interface AllCommentRow {
         id: string;
         threadId: string;
@@ -729,16 +817,20 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         authorDisplayName: string;
         body: string;
         mentions: string[];
-        createdAt: Date;
-        updatedAt: Date | null;
-        deletedAt: Date | null;
-        threadResolvedAt: Date | null;
+        createdAt: Date | string;
+        updatedAt: Date | string | null;
+        deletedAt: Date | string | null;
+        threadResolvedAt: Date | string | null;
       }
+      const toIso = (v: Date | string): string =>
+        v instanceof Date ? v.toISOString() : new Date(v).toISOString();
 
       const keyset = cursorCreatedAt
         ? sql`AND (c.created_at, c.id) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : sql``;
       const scopeFilter = scope === 'mine' ? sql`AND c.author_id = ${user.id}` : sql``;
+      // canRead filter: exclude comments on private docs the caller can't read.
+      const canReadFilter = sql`AND (d.visibility = 'org' OR d.uploader_id = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = d.id AND dc.user_id = ${user.id}))`;
 
       const rows = (await db.execute(sql`
         SELECT c.id AS "id",
@@ -761,6 +853,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         INNER JOIN documents d ON d.id = v.document_id
         INNER JOIN users u ON u.id = c.author_id
         WHERE d.deleted_at IS NULL
+        ${canReadFilter}
         ${scopeFilter}
         ${keyset}
         ORDER BY c.created_at DESC, c.id DESC
@@ -781,9 +874,9 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         authorDisplayName: r.authorDisplayName,
         body: r.deletedAt !== null ? '' : r.body,
         mentions: r.mentions,
-        createdAt: r.createdAt.toISOString(),
-        updatedAt: r.updatedAt?.toISOString() ?? null,
-        deletedAt: r.deletedAt?.toISOString() ?? null,
+        createdAt: toIso(r.createdAt),
+        updatedAt: r.updatedAt !== null ? toIso(r.updatedAt) : null,
+        deletedAt: r.deletedAt !== null ? toIso(r.deletedAt) : null,
         threadResolved: r.threadResolvedAt !== null,
       }));
 

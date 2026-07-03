@@ -26,6 +26,7 @@ export const documents = pgTable('documents', {
   title: text('title').notNull(),
   description: text('description'),
   uploaderId: text('uploader_id').notNull().references(() => users.id),
+  visibility: text('visibility', { enum: ['org', 'private'] }).notNull().default('org'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
@@ -97,6 +98,29 @@ export const documentViews = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.documentId] }),
   })
+);
+
+export const documentCollaborators = pgTable(
+  'document_collaborators',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['commenter', 'editor'] }).notNull(),
+    grantedBy: text('granted_by').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqDocUser: uniqueIndex('document_collaborators_doc_user_unique').on(
+      t.documentId,
+      t.userId,
+    ),
+    byUser: index('document_collaborators_user_id_idx').on(t.userId),
+  }),
 );
 
 export const sessions = pgTable(

@@ -2,13 +2,13 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
-import { v7 as uuidv7 } from 'uuid';
-import { documents, users, versions, threads, comments } from '@primer/shared/schema';
+import { documents, documentCollaborators, users, versions, threads, comments } from '@primer/shared/schema';
 import { buildMcpToolHandlers, type ToolDeps } from './tools.ts';
+import { v7 as uuidv7 } from 'uuid';
 
 async function seedUser(id: string): Promise<void> {
   await db.insert(users).values({ id, email: `${id}@x.test`, displayName: id });
@@ -52,6 +52,7 @@ beforeEach(async () => {
   await db.execute(sql`DELETE FROM comments`);
   await db.execute(sql`DELETE FROM threads`);
   await db.execute(sql`DELETE FROM versions`);
+  await db.execute(sql`DELETE FROM document_collaborators`);
   await db.execute(sql`DELETE FROM documents`);
   await db.execute(sql`DELETE FROM users WHERE id LIKE 'tools-%'`);
 });
@@ -146,6 +147,8 @@ describe('primer_get_document — open access path', () => {
       // Open access: other user can read
       expect(res.isError).toBeFalsy();
       expect(res).toBeDefined();
+      const body = JSON.parse(res.content[0].text);
+      expect(body.document.visibility).toBe('org');
     });
   });
 });
@@ -291,6 +294,100 @@ describe('primer_get_version_content', () => {
       const res = await handlers.primer_get_version_content({ url: `${url}/v/9` }, owner);
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+    });
+  });
+});
+
+async function seedDocOwnedBy(ownerId: string): Promise<{ docId: string; versionId: string }> {
+  const docId = uuidv7();
+  const versionId = uuidv7();
+  await db.insert(documents).values({
+    id: docId,
+    title: 'X',
+    description: null,
+    uploaderId: ownerId,
+  });
+  await db.insert(versions).values({
+    id: versionId,
+    documentId: docId,
+    versionNumber: 1,
+    storageKey: `v1/${versionId}.html`,
+    sizeBytes: 0,
+    versionNote: null,
+  });
+  return { docId, versionId };
+}
+
+describe('MCP tools respect visibility + collab', () => {
+  it('primer_get_document on private doc as stranger returns not_found', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-stranger');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, docId));
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_document(
+        { documentId: docId },
+        { id: 'tools-stranger', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+    });
+  });
+
+  it('primer_get_document on private doc as commenter returns ok', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-commenter');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, docId));
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-commenter',
+      role: 'commenter', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_document(
+        { documentId: docId },
+        { id: 'tools-commenter', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBeFalsy();
+    });
+  });
+
+  it('primer_add_version as editor collab returns ok', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-editor');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-editor',
+      role: 'editor', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_add_version(
+        { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
+        { id: 'tools-editor', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBeFalsy();
+    });
+  });
+
+  it('primer_add_version as commenter collab returns forbidden', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-commenter');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-commenter',
+      role: 'commenter', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_add_version(
+        { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
+        { id: 'tools-commenter', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('forbidden');
     });
   });
 });
@@ -638,6 +735,96 @@ describe('primer_get_all_comments', () => {
       // owner2 scoped to their own comments sees only theirs.
       const scoped2 = JSON.parse((await handlers.primer_get_all_comments({ scope: 'mine' }, owner2)).content[0].text);
       expect(scoped2.comments.map((c: { id: string }) => c.id)).toEqual([theirs.commentId]);
+    });
+  });
+});
+
+describe('post-#37 tools respect visibility (canRead filter)', () => {
+  const stranger = { id: 'tools-stranger', email: 'tools-stranger@x.test', displayName: 'tools-stranger' };
+  const commenter = { id: 'tools-commenter', email: 'tools-commenter@x.test', displayName: 'tools-commenter' };
+
+  it('primer_list_documents hides a private doc from a stranger; shows it to a commenter collab', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-stranger');
+    await seedUser('tools-commenter');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const created = await handlers.primer_create_document({ title: 'Private Only', content: '<p>a</p>', format: 'html' }, owner);
+      const { documentId } = JSON.parse(created.content[0].text);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(), documentId, userId: 'tools-commenter', role: 'commenter', grantedBy: 'tools-owner',
+      });
+
+      const asStranger = JSON.parse((await handlers.primer_list_documents({}, stranger)).content[0].text);
+      expect(asStranger.documents.map((d: { id: string }) => d.id)).not.toContain(documentId);
+
+      const asCommenter = JSON.parse((await handlers.primer_list_documents({}, commenter)).content[0].text);
+      expect(asCommenter.documents.map((d: { id: string }) => d.id)).toContain(documentId);
+    });
+  });
+
+  it('primer_find_document hides a private doc from a stranger; shows it to a commenter collab', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-stranger');
+    await seedUser('tools-commenter');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const created = await handlers.primer_create_document({ title: 'Secret Roadmap', content: '<p>x</p>', format: 'html' }, owner);
+      const { documentId } = JSON.parse(created.content[0].text);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(), documentId, userId: 'tools-commenter', role: 'commenter', grantedBy: 'tools-owner',
+      });
+
+      const asStranger = JSON.parse((await handlers.primer_find_document({ query: 'roadmap' }, stranger)).content[0].text);
+      expect(asStranger.documents.map((d: { id: string }) => d.id)).not.toContain(documentId);
+
+      const asCommenter = JSON.parse((await handlers.primer_find_document({ query: 'roadmap' }, commenter)).content[0].text);
+      expect(asCommenter.documents.map((d: { id: string }) => d.id)).toContain(documentId);
+    });
+  });
+
+  it('primer_get_document_comments returns not_found for a stranger on a private doc', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-stranger');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const created = await handlers.primer_create_document({ title: 'X', content: '<p>a</p>', format: 'html' }, owner);
+      const { documentId } = JSON.parse(created.content[0].text);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+
+      const res = await handlers.primer_get_document_comments({ documentId }, stranger);
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+    });
+  });
+
+  it('primer_get_all_comments excludes comments on private docs the caller cannot read', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-stranger');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      // Public + private doc, each with one comment.
+      const pub = JSON.parse((await handlers.primer_create_document({ title: 'Public', content: '<p>p</p>', format: 'html' }, owner)).content[0].text);
+      const priv = JSON.parse((await handlers.primer_create_document({ title: 'Private', content: '<p>s</p>', format: 'html' }, owner)).content[0].text);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, priv.documentId));
+      const pubC = await seedThreadWithComment(pub.versionId, 'tools-owner', 'public comment');
+      const privC = await seedThreadWithComment(priv.versionId, 'tools-owner', 'private comment');
+
+      const asStranger = JSON.parse((await handlers.primer_get_all_comments({}, stranger)).content[0].text);
+      const strangerIds = asStranger.comments.map((c: { id: string }) => c.id);
+      expect(strangerIds).toContain(pubC.commentId);
+      expect(strangerIds).not.toContain(privC.commentId);
+
+      // Owner sees both.
+      const asOwner = JSON.parse((await handlers.primer_get_all_comments({}, owner)).content[0].text);
+      const ownerIds = asOwner.comments.map((c: { id: string }) => c.id);
+      expect(ownerIds).toEqual(expect.arrayContaining([pubC.commentId, privC.commentId]));
     });
   });
 });

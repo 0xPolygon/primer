@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MailgunNotifier } from './mailgun.ts';
 import { db } from '../db/client.ts';
 import { users } from '@primer/shared/schema';
-import type { NotifyCommentArgs } from './notifier.ts';
+import type { NotifyCommentArgs, NotifyCollaboratorAddedArgs } from './notifier.ts';
 import { sql } from 'drizzle-orm';
 
 const NOW = new Date('2026-05-20T12:00:00Z');
@@ -253,5 +253,106 @@ describe('MailgunNotifier.notifyComment', () => {
     const expected = 'You received this because you were mentioned, are a participant in this thread, or uploaded this document.';
     expect(body.text).toContain(expected);
     expect(body.html).toContain(expected);
+  });
+});
+
+function collabArgs(over: Partial<NotifyCollaboratorAddedArgs> = {}): NotifyCollaboratorAddedArgs {
+  return {
+    docId: 'doc-1',
+    docTitle: 'Test Doc',
+    addedUserId: 'mock-user-2',
+    addedByUserId: 'mock-user-1',
+    role: 'editor',
+    ...over,
+  };
+}
+
+describe('MailgunNotifier.notifyCollaboratorAdded', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    await db
+      .insert(users)
+      .values([
+        { id: 'mock-user-1', email: 'one@p.t', displayName: 'User One' },
+        { id: 'mock-user-2', email: 'two@p.t', displayName: 'Alice Tester' },
+        { id: 'mock-user-3', email: 'three@p.t', displayName: 'User Three' },
+      ])
+      .onConflictDoUpdate({
+        target: users.id,
+        set: { email: sql`excluded.email`, displayName: sql`excluded.display_name` },
+      });
+    fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ id: 'mg-id', message: 'Queued. Thank you.' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await db
+      .insert(users)
+      .values([{ id: 'mock-user-1', email: 'mock@polygon.technology', displayName: 'Mock User' }])
+      .onConflictDoUpdate({
+        target: users.id,
+        set: { email: sql`excluded.email`, displayName: sql`excluded.display_name` },
+      });
+  });
+
+  it('POSTs a single email to the added user with subject and body', async () => {
+    const n = new MailgunNotifier({
+      apiKey: 'sk-test',
+      domain: 'dashboard.polygon.technology',
+      fromAddress: 'primer@dashboard.polygon.technology',
+      appBaseUrl: 'https://primer.example',
+    });
+    await n.notifyCollaboratorAdded(collabArgs());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.mailgun.net/v3/dashboard.polygon.technology/messages');
+    const form = parseForm(String(init.body));
+    expect(form.to).toBe('two@p.t');
+    expect(form.subject).toBe(`You were added to 'Test Doc' on Primer`);
+    expect(form.text).toContain('User One added you as an editor');
+    expect(form.text).toContain('https://primer.example/d/doc-1');
+    expect(form.html).toContain('User One');
+    expect(form.html).toContain('added you as an <strong>editor</strong>');
+    expect(form.html).toContain('href="https://primer.example/d/doc-1"');
+  });
+
+  it('renders commenter role text', async () => {
+    const n = new MailgunNotifier({
+      apiKey: 'sk-test',
+      domain: 'dashboard.polygon.technology',
+      fromAddress: 'primer@dashboard.polygon.technology',
+      appBaseUrl: 'https://primer.example',
+    });
+    await n.notifyCollaboratorAdded(collabArgs({ role: 'commenter' }));
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const form = parseForm(String(init.body));
+    expect(form.text).toContain('User One added you as a commenter');
+    expect(form.html).toContain('added you as a <strong>commenter</strong>');
+  });
+
+  it('suppresses self-add (no HTTP request)', async () => {
+    const n = new MailgunNotifier({
+      apiKey: 'sk-test',
+      domain: 'dashboard.polygon.technology',
+      fromAddress: 'primer@dashboard.polygon.technology',
+      appBaseUrl: 'https://primer.example',
+    });
+    await n.notifyCollaboratorAdded(collabArgs({ addedUserId: 'mock-user-1' }));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('skips send if added user has no email row (logs and returns)', async () => {
+    const n = new MailgunNotifier({
+      apiKey: 'sk-test',
+      domain: 'dashboard.polygon.technology',
+      fromAddress: 'primer@dashboard.polygon.technology',
+      appBaseUrl: 'https://primer.example',
+    });
+    await n.notifyCollaboratorAdded(collabArgs({ addedUserId: 'unknown-user-xyz' }));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

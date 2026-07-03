@@ -25,6 +25,7 @@ import { CommentSidebar } from '../components/CommentSidebar.tsx';
 import { VersionSelector } from '../components/VersionSelector.tsx';
 import { EditableField } from '../components/EditableField.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
+import { ShareModal } from '../components/ShareModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { useTheme } from '../lib/useTheme.ts';
@@ -100,6 +101,7 @@ function DocumentPageInner() {
   const deleteDoc = useDeleteDocument(docId ?? '');
 
   const [showAddVersion, setShowAddVersion] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [actionsMenuState, setActionsMenuState] = useState<'closed' | 'menu' | 'confirm'>(
     'closed',
   );
@@ -527,6 +529,11 @@ function DocumentPageInner() {
               await editDoc.mutateAsync({ description: next });
             }}
           />
+          {!isUploader && docQuery.data?.document.visibility === 'private' && (
+            <span className="mt-1 inline-flex rounded-full border border-neutral-300 px-2 py-0.5 text-xs text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
+              Shared privately
+            </span>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {versions.length > 0 && (
@@ -550,6 +557,15 @@ function DocumentPageInner() {
               }`}
             >
               {pickMode ? 'Cancel' : 'Add Comment'}
+            </button>
+          )}
+          {isUploader && (
+            <button
+              type="button"
+              onClick={() => setShowShare(true)}
+              className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              Share
             </button>
           )}
           <div className="relative" ref={actionsMenuRef}>
@@ -780,6 +796,9 @@ function DocumentPageInner() {
         preselectedDocTitle={document.title}
         onClose={() => setShowAddVersion(false)}
       />
+      {showShare && docId && (
+        <ShareModal open docId={docId} onClose={() => setShowShare(false)} />
+      )}
     </div>
   );
 }
