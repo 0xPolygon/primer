@@ -55,11 +55,11 @@ export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
           </div>
         </div>
       </Link>
-      <div className="absolute right-2 top-1">
+      <div className="absolute right-2 top-0 flex h-9 items-center">
         {assignedFolder ? (
           <DocFolderChip doc={doc} folderName={assignedFolder.name} folders={folders} />
         ) : (
-          <DocKebabMenu doc={doc} folders={folders} />
+          <DocKebabMenu doc={doc} folders={folders} variant="solid" />
         )}
       </div>
     </div>
