@@ -26,6 +26,7 @@ import { registerTokenRoutes } from './routes/tokens.ts';
 import { registerCollaboratorRoutes } from './routes/collaborators.ts';
 import { registerFolderRoutes } from './routes/folders.ts';
 import { registerDocumentFolderRoutes } from './routes/documentFolder.ts';
+import { registerLibraryRoute } from './routes/library.ts';
 import { registerOAuthRoutes } from './auth/oauth/routes.ts';
 import { registerMcpRoute } from './mcp/routes.ts';
 import type { Storage } from '@primer/shared/storage';
@@ -88,6 +89,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerCommentRoutes(app, deps);
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
+  registerLibraryRoute(app);
   registerDashboardRoute(app);
   registerAdminRoute(app);
   registerVersionRoutes(app);
