@@ -155,4 +155,28 @@ describe('GET /api/library', () => {
       expect(body.documents.find((d) => d.id === upload.documentId)).toBeUndefined();
     });
   });
+
+  it('folders[].docCount excludes docs the caller can no longer read', async () => {
+    await withApp(async (app) => {
+      // user-1 uploads an org doc and assigns it to their own folder; flipping it private
+      // doesn't affect user-1 (still owner), so count should stay 1 for user-1.
+      const upload = await uploadFixture(app);
+      const folderId1 = await makeFolder(app, 'mock-user-1', 'Research');
+      await assignFolder(app, 'mock-user-1', upload.documentId, folderId1);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+
+      const body1 = (await (await app.request('/api/library', { headers: asUser('mock-user-1') })).json()) as LibraryResponse;
+      expect(body1.folders.find((x) => x.id === folderId1)?.docCount).toBe(1);
+
+      // user-2 uploads an org doc, assigns it to their own folder, then the doc is soft-deleted.
+      // user-2's folder should report count 0 (doc is gone, unreadable).
+      const up2 = await uploadFixture(app);
+      const folderId2 = await makeFolder(app, 'mock-user-2', 'Reading');
+      await assignFolder(app, 'mock-user-2', up2.documentId, folderId2);
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, up2.documentId));
+
+      const body2 = (await (await app.request('/api/library', { headers: asUser('mock-user-2') })).json()) as LibraryResponse;
+      expect(body2.folders.find((x) => x.id === folderId2)?.docCount).toBe(0);
+    });
+  });
 });

@@ -78,7 +78,10 @@ export function HomePage() {
   // 'Deleted' chip → reset folder highlight to All docs.
   useEffect(() => {
     if (chip === 'deleted' && folderId !== null) setFolderId(null);
-  }, [chip]);
+    // setFolderId is a local closure over params; we deliberately don't include it
+    // in the deps to avoid re-running when params change independently. The guard
+    // above keeps this a no-op after the first reset.
+  }, [chip, folderId]);
 
   const data = q.data;
 

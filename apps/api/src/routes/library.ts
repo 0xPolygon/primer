@@ -100,7 +100,22 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
     const folderRows = (await db.execute(sql`
       SELECT f.id,
              f.name,
-             COUNT(df.document_id)::int AS "docCount"
+             COUNT(df.document_id) FILTER (
+               WHERE df.document_id IS NOT NULL
+                 AND EXISTS (
+                   SELECT 1 FROM documents d
+                    WHERE d.id = df.document_id
+                      AND d.deleted_at IS NULL
+                      AND (
+                        d.visibility = 'org'
+                        OR d.uploader_id = ${userId}
+                        OR EXISTS (
+                          SELECT 1 FROM document_collaborators dc
+                           WHERE dc.document_id = d.id AND dc.user_id = ${userId}
+                        )
+                      )
+                 )
+             )::int AS "docCount"
         FROM folders f
    LEFT JOIN document_folders df ON df.folder_id = f.id AND df.user_id = ${userId}
        WHERE f.user_id = ${userId}
