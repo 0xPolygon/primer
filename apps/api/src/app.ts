@@ -24,6 +24,7 @@ import { registerUserRoutes } from './routes/users.ts';
 import { registerDeviceRoutes } from './routes/device.ts';
 import { registerTokenRoutes } from './routes/tokens.ts';
 import { registerCollaboratorRoutes } from './routes/collaborators.ts';
+import { registerFolderRoutes } from './routes/folders.ts';
 import { registerOAuthRoutes } from './auth/oauth/routes.ts';
 import { registerMcpRoute } from './mcp/routes.ts';
 import type { Storage } from '@primer/shared/storage';
@@ -84,6 +85,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerMermaidAssetRoute(app);
   registerThreadRoutes(app, deps);
   registerCommentRoutes(app, deps);
+  registerFolderRoutes(app);
   registerDashboardRoute(app);
   registerAdminRoute(app);
   registerVersionRoutes(app);
