@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Navigate, useParams, useNavigate } from 'react-router-dom';
+import { Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import type {
   AnchorData,
   InboundProtocolMessage,
@@ -41,6 +41,8 @@ import {
   computePillPosition,
   type PillPosition,
 } from '../lib/computePillPosition.ts';
+import { useLibraryQuery } from '../queries/library.ts';
+import { DocDetailFolderControl } from '../components/DocDetailFolderControl.tsx';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -129,6 +131,9 @@ function DocumentPageInner() {
   }, []);
 
   const me = useMe();
+  const libraryQ = useLibraryQuery();
+  const libDoc = libraryQ.data?.documents.find((d) => d.id === docId);
+  const currentFolder = libDoc?.folderId ? libraryQ.data?.folders.find((f) => f.id === libDoc.folderId) : null;
   const { effective: theme } = useTheme();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [sheetSnap, setSheetSnap] = useState<SnapPoint>('handle');
@@ -504,6 +509,14 @@ function DocumentPageInner() {
     <div className="flex flex-col h-[calc(100vh-60px)]">
       <header className="flex items-baseline justify-between gap-3 border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
         <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+          {currentFolder && (
+            <Link
+              to={`/?folder=${encodeURIComponent(currentFolder.id)}`}
+              className="mb-1 inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+            >
+              ← {currentFolder.name}
+            </Link>
+          )}
           <div className="flex items-center gap-2 min-w-0">
             {document.visibility === 'private' && (
               <PrivateLockIcon className="h-4 w-4 shrink-0 text-purple-600 dark:text-purple-400" />
@@ -537,6 +550,14 @@ function DocumentPageInner() {
           />
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {libDoc && (
+            <DocDetailFolderControl
+              docId={libDoc.id}
+              currentFolderId={libDoc.folderId}
+              currentFolderName={currentFolder?.name ?? null}
+              folders={libraryQ.data?.folders ?? []}
+            />
+          )}
           {versions.length > 0 && (
             <VersionSelector
               docId={docId!}
