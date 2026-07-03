@@ -13,6 +13,7 @@ interface MyDocRow {
   title: string;
   description: string | null;
   uploaderDisplayName: string;
+  visibility: 'org' | 'private';
   threadCount: number;
   activeThreadCount: number;
   lastActivityAt: string | Date;
@@ -57,6 +58,7 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
         d.id,
         d.title,
         d.description,
+        d.visibility,
         u.display_name AS "uploaderDisplayName",
         COUNT(DISTINCT vt.thread_id) FILTER (WHERE vt.thread_id IS NOT NULL)::int AS "threadCount",
         COUNT(DISTINCT vt.thread_id) FILTER (WHERE vt.thread_id IS NOT NULL AND vt.resolved_at IS NULL)::int AS "activeThreadCount",
@@ -70,7 +72,7 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
       LEFT JOIN version_threads vt ON vt.document_id = d.id
       LEFT JOIN version_comments vc ON vc.document_id = d.id
       WHERE d.uploader_id = ${userId} AND d.deleted_at IS NULL
-      GROUP BY d.id, d.title, d.description, u.display_name, d.created_at
+      GROUP BY d.id, d.title, d.description, d.visibility, u.display_name, d.created_at
       ORDER BY "lastActivityAt" DESC
     `)) as unknown as MyDocRow[];
 
@@ -107,6 +109,7 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
         d.id,
         d.title,
         d.description,
+        d.visibility,
         u.display_name AS "uploaderDisplayName",
         COUNT(DISTINCT t.id) FILTER (WHERE t.id IS NOT NULL)::int AS "threadCount",
         COUNT(DISTINCT t.id) FILTER (WHERE t.id IS NOT NULL AND t.resolved_at IS NULL)::int AS "activeThreadCount",
@@ -125,7 +128,7 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
           SELECT 1 FROM document_collaborators dc
           WHERE dc.document_id = d.id AND dc.user_id = ${userId}
         )
-      GROUP BY d.id, d.title, d.description, u.display_name, latest.signal_at, latest.signal
+      GROUP BY d.id, d.title, d.description, d.visibility, u.display_name, latest.signal_at, latest.signal
       ORDER BY latest.signal_at DESC
     `)) as unknown as ActivityRow[];
 
@@ -134,6 +137,7 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
       title: r.title,
       description: r.description,
       uploaderDisplayName: r.uploaderDisplayName,
+      visibility: r.visibility,
       threadCount: toInt(r.threadCount),
       activeThreadCount: toInt(r.activeThreadCount),
       lastActivityAt: toIso(r.lastActivityAt),
@@ -144,6 +148,7 @@ export function registerDashboardRoute(app: Hono<{ Variables: AppVariables }>): 
       title: r.title,
       description: r.description,
       uploaderDisplayName: r.uploaderDisplayName,
+      visibility: r.visibility,
       threadCount: toInt(r.threadCount),
       activeThreadCount: toInt(r.activeThreadCount),
       lastActivityAt: toIso(r.lastActivityAt),

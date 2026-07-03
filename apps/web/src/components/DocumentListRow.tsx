@@ -5,6 +5,7 @@ import type {
   DeletedDocumentEntry,
 } from '@primer/shared';
 import { useRestoreDocument } from '../queries/documents.ts';
+import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 
 function relativeTime(iso: string): string {
   const d = new Date(iso);
@@ -31,7 +32,12 @@ export function MyDocumentRow({ doc }: MyDocProps) {
       className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 px-1 py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800"
     >
       <div className="flex flex-col gap-0.5 min-w-0 flex-1 mr-3">
-        <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">{doc.title}</span>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-neutral-900 dark:text-neutral-100 min-w-0">
+          {doc.visibility === 'private' && (
+            <PrivateLockIcon className="h-3.5 w-3.5 shrink-0 text-purple-600 dark:text-purple-400" />
+          )}
+          <span className="truncate">{doc.title}</span>
+        </span>
         <span className="text-xs text-neutral-500 truncate">
           {doc.description ? doc.description : <em className="text-neutral-400 dark:text-neutral-500">no description</em>}
         </span>
@@ -66,7 +72,12 @@ export function ActivityRow({ entry }: ActivityProps) {
       className="flex items-center justify-between border-b border-neutral-100 dark:border-neutral-800 px-1 py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800"
     >
       <div className="flex flex-col gap-0.5 min-w-0 flex-1 mr-3">
-        <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">{entry.title}</span>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-neutral-900 dark:text-neutral-100 min-w-0">
+          {entry.visibility === 'private' && (
+            <PrivateLockIcon className="h-3.5 w-3.5 shrink-0 text-purple-600 dark:text-purple-400" />
+          )}
+          <span className="truncate">{entry.title}</span>
+        </span>
         <span className="text-xs text-neutral-500 truncate">
           by {entry.uploaderDisplayName} · {signalLabel}
         </span>

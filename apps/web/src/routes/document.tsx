@@ -24,6 +24,7 @@ import { ArtifactIframe } from '../components/ArtifactIframe.tsx';
 import { CommentSidebar } from '../components/CommentSidebar.tsx';
 import { VersionSelector } from '../components/VersionSelector.tsx';
 import { EditableField } from '../components/EditableField.tsx';
+import { PrivateLockIcon } from '../components/PrivateLockIcon.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { ShareModal } from '../components/ShareModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
@@ -502,21 +503,26 @@ function DocumentPageInner() {
   return (
     <div className="flex flex-col h-[calc(100vh-60px)]">
       <header className="flex items-baseline justify-between gap-3 border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
-        <div className="min-w-0 flex-1">
-          <EditableField
-            value={document.title}
-            placeholder="Add a title"
-            canEdit={isUploader}
-            displayClassName="text-xl font-semibold"
-            maxLength={200}
-            ariaLabel="Document title"
-            onSave={async (next) => {
-              if (next === null || next.trim().length === 0) {
-                throw new Error('Title cannot be empty');
-              }
-              await editDoc.mutateAsync({ title: next });
-            }}
-          />
+        <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+          <div className="flex items-center gap-2 min-w-0">
+            {document.visibility === 'private' && (
+              <PrivateLockIcon className="h-4 w-4 shrink-0 text-purple-600 dark:text-purple-400" />
+            )}
+            <EditableField
+              value={document.title}
+              placeholder="Add a title"
+              canEdit={isUploader}
+              displayClassName="text-xl font-semibold"
+              maxLength={200}
+              ariaLabel="Document title"
+              onSave={async (next) => {
+                if (next === null || next.trim().length === 0) {
+                  throw new Error('Title cannot be empty');
+                }
+                await editDoc.mutateAsync({ title: next });
+              }}
+            />
+          </div>
           <EditableField
             value={document.description}
             placeholder="Add a description"
@@ -529,11 +535,6 @@ function DocumentPageInner() {
               await editDoc.mutateAsync({ description: next });
             }}
           />
-          {!isUploader && docQuery.data?.document.visibility === 'private' && (
-            <span className="mt-1 inline-flex rounded-full border border-neutral-300 px-2 py-0.5 text-xs text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
-              Shared privately
-            </span>
-          )}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {versions.length > 0 && (

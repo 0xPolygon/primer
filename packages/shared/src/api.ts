@@ -104,6 +104,7 @@ export interface DashboardDocumentSummary {
   title: string;
   description: string | null;
   uploaderDisplayName: string;
+  visibility: 'org' | 'private';
   threadCount: number;
   activeThreadCount: number;
   lastActivityAt: string;
