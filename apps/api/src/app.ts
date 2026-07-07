@@ -24,6 +24,7 @@ import { registerUserRoutes } from './routes/users.ts';
 import { registerDeviceRoutes } from './routes/device.ts';
 import { registerTokenRoutes } from './routes/tokens.ts';
 import { registerCollaboratorRoutes } from './routes/collaborators.ts';
+import { registerExternalShareAdminRoutes } from './routes/externalShareAdmin.ts';
 import { registerFolderRoutes } from './routes/folders.ts';
 import { registerDocumentFolderRoutes } from './routes/documentFolder.ts';
 import { registerLibraryRoute } from './routes/library.ts';
@@ -82,6 +83,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerUploadRoute(app, deps);
   registerDocumentRoutes(app, deps);
   registerCollaboratorRoutes(app, deps);
+  registerExternalShareAdminRoutes(app, deps);
   registerVersionContentRoute(app, deps);
   registerExternalShareRoutes(app, deps);
   registerCompanionRoute(app);

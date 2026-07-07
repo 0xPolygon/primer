@@ -310,3 +310,39 @@ export interface LibraryResponse {
   documents: LibraryDocument[];
   recentlyDeleted: DeletedDocumentEntry[];
 }
+
+export interface ExternalRecipientDto {
+  id: string;
+  email: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  firstViewedAt: string | null;
+  viewCount: number;
+  lastViewedAt: string | null;
+}
+
+export interface ExternalShareDto {
+  id: string;
+  shareToken: string;
+  publishedVersionId: string | null;
+  publishedVersionNumber: number | null;
+  createdAt: string;
+}
+
+export interface ExternalShareResponse {
+  share: ExternalShareDto | null;
+  recipients: ExternalRecipientDto[];
+  /** False when the server has no working email transport (NoopNotifier in
+   *  production) — the sharer UI must warn that external sharing is unusable. */
+  emailEnabled: boolean;
+}
+
+export interface AddExternalRecipientRequest {
+  email: string;
+  expiresInDays?: number; // default 90, max 365
+}
+
+export interface PublishExternalShareRequest {
+  versionId: string;
+}
