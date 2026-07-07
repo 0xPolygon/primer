@@ -42,6 +42,7 @@ export async function lookupViewerSession(
            sh.id                   AS "shareId",
            sh.document_id          AS "documentId",
            sh.published_version_id AS "publishedVersionId",
+           d.id                    AS "docId",
            d.title                 AS "title"
     FROM external_viewer_sessions s
     INNER JOIN external_recipients r ON r.id = s.recipient_id
@@ -64,6 +65,7 @@ export async function lookupViewerSession(
     shareId: string;
     documentId: string;
     publishedVersionId: string | null;
+    docId: string;
     title: string;
   }>;
   if (!row) return null;
@@ -81,7 +83,7 @@ export async function lookupViewerSession(
       addedBy: row.addedBy,
     },
     share: { id: row.shareId, documentId: row.documentId, publishedVersionId: row.publishedVersionId },
-    document: { id: row.documentId, title: row.title },
+    document: { id: row.docId, title: row.title },
   };
 }
 
