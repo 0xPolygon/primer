@@ -10,15 +10,17 @@ export const OTP_MAX_ATTEMPTS = 5;
 /** One live code per recipient: issuing consumes any outstanding code. */
 export async function issueOtp(recipientId: string): Promise<{ code: string }> {
   const code = generateOtpCode();
-  await db
-    .update(externalOtps)
-    .set({ consumedAt: new Date() })
-    .where(and(eq(externalOtps.recipientId, recipientId), isNull(externalOtps.consumedAt)));
-  await db.insert(externalOtps).values({
-    id: uuidv7(),
-    recipientId,
-    codeHash: hashOtpCode(code),
-    expiresAt: new Date(Date.now() + OTP_TTL_MS),
+  await db.transaction(async (tx) => {
+    await tx
+      .update(externalOtps)
+      .set({ consumedAt: new Date() })
+      .where(and(eq(externalOtps.recipientId, recipientId), isNull(externalOtps.consumedAt)));
+    await tx.insert(externalOtps).values({
+      id: uuidv7(),
+      recipientId,
+      codeHash: hashOtpCode(code),
+      expiresAt: new Date(Date.now() + OTP_TTL_MS),
+    });
   });
   return { code };
 }
@@ -26,7 +28,9 @@ export async function issueOtp(recipientId: string): Promise<{ code: string }> {
 /**
  * Charge an attempt atomically BEFORE comparing, so concurrent guesses can
  * never exceed OTP_MAX_ATTEMPTS — the UPDATE's attempt_count guard is the
- * source of truth, not application logic.
+ * source of truth, not application logic. A successful verification also
+ * consumes one attempt slot; the correct guess itself counts toward the
+ * attempt limit, preserving the "at most 5 guesses total per code" guarantee.
  */
 export async function verifyOtp(recipientId: string, code: string): Promise<boolean> {
   const rows = (await db.execute(sql`
