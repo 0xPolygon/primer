@@ -43,6 +43,7 @@ import {
 } from '../lib/computePillPosition.ts';
 import { useLibraryQuery } from '../queries/library.ts';
 import { DocDetailFolderControl } from '../components/DocDetailFolderControl.tsx';
+import { relativeTime } from '../lib/relativeTime.ts';
 
 interface PendingSelection {
   anchor: TextRangeAnchor;
@@ -550,59 +551,52 @@ function DocumentPageInner() {
           />
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {libDoc && (
-            <DocDetailFolderControl
-              docId={libDoc.id}
-              currentFolderId={libDoc.folderId}
-              currentFolderName={currentFolder?.name ?? null}
-              folders={libraryQ.data?.folders ?? []}
-            />
-          )}
-          {versions.length > 0 && (
-            <VersionSelector
-              docId={docId!}
-              versions={versions}
-              currentVersionNumber={currentVersionNumber}
-              isViewingLatest={isViewingLatest}
-              onAddVersion={
-                isUploader && !readMostly ? () => setShowAddVersion(true) : undefined
-              }
-            />
-          )}
-          {!readMostly && (
-            <button
-              onClick={togglePickMode}
-              className={`hidden md:inline-flex h-7 items-center rounded px-3 text-sm ${
-                pickMode
-                  ? 'bg-red-600 text-white'
-                  : 'border border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
-              }`}
-            >
-              {pickMode ? 'Cancel' : 'Add Comment'}
-            </button>
-          )}
-          {isUploader && (
-            <button
-              type="button"
-              onClick={() => setShowShare(true)}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
-            >
-              Share
-            </button>
-          )}
-          <div className="relative" ref={actionsMenuRef}>
-            <button
-              type="button"
-              onClick={() =>
-                setActionsMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))
-              }
-              aria-label="More actions"
-              aria-haspopup="menu"
-              aria-expanded={actionsMenuState !== 'closed'}
-              className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-            >
-              ⋯
-            </button>
+          <div className="flex items-center gap-1.5">
+            {libDoc && (
+              <DocDetailFolderControl
+                docId={libDoc.id}
+                currentFolderId={libDoc.folderId}
+                currentFolderName={currentFolder?.name ?? null}
+                folders={libraryQ.data?.folders ?? []}
+              />
+            )}
+            {versions.length > 0 && (
+              <VersionSelector
+                docId={docId!}
+                versions={versions}
+                currentVersionNumber={currentVersionNumber}
+                isViewingLatest={isViewingLatest}
+                onAddVersion={
+                  isUploader && !readMostly ? () => setShowAddVersion(true) : undefined
+                }
+              />
+            )}
+            {isUploader && (
+              <button
+                type="button"
+                onClick={() => setShowShare(true)}
+                className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                Share
+              </button>
+            )}
+            <div className="relative" ref={actionsMenuRef}>
+              <button
+                type="button"
+                onClick={() =>
+                  setActionsMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))
+                }
+                aria-label="More actions"
+                aria-haspopup="menu"
+                aria-expanded={actionsMenuState !== 'closed'}
+                className="inline-flex h-7 items-center justify-center rounded border border-neutral-300 bg-white px-2 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="5" cy="12" r="1.6" />
+                  <circle cx="12" cy="12" r="1.6" />
+                  <circle cx="19" cy="12" r="1.6" />
+                </svg>
+              </button>
             {actionsMenuState === 'menu' && (
               <div
                 role="menu"
@@ -695,10 +689,34 @@ function DocumentPageInner() {
                 {copyFeedback.message}
               </div>
             )}
+            </div>
           </div>
-          <div className="hidden md:block text-sm text-neutral-500">
-            {document.uploaderDisplayName} ·{' '}
-            {new Date(document.createdAt).toLocaleString()}
+          {!readMostly && (
+            <button
+              type="button"
+              onClick={togglePickMode}
+              className={`hidden h-7 items-center rounded px-3 text-xs font-medium md:inline-flex ${
+                pickMode
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200'
+              }`}
+            >
+              {pickMode ? 'Cancel' : '+ Add Comment'}
+            </button>
+          )}
+          <div className="hidden items-center gap-3 md:flex">
+            <div className="h-4 w-px bg-neutral-200 dark:bg-neutral-800" aria-hidden="true" />
+            <div className="flex h-7 flex-col justify-center text-right leading-tight">
+              <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                {document.uploaderDisplayName}
+              </span>
+              <span
+                className="text-[10px] text-neutral-500"
+                title={new Date(document.createdAt).toLocaleString()}
+              >
+                {relativeTime(document.createdAt)}
+              </span>
+            </div>
           </div>
         </div>
       </header>
