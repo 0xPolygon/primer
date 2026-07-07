@@ -10,6 +10,7 @@ import { mockResolver, type UserResolver } from './auth/resolver.ts';
 import { registerUploadRoute } from './routes/upload.ts';
 import { registerDocumentRoutes } from './routes/documents.ts';
 import { registerVersionContentRoute } from './routes/versionContent.ts';
+import { registerExternalShareRoutes } from './routes/externalShare.ts';
 import { registerCompanionRoute } from './routes/companion.ts';
 import { registerMermaidAssetRoute } from './routes/mermaidAsset.ts';
 import { registerDevFixtureRoute } from './routes/devFixture.ts';
@@ -82,6 +83,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerDocumentRoutes(app, deps);
   registerCollaboratorRoutes(app, deps);
   registerVersionContentRoute(app, deps);
+  registerExternalShareRoutes(app, deps);
   registerCompanionRoute(app);
   registerMermaidAssetRoute(app);
   registerThreadRoutes(app, deps);

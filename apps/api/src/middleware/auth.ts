@@ -35,6 +35,14 @@ function isPublicWellKnown(path: string): boolean {
   return path.startsWith('/.well-known/oauth-');
 }
 
+// External share plane: the /share/:token SPA page and its /api/share/*
+// endpoints authenticate viewers with their own OTP + primer_ext_sid cookie
+// (see apps/api/src/external/), never the internal session. They must be
+// reachable without an Okta session.
+function isExternalSharePath(path: string): boolean {
+  return path.startsWith('/share/') || path.startsWith('/api/share/');
+}
+
 export interface AuthMiddlewareOptions {
   /**
    * OAuth issuer URL. When set, unauthenticated requests to /mcp will
@@ -50,7 +58,7 @@ export function authMiddleware(
 ): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (c, next) => {
     const path = c.req.path;
-    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path) || isPublicWellKnown(path)) return next();
+    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path) || isPublicWellKnown(path) || isExternalSharePath(path)) return next();
 
     const user = await resolver(c);
     if (user) {
