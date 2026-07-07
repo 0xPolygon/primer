@@ -22,7 +22,13 @@ allowBuilds:
 # (dev-server CSRF). The CVE only affects esbuild's dev server, which we never
 # start — drizzle-kit only invokes esbuild as a CLI bundler. Force the
 # transitive copy to a patched version to clear the audit noise.
+#
+# Transitive override: jsdom (test DOM env, dev-only) pulls undici <7.28.0,
+# affected by several advisories (TLS bypass, WS DoS, SOCKS5 routing,
+# Set-Cookie injection, cache disclosure). undici is never in the production
+# path. Pin to the patched 7.28 line; kept on ^7 to stay compatible with jsdom.
 overrides:
   esbuild: '^0.25.0'
+  undici: '^7.28.0'
 strictPeerDependencies: true
 engineStrict: true

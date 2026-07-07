@@ -22,7 +22,7 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "gray-matter": "^4.0.3",
-    "hono": "^4.12.21",
+    "hono": "^4.12.25",
     "markdown-it": "^14.2.0",
     "markdown-it-task-lists": "^2.1.1",
     "openid-client": "^6.8.4",
