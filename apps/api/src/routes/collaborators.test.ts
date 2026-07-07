@@ -15,10 +15,13 @@ import { asUser, asUserJson } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
 
 class SpyNotifier implements Notifier {
+  readonly emailEnabled = false;
   collabCalls: NotifyCollaboratorAddedArgs[] = [];
   commentCalls: NotifyCommentArgs[] = [];
   async notifyComment(args: NotifyCommentArgs): Promise<void> { this.commentCalls.push(args); }
   async notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void> { this.collabCalls.push(args); }
+  async notifyExternalOtp() {}
+  async notifyExternalFirstView() {}
 }
 
 async function withMultiUserApp<T>(
