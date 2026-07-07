@@ -9,6 +9,7 @@ import { generateShareToken } from './tokens.ts';
 import {
   createViewerSession, lookupViewerSession,
   deleteSessionsForRecipient, deleteSessionsForShare,
+  VIEWER_SESSION_TTL_MS,
 } from './session.ts';
 
 interface Chain { docId: string; shareId: string; shareToken: string; recipientId: string }
@@ -28,6 +29,10 @@ async function createChain(): Promise<Chain> {
 }
 
 describe('external viewer sessions', () => {
+  it('VIEWER_SESSION_TTL_MS is pinned to 30 days', () => {
+    expect(VIEWER_SESSION_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+
   it('creates and looks up a session through the full join chain', async () => {
     const ch = await createChain();
     const s = await createViewerSession(ch.recipientId, 'vitest');

@@ -16,6 +16,9 @@ import { logger } from '../logger.ts';
 
 const GENERIC_OK = { ok: true } as const;
 
+// IP-keyed limits are best-effort: behind a proxy the leftmost x-forwarded-for
+// header is client-controlled and therefore spoofable. Per-email and per-share
+// keys (plus the DB attempt cap in verifyOtp) are the real backstops.
 function clientIp(c: Context<{ Variables: AppVariables }>): string {
   return c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
 }
@@ -104,10 +107,15 @@ export function registerExternalShareRoutes(
     const email = typeof body?.email === 'string' ? body.email.trim() : '';
     const code = typeof body?.code === 'string' ? body.code.trim() : '';
     if (!email || !/^\d{6}$/.test(code)) return c.json({ error: 'invalid_code' }, 400);
-    if (!checkRateLimit(`ext-otp-verify:ip:${clientIp(c)}`, 20)) {
+    const shareToken = c.req.param('shareToken');
+    if (
+      !checkRateLimit(`ext-otp-verify:ip:${clientIp(c)}`, 20) ||
+      !checkRateLimit(`ext-otp-verify:email:${email.toLowerCase()}`, 10) ||
+      !checkRateLimit(`ext-otp-verify:share:${shareToken}`, 60)
+    ) {
       return c.json({ error: 'rate_limited' }, 429);
     }
-    const recipient = await findActiveRecipient(c.req.param('shareToken'), email);
+    const recipient = await findActiveRecipient(shareToken, email);
     // Unknown email and wrong code are indistinguishable by design.
     if (!recipient) return c.json({ error: 'invalid_code' }, 400);
     const ok = await verifyOtp(recipient.recipientId, code);

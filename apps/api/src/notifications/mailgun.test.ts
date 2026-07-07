@@ -378,6 +378,7 @@ describe('MailgunNotifier external emails', () => {
     expect(body.get('subject')).not.toContain('123456');
     expect(body.get('text')).toContain('123456');
     expect(body.get('text')).not.toContain('http');   // no clickable auth links
+    expect(body.get('html')).not.toContain('http');   // no clickable auth links in HTML either
     expect(body.get('text')).not.toContain('Deck');   // never the doc title pre-verification
   });
 

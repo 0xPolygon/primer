@@ -119,6 +119,29 @@ describe('external share public routes', () => {
     } finally { await rm(f.root, { recursive: true, force: true }); }
   });
 
+  it('verify rate-limits repeated attempts for the same email', async () => {
+    const f = await fixture();
+    try {
+      // Request a code so the OTP exists (subsequent verifies use wrong code,
+      // which still count against the per-email rate limit).
+      await requestCode(f, 'client@example.com');
+      const attemptVerify = () =>
+        f.app.request(`/api/share/${f.shareToken}/verify`, {
+          method: 'POST', headers: JSON_HEADERS,
+          body: JSON.stringify({ email: 'client@example.com', code: '000000' }),
+        });
+      // 10 attempts should all be non-429 (400 wrong-code)
+      for (let i = 0; i < 10; i++) {
+        const res = await attemptVerify();
+        expect(res.status).toBe(400);
+      }
+      // 11th attempt should be rate-limited
+      const res = await attemptVerify();
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({ error: 'rate_limited' });
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
   it('verify returns the identical error for unknown email vs wrong code', async () => {
     const f = await fixture();
     try {
