@@ -82,7 +82,7 @@ export function registerDocumentRoutes(
         uploaderDisplayName: doc.uploaderDisplayName,
         visibility: doc.visibility as 'org' | 'private',
         createdAt: doc.createdAt.toISOString(),
-        externallyShared: ext?.externallyShared ?? false,
+        externallyShared: Boolean(ext?.externallyShared),
       } satisfies DocumentDetail,
       latestVersion: {
         id: v.id,
