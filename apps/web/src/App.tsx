@@ -10,8 +10,10 @@ import { TokenSettingsPage } from './routes/settings-tokens.tsx';
 import { NotFoundPage } from './routes/notFound.tsx';
 import CompareSelectPage from './routes/compareSelect.tsx';
 import ComparePage from './routes/compare.tsx';
+import { SharePage } from './routes/share.tsx';
 
 const router = createBrowserRouter([
+  { path: '/share/:shareToken', element: <SharePage /> },
   {
     element: <AppShell />,
     children: [
