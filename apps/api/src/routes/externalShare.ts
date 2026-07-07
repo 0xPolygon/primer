@@ -117,7 +117,12 @@ export function registerExternalShareRoutes(
       recipient.recipientId,
       c.req.header('user-agent') ?? null,
     );
-    const secure = new URL(c.req.url).protocol === 'https:';
+    // Secure flag: prefer explicit COOKIE_SECURE, else derive from AUTH_BASE_URL.
+    // Request URL cannot be used: production runs plain HTTP behind Railway's TLS
+    // proxy, so c.req.url will always show http:// even on an HTTPS deploy.
+    const secure =
+      process.env.COOKIE_SECURE === 'true' ||
+      (process.env.AUTH_BASE_URL ?? '').startsWith('https://');
     c.header(
       'set-cookie',
       serializeCookie(VIEWER_COOKIE_NAME, session.id, {

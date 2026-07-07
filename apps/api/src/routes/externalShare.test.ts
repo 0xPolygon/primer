@@ -10,7 +10,7 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier, type NotifyExternalOtpArgs, type NotifyExternalFirstViewArgs } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
 import {
-  versions as versionsTable, externalShares, externalRecipients, externalViews,
+  externalShares, externalRecipients, externalViews,
 } from '@primer/shared/schema';
 import { generateShareToken } from '../external/tokens.ts';
 import { _resetRateLimiterForTests } from '../lib/rateLimiter.ts';
@@ -145,6 +145,9 @@ describe('external share public routes', () => {
       const content = await f.app.request(`/api/share/${f.shareToken}/content`, { headers: { cookie } });
       expect(content.status).toBe(200);
       expect(content.headers.get('content-security-policy')).toBe(ARTIFACT_CSP);
+      expect(content.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+      expect(content.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(content.headers.get('referrer-policy')).toBe('no-referrer');
       expect(content.headers.get('x-robots-tag')).toBe('noindex');
       expect(content.headers.get('cache-control')).toBe('private, no-store');
       expect(await content.text()).toContain('<h1>External Deck</h1>');
@@ -211,5 +214,53 @@ describe('external share public routes', () => {
       const res = await f.app.request(`/api/share/${f.shareToken}/session`);
       expect(res.status).toBe(200);
     } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it('verify sets Secure flag on cookie when AUTH_BASE_URL is https', async () => {
+    const prev = process.env.AUTH_BASE_URL;
+    process.env.AUTH_BASE_URL = 'https://primer.example.com';
+    const f = await fixture();
+    try {
+      await requestCode(f, 'client@example.com');
+      const code = f.notifier.otps.at(-1)!.code;
+      const res = await f.app.request(`/api/share/${f.shareToken}/verify`, {
+        method: 'POST', headers: JSON_HEADERS,
+        body: JSON.stringify({ email: 'client@example.com', code }),
+      });
+      expect(res.status).toBe(200);
+      const setCookie = res.headers.get('set-cookie')!;
+      expect(setCookie.toLowerCase()).toContain('secure');
+    } finally {
+      if (prev === undefined) delete process.env.AUTH_BASE_URL;
+      else process.env.AUTH_BASE_URL = prev;
+      await rm(f.root, { recursive: true, force: true });
+    }
+  });
+
+  it('verify omits Secure flag on cookie when AUTH_BASE_URL is http', async () => {
+    const prev = process.env.AUTH_BASE_URL;
+    const prevSecure = process.env.COOKIE_SECURE;
+    process.env.AUTH_BASE_URL = 'http://primer.example.com';
+    delete process.env.COOKIE_SECURE;
+    const f = await fixture();
+    try {
+      await requestCode(f, 'client@example.com');
+      const code = f.notifier.otps.at(-1)!.code;
+      const res = await f.app.request(`/api/share/${f.shareToken}/verify`, {
+        method: 'POST', headers: JSON_HEADERS,
+        body: JSON.stringify({ email: 'client@example.com', code }),
+      });
+      expect(res.status).toBe(200);
+      const setCookie = res.headers.get('set-cookie')!;
+      // Split on ';' and check no standalone 'secure' attribute is present
+      const attrs = setCookie.split(';').map((s) => s.trim().toLowerCase());
+      expect(attrs).not.toContain('secure');
+    } finally {
+      if (prev === undefined) delete process.env.AUTH_BASE_URL;
+      else process.env.AUTH_BASE_URL = prev;
+      if (prevSecure === undefined) delete process.env.COOKIE_SECURE;
+      else process.env.COOKIE_SECURE = prevSecure;
+      await rm(f.root, { recursive: true, force: true });
+    }
   });
 });
