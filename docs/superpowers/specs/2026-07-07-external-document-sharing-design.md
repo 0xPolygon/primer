@@ -169,13 +169,17 @@ in signed tokens that could outlive a revocation.
    constant-time hash comparison. Failure increments `attemptCount` and
    returns a generic error. Success: mark consumed, create viewer session,
    set `primer_ext_sid`, client proceeds to the viewer.
-4. **View** — the viewer page renders the published version full screen
-   (reusing the existing full-screen mode presentation): no comment bezel, no
-   buttons, no internal chrome. Content loads from
-   `GET /api/share/:shareToken/content`, which validates the session chain
-   and serves only `publishedVersionId` through the same strict-CSP,
-   sandboxed-iframe pipeline as `apps/api/src/routes/versionContent.ts`.
-   Each content load writes an `external_views` row.
+4. **View** — after verification the client navigates to
+   `GET /api/share/:shareToken/content`, which serves the published version's
+   HTML as a **top-level document** — identical delivery to the internal
+   full-screen mode (`document.tsx` opens `/api/versions/:id/content`
+   directly). A sandboxed iframe cannot be used here: sandboxed-iframe
+   subresource requests are cross-site and strip the SameSite=Lax viewer
+   cookie (see `apps/api/src/middleware/auth.ts`). The same strict
+   `ARTIFACT_CSP` applies (`connect-src 'none'`, `form-action 'none'`), the
+   cookie is HttpOnly, and unauthenticated/unpublished requests 302 back to
+   the branded landing page. Each successful load writes an `external_views`
+   row.
 
 All `/share` responses carry `X-Robots-Tag: noindex`.
 
