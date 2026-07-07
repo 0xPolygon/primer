@@ -9,10 +9,11 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { documents, documentViews, versions, users, documentCollaborators } from '@primer/shared/schema';
+import { documents, documentViews, versions, users, documentCollaborators, externalShares } from '@primer/shared/schema';
 import type { DocumentDetailResponse, UploadResponse } from '@primer/shared/api';
 import type { DocumentPatchRequest } from '@primer/shared';
 import { CSRF_HEADERS, asUser, asUserJson } from '../test/harness.ts';
+import { generateShareToken } from '../external/tokens.ts';
 
 async function uploadFixture(app: ReturnType<typeof createApp>): Promise<UploadResponse> {
   const fd = new FormData();
@@ -839,6 +840,24 @@ describe('PATCH /api/documents/:docId visibility', () => {
       });
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toBe('invalid_body');
+    });
+  });
+});
+
+describe('GET /api/documents/:docId — externallyShared flag', () => {
+  it('reports externallyShared on the document payload', async () => {
+    await withMultiUserApp(async (app) => {
+      const { documentId } = await uploadFixture(app);
+
+      const before = await app.request(`/api/documents/${documentId}`, { headers: asUser('mock-user-1') });
+      expect(((await before.json()) as { document: { externallyShared: boolean } }).document.externallyShared).toBe(false);
+
+      await db.insert(externalShares).values({
+        id: uuidv7(), documentId, shareToken: generateShareToken(), createdBy: 'mock-user-1',
+      });
+
+      const after = await app.request(`/api/documents/${documentId}`, { headers: asUser('mock-user-1') });
+      expect(((await after.json()) as { document: { externallyShared: boolean } }).document.externallyShared).toBe(true);
     });
   });
 });

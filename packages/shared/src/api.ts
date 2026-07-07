@@ -45,8 +45,12 @@ export interface VersionSummary {
   createdAt: string;          // ISO timestamp
 }
 
+export interface DocumentDetail extends DocumentSummary {
+  externallyShared: boolean;
+}
+
 export interface DocumentDetailResponse {
-  document: DocumentSummary;
+  document: DocumentDetail;
   latestVersion: VersionSummary;
 }
 
