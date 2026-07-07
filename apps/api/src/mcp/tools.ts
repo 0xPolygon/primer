@@ -8,6 +8,7 @@ import { documents, versions, threads, comments, users } from '@primer/shared/sc
 import { markdownToHtml } from '../upload/markdown.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
+import { logger } from '../logger.ts';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary } from '@primer/shared/api';
 import { isTextRangeAnchor, isElementPathAnchor } from '@primer/shared';
 import {
@@ -184,6 +185,18 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
 
       const doc = docRows[0];
       const v = versionRows[0];
+
+      // Record the view so this doc enters the caller's accessed library,
+      // mirroring GET /api/documents/:docId in routes/documents.ts.
+      try {
+        await db.execute(sql`
+          INSERT INTO document_views (user_id, document_id)
+          VALUES (${user.id}, ${documentId})
+          ON CONFLICT (user_id, document_id) DO UPDATE SET viewed_at = excluded.viewed_at
+        `);
+      } catch (viewErr) {
+        logger.warn({ err: viewErr, docId: documentId, userId: user.id }, 'failed to upsert document_views (mcp)');
+      }
 
       return ok({
         document: {
@@ -573,8 +586,10 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
 
     primer_list_documents: async (args, user) => {
       // List (non-deleted) documents, newest first, keyset-paginated.
-      // scope 'all' (default) is the share-by-URL model — any authenticated user
-      // can list every document. scope 'mine' restricts to the caller's uploads.
+      // scope 'all' (default) returns the caller's accessed library — docs they
+      // created, collaborate on, or org docs they've opened. Org docs the caller
+      // never opened are excluded (reachable only by direct URL). scope 'mine'
+      // further restricts to the caller's own uploads.
       // Cursor is the last document id from the previous page (uuidv7 is
       // time-sortable, so ordering by (createdAt DESC, id DESC) is stable).
       const limit = parseLimit(args.limit);
@@ -598,9 +613,10 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const keysetPredicate = cursorCreatedAt
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
-      // canRead filter: private docs the caller neither owns nor collaborates
-      // on are excluded. Mirrors the dashboard "Recently viewed" predicate.
-      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}))`;
+      // Library scope: docs the caller has accessed — created, collaborates on,
+      // or an org doc they've opened (has a document_views row). Org docs the
+      // caller never opened are excluded, mirroring the dashboard library.
+      const accessedPredicate = sql`(${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}) OR (${documents.visibility} = 'org' AND EXISTS (SELECT 1 FROM document_views dv WHERE dv.document_id = ${documents.id} AND dv.user_id = ${user.id})))`;
 
       const rows = await db
         .select({
@@ -614,7 +630,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
-        .where(and(sql`${documents.deletedAt} IS NULL`, canReadPredicate, scopePredicate, keysetPredicate))
+        .where(and(sql`${documents.deletedAt} IS NULL`, accessedPredicate, scopePredicate, keysetPredicate))
         .orderBy(desc(documents.createdAt), desc(documents.id))
         .limit(limit + 1);
 
@@ -1046,7 +1062,7 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_list_documents: {
     description:
-      "List Primer documents (newest first), paginated. scope controls whose documents are returned: 'all' (default) lists every document (Primer's share-by-URL model), 'mine' lists only documents uploaded by the current user. ASK THE USER whether they want their own documents or all documents before choosing scope. Pass an optional limit (1-100, default 25) and a cursor from a previous page's nextCursor to fetch the next page. Returns { scope, documents, nextCursor, hasMore }.",
+      "List Primer documents (newest first), paginated. scope controls which documents are returned: 'all' (default) lists the caller's accessed library — documents they created, collaborate on, or org documents they've opened; org documents the caller has never opened are excluded (reachable only by direct URL). 'mine' lists only documents uploaded by the current user. ASK THE USER whether they want their own documents or their whole library before choosing scope. Pass an optional limit (1-100, default 25) and a cursor from a previous page's nextCursor to fetch the next page. Returns { scope, documents, nextCursor, hasMore }.",
     inputSchema: {
       scope: z.enum(['all', 'mine']).optional(),
       limit: z.number().int().positive().max(MAX_PAGE_LIMIT).optional(),

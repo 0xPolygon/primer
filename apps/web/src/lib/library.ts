@@ -32,11 +32,16 @@ function matchesFolder(d: LibraryDocument, folderId: string | null): boolean {
 function matchesChip(d: LibraryDocument, chip: Chip): boolean {
   switch (chip) {
     case 'all':
+      // The API already scopes the feed to the caller's accessed library
+      // (created, collaborator, or org docs they've opened), so 'all' shows
+      // everything returned.
       return true;
     case 'mine':
-      return d.ownership === 'mine';
+      // Docs the caller created or is an explicit collaborator on.
+      return d.ownership === 'mine' || d.ownership === 'collaborator';
     case 'shared':
-      return d.ownership === 'org' || d.ownership === 'collaborator';
+      // Org docs shared with the caller via link (opened, not owned/collab).
+      return d.ownership === 'org';
     case 'deleted':
       // 'deleted' chip is handled by swapping data source in the page,
       // not by filtering LibraryDocument[]. This branch should never run
