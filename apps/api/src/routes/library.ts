@@ -44,7 +44,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
   app.get('/api/library', async (c) => {
     const userId = c.get('user').id;
 
-    // Docs the caller can read: own OR org OR collaborator.
+    // Docs in the caller's library: own OR collaborator OR org-doc-they've-opened.
     const docRows = (await db.execute(sql`
       WITH version_threads AS (
         SELECT v.document_id, t.id AS thread_id, t.resolved_at,
@@ -88,10 +88,16 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
       LEFT JOIN version_comments vc   ON vc.document_id = d.id
       WHERE d.deleted_at IS NULL
         AND (
-          d.visibility = 'org'
-          OR d.uploader_id = ${userId}
+          -- Docs the caller has actually accessed: created, collaborates on,
+          -- or an org doc they've opened (has a document_views row). Org docs
+          -- the caller never opened are NOT in the library — reachable only by
+          -- direct URL, per the PRD's "no global feed" rule.
+          d.uploader_id = ${userId}
           OR EXISTS (SELECT 1 FROM document_collaborators dc
                        WHERE dc.document_id = d.id AND dc.user_id = ${userId})
+          OR (d.visibility = 'org' AND EXISTS (
+                SELECT 1 FROM document_views dv
+                 WHERE dv.document_id = d.id AND dv.user_id = ${userId}))
         )
       GROUP BY d.id, d.title, d.description, d.uploader_id, d.visibility, u.display_name, d.created_at, df.folder_id
       ORDER BY "lastActivityAt" DESC
@@ -107,12 +113,15 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
                     WHERE d.id = df.document_id
                       AND d.deleted_at IS NULL
                       AND (
-                        d.visibility = 'org'
-                        OR d.uploader_id = ${userId}
+                        d.uploader_id = ${userId}
                         OR EXISTS (
                           SELECT 1 FROM document_collaborators dc
                            WHERE dc.document_id = d.id AND dc.user_id = ${userId}
                         )
+                        OR (d.visibility = 'org' AND EXISTS (
+                          SELECT 1 FROM document_views dv
+                           WHERE dv.document_id = d.id AND dv.user_id = ${userId}
+                        ))
                       )
                  )
              )::int AS "docCount"

@@ -39,16 +39,16 @@ describe('filterAndSort', () => {
     expect(out.map((d) => d.id)).toEqual(['a']);
   });
 
-  it('chip=mine keeps ownership==="mine"', () => {
+  it('chip=mine keeps ownership mine OR collaborator', () => {
     const docs = [doc({ id: 'a', ownership: 'mine' }), doc({ id: 'b', ownership: 'org' }), doc({ id: 'c', ownership: 'collaborator' })];
     const out = filterAndSort(docs, { folderId: null, chip: 'mine', q: '', sortKey: 'activity' });
-    expect(out.map((d) => d.id)).toEqual(['a']);
+    expect(out.map((d) => d.id).sort()).toEqual(['a', 'c']);
   });
 
-  it('chip=shared keeps ownership org OR collaborator', () => {
+  it('chip=shared keeps only ownership===org (docs opened via link)', () => {
     const docs = [doc({ id: 'a', ownership: 'mine' }), doc({ id: 'b', ownership: 'org' }), doc({ id: 'c', ownership: 'collaborator' })];
     const out = filterAndSort(docs, { folderId: null, chip: 'shared', q: '', sortKey: 'activity' });
-    expect(out.map((d) => d.id).sort()).toEqual(['b', 'c']);
+    expect(out.map((d) => d.id)).toEqual(['b']);
   });
 
   it('q matches title case-insensitively', () => {

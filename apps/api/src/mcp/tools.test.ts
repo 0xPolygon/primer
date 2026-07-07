@@ -459,7 +459,7 @@ describe('primer_list_documents', () => {
     });
   });
 
-  it("scope 'mine' returns only the caller's own documents; 'all' returns everyone's", async () => {
+  it("scope 'all' is the caller's accessed library: own uploads + org docs they've opened, not everyone's", async () => {
     await seedUser('tools-owner');
     await seedUser('tools-other');
     const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
@@ -473,10 +473,16 @@ describe('primer_list_documents', () => {
       const mineId = JSON.parse(mine.content[0].text).documentId;
       const theirsId = JSON.parse(theirs.content[0].text).documentId;
 
+      // Owner has never opened Theirs → 'all' shows only their own upload.
+      const before = JSON.parse((await handlers.primer_list_documents({ scope: 'all' }, owner)).content[0].text);
+      expect(before.documents.map((d: { id: string }) => d.id)).toEqual([mineId]);
+
       const scoped = JSON.parse((await handlers.primer_list_documents({ scope: 'mine' }, owner)).content[0].text);
       expect(scoped.scope).toBe('mine');
       expect(scoped.documents.map((d: { id: string }) => d.id)).toEqual([mineId]);
 
+      // Opening Theirs records a view → it enters the owner's accessed library.
+      await handlers.primer_get_document({ documentId: theirsId }, owner);
       const all = JSON.parse((await handlers.primer_list_documents({ scope: 'all' }, owner)).content[0].text);
       expect(all.scope).toBe('all');
       expect(all.documents.map((d: { id: string }) => d.id).sort()).toEqual([mineId, theirsId].sort());
@@ -490,10 +496,18 @@ describe('primer_list_documents', () => {
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
       await handlers.primer_create_document({ title: 'Mine', content: '<p>a</p>', format: 'html' }, owner);
-      await handlers.primer_create_document({ title: 'Theirs', content: '<p>b</p>', format: 'html' }, owner2);
+      const theirs = await handlers.primer_create_document({ title: 'Theirs', content: '<p>b</p>', format: 'html' }, owner2);
+      const theirsId = JSON.parse(theirs.content[0].text).documentId;
+
       const body = JSON.parse((await handlers.primer_list_documents({}, owner)).content[0].text);
       expect(body.scope).toBe('all');
-      expect(body.documents.length).toBe(2);
+      // 'all' is the accessed library, not every doc: owner hasn't opened Theirs.
+      expect(body.documents.length).toBe(1);
+
+      // After opening Theirs, it appears.
+      await handlers.primer_get_document({ documentId: theirsId }, owner);
+      const body2 = JSON.parse((await handlers.primer_list_documents({}, owner)).content[0].text);
+      expect(body2.documents.length).toBe(2);
     });
   });
 });

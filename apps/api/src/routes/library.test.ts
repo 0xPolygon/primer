@@ -57,6 +57,11 @@ async function assignFolder(app: ReturnType<typeof createApp>, userId: string, d
   });
 }
 
+/** Open a document as `userId`, which records a document_views row. */
+async function viewDoc(app: ReturnType<typeof createApp>, userId: string, docId: string) {
+  await app.request(`/api/documents/${docId}`, { headers: asUser(userId) });
+}
+
 describe('GET /api/library', () => {
   it('returns docs the caller uploaded', async () => {
     await withApp(async (app) => {
@@ -71,9 +76,19 @@ describe('GET /api/library', () => {
     });
   });
 
-  it('org docs are visible with ownership=org to other users', async () => {
+  it('org docs the caller never opened are NOT in their library', async () => {
     await withApp(async (app) => {
       const upload = await uploadFixture(app);
+      const res = await app.request('/api/library', { headers: asUser('mock-user-2') });
+      const body = (await res.json()) as LibraryResponse;
+      expect(body.documents.find((d) => d.id === upload.documentId)).toBeUndefined();
+    });
+  });
+
+  it('org docs appear with ownership=org once the caller opens them', async () => {
+    await withApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await viewDoc(app, 'mock-user-2', upload.documentId);
       const res = await app.request('/api/library', { headers: asUser('mock-user-2') });
       const body = (await res.json()) as LibraryResponse;
       const other = body.documents.find((d) => d.id === upload.documentId);
@@ -114,6 +129,8 @@ describe('GET /api/library', () => {
       const bodyA = (await (await app.request('/api/library', { headers: asUser('mock-user-1') })).json()) as LibraryResponse;
       expect(bodyA.documents.find((d) => d.id === upload.documentId)?.folderId).toBe(folderA);
 
+      // user-2 opens the org doc so it enters their library, then sees no folder assignment.
+      await viewDoc(app, 'mock-user-2', upload.documentId);
       const bodyB = (await (await app.request('/api/library', { headers: asUser('mock-user-2') })).json()) as LibraryResponse;
       expect(bodyB.documents.find((d) => d.id === upload.documentId)?.folderId).toBeNull();
       expect(bodyB.folders).toEqual([]);
