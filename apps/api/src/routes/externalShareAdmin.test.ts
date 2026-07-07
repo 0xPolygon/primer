@@ -139,4 +139,31 @@ describe('external share admin routes', () => {
       expect(((await get.json()) as ExternalShareResponse).share).toBeNull();
     });
   });
+
+  it('rejects emails with empty local part or domain', async () => {
+    await withApp(async (app) => {
+      const { documentId } = await uploadDoc(app);
+      await app.request(`/api/documents/${documentId}/external-share`, {
+        method: 'POST', headers: asUserJson('mock-user-1'),
+      });
+
+      const emptyLocal = await app.request(`/api/documents/${documentId}/external-share/recipients`, {
+        method: 'POST', headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ email: '@foo.com' }),
+      });
+      expect(emptyLocal.status).toBe(400);
+
+      const emptyDomain = await app.request(`/api/documents/${documentId}/external-share/recipients`, {
+        method: 'POST', headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ email: 'foo@' }),
+      });
+      expect(emptyDomain.status).toBe(400);
+
+      const validEmail = await app.request(`/api/documents/${documentId}/external-share/recipients`, {
+        method: 'POST', headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ email: 'ok@example.com' }),
+      });
+      expect(validEmail.status).toBe(201);
+    });
+  });
 });

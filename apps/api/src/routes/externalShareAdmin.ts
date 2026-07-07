@@ -170,7 +170,8 @@ export function registerExternalShareAdminRoutes(
 
     const body = (await c.req.json().catch(() => null)) as AddExternalRecipientRequest | null;
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
-    if (!email || email.length > 320 || !email.includes('@')) {
+    const atIdx = email.indexOf('@');
+    if (!email || email.length > 320 || atIdx < 1 || atIdx === email.length - 1) {
       return c.json({ error: 'invalid_email' }, 400);
     }
     const days = Math.min(
