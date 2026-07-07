@@ -56,15 +56,21 @@ export function SharePage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await shareApi(`/api/share/${shareToken}/session`);
-      const body = (await res.json().catch(() => null)) as
-        | { authenticated: boolean; documentTitle?: string; published?: boolean }
-        | null;
-      if (cancelled) return;
-      if (body?.authenticated) {
-        setStep({ kind: 'ready', documentTitle: body.documentTitle ?? '', published: body.published ?? false });
-      } else {
-        setStep({ kind: 'email' });
+      try {
+        const res = await shareApi(`/api/share/${shareToken}/session`);
+        const body = (await res.json().catch(() => null)) as
+          | { authenticated: boolean; documentTitle?: string; published?: boolean }
+          | null;
+        if (cancelled) return;
+        if (body?.authenticated) {
+          setStep({ kind: 'ready', documentTitle: body.documentTitle ?? '', published: body.published ?? false });
+        } else {
+          setStep({ kind: 'email' });
+        }
+      } catch {
+        if (!cancelled) {
+          setStep({ kind: 'email' });
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -120,7 +126,7 @@ export function SharePage() {
       {/* BRAND PASS: Polygon wordmark + Primer sub-brand at top */}
       <div className="flex items-center mb-10">
         <PolygonWordmark />
-        <span className="ml-2 text-[#353535] text-xl select-none" aria-hidden="true">·</span>
+        <span className="ml-2 text-[#595A5F] text-xl select-none" aria-hidden="true">·</span>
         <SubBrandLabel />
       </div>
 
