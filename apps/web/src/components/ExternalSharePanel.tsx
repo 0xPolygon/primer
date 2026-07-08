@@ -1,12 +1,42 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   useExternalShare, useCreateExternalShare, useRevokeExternalShare,
   useAddExternalRecipient, useRevokeExternalRecipient, usePublishExternalShare,
 } from '../queries/externalShare.ts';
 import { useVersionsQuery } from '../queries/versions.ts';
+import { copyText } from '../lib/clipboardCopy.ts';
 
 interface Props {
   docId: string;
+}
+
+function CopyIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function PlusIcon({ className = 'h-4 w-4' }: { className?: string }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
 }
 
 export function ExternalSharePanel({ docId }: Props) {
@@ -20,6 +50,23 @@ export function ExternalSharePanel({ docId }: Props) {
   const [email, setEmail] = useState('');
   const [publishTarget, setPublishTarget] = useState('');
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+  }, []);
+
+  async function copyShareLink(url: string) {
+    const result = await copyText(url);
+    if (result === 'failed') return;
+    setCopied(true);
+    if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => {
+      setCopied(false);
+      copiedTimerRef.current = null;
+    }, 1500);
+  }
 
   if (share.isLoading || share.data === null) return null; // 403 → not a manager
   const data = share.data;
@@ -64,10 +111,12 @@ export function ExternalSharePanel({ docId }: Props) {
             />
             <button
               type="button"
-              className="text-xs underline"
-              onClick={() => void navigator.clipboard.writeText(`${window.location.origin}/share/${data.share!.shareToken}`)}
+              title={copied ? 'Copied' : 'Copy link'}
+              aria-label={copied ? 'Copied' : 'Copy link'}
+              className={`rounded border border-neutral-300 dark:border-neutral-700 p-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${copied ? 'text-green-600 dark:text-green-400' : ''}`}
+              onClick={() => void copyShareLink(`${window.location.origin}/share/${data.share!.shareToken}`)}
             >
-              Copy link
+              {copied ? <CheckIcon /> : <CopyIcon />}
             </button>
           </div>
 
@@ -122,8 +171,14 @@ export function ExternalSharePanel({ docId }: Props) {
               placeholder="client@company.com"
               className="flex-1 rounded border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-xs"
             />
-            <button type="submit" disabled={addRecipient.isPending} className="text-xs underline">
-              Add recipient
+            <button
+              type="submit"
+              disabled={addRecipient.isPending}
+              title="Add recipient"
+              aria-label="Add recipient"
+              className="rounded border border-neutral-300 dark:border-neutral-700 p-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:opacity-40"
+            >
+              <PlusIcon />
             </button>
           </form>
           {addRecipient.isError && (
