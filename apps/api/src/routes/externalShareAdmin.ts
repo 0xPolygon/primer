@@ -3,7 +3,8 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type {
-  AddExternalRecipientRequest, ExternalShareResponse, PublishExternalShareRequest,
+  AddExternalRecipientRequest, ExternalShareResponse, ExternalShareViewsResponse,
+  PublishExternalShareRequest,
 } from '@primer/shared';
 import { documents, versions, externalShares, externalRecipients } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
@@ -16,6 +17,7 @@ import { deleteSessionsForRecipient, deleteSessionsForShare } from '../external/
 
 const DEFAULT_EXPIRY_DAYS = 90;
 const MAX_EXPIRY_DAYS = 365;
+const VIEWS_LIMIT = 200;
 
 // Same manage-gate as collaborators.ts: non-readers get 404 (don't reveal the
 // doc exists), readers without manage rights get 403.
@@ -243,5 +245,52 @@ export function registerExternalShareAdminRoutes(
       .where(eq(externalShares.id, share.id));
     logger.info({ docId, shareId: share.id, versionId }, 'external share published');
     return c.json({ ok: true });
+  });
+
+  app.get('/api/documents/:docId/external-share/views', async (c) => {
+    const docId = c.req.param('docId');
+    const gate = await loadDocForManage(docId, c.get('user').id);
+    if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
+    if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
+    const share = await activeShare(docId);
+    if (!share) return c.json({ error: 'not_found' }, 404);
+
+    // Full audit trail for the share: revoked recipients' historical views
+    // are included on purpose — revoking access must not erase history.
+    // IP and user-agent stay in the DB, deliberately not exposed here.
+    const rows = (await db.execute(sql`
+      SELECT v.id,
+             r.email,
+             ver.version_number AS "versionNumber",
+             v.viewed_at        AS "viewedAt"
+      FROM external_views v
+      INNER JOIN external_recipients r ON r.id = v.recipient_id
+      INNER JOIN versions ver          ON ver.id = v.version_id
+      WHERE r.share_id = ${share.id}
+      ORDER BY v.viewed_at DESC
+      LIMIT ${VIEWS_LIMIT}
+    `)) as unknown as Array<{
+      id: string;
+      email: string;
+      versionNumber: number;
+      viewedAt: Date | string;
+    }>;
+    const [count] = (await db.execute(sql`
+      SELECT count(*)::int AS total
+      FROM external_views v
+      INNER JOIN external_recipients r ON r.id = v.recipient_id
+      WHERE r.share_id = ${share.id}
+    `)) as unknown as Array<{ total: number }>;
+
+    const body: ExternalShareViewsResponse = {
+      views: rows.map((r) => ({
+        id: r.id,
+        email: r.email,
+        versionNumber: r.versionNumber,
+        viewedAt: (r.viewedAt instanceof Date ? r.viewedAt : new Date(r.viewedAt)).toISOString(),
+      })),
+      total: count?.total ?? 0,
+    };
+    return c.json(body);
   });
 }
