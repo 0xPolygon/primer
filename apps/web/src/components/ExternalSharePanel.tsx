@@ -5,6 +5,7 @@ import {
 } from '../queries/externalShare.ts';
 import { useVersionsQuery } from '../queries/versions.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
+import { ViewActivityModal } from './ViewActivityModal.tsx';
 
 interface Props {
   docId: string;
@@ -50,6 +51,7 @@ export function ExternalSharePanel({ docId }: Props) {
   const [email, setEmail] = useState('');
   const [publishTarget, setPublishTarget] = useState('');
   const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -208,19 +210,30 @@ export function ExternalSharePanel({ docId }: Props) {
             ))}
           </ul>
 
-          {!confirmRevoke ? (
-            <button type="button" onClick={() => setConfirmRevoke(true)} className="text-xs text-red-600 underline">
-              Revoke all external access
+          <div className="flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setActivityOpen(true)}
+              className="text-xs text-neutral-600 dark:text-neutral-300 underline"
+            >
+              View activity
             </button>
-          ) : (
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-red-600">Ends all recipient access immediately. Sure?</span>
-              <button type="button" onClick={() => { revokeShare.mutate(); setConfirmRevoke(false); }} className="text-red-600 font-semibold underline">
-                Yes, revoke
+            {!confirmRevoke ? (
+              <button type="button" onClick={() => setConfirmRevoke(true)} className="text-xs text-red-600 underline">
+                Revoke all external access
               </button>
-              <button type="button" onClick={() => setConfirmRevoke(false)} className="underline">Cancel</button>
-            </div>
-          )}
+            ) : (
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-red-600">Ends all recipient access immediately. Sure?</span>
+                <button type="button" onClick={() => { revokeShare.mutate(); setConfirmRevoke(false); }} className="text-red-600 font-semibold underline">
+                  Yes, revoke
+                </button>
+                <button type="button" onClick={() => setConfirmRevoke(false)} className="underline">Cancel</button>
+              </div>
+            )}
+          </div>
+
+          <ViewActivityModal open={activityOpen} docId={docId} onClose={() => setActivityOpen(false)} />
         </div>
       )}
     </section>

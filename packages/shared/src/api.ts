@@ -342,6 +342,18 @@ export interface ExternalShareResponse {
   emailEnabled: boolean;
 }
 
+export interface ExternalViewEventDto {
+  id: string;
+  email: string;         // recipient email (from external_recipients)
+  versionNumber: number; // version that was viewed
+  viewedAt: string;      // ISO
+}
+
+export interface ExternalShareViewsResponse {
+  views: ExternalViewEventDto[]; // ordered viewedAt DESC, capped at 200
+  total: number;                 // full event count for the share
+}
+
 export interface AddExternalRecipientRequest {
   email: string;
   expiresInDays?: number; // default 90, max 365

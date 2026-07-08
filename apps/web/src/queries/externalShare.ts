@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AddExternalRecipientRequest, ExternalShareResponse } from '@primer/shared';
+import type {
+  AddExternalRecipientRequest, ExternalShareResponse, ExternalShareViewsResponse,
+} from '@primer/shared';
 import { api } from '../lib/fetch.ts';
 
 const key = (docId: string) => ['external-share', docId] as const;
@@ -13,6 +15,20 @@ export function useExternalShare(docId: string, enabled: boolean) {
       if (res.status === 403) return null; // not a manager: hide the panel
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return (await res.json()) as ExternalShareResponse;
+    },
+  });
+}
+
+/** Audit log for the share's external views. Fetched only while the
+ *  activity modal is open — pass its open state as `enabled`. */
+export function useExternalShareViews(docId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['external-share-views', docId] as const,
+    enabled,
+    queryFn: async (): Promise<ExternalShareViewsResponse> => {
+      const res = await api(`/api/documents/${docId}/external-share/views`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as ExternalShareViewsResponse;
     },
   });
 }

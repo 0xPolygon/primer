@@ -6,9 +6,10 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
+import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { users } from '@primer/shared/schema';
-import type { ExternalShareResponse } from '@primer/shared';
+import { users, externalViews } from '@primer/shared/schema';
+import type { ExternalShareResponse, ExternalShareViewsResponse } from '@primer/shared';
 import { CSRF_HEADERS, asUser, asUserJson } from '../test/harness.ts';
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
@@ -164,6 +165,85 @@ describe('external share admin routes', () => {
         body: JSON.stringify({ email: 'ok@example.com' }),
       });
       expect(validEmail.status).toBe(201);
+    });
+  });
+
+  describe('GET /external-share/views', () => {
+    async function setupShareWithViews(app: ReturnType<typeof createApp>) {
+      const { documentId, versionId } = await uploadDoc(app);
+      await app.request(`/api/documents/${documentId}/external-share`, {
+        method: 'POST', headers: asUserJson('mock-user-1'),
+      });
+      const addA = await app.request(`/api/documents/${documentId}/external-share/recipients`, {
+        method: 'POST', headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ email: 'alice@client.com' }),
+      });
+      const addB = await app.request(`/api/documents/${documentId}/external-share/recipients`, {
+        method: 'POST', headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ email: 'bob@client.com' }),
+      });
+      const { recipient: alice } = (await addA.json()) as { recipient: { id: string } };
+      const { recipient: bob } = (await addB.json()) as { recipient: { id: string } };
+      // Insert audit rows directly with controlled timestamps (oldest first).
+      const base = Date.parse('2026-07-08T10:00:00Z');
+      await db.insert(externalViews).values([
+        { id: uuidv7(), recipientId: alice.id, versionId, viewedAt: new Date(base) },
+        { id: uuidv7(), recipientId: bob.id, versionId, viewedAt: new Date(base + 60_000) },
+        { id: uuidv7(), recipientId: alice.id, versionId, viewedAt: new Date(base + 120_000) },
+      ]);
+      return { documentId, versionId, alice, bob };
+    }
+
+    it('returns the whole-share log newest-first with email and version joins', async () => {
+      await withApp(async (app) => {
+        const { documentId } = await setupShareWithViews(app);
+        const res = await app.request(`/api/documents/${documentId}/external-share/views`, {
+          headers: asUser('mock-user-1'),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as ExternalShareViewsResponse;
+        expect(body.total).toBe(3);
+        expect(body.views.map((v) => v.email)).toEqual([
+          'alice@client.com', 'bob@client.com', 'alice@client.com',
+        ]);
+        expect(body.views.every((v) => v.versionNumber === 1)).toBe(true);
+        const times = body.views.map((v) => Date.parse(v.viewedAt));
+        expect(times[0]).toBeGreaterThan(times[1]);
+        expect(times[1]).toBeGreaterThan(times[2]);
+      });
+    });
+
+    it('keeps a revoked recipient\'s historical views in the log', async () => {
+      await withApp(async (app) => {
+        const { documentId, bob } = await setupShareWithViews(app);
+        const del = await app.request(
+          `/api/documents/${documentId}/external-share/recipients/${bob.id}`,
+          { method: 'DELETE', headers: asUserJson('mock-user-1') },
+        );
+        expect(del.status).toBe(200);
+        const res = await app.request(`/api/documents/${documentId}/external-share/views`, {
+          headers: asUser('mock-user-1'),
+        });
+        const body = (await res.json()) as ExternalShareViewsResponse;
+        expect(body.total).toBe(3);
+        expect(body.views.some((v) => v.email === 'bob@client.com')).toBe(true);
+      });
+    });
+
+    it('gates like the other admin routes: 403 for non-managers, 404 without an active share', async () => {
+      await withApp(async (app) => {
+        const { documentId } = await setupShareWithViews(app);
+        const forbidden = await app.request(`/api/documents/${documentId}/external-share/views`, {
+          headers: asUser('mock-user-2'),
+        });
+        expect(forbidden.status).toBe(403);
+
+        const { documentId: unshared } = await uploadDoc(app);
+        const noShare = await app.request(`/api/documents/${unshared}/external-share/views`, {
+          headers: asUser('mock-user-1'),
+        });
+        expect(noShare.status).toBe(404);
+      });
     });
   });
 });
