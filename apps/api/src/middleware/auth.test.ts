@@ -64,4 +64,21 @@ describe('authMiddleware', () => {
     const res = await app.request('/companion/v1.js');
     expect(res.status).toBe(200);
   });
+
+  it('bypasses /assets/* and /favicon.svg for unauthenticated requests (SPA bundle on /share pages)', async () => {
+    const app = makeApp(async () => null);
+    app.get('/assets/index-abc123.js', (c) => c.text('// bundle'));
+    app.get('/favicon.svg', (c) => c.text('<svg/>'));
+    // Regression: these previously 302'd to /auth/login, which redirected the
+    // browser's subresource requests to Okta and died on CORS for external
+    // viewers loading /share/:token in production.
+    expect((await app.request('/assets/index-abc123.js')).status).toBe(200);
+    expect((await app.request('/favicon.svg')).status).toBe(200);
+  });
+
+  it('does not loosen sibling paths like /assetsfoo or /faviconx', async () => {
+    const app = makeApp(async () => null);
+    expect((await app.request('/assetsfoo/x.js')).status).toBe(302);
+    expect((await app.request('/favicon.svg.bak')).status).toBe(302);
+  });
 });

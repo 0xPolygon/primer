@@ -43,6 +43,16 @@ function isExternalSharePath(path: string): boolean {
   return path.startsWith('/share/') || path.startsWith('/api/share/');
 }
 
+// The SPA bundle (/assets/* content-hashed JS/CSS, favicon) is identical for
+// every visitor and contains no secrets — all data stays behind the API's
+// auth. It must be public: unauthenticated visitors on /share/:token load
+// index.html, and if its subresource requests 302 to Okta the browser kills
+// them as cross-origin (no CORS on the Okta authorize page). Only bites in
+// production (SERVE_STATIC=1) — dev serves assets from Vite.
+function isPublicSpaAsset(path: string): boolean {
+  return path.startsWith('/assets/') || path === '/favicon.svg';
+}
+
 export interface AuthMiddlewareOptions {
   /**
    * OAuth issuer URL. When set, unauthenticated requests to /mcp will
@@ -58,7 +68,7 @@ export function authMiddleware(
 ): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (c, next) => {
     const path = c.req.path;
-    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path) || isPublicWellKnown(path) || isExternalSharePath(path)) return next();
+    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path) || isPublicWellKnown(path) || isExternalSharePath(path) || isPublicSpaAsset(path)) return next();
 
     const user = await resolver(c);
     if (user) {
