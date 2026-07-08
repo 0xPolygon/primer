@@ -305,3 +305,108 @@ export const documentFolders = pgTable(
     byFolder: index('document_folders_folder_id_idx').on(t.folderId),
   }),
 );
+
+// ---------------------------------------------------------------------------
+// External sharing plane. External viewers are NOT users: no rows in `users`,
+// no Okta, no primer_sid sessions. Everything below joins back to documents
+// so revocation/soft-delete kill access at request time.
+// ---------------------------------------------------------------------------
+
+export const externalShares = pgTable(
+  'external_shares',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    // High-entropy URL token (base64url of 32 random bytes) — deliberately
+    // not the document UUID, so share URLs are non-enumerable and revocable
+    // independently of the doc.
+    shareToken: text('share_token').notNull(),
+    // Nullable: nothing is externally visible until the first explicit publish.
+    publishedVersionId: uuid('published_version_id').references(() => versions.id),
+    createdBy: text('created_by').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => ({
+    byToken: uniqueIndex('external_shares_token_unique').on(t.shareToken),
+    oneActivePerDoc: uniqueIndex('external_shares_doc_active_unique')
+      .on(t.documentId)
+      .where(sql`${t.revokedAt} IS NULL`),
+  }),
+);
+
+export const externalRecipients = pgTable(
+  'external_recipients',
+  {
+    id: uuid('id').primaryKey(),
+    shareId: uuid('share_id')
+      .notNull()
+      .references(() => externalShares.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(), // stored lowercased
+    addedBy: text('added_by').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    firstViewedAt: timestamp('first_viewed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    uniqShareEmail: uniqueIndex('external_recipients_share_email_unique').on(t.shareId, t.email),
+  }),
+);
+
+export const externalOtps = pgTable(
+  'external_otps',
+  {
+    id: uuid('id').primaryKey(),
+    recipientId: uuid('recipient_id')
+      .notNull()
+      .references(() => externalRecipients.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(), // sha-256 hex of the 6-digit code
+    attemptCount: integer('attempt_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    byRecipient: index('external_otps_recipient_idx').on(t.recipientId),
+  }),
+);
+
+export const externalViewerSessions = pgTable(
+  'external_viewer_sessions',
+  {
+    id: text('id').primaryKey(), // randomBytes(32).toString('hex')
+    recipientId: uuid('recipient_id')
+      .notNull()
+      .references(() => externalRecipients.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    userAgent: text('user_agent'),
+  },
+  (t) => ({
+    byRecipient: index('external_viewer_sessions_recipient_idx').on(t.recipientId),
+    byExpiry: index('external_viewer_sessions_expires_at_idx').on(t.expiresAt),
+  }),
+);
+
+export const externalViews = pgTable(
+  'external_views',
+  {
+    id: uuid('id').primaryKey(),
+    recipientId: uuid('recipient_id')
+      .notNull()
+      .references(() => externalRecipients.id, { onDelete: 'cascade' }),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => versions.id, { onDelete: 'cascade' }),
+    viewedAt: timestamp('viewed_at', { withTimezone: true }).notNull().defaultNow(),
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+  },
+  (t) => ({
+    byRecipient: index('external_views_recipient_idx').on(t.recipientId),
+  }),
+);

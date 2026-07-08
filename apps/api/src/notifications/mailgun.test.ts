@@ -356,3 +356,44 @@ describe('MailgunNotifier.notifyCollaboratorAdded', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+const cfg = {
+  apiKey: 'k', domain: 'mg.example.com',
+  fromAddress: 'primer@mg.example.com', appBaseUrl: 'https://primer.example.com',
+};
+
+describe('MailgunNotifier external emails', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('emailEnabled is true', () => {
+    expect(new MailgunNotifier(cfg).emailEnabled).toBe(true);
+  });
+
+  it('notifyExternalOtp sends the code in the body, not the subject, with no links', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+    await new MailgunNotifier(cfg).notifyExternalOtp({ toEmail: 'client@example.com', code: '123456' });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const body = new URLSearchParams(fetchSpy.mock.calls[0][1]!.body as string);
+    expect(body.get('to')).toBe('client@example.com');
+    expect(body.get('subject')).not.toContain('123456');
+    expect(body.get('text')).toContain('123456');
+    expect(body.get('text')).not.toContain('http');   // no clickable auth links
+    expect(body.get('html')).not.toContain('http');   // no clickable auth links in HTML either
+    expect(body.get('text')).not.toContain('Deck');   // never the doc title pre-verification
+  });
+
+  it('notifyExternalFirstView emails the sharer with viewer email and doc link', async () => {
+    await db.insert(users).values({
+      id: 'sharer-1', email: 'sharer@polygon.technology', displayName: 'Sharer',
+    }).onConflictDoNothing();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
+    await new MailgunNotifier(cfg).notifyExternalFirstView({
+      sharerUserId: 'sharer-1', viewerEmail: 'client@example.com',
+      docId: '0198c5a0-0000-7000-8000-000000000000', docTitle: 'Q3 Deck',
+    });
+    const body = new URLSearchParams(fetchSpy.mock.calls[0][1]!.body as string);
+    expect(body.get('to')).toBe('sharer@polygon.technology');
+    expect(body.get('subject')).toContain('client@example.com');
+    expect(body.get('text')).toContain('/d/0198c5a0-0000-7000-8000-000000000000');
+  });
+});

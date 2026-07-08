@@ -12,8 +12,11 @@ import type { FolderDTO } from '@primer/shared/api';
 import { asUser, asUserJson } from '../test/harness.ts';
 
 class NullNotifier implements Notifier {
+  readonly emailEnabled = false;
   async notifyComment() {}
   async notifyCollaboratorAdded() {}
+  async notifyExternalOtp() {}
+  async notifyExternalFirstView() {}
 }
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {

@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 import { eq, desc, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
-import type { DocumentDetailResponse, AddVersionResponse, DocumentSummary } from '@primer/shared/api';
+import type { DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary } from '@primer/shared/api';
 import { documents, versions, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
@@ -66,6 +66,13 @@ export function registerDocumentRoutes(
     const doc = docRows[0];
     const v = versionRows[0];
 
+    const [ext] = (await db.execute(sql`
+      SELECT EXISTS(
+        SELECT 1 FROM external_shares
+        WHERE document_id = ${docId} AND revoked_at IS NULL
+      ) AS "externallyShared"
+    `)) as unknown as Array<{ externallyShared: boolean }>;
+
     const body: DocumentDetailResponse = {
       document: {
         id: doc.id,
@@ -75,7 +82,8 @@ export function registerDocumentRoutes(
         uploaderDisplayName: doc.uploaderDisplayName,
         visibility: doc.visibility as 'org' | 'private',
         createdAt: doc.createdAt.toISOString(),
-      },
+        externallyShared: Boolean(ext?.externallyShared),
+      } satisfies DocumentDetail,
       latestVersion: {
         id: v.id,
         versionNumber: v.versionNumber,

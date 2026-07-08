@@ -10,6 +10,7 @@ import {
   useSetVisibility,
 } from '../queries/collaborators.ts';
 import { roleOptions } from '../lib/share.ts';
+import { ExternalSharePanel } from './ExternalSharePanel.tsx';
 
 type CollaboratorRole = 'commenter' | 'editor';
 
@@ -309,6 +310,8 @@ export function ShareModal({ open, docId, onClose }: Props) {
               {inlineError}
             </div>
           )}
+
+          <ExternalSharePanel docId={docId} />
         </div>
 
         <footer className="flex justify-end border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">

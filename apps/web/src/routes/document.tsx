@@ -536,6 +536,14 @@ function DocumentPageInner() {
                 await editDoc.mutateAsync({ title: next });
               }}
             />
+            {docQuery.data?.document.externallyShared && (
+              <span
+                title="This document has an active external share"
+                className="ml-2 inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 text-[11px] font-medium align-middle"
+              >
+                Shared externally
+              </span>
+            )}
           </div>
           <EditableField
             value={document.description}
