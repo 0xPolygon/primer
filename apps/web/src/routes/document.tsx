@@ -423,9 +423,9 @@ function DocumentPageInner() {
       readMostly
         ? null
         : pendingSelection
-          ? { anchor: pendingSelection.anchor as AnchorData }
+          ? { anchor: pendingSelection.anchor as AnchorData, origin: 'selection' as const }
           : pendingPick
-            ? { anchor: pendingPick.anchor as AnchorData }
+            ? { anchor: pendingPick.anchor as AnchorData, origin: 'pick' as const }
             : null,
     [readMostly, pendingSelection, pendingPick],
   );
