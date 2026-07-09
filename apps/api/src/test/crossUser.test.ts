@@ -253,4 +253,58 @@ describe('collaborators × visibility — end-to-end', () => {
       expect(addAsStranger.status).toBe(404);
     });
   });
+
+  it('GET /api/documents/:id reports the viewer effective role as myRole', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(users).values([
+        { id: 'mock-user-3', email: 'three@p.t', displayName: 'User Three' },
+      ]).onConflictDoNothing();
+
+      // org visibility: a non-collaborator can read but is a stranger
+      const asStranger = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-2'),
+      });
+      expect(asStranger.status).toBe(200);
+      expect(((await asStranger.json()) as { myRole?: string }).myRole).toBe('stranger');
+
+      await db.insert(documentCollaborators).values([
+        {
+          id: uuidv7(),
+          documentId: upload.documentId,
+          userId: 'mock-user-2',
+          role: 'editor',
+          grantedBy: 'mock-user-1',
+        },
+        {
+          id: uuidv7(),
+          documentId: upload.documentId,
+          userId: 'mock-user-3',
+          role: 'commenter',
+          grantedBy: 'mock-user-1',
+        },
+      ]);
+      await db.update(documents)
+        .set({ visibility: 'private' })
+        .where(eq(documents.id, upload.documentId));
+
+      const asOwner = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-1'),
+      });
+      expect(asOwner.status).toBe(200);
+      expect(((await asOwner.json()) as { myRole?: string }).myRole).toBe('owner');
+
+      const asEditor = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-2'),
+      });
+      expect(asEditor.status).toBe(200);
+      expect(((await asEditor.json()) as { myRole?: string }).myRole).toBe('editor');
+
+      const asCommenter = await app.request(`/api/documents/${upload.documentId}`, {
+        headers: asUser('mock-user-3'),
+      });
+      expect(asCommenter.status).toBe(200);
+      expect(((await asCommenter.json()) as { myRole?: string }).myRole).toBe('commenter');
+    });
+  });
 });
