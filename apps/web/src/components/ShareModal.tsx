@@ -10,19 +10,24 @@ import {
   useSetVisibility,
 } from '../queries/collaborators.ts';
 import { roleOptions } from '../lib/share.ts';
+import { copyText } from '../lib/clipboardCopy.ts';
+import { internalDocUrl } from '../lib/internalDocUrl.ts';
 import { ExternalSharePanel } from './ExternalSharePanel.tsx';
+import { CopyIcon, CheckIcon } from './icons.tsx';
 
 type CollaboratorRole = 'commenter' | 'editor';
 
 interface Props {
   open: boolean;
   docId: string;
+  /** When the user is viewing a pinned version, the copied link points at it. */
+  versionNumber?: number;
   onClose: () => void;
 }
 
 const DEBOUNCE_MS = 200;
 
-export function ShareModal({ open, docId, onClose }: Props) {
+export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
   const doc = useDocument(docId);
   const collabs = useCollaborators(docId);
   const visibility = doc.data?.document.visibility ?? 'org';
@@ -37,9 +42,15 @@ export function ShareModal({ open, docId, onClose }: Props) {
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [pendingRole, setPendingRole] = useState<CollaboratorRole>('editor');
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+  }, []);
 
   // Reset when opening.
   useEffect(() => {
@@ -50,6 +61,7 @@ export function ShareModal({ open, docId, onClose }: Props) {
       setPendingUserId(null);
       setPendingRole('editor');
       setInlineError(null);
+      setLinkCopied(false);
     } else {
       triggerRef.current?.focus();
     }
@@ -84,6 +96,23 @@ export function ShareModal({ open, docId, onClose }: Props) {
     const opt = options.find((o) => o.value === pendingRole);
     if (opt?.disabled) setPendingRole('editor');
   }, [options, pendingRole]);
+
+  const internalLink = internalDocUrl(window.location.origin, docId, versionNumber);
+
+  async function onCopyInternalLink() {
+    setInlineError(null);
+    const result = await copyText(internalLink);
+    if (result === 'failed') {
+      setInlineError('Copy failed — select the link and copy it manually.');
+      return;
+    }
+    setLinkCopied(true);
+    if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => {
+      setLinkCopied(false);
+      copiedTimerRef.current = null;
+    }, 1500);
+  }
 
   async function onToggleVisibility(next: 'org' | 'private') {
     setInlineError(null);
@@ -160,6 +189,33 @@ export function ShareModal({ open, docId, onClose }: Props) {
         </header>
 
         <div className="space-y-5 px-4 py-4">
+          {/* Internal link */}
+          <section>
+            <h3 className="mb-2 text-sm font-semibold">Internal link</h3>
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={internalLink}
+                className="flex-1 rounded border border-neutral-300 bg-neutral-50 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button
+                type="button"
+                title={linkCopied ? 'Copied' : 'Copy internal link'}
+                aria-label={linkCopied ? 'Copied' : 'Copy internal link'}
+                className={`rounded border border-neutral-300 p-1.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800 ${linkCopied ? 'text-green-600 dark:text-green-400' : ''}`}
+                onClick={() => void onCopyInternalLink()}
+              >
+                {linkCopied ? <CheckIcon /> : <CopyIcon />}
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-neutral-500">
+              {visibility === 'org'
+                ? 'For sharing inside Polygon — anyone at Polygon can open this link.'
+                : 'For sharing inside Polygon — only you and the collaborators below can open this link.'}
+            </p>
+          </section>
+
           {/* Visibility */}
           <section>
             <h3 className="mb-2 text-sm font-semibold">Visibility</h3>

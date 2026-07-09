@@ -847,7 +847,12 @@ function DocumentPageInner() {
         onClose={() => setShowAddVersion(false)}
       />
       {showShare && docId && (
-        <ShareModal open docId={docId} onClose={() => setShowShare(false)} />
+        <ShareModal
+          open
+          docId={docId}
+          versionNumber={requestedNumber}
+          onClose={() => setShowShare(false)}
+        />
       )}
     </div>
   );
