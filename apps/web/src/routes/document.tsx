@@ -36,6 +36,7 @@ import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
 import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
+import { canEditDoc } from '../lib/docCapabilities.ts';
 import { extractCanonicalDocId } from '../lib/docIdParam.ts';
 import {
   computePillPosition,
@@ -139,6 +140,7 @@ function DocumentPageInner() {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [sheetSnap, setSheetSnap] = useState<SnapPoint>('handle');
   const isUploader = !!me.data && me.data.id === docQuery.data?.document.uploaderId;
+  const canEdit = canEditDoc(docQuery.data?.myRole);
 
   const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
   const [pendingPick, setPendingPick] = useState<PendingPick | null>(null);
@@ -525,7 +527,7 @@ function DocumentPageInner() {
             <EditableField
               value={document.title}
               placeholder="Add a title"
-              canEdit={isUploader}
+              canEdit={canEdit}
               displayClassName="text-xl font-semibold"
               maxLength={200}
               ariaLabel="Document title"
@@ -548,7 +550,7 @@ function DocumentPageInner() {
           <EditableField
             value={document.description}
             placeholder="Add a description"
-            canEdit={isUploader}
+            canEdit={canEdit}
             multiline
             displayClassName="inline-block max-w-[60ch] break-words align-top text-sm text-neutral-600 dark:text-neutral-400"
             maxLength={2000}
@@ -575,7 +577,7 @@ function DocumentPageInner() {
                 currentVersionNumber={currentVersionNumber}
                 isViewingLatest={isViewingLatest}
                 onAddVersion={
-                  isUploader && !readMostly ? () => setShowAddVersion(true) : undefined
+                  canEdit && !readMostly ? () => setShowAddVersion(true) : undefined
                 }
               />
             )}

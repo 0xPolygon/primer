@@ -91,6 +91,7 @@ export function registerDocumentRoutes(
         sizeBytes: v.sizeBytes,
         createdAt: v.createdAt.toISOString(),
       },
+      myRole: eff,
     };
     try {
       await db.execute(sql`

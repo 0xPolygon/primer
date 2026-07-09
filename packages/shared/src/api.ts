@@ -49,9 +49,15 @@ export interface DocumentDetail extends DocumentSummary {
   externallyShared: boolean;
 }
 
+/** The requesting viewer's effective role on a document. Mirrors
+ *  EffectiveRole in apps/api/src/lib/permissions.ts: 'stranger' is a
+ *  non-collaborator (readable only when visibility is 'org'). */
+export type ViewerRole = 'owner' | 'editor' | 'commenter' | 'stranger';
+
 export interface DocumentDetailResponse {
   document: DocumentDetail;
   latestVersion: VersionSummary;
+  myRole: ViewerRole;
 }
 
 export interface CommentDTO {
