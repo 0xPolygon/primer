@@ -39,6 +39,14 @@ export function MentionTextarea({
   const users: MentionableUser[] = usersQ.data ?? [];
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initialSelectedIds ?? []));
 
+  // Imperative focus instead of the DOM autofocus attribute: preventScroll
+  // keeps the surrounding scroll containers (and a zoomed-in window) from
+  // panning to the textarea when it mounts.
+  useEffect(() => {
+    if (autoFocus) taRef.current?.focus({ preventScroll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Typeahead state.
   const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
   const [highlightIdx, setHighlightIdx] = useState(0);
@@ -146,7 +154,6 @@ export function MentionTextarea({
         placeholder={placeholder}
         rows={rows}
         maxLength={maxLength}
-        autoFocus={autoFocus}
         className={className ?? 'block w-full rounded border border-neutral-300 dark:border-neutral-700 px-2 py-1 text-xs'}
       />
       {trigger && matches.length > 0 && (

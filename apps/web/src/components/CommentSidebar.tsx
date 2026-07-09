@@ -7,6 +7,9 @@ import { hasLiveComments } from '../lib/liveComments.ts';
 
 interface PendingAnchor {
   anchor: AnchorData;
+  /** How the composer was opened: 'selection' must not steal focus from the
+   *  iframe's text selection; 'pick' is an explicit ask, so it may focus. */
+  origin: 'selection' | 'pick';
 }
 
 interface Props {
@@ -187,6 +190,7 @@ export function CommentSidebar({
       {pending && (
         <NewThreadComposer
           anchor={pending.anchor}
+          autoFocus={pending.origin === 'pick'}
           submitting={submitting}
           onCancel={onCancelPending}
           onDirtyChange={onComposerDirtyChange}

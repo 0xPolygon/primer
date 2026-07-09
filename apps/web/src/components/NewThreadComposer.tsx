@@ -12,6 +12,10 @@ interface Props {
    *  to keep the composer open across iframe interactions only while the
    *  user has unsaved input. */
   onDirtyChange?: (dirty: boolean) => void;
+  /** Focus the textarea on mount. Off by default: when the composer opens
+   *  because of a text selection in the iframe, grabbing focus would kill
+   *  the selection's Cmd+C. Explicit flows (pick mode) opt in. */
+  autoFocus?: boolean;
 }
 
 function anchorPreview(a: AnchorData): string {
@@ -31,6 +35,7 @@ export function NewThreadComposer({
   onSubmit,
   onCancel,
   onDirtyChange,
+  autoFocus = false,
 }: Props) {
   const [body, setBody] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
@@ -68,7 +73,7 @@ export function NewThreadComposer({
         onMentionsChange={setMentions}
         placeholder="Write a comment…"
         rows={3}
-        autoFocus
+        autoFocus={autoFocus}
       />
       <div className="mt-2 flex justify-end gap-2">
         <button
