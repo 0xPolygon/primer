@@ -81,4 +81,19 @@ describe('authMiddleware', () => {
     expect((await app.request('/assetsfoo/x.js')).status).toBe(302);
     expect((await app.request('/favicon.svg.bak')).status).toBe(302);
   });
+
+  it('bypasses /brand/* for unauthenticated requests (artifact iframe subresources)', async () => {
+    const app = makeApp(async () => null);
+    app.get('/brand/fonts/PolySans-Neutral.woff2', (c) => c.text('woff2'));
+    // Regression: fonts/art referenced by published --publish artifacts are
+    // fetched cross-site and credential-less from the sandboxed iframe; a
+    // 302 to /auth/login makes them silently fall back.
+    const res = await app.request('/brand/fonts/PolySans-Neutral.woff2');
+    expect(res.status).toBe(200);
+  });
+
+  it('does not loosen sibling paths like /brandx', async () => {
+    const app = makeApp(async () => null);
+    expect((await app.request('/brandx/x.woff2')).status).toBe(302);
+  });
 });
