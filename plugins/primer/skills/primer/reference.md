@@ -125,7 +125,26 @@ If `primer_whoami` returns `code: 'not_authenticated'`, the token was revoked (u
 
 ## Upload mutations Primer makes
 
-When Primer ingests HTML, it strips `<iframe>` and `<meta http-equiv="refresh">` (security hardening — the rendered view runs in the same origin as the app shell). Do not bother generating those tags; they will be removed before the version is rendered. Other HTML, including `<script>` tags inside the sandboxed iframe Primer wraps your content in, is preserved.
+When Primer ingests HTML it runs a sanitize-html **allowlist**: tags and
+attributes not on the list are removed, not escaped. Highlights authors
+must know:
+
+- `<iframe>`, `<object>`, `<embed>`, `<form>`, and `<meta http-equiv>`
+  are always stripped (security hardening — see the threat model in
+  `apps/api/src/upload/sanitize.ts`).
+- `<script>` (inline and src), inline `on*` handlers, `<style>`, and
+  data-URI images/fonts **survive** — the sandboxed iframe plus
+  `connect-src 'none'` bounds them.
+- SVG: common shape/gradient/clip tags survive. `<use>` survives only
+  with a same-document fragment `href` (`#some-id`); `xlink:href` is
+  normalized to `href`; a `<use>` referencing an external document is
+  removed entirely.
+- Attributes not in the allowlist are dropped silently (e.g. `viewBox`
+  survives on `<svg>`/`<marker>`/`<pattern>` but not on `<symbol>`).
+
+If a construct matters to your artifact, verify survival: publish, then
+`primer_get_version_content` and diff against your source. That
+round-trip is cheap and catches every silent mutation.
 
 ## `.primer/document.json`
 
