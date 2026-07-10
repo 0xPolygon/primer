@@ -124,6 +124,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     // either the repo root or the package dir depending on workspace settings).
     const here = dirname(fileURLToPath(import.meta.url));
     const staticRoot = process.env.STATIC_ROOT ?? resolvePath(here, '../../web/dist');
+    // Brand assets are fetched from inside the sandboxed artifact iframe,
+    // whose opaque origin makes every @font-face request cross-origin
+    // (Origin: null) — without ACAO the fonts silently fall back to the
+    // system stack. The files are contract-named and immutable (see
+    // web/public/brand/README.md), so cache them hard.
+    app.use('/brand/*', async (c, next) => {
+      await next();
+      c.res.headers.set('Access-Control-Allow-Origin', '*');
+      c.res.headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    });
     app.use('/*', serveStatic({ root: staticRoot }));
     app.get('/*', async (c) => {
       const p = c.req.path;
