@@ -140,11 +140,10 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
       return { tagName: 'use', attribs: kept };
     },
   },
-  exclusiveFilter: (frame) => {
-    if (frame.tag !== 'use') return false;
-    const href = frame.attribs.href ?? frame.attribs['xlink:href'] ?? '';
-    return !href.startsWith('#');
-  },
+  // Runs after transformTags, so a surviving <use> can only carry the
+  // normalized `href` — xlink:href never reaches this point.
+  exclusiveFilter: (frame) =>
+    frame.tag === 'use' && !(frame.attribs.href ?? '').startsWith('#'),
   // <style> is listed above; sanitize-html flags it as "vulnerable" by
   // default. We add an explicit CSS scrub below (scrubStyleBlocks) for the
   // patterns that matter — expression(), url(javascript:), behavior,
