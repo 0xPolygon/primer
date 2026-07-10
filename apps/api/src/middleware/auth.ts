@@ -53,6 +53,15 @@ function isPublicSpaAsset(path: string): boolean {
   return path.startsWith('/assets/') || path === '/favicon.svg';
 }
 
+// Brand assets (/brand/* fonts and art) are subresources of published
+// artifacts, fetched from the sandboxed artifact iframe. Like /companion/,
+// those requests arrive cross-site and credential-less — an auth redirect
+// kills them (fonts silently fall back). The files are static, identical
+// for every viewer, and contain no secrets (see web/public/brand/README.md).
+function isPublicBrandAsset(path: string): boolean {
+  return path.startsWith('/brand/');
+}
+
 export interface AuthMiddlewareOptions {
   /**
    * OAuth issuer URL. When set, unauthenticated requests to /mcp will
@@ -68,7 +77,7 @@ export function authMiddleware(
 ): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (c, next) => {
     const path = c.req.path;
-    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path) || isPublicWellKnown(path) || isExternalSharePath(path) || isPublicSpaAsset(path)) return next();
+    if (PUBLIC_PATHS.has(path) || isPublicCompanionAsset(path) || isPublicWellKnown(path) || isExternalSharePath(path) || isPublicSpaAsset(path) || isPublicBrandAsset(path)) return next();
 
     const user = await resolver(c);
     if (user) {
