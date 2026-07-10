@@ -10,7 +10,7 @@ const PARSER_OPTIONS = {
 };
 
 const SVG_TAGS = [
-  'svg', 'g', 'defs', 'title', 'desc', 'symbol', 'marker',
+  'svg', 'g', 'defs', 'title', 'desc', 'symbol', 'marker', 'use',
   'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
   'text', 'tspan', 'textPath',
   'linearGradient', 'radialGradient', 'stop',
@@ -92,6 +92,7 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     fieldset: ['disabled', 'name'],
     svg: ['viewBox', 'xmlns', 'preserveAspectRatio', 'width', 'height',
           'role', 'aria-label', 'aria-labelledby', 'aria-describedby'],
+    use: ['href', 'x', 'y', 'width', 'height'],
     path: ['d', 'pathLength'],
     rect: ['x', 'y', 'width', 'height', 'rx', 'ry'],
     circle: ['cx', 'cy', 'r'],
@@ -122,6 +123,27 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   allowedSchemes: ['https', 'http', 'mailto'],
   allowedSchemesByTag: {
     img: ['https', 'http', 'data'],
+  },
+  // <use> may only reference same-document fragments. An external href
+  // (https://…/sprite.svg#x or a relative path) would pull remote SVG
+  // into the artifact, which the sandbox does not defang. We normalize
+  // legacy xlink:href to href, strip anything that is not a "#fragment",
+  // and drop the element entirely when no valid href remains.
+  transformTags: {
+    use: (tagName, attribs) => {
+      const href = attribs.href ?? attribs['xlink:href'] ?? '';
+      const kept: Record<string, string> = {};
+      if (href.startsWith('#')) kept.href = href;
+      for (const k of ['x', 'y', 'width', 'height', 'class', 'id', 'style']) {
+        if (attribs[k] !== undefined) kept[k] = attribs[k];
+      }
+      return { tagName: 'use', attribs: kept };
+    },
+  },
+  exclusiveFilter: (frame) => {
+    if (frame.tag !== 'use') return false;
+    const href = frame.attribs.href ?? frame.attribs['xlink:href'] ?? '';
+    return !href.startsWith('#');
   },
   // <style> is listed above; sanitize-html flags it as "vulnerable" by
   // default. We add an explicit CSS scrub below (scrubStyleBlocks) for the
