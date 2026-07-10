@@ -200,3 +200,53 @@ describe('sanitizeUploadedHtml — document structure preservation', () => {
     expect(out).toContain('p{color:red}');
   });
 });
+
+describe('sanitizeUploadedHtml — svg <use> references', () => {
+  it('keeps <use> with a same-document fragment href', () => {
+    const out = sanitizeUploadedHtml(
+      '<svg viewBox="0 0 729 200"><use href="#polygon-logo"></use></svg>'
+    );
+    expect(out).toContain('<use href="#polygon-logo"');
+  });
+
+  it('normalizes xlink:href fragment references to href', () => {
+    const out = sanitizeUploadedHtml(
+      '<svg viewBox="0 0 10 10"><use xlink:href="#mark"></use></svg>'
+    );
+    expect(out).toContain('<use href="#mark"');
+    expect(out).not.toContain('xlink:href');
+  });
+
+  it('drops <use> that references an external document', () => {
+    const out = sanitizeUploadedHtml(
+      '<svg><use href="https://evil.example/sprite.svg#x"></use></svg>'
+    );
+    expect(out).not.toContain('<use');
+  });
+
+  it('drops <use> with a relative path href', () => {
+    const out = sanitizeUploadedHtml('<svg><use href="sprite.svg#x"></use></svg>');
+    expect(out).not.toContain('<use');
+  });
+});
+
+describe('sanitizeUploadedHtml — svg <use> adversarial references', () => {
+  it('drops protocol-relative use hrefs', () => {
+    const out = sanitizeUploadedHtml(
+      '<svg><use href="//evil.example/sprite.svg#x"></use></svg>'
+    );
+    expect(out).not.toContain('<use');
+  });
+
+  it('prefers href over xlink:href when both are present', () => {
+    const out = sanitizeUploadedHtml(
+      '<svg><use href="https://evil.example/s.svg#x" xlink:href="#safe"></use></svg>'
+    );
+    expect(out).not.toContain('<use');
+  });
+
+  it('drops mixed-case xlink:HREF variants rather than normalizing them', () => {
+    const out = sanitizeUploadedHtml('<svg><use xlink:HREF="#mark"></use></svg>');
+    expect(out).not.toContain('<use');
+  });
+});
