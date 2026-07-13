@@ -528,7 +528,7 @@ function DocumentPageInner() {
               value={document.title}
               placeholder="Add a title"
               canEdit={canEdit}
-              displayClassName="text-xl font-semibold"
+              displayClassName="text-lg md:text-xl font-semibold"
               maxLength={200}
               ariaLabel="Document title"
               onSave={async (next) => {
@@ -552,7 +552,7 @@ function DocumentPageInner() {
             placeholder="Add a description"
             canEdit={canEdit}
             multiline
-            displayClassName="inline-block max-w-[60ch] break-words align-top text-sm text-neutral-600 dark:text-neutral-400"
+            displayClassName="inline-block max-w-[60ch] break-words align-top text-sm text-neutral-600 dark:text-neutral-400 line-clamp-2 md:line-clamp-none"
             maxLength={2000}
             ariaLabel="Document description"
             onSave={async (next) => {

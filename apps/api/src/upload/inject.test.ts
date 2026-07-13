@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parse, serialize } from 'parse5';
-import { injectCompanionScript, injectStoragePolyfill } from './inject.ts';
+import { injectCompanionScript, injectStoragePolyfill, injectViewportMeta } from './inject.ts';
 import { STORAGE_POLYFILL_JS } from './storagePolyfill.ts';
 
 function inject(html: string): string {
@@ -12,6 +12,12 @@ function inject(html: string): string {
 function injectPolyfill(html: string): string {
   const doc = parse(html);
   injectStoragePolyfill(doc);
+  return serialize(doc);
+}
+
+function injectViewport(html: string): string {
+  const doc = parse(html);
+  injectViewportMeta(doc);
   return serialize(doc);
 }
 
@@ -85,6 +91,48 @@ describe('injectStoragePolyfill', () => {
     }
     expect(() =>
       injectStoragePolyfill(doc as Parameters<typeof injectStoragePolyfill>[0])
+    ).toThrow(/no <head>/);
+  });
+});
+
+describe('injectViewportMeta', () => {
+  it('appends a responsive viewport meta to <head> when none is present', () => {
+    const out = injectViewport('<html><head><title>T</title></head><body></body></html>');
+    expect(out).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+    // Appended after existing head content, keeping any <meta charset> early.
+    expect(out).toMatch(/<title>T<\/title><meta name="viewport"/);
+  });
+
+  it('is a no-op when the artifact already declares a viewport', () => {
+    const out = injectViewport(
+      '<html><head><meta name="viewport" content="width=1024"></head><body></body></html>'
+    );
+    expect(out.match(/name="viewport"/g)?.length).toBe(1);
+    expect(out).toContain('content="width=1024"');
+  });
+
+  it('matches an existing viewport meta case-insensitively', () => {
+    const out = injectViewport(
+      '<html><head><meta name="VIEWPORT" content="width=800"></head><body></body></html>'
+    );
+    expect(out.match(/name="viewport"/gi)?.length).toBe(1);
+  });
+
+  it('works when source has no explicit <head> (parse5 normalizes)', () => {
+    const out = injectViewport('<p>standalone</p>');
+    expect(out).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">');
+  });
+
+  it('throws if the document tree has no <head>', () => {
+    const doc = parse('<html><body></body></html>');
+    const html = doc.childNodes.find(
+      (n) => (n as { tagName?: string }).tagName === 'html'
+    ) as { childNodes: { tagName?: string }[] } | undefined;
+    if (html) {
+      html.childNodes = html.childNodes.filter((n) => n.tagName !== 'head');
+    }
+    expect(() =>
+      injectViewportMeta(doc as Parameters<typeof injectViewportMeta>[0])
     ).toThrow(/no <head>/);
   });
 });

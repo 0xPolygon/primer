@@ -1,7 +1,7 @@
 import { parse, serialize } from 'parse5';
 import type { UploadErrorCode } from '@primer/shared/api';
 import { sanitizeUploadedHtml } from './sanitize.ts';
-import { injectCompanionScript, injectStoragePolyfill } from './inject.ts';
+import { injectCompanionScript, injectStoragePolyfill, injectViewportMeta } from './inject.ts';
 
 export type TransformResult =
   | { ok: true; html: string }
@@ -25,6 +25,7 @@ export function transformHtml(input: string): TransformResult {
     };
   }
 
+  injectViewportMeta(doc);
   injectStoragePolyfill(doc);
   injectCompanionScript(doc);
 
