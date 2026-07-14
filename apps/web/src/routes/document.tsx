@@ -623,6 +623,10 @@ function DocumentPageInner() {
                     );
                   }
                   const onClickFor: Record<Exclude<MenuItemId, 'separator'>, () => void> = {
+                    share: () => {
+                      setActionsMenuState('closed');
+                      setShowShare(true);
+                    },
                     'open-fullscreen': () => {
                       setActionsMenuState('closed');
                       openFullScreen();
