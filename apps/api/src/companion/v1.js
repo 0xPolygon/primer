@@ -400,6 +400,7 @@
     }
 
     flushLogBuffer();
+    scheduleContentMetrics();
 
     if (onWindowMessage) {
       window.removeEventListener('message', onWindowMessage);
@@ -1583,6 +1584,43 @@
     return out;
   }
 
+  // ── Content width reporting (fit-to-width) ───────────────────────
+  // The parent scales the iframe down on narrow screens when the artifact
+  // is intrinsically wider than the container. Only overflow is reported
+  // (scrollWidth > clientWidth * 1.02) and only when the value changes.
+  // Guard logic mirrored in contentMetrics.test.ts; tolerance mirrored in
+  // apps/web/src/lib/fitToWidth.ts (FIT_OVERFLOW_TOLERANCE). Keep in sync.
+  let lastReportedContentWidth = 0;
+  let contentMetricsTimer = null;
+
+  function reportContentMetrics() {
+    if (!port) return;
+    try {
+      const doc = document.documentElement;
+      const body = document.body;
+      const clientWidth = doc ? doc.clientWidth : 0;
+      const contentWidth = Math.max(
+        doc ? doc.scrollWidth : 0,
+        body ? body.scrollWidth : 0,
+      );
+      if (!(contentWidth > 0) || !(clientWidth > 0)) return;
+      if (contentWidth <= clientWidth * 1.02) return;
+      if (contentWidth === lastReportedContentWidth) return;
+      lastReportedContentWidth = contentWidth;
+      port.postMessage({ type: 'content_metrics', contentWidth });
+    } catch (e) {
+      // Non-fatal: fit-to-width just won't engage.
+    }
+  }
+
+  function scheduleContentMetrics() {
+    if (contentMetricsTimer !== null) return;
+    contentMetricsTimer = setTimeout(function () {
+      contentMetricsTimer = null;
+      reportContentMetrics();
+    }, 150);
+  }
+
   // ── Resize observer ──────────────────────────────────────────────
 
   const ro = new ResizeObserver(() => {
@@ -1592,6 +1630,7 @@
       const h = document.documentElement.scrollHeight || document.body.scrollHeight;
       port.postMessage({ type: 'resize', height: h });
     }
+    scheduleContentMetrics();
   });
   ro.observe(document.body);
 
