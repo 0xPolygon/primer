@@ -22,8 +22,8 @@ import { useThreadsQuery } from '../queries/threads.ts';
 import { useCreateThread } from '../queries/mutations.ts';
 import { ArtifactIframe } from '../components/ArtifactIframe.tsx';
 import { CommentSidebar } from '../components/CommentSidebar.tsx';
-import { VersionSelector } from '../components/VersionSelector.tsx';
 import { EditableField } from '../components/EditableField.tsx';
+import { HeaderActions, type ActionFeedback } from '../components/HeaderActions.tsx';
 import { PrivateLockIcon } from '../components/PrivateLockIcon.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { ShareModal } from '../components/ShareModal.tsx';
@@ -35,7 +35,6 @@ import { hasLiveComments } from '../lib/liveComments.ts';
 import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
-import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
 import { canEditDoc } from '../lib/docCapabilities.ts';
 import { extractCanonicalDocId } from '../lib/docIdParam.ts';
 import {
@@ -107,12 +106,6 @@ function DocumentPageInner() {
 
   const [showAddVersion, setShowAddVersion] = useState(false);
   const [showShare, setShowShare] = useState(false);
-  const [actionsMenuState, setActionsMenuState] = useState<'closed' | 'menu' | 'confirm'>(
-    'closed',
-  );
-  const [copyFeedback, setCopyFeedback] = useState<
-    { kind: 'success' | 'error'; message: string } | null
-  >(null);
 
   const COLLAPSED_KEY = 'primer.sidebar.collapsed';
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -123,14 +116,6 @@ function DocumentPageInner() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(COLLAPSED_KEY, sidebarCollapsed ? '1' : '0');
   }, [sidebarCollapsed]);
-
-  useEffect(() => {
-    return () => {
-      if (copyFeedbackTimerRef.current !== null) {
-        clearTimeout(copyFeedbackTimerRef.current);
-      }
-    };
-  }, []);
 
   const me = useMe();
   const libraryQ = useLibraryQuery();
@@ -153,8 +138,6 @@ function DocumentPageInner() {
   const iframeWrapperRef = useRef<HTMLDivElement>(null);
   const pillRef = useRef<HTMLDivElement | null>(null);
   const [pillPos, setPillPos] = useState<PillPosition | null>(null);
-  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const actionsMenuRef = useRef<HTMLDivElement>(null);
   // True iff the new-thread composer currently holds non-whitespace input.
   // Read by the iframe message handler to decide whether `selection_cleared`
   // should auto-dismiss a still-empty composer.
@@ -263,20 +246,6 @@ function DocumentPageInner() {
     [readMostly]
   );
 
-  function showFeedback(
-    fb: { kind: 'success' | 'error'; message: string },
-    dismissMs: number = fb.kind === 'error' ? 3000 : 2000,
-  ) {
-    if (copyFeedbackTimerRef.current !== null) {
-      clearTimeout(copyFeedbackTimerRef.current);
-    }
-    setCopyFeedback(fb);
-    copyFeedbackTimerRef.current = setTimeout(() => {
-      setCopyFeedback(null);
-      copyFeedbackTimerRef.current = null;
-    }, dismissMs);
-  }
-
   function openFullScreen() {
     if (!currentVersionId) return;
     window.open(
@@ -286,8 +255,8 @@ function DocumentPageInner() {
     );
   }
 
-  async function downloadHtml() {
-    if (!docQuery.data || !currentVersionId) return;
+  async function downloadHtml(): Promise<ActionFeedback | null> {
+    if (!docQuery.data || !currentVersionId) return null;
     try {
       const res = await fetch(`/api/versions/${currentVersionId}/content`, {
         credentials: 'same-origin',
@@ -306,8 +275,9 @@ function DocumentPageInner() {
       a.click();
       window.document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      return null;
     } catch {
-      showFeedback({ kind: 'error', message: 'Download failed. Try again.' });
+      return { kind: 'error', message: 'Download failed. Try again.' };
     }
   }
 
@@ -333,19 +303,17 @@ function DocumentPageInner() {
     URL.revokeObjectURL(url);
   }
 
-  async function copyComments() {
-    if (!docQuery.data) return;
+  async function copyComments(): Promise<ActionFeedback> {
+    if (!docQuery.data) return { kind: 'error', message: 'Comments not loaded yet.' };
     const md = formatThreadsAsMarkdown(
       { title: docQuery.data.document.title },
       { versionNumber: currentVersionNumber },
       threads,
     );
     const result = await copyText(md);
-    showFeedback(
-      result === 'failed'
-        ? { kind: 'error', message: 'Copy failed. Try Download instead.' }
-        : { kind: 'success', message: 'Copied' },
-    );
+    return result === 'failed'
+      ? { kind: 'error', message: 'Copy failed. Try Download instead.' }
+      : { kind: 'success', message: 'Copied' };
   }
 
   const togglePickMode = () => {
@@ -368,17 +336,6 @@ function DocumentPageInner() {
   useEffect(() => {
     senderRef.current?.({ type: 'set_focused_anchor', anchorId: focusedThreadId });
   }, [focusedThreadId, currentVersionId]);
-
-  useEffect(() => {
-    if (actionsMenuState !== 'menu') return;
-    function onDown(e: MouseEvent) {
-      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
-        setActionsMenuState('closed');
-      }
-    }
-    window.document.addEventListener('mousedown', onDown);
-    return () => window.document.removeEventListener('mousedown', onDown);
-  }, [actionsMenuState]);
 
   const onHighlight = useCallback((anchorId: string) => {
     setFocusedThreadId(anchorId);
@@ -508,19 +465,51 @@ function DocumentPageInner() {
 
   const { document } = docQuery.data;
 
+  const headerActionsProps = {
+    docId: docId!,
+    versions,
+    currentVersionNumber,
+    isViewingLatest,
+    onAddVersion: canEdit && !readMostly ? () => setShowAddVersion(true) : undefined,
+    isUploader,
+    onShare: () => setShowShare(true),
+    onOpenFullScreen: openFullScreen,
+    onDownloadHtml: downloadHtml,
+    onCopyComments: copyComments,
+    onExportComments: exportComments,
+    onDelete: async () => {
+      await deleteDoc.mutateAsync();
+      navigate('/');
+    },
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-60px)]">
-      <header className="flex items-baseline justify-between gap-3 border-b border-neutral-200 px-3 sm:px-4 pb-2 pt-1 dark:border-neutral-800">
+      <header className="border-b border-neutral-200 px-3 pb-2 pt-1 dark:border-neutral-800 sm:px-4 md:flex md:items-baseline md:justify-between md:gap-3">
+        {/* Mobile top row: breadcrumb (or spacer) + compact actions. */}
+        <div className="mb-0.5 flex items-center justify-between gap-2 md:hidden">
+          {currentFolder ? (
+            <Link
+              to={`/?folder=${encodeURIComponent(currentFolder.id)}`}
+              className="inline-flex min-w-0 items-center gap-1 truncate text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+            >
+              ← {currentFolder.name}
+            </Link>
+          ) : (
+            <span aria-hidden="true" />
+          )}
+          <HeaderActions variant="mobile" {...headerActionsProps} />
+        </div>
         <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
           {currentFolder && (
             <Link
               to={`/?folder=${encodeURIComponent(currentFolder.id)}`}
-              className="mb-1 inline-flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+              className="mb-1 hidden items-center gap-1 text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 md:inline-flex"
             >
               ← {currentFolder.name}
             </Link>
           )}
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
             {document.visibility === 'private' && (
               <PrivateLockIcon className="h-4 w-4 shrink-0 text-purple-600 dark:text-purple-400" />
             )}
@@ -528,7 +517,7 @@ function DocumentPageInner() {
               value={document.title}
               placeholder="Add a title"
               canEdit={canEdit}
-              displayClassName="text-lg md:text-xl font-semibold"
+              displayClassName="text-lg md:text-xl font-semibold line-clamp-2 md:line-clamp-none"
               maxLength={200}
               ariaLabel="Document title"
               onSave={async (next) => {
@@ -552,7 +541,7 @@ function DocumentPageInner() {
             placeholder="Add a description"
             canEdit={canEdit}
             multiline
-            displayClassName="inline-block max-w-[60ch] break-words align-top text-sm text-neutral-600 dark:text-neutral-400 line-clamp-2 md:line-clamp-none"
+            displayClassName="max-w-[60ch] break-words text-sm text-neutral-600 dark:text-neutral-400 line-clamp-2 md:line-clamp-none"
             maxLength={2000}
             ariaLabel="Document description"
             onSave={async (next) => {
@@ -560,7 +549,7 @@ function DocumentPageInner() {
             }}
           />
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="hidden shrink-0 items-center gap-3 md:flex">
           <div className="flex items-center gap-1.5">
             {libDoc && (
               <DocDetailFolderControl
@@ -570,140 +559,7 @@ function DocumentPageInner() {
                 folders={libraryQ.data?.folders ?? []}
               />
             )}
-            {versions.length > 0 && (
-              <VersionSelector
-                docId={docId!}
-                versions={versions}
-                currentVersionNumber={currentVersionNumber}
-                isViewingLatest={isViewingLatest}
-                onAddVersion={
-                  canEdit && !readMostly ? () => setShowAddVersion(true) : undefined
-                }
-              />
-            )}
-            {isUploader && (
-              <button
-                type="button"
-                onClick={() => setShowShare(true)}
-                className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-              >
-                Share
-              </button>
-            )}
-            <div className="relative" ref={actionsMenuRef}>
-              <button
-                type="button"
-                onClick={() =>
-                  setActionsMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))
-                }
-                aria-label="More actions"
-                aria-haspopup="menu"
-                aria-expanded={actionsMenuState !== 'closed'}
-                className="inline-flex h-7 items-center justify-center rounded border border-neutral-300 bg-white px-2 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <circle cx="5" cy="12" r="1.6" />
-                  <circle cx="12" cy="12" r="1.6" />
-                  <circle cx="19" cy="12" r="1.6" />
-                </svg>
-              </button>
-            {actionsMenuState === 'menu' && (
-              <div
-                role="menu"
-                className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
-              >
-                {buildMenuItems({ isUploader }).map((item, index) => {
-                  if (item.id === 'separator') {
-                    return (
-                      <div
-                        key={`sep-${index}`}
-                        className="my-1 border-t border-neutral-200 dark:border-neutral-800"
-                        aria-hidden="true"
-                      />
-                    );
-                  }
-                  const onClickFor: Record<Exclude<MenuItemId, 'separator'>, () => void> = {
-                    share: () => {
-                      setActionsMenuState('closed');
-                      setShowShare(true);
-                    },
-                    'open-fullscreen': () => {
-                      setActionsMenuState('closed');
-                      openFullScreen();
-                    },
-                    'download-html': () => {
-                      setActionsMenuState('closed');
-                      void downloadHtml();
-                    },
-                    copy: () => {
-                      setActionsMenuState('closed');
-                      void copyComments();
-                    },
-                    download: () => {
-                      setActionsMenuState('closed');
-                      exportComments();
-                    },
-                    delete: () => setActionsMenuState('confirm'),
-                  };
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="menuitem"
-                      onClick={onClickFor[item.id]}
-                      className={`block w-full px-3 py-1.5 text-left text-xs ${
-                        item.destructive
-                          ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20'
-                          : 'text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {actionsMenuState === 'confirm' && (
-              <div className="absolute right-0 z-10 mt-1 w-64 rounded border border-neutral-200 bg-white p-3 shadow-md dark:border-neutral-800 dark:bg-neutral-900">
-                <p className="text-xs text-neutral-700 dark:text-neutral-300">
-                  Delete this document? You can restore it within 30 days from the home page.
-                </p>
-                <div className="mt-2 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setActionsMenuState('closed')}
-                    className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await deleteDoc.mutateAsync();
-                      setActionsMenuState('closed');
-                      navigate('/');
-                    }}
-                    className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-700"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            )}
-            {copyFeedback && (
-              <div
-                role="status"
-                aria-live="polite"
-                className={`absolute right-0 z-10 mt-1 rounded border px-2 py-1 text-xs shadow-md ${
-                  copyFeedback.kind === 'success'
-                    ? 'border-neutral-200 bg-white text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300'
-                    : 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400'
-                }`}
-              >
-                {copyFeedback.message}
-              </div>
-            )}
-            </div>
+            <HeaderActions variant="desktop" {...headerActionsProps} />
           </div>
           {!readMostly && (
             <button
