@@ -50,6 +50,7 @@ export function HeaderActions({
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (menuState !== 'menu') return;
@@ -65,6 +66,12 @@ export function HeaderActions({
   useEffect(() => {
     return () => {
       if (feedbackTimerRef.current !== null) clearTimeout(feedbackTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
     };
   }, []);
 
@@ -91,13 +98,21 @@ export function HeaderActions({
     },
     'download-html': () => {
       setMenuState('closed');
-      void onDownloadHtml().then((fb) => {
-        if (fb) showFeedback(fb);
-      });
+      void onDownloadHtml()
+        .then((fb) => {
+          if (fb) showFeedback(fb);
+        })
+        .catch(() =>
+          showFeedback({ kind: 'error', message: 'Download failed. Try again.' }),
+        );
     },
     copy: () => {
       setMenuState('closed');
-      void onCopyComments().then((fb) => showFeedback(fb));
+      void onCopyComments()
+        .then((fb) => showFeedback(fb))
+        .catch(() =>
+          showFeedback({ kind: 'error', message: 'Copy failed. Try Download instead.' }),
+        );
     },
     download: () => {
       setMenuState('closed');
@@ -132,7 +147,7 @@ export function HeaderActions({
           onClick={() => setMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))}
           aria-label="More actions"
           aria-haspopup="menu"
-          aria-expanded={menuState !== 'closed'}
+          aria-expanded={menuState === 'menu'}
           className="inline-flex h-7 items-center justify-center rounded border border-neutral-300 bg-white px-2 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -192,8 +207,14 @@ export function HeaderActions({
               <button
                 type="button"
                 onClick={async () => {
-                  await onDelete();
-                  setMenuState('closed');
+                  try {
+                    await onDelete();
+                    if (mountedRef.current) setMenuState('closed');
+                  } catch {
+                    if (mountedRef.current) {
+                      showFeedback({ kind: 'error', message: 'Delete failed. Try again.' });
+                    }
+                  }
                 }}
                 className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-700"
               >
