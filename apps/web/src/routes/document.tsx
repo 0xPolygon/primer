@@ -491,9 +491,10 @@ function DocumentPageInner() {
           {currentFolder ? (
             <Link
               to={`/?folder=${encodeURIComponent(currentFolder.id)}`}
-              className="inline-flex min-w-0 items-center gap-1 truncate text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+              className="inline-flex min-w-0 items-center gap-1 text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
             >
-              ← {currentFolder.name}
+              <span aria-hidden="true">←</span>
+              <span className="truncate">{currentFolder.name}</span>
             </Link>
           ) : (
             <span aria-hidden="true" />

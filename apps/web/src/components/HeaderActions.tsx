@@ -70,6 +70,7 @@ export function HeaderActions({
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
