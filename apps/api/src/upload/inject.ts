@@ -55,6 +55,44 @@ export function injectCompanionScript(doc: Document): void {
   body.childNodes.push(scriptEl as ChildNode);
 }
 
+// Injects a responsive viewport <meta> into <head> when the artifact doesn't
+// already declare one. LLM-generated artifacts frequently omit
+// `<meta name="viewport">`, so mobile browsers lay them out at the default
+// ~980px viewport inside the sandboxed iframe — producing the horizontal
+// scroll / "zoomed out" reading experience on phones. We only inject when the
+// author did NOT specify a viewport, so intentional viewport choices are
+// preserved. Appended (not unshifted) so a `<meta charset>` stays within the
+// first bytes of <head> for early encoding detection.
+export function injectViewportMeta(doc: Document): void {
+  const head = findHead(doc);
+  if (!head) {
+    throw new Error('document has no <head> after parse5 normalization');
+  }
+
+  const hasViewport = head.childNodes.some(
+    (n) =>
+      (n as Element).tagName === 'meta' &&
+      (n as Element).attrs?.some(
+        (a) => a.name.toLowerCase() === 'name' && a.value.toLowerCase() === 'viewport',
+      ),
+  );
+  if (hasViewport) return;
+
+  const metaEl: Element = {
+    nodeName: 'meta',
+    tagName: 'meta',
+    attrs: [
+      { name: 'name', value: 'viewport' },
+      { name: 'content', value: 'width=device-width, initial-scale=1' },
+    ],
+    namespaceURI: 'http://www.w3.org/1999/xhtml',
+    childNodes: [],
+    parentNode: head,
+  } as unknown as Element;
+
+  head.childNodes.push(metaEl as ChildNode);
+}
+
 // Injects an inline <script> with the storage polyfill source as the FIRST
 // child of <head>. Must be parser-blocking (no `src`, no `defer`, no `async`)
 // so it runs before any artifact <script> in either <head> or <body> —

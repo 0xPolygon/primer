@@ -48,6 +48,26 @@
     }
   }
 
+  // ── Mobile viewport ──────────────────────────────────────────────
+  // Many artifacts ship without a responsive viewport <meta>, so mobile
+  // browsers lay them out at the default ~980px viewport inside the iframe —
+  // producing horizontal scroll while reading. The upload pipeline injects a
+  // viewport for new uploads; this runtime guard covers the backlog uploaded
+  // before that change. We only add one when the author didn't declare a
+  // viewport, so intentional viewport choices are preserved.
+  function ensureViewportMeta() {
+    try {
+      if (document.querySelector('meta[name="viewport" i]')) return;
+      const meta = document.createElement('meta');
+      meta.setAttribute('name', 'viewport');
+      meta.setAttribute('content', 'width=device-width, initial-scale=1');
+      (document.head || document.documentElement).appendChild(meta);
+    } catch (e) {
+      // Non-fatal: a missing viewport only degrades mobile layout.
+    }
+  }
+  ensureViewportMeta();
+
   // ── Mermaid detection ────────────────────────────────────────────
   // Mirrored in mermaidScanner.test.ts; keep in sync.
   // Pinned bundle version is duplicated here as a string literal because the

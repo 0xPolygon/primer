@@ -21,6 +21,27 @@ describe('transformHtml', () => {
     expect(out.html).toMatch(/<head><script>/);
   });
 
+  it('injects a responsive viewport meta when the artifact lacks one', () => {
+    const out = transformHtml('<html><head><title>Doc</title></head><body><p>hi</p></body></html>');
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.html).toContain('name="viewport"');
+    expect(out.html).toContain('content="width=device-width, initial-scale=1"');
+  });
+
+  it('does not add a second viewport meta when the artifact already declares one', () => {
+    const input =
+      '<html><head><meta name="viewport" content="width=1200"><title>Doc</title></head>' +
+      '<body><p>hi</p></body></html>';
+    const out = transformHtml(input);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    const matches = out.html.match(/name="viewport"/g);
+    expect(matches?.length).toBe(1);
+    // The author's intentional viewport is preserved untouched.
+    expect(out.html).toContain('content="width=1200"');
+  });
+
   it('returns parse_failed when input is not parseable as HTML', () => {
     const out = transformHtml('');
     expect(out.ok).toBe(false);
