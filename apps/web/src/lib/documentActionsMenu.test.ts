@@ -49,4 +49,20 @@ describe('buildMenuItems', () => {
       expect(item.label!.length).toBeGreaterThan(0);
     }
   });
+
+  it('puts a share entry first when includeShare is set for the uploader', () => {
+    const items = buildMenuItems({ isUploader: true, includeShare: true });
+    expect(items[0]).toEqual({ id: 'share', label: 'Share…' });
+    expect(items[1]).toEqual({ id: 'separator' });
+  });
+
+  it('omits share for non-uploaders even when includeShare is set', () => {
+    const ids = buildMenuItems({ isUploader: false, includeShare: true }).map((i) => i.id);
+    expect(ids).not.toContain('share');
+  });
+
+  it('omits share when includeShare is absent', () => {
+    const ids = buildMenuItems({ isUploader: true }).map((i) => i.id);
+    expect(ids).not.toContain('share');
+  });
 });

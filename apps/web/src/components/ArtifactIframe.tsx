@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   Anchor,
   InboundProtocolMessage,
@@ -7,6 +7,13 @@ import type {
 } from '@primer/shared';
 import { parseInboundMessage, parseWindowEnvelope } from '@primer/shared';
 import { createMessageBuffer } from '../companion/buffer.ts';
+import {
+  computeFitScale,
+  fitIframeStyle,
+  hasResidualOverflow,
+  nextFitState,
+  type FitState,
+} from '../lib/fitToWidth.ts';
 
 interface Props {
   src: string;
@@ -15,6 +22,9 @@ interface Props {
   onMessage: (msg: InboundProtocolMessage) => void;
   /** Imperative outbound channel. Parent stores a setter; child stores the sender. */
   registerSender?: (send: ((msg: OutboundProtocolMessage) => void) | null) => void;
+  /** Scale content down (to at most 0.5×) when the artifact is intrinsically
+   * wider than the container. Enabled by the document route on mobile. */
+  fitToWidth?: boolean;
 }
 
 // SECURITY-CRITICAL: The sandbox value below is the primary defense against
@@ -31,7 +41,7 @@ interface Props {
 // Both tokens are scoped to the iframe's opaque origin: they do not grant
 // access to parent cookies, storage, or DOM and do not open the
 // fake-SSO-popup vector that the three forbidden tokens above would.
-export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender }: Props) {
+export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender, fitToWidth }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
 
@@ -45,6 +55,29 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender 
   useEffect(() => { themeRef.current = theme; }, [theme]);
   useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
   useEffect(() => { registerSenderRef.current = registerSender; }, [registerSender]);
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<FitState>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const fitToWidthRef = useRef(fitToWidth === true);
+  useEffect(() => { fitToWidthRef.current = fitToWidth === true; }, [fitToWidth]);
+
+  // New document/version → forget the previous artifact's width.
+  useEffect(() => { setFit(null); }, [src]);
+
+  // Track the wrapper's width so the scale follows rotation and layout
+  // changes. Observing unconditionally keeps hook order stable and is cheap.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    setContainerWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (typeof w === 'number') setContainerWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -66,7 +99,17 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender 
 
       port.onmessage = (event) => {
         const parsed = parseInboundMessage(event.data);
-        if (parsed) onMessageRef.current(parsed);
+        if (!parsed) return;
+        if (parsed.type === 'content_metrics') {
+          // Rendering concern owned by this component — not forwarded.
+          if (fitToWidthRef.current) {
+            setFit((cur) =>
+              nextFitState(cur, parsed.contentWidth, wrapRef.current?.clientWidth ?? 0),
+            );
+          }
+          return;
+        }
+        onMessageRef.current(parsed);
       };
       port.start();
 
@@ -122,13 +165,23 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender 
     portRef.current?.postMessage({ type: 'theme_changed', theme } satisfies OutboundProtocolMessage);
   }, [theme]);
 
+  const scale = fitToWidth ? computeFitScale(fit, containerWidth) : 1;
+  const fitStyle = fitIframeStyle(scale, fit);
+  const allowPanX = fitToWidth ? hasResidualOverflow(scale, fit, containerWidth) : false;
+
   return (
-    <iframe
-      ref={iframeRef}
-      src={src}
-      sandbox="allow-scripts allow-forms allow-modals allow-downloads"
-      title="Artifact"
-      style={{ width: '100%', height: 'calc(100vh - 120px)', border: 0 }}
-    />
+    <div
+      ref={wrapRef}
+      className="h-full w-full"
+      style={{ overflowX: allowPanX ? 'auto' : 'hidden', overflowY: 'hidden' }}
+    >
+      <iframe
+        ref={iframeRef}
+        src={src}
+        sandbox="allow-scripts allow-forms allow-modals allow-downloads"
+        title="Artifact"
+        style={{ border: 0, display: 'block', ...fitStyle }}
+      />
+    </div>
   );
 }

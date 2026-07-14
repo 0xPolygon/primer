@@ -118,6 +118,14 @@ export interface MsgResize {
   type: 'resize';
   height: number;
 }
+/** Fired when the artifact's content is intrinsically wider than the iframe
+ *  viewport (companion only sends it on overflow, never for fitting
+ *  content). The parent uses it to scale the iframe down to fit narrow
+ *  screens. */
+export interface MsgContentMetrics {
+  type: 'content_metrics';
+  contentWidth: number;
+}
 export interface MsgOpenExternal {
   type: 'open_external';
   url: string;
@@ -144,6 +152,7 @@ export type InboundProtocolMessage =
   | MsgPickModeExited
   | MsgAnchorPositions
   | MsgResize
+  | MsgContentMetrics
   | MsgOpenExternal
   | MsgAnchorClicked
   | MsgCompanionLog;
@@ -247,6 +256,10 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
     case 'resize': {
       if (!isNumber(raw.height)) return null;
       return { type: 'resize', height: raw.height };
+    }
+    case 'content_metrics': {
+      if (!isNumber(raw.contentWidth) || raw.contentWidth <= 0) return null;
+      return { type: 'content_metrics', contentWidth: raw.contentWidth };
     }
     case 'open_external': {
       if (!isString(raw.url)) return null;
