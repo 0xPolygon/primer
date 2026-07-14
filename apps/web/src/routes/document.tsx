@@ -753,6 +753,7 @@ function DocumentPageInner() {
             src={`/api/versions/${currentVersionId}/content`}
             anchors={anchorsForCompanion}
             theme={theme}
+            fitToWidth={isMobile}
             onMessage={onMessage}
             registerSender={registerSender}
           />
