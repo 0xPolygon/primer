@@ -191,6 +191,21 @@ describe('parseInboundMessage', () => {
       expect(parsedFirst.anchor).toEqual(parsedSecond.anchor);
     }
   });
+
+  it('round-trips content_metrics', () => {
+    expect(parseInboundMessage({ type: 'content_metrics', contentWidth: 812 })).toEqual({
+      type: 'content_metrics',
+      contentWidth: 812,
+    });
+  });
+
+  it('rejects content_metrics without a positive finite width', () => {
+    expect(parseInboundMessage({ type: 'content_metrics' })).toBeNull();
+    expect(parseInboundMessage({ type: 'content_metrics', contentWidth: 0 })).toBeNull();
+    expect(parseInboundMessage({ type: 'content_metrics', contentWidth: -5 })).toBeNull();
+    expect(parseInboundMessage({ type: 'content_metrics', contentWidth: Infinity })).toBeNull();
+    expect(parseInboundMessage({ type: 'content_metrics', contentWidth: '900' })).toBeNull();
+  });
 });
 
 describe('parseInboundMessage — companion_log', () => {
