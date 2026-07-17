@@ -23,6 +23,8 @@ import { registerMeRoute } from './routes/me.ts';
 import { registerUserRoutes } from './routes/users.ts';
 import { registerDeviceRoutes } from './routes/device.ts';
 import { registerTokenRoutes } from './routes/tokens.ts';
+import { registerServiceTokenRoutes } from './routes/serviceTokens.ts';
+import { parseAdminEmails } from './auth/admin.ts';
 import { registerCollaboratorRoutes } from './routes/collaborators.ts';
 import { registerExternalShareAdminRoutes } from './routes/externalShareAdmin.ts';
 import { registerFolderRoutes } from './routes/folders.ts';
@@ -47,6 +49,7 @@ export interface AppDeps {
   authCookieName?: string;              // NEW; defaults to 'primer_sid'
   authStateCookieName?: string;         // NEW; defaults to 'primer_auth_state'
   authBaseUrl?: string;                 // NEW; base URL used in device verification links
+  adminEmails?: string[];               // normalized allowlist; defaults to ADMIN_EMAILS env
 }
 
 export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
@@ -96,10 +99,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerAdminRoute(app);
   registerVersionRoutes(app);
   registerAuthRoutes(app, deps);
-  registerMeRoute(app);
+  const adminEmails = deps.adminEmails ?? parseAdminEmails(process.env.ADMIN_EMAILS);
+  registerMeRoute(app, { adminEmails });
   registerUserRoutes(app);
   registerDeviceRoutes(app, { baseUrl: deps.authBaseUrl ?? process.env.AUTH_BASE_URL ?? '' });
   registerTokenRoutes(app);
+  registerServiceTokenRoutes(app, { adminEmails });
 
   if (issuer.length > 0) {
     registerOAuthRoutes(app, {

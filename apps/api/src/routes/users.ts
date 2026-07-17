@@ -4,6 +4,7 @@ import type { AppVariables } from '../app.ts';
 import { documents, documentCollaborators, users } from '@primer/shared/schema';
 import { db } from '../db/client.ts';
 import type { MentionableUsersResponse, UserSearchResponse } from '@primer/shared';
+import { SERVICE_USER_ID } from '../auth/admin.ts';
 
 const TYPEAHEAD_LIMIT = 20;
 
@@ -13,7 +14,8 @@ export function registerUserRoutes(app: Hono<{ Variables: AppVariables }>): void
     const rows = await db
       .select({ id: users.id, displayName: users.displayName, email: users.email })
       .from(users)
-      .where(ne(users.id, me.id));
+      // Service accounts (Claude) can't be mentioned — they only act via API tokens.
+      .where(and(ne(users.id, me.id), ne(users.id, SERVICE_USER_ID)));
     const body: MentionableUsersResponse = { users: rows };
     return c.json(body, 200);
   });
@@ -27,8 +29,8 @@ export function registerUserRoutes(app: Hono<{ Variables: AppVariables }>): void
 
     const docId = c.req.query('docId') ?? null;
 
-    // Excluded ids: caller + (optionally) owner + existing collaborators.
-    const excluded = new Set<string>([c.get('user').id]);
+    // Excluded ids: caller + service account + (optionally) owner + existing collaborators.
+    const excluded = new Set<string>([c.get('user').id, SERVICE_USER_ID]);
     if (docId) {
       const [doc] = await db
         .select({ uploaderId: documents.uploaderId })

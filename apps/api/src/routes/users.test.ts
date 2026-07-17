@@ -13,6 +13,7 @@ import type { MentionableUsersResponse } from '@primer/shared';
 import type { UserSearchResponse } from '@primer/shared/api';
 import { asUser } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
+import { SERVICE_USER_ID } from '../auth/admin.ts';
 
 async function withApp<T>(
   fn: (app: ReturnType<typeof createApp>) => Promise<T>,
@@ -90,6 +91,27 @@ describe('GET /api/users/mentionable', () => {
     });
   });
 
+  it('excludes the Claude service account', async () => {
+    await withApp(async (app) => {
+      await db
+        .insert(users)
+        .values([
+          { id: 'mock-user-2', email: 'two@p.t', displayName: 'User Two' },
+          {
+            id: SERVICE_USER_ID,
+            email: 'claude-service@polygon.technology',
+            displayName: 'Claude',
+          },
+        ])
+        .onConflictDoNothing();
+      const res = await app.request('/api/users/mentionable');
+      const body = (await res.json()) as MentionableUsersResponse;
+      const ids = body.users.map((u) => u.id);
+      expect(ids).toContain('mock-user-2');
+      expect(ids).not.toContain(SERVICE_USER_ID);
+    });
+  });
+
   it('reflects X-Mock-User-Id (caller filter follows the header)', async () => {
     await withApp(async (app) => {
       await db
@@ -149,6 +171,23 @@ describe('GET /api/users (typeahead)', () => {
       const body = (await res.json()) as UserSearchResponse;
       const names = body.users.map((u) => u.displayName);
       expect(names).toEqual(['Bobby Four']); // Bob Two excluded (existing), only Bobby remains.
+    });
+  });
+
+  it('excludes the Claude service account from search results', async () => {
+    await withMultiUserApp(async (app) => {
+      await db
+        .insert(users)
+        .values({
+          id: SERVICE_USER_ID,
+          email: 'claude-service@polygon.technology',
+          displayName: 'Claude',
+        })
+        .onConflictDoNothing();
+      const res = await app.request('/api/users?q=Cla', { headers: asUser('mock-user-1') });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as UserSearchResponse;
+      expect(body.users.map((u) => u.id)).not.toContain(SERVICE_USER_ID);
     });
   });
 

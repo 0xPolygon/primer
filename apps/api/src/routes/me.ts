@@ -1,11 +1,20 @@
 import type { Hono } from 'hono';
 import type { AppVariables } from '../app.ts';
-import type { UserDTO } from '@primer/shared';
+import type { MeResponse } from '@primer/shared';
+import { isAdmin } from '../auth/admin.ts';
 
-export function registerMeRoute(app: Hono<{ Variables: AppVariables }>): void {
+export function registerMeRoute(
+  app: Hono<{ Variables: AppVariables }>,
+  opts: { adminEmails: string[] },
+): void {
   app.get('/api/me', (c) => {
     const u = c.get('user');
-    const body: UserDTO = { id: u.id, email: u.email, displayName: u.displayName };
+    const body: MeResponse = {
+      id: u.id,
+      email: u.email,
+      displayName: u.displayName,
+      isAdmin: isAdmin(u, opts.adminEmails),
+    };
     return c.json(body, 200);
   });
 }
