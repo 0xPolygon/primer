@@ -12,8 +12,8 @@ import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
 import { apiTokens, users } from '@primer/shared/schema';
 import { generateToken } from '../auth/tokens.ts';
-import { asUserJson, CSRF_HEADERS } from '../test/harness.ts';
-import type { ApiTokenSummary, ApiTokensListResponse } from '@primer/shared';
+import { asUserJson } from '../test/harness.ts';
+import type { ApiTokenSummary, ApiTokensListResponse, CreateTokenResponse } from '@primer/shared';
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-tokens-test-'));
@@ -272,15 +272,109 @@ describe('DELETE /api/tokens/:id', () => {
 });
 
 describe('POST /api/tokens', () => {
-  it('is NOT registered (manual mint not in v1) — returns 404', async () => {
+  it('mints a never-expiring token, returning the plaintext exactly once', async () => {
+    const userId = await seedUser();
+    let plaintext = '';
+
     await withApp(async (app) => {
-      const userId = await seedUser();
       const res = await app.request('/api/tokens', {
         method: 'POST',
-        headers: { ...asUserJson(userId), ...CSRF_HEADERS },
-        body: JSON.stringify({ name: 'manual-mint-attempt' }),
+        headers: asUserJson(userId),
+        body: JSON.stringify({ name: '  claude-slack  ' }),
       });
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as CreateTokenResponse;
+
+      expect(body.token.startsWith('primer_pat_')).toBe(true);
+      plaintext = body.token;
+
+      // Name is trimmed; token never expires.
+      expect(body.summary.name).toBe('claude-slack');
+      expect(body.summary.expiresAt).toBeNull();
+      expect(body.summary.revokedAt).toBeNull();
+      expect(body.summary.lastUsedAt).toBeNull();
+      expect(body.token.includes(body.summary.tokenPrefix)).toBe(true);
+
+      // Summary carries no secret material.
+      const keys = Object.keys(body.summary).sort();
+      expect(keys).toEqual(
+        ['id', 'name', 'tokenPrefix', 'createdAt', 'lastUsedAt', 'expiresAt', 'revokedAt'].sort()
+      );
+      expect((body.summary as unknown as Record<string, unknown>).tokenHash).toBeUndefined();
+
+      // The new token shows up in the list.
+      const list = await app.request('/api/tokens', { headers: asUserJson(userId) });
+      const listBody = (await list.json()) as ApiTokensListResponse;
+      expect(listBody.tokens).toHaveLength(1);
+      expect(listBody.tokens[0].id).toBe(body.summary.id);
+    });
+
+    // The minted token authenticates as its creator via the bearer resolver.
+    await withBearerOnlyApp(async (app) => {
+      const me = await app.request('/api/me', {
+        headers: { authorization: `Bearer ${plaintext}` },
+      });
+      expect(me.status).toBe(200);
+      const meBody = (await me.json()) as { id: string };
+      expect(meBody.id).toBe(userId);
+    });
+  });
+
+  it('rejects missing, empty, whitespace-only, and over-long names with 400', async () => {
+    await withApp(async (app) => {
+      const userId = await seedUser();
+      const bodies = [
+        JSON.stringify({}),
+        JSON.stringify({ name: '' }),
+        JSON.stringify({ name: '   ' }),
+        JSON.stringify({ name: 'x'.repeat(101) }),
+        JSON.stringify({ name: 42 }),
+        'not-json',
+      ];
+      for (const body of bodies) {
+        const res = await app.request('/api/tokens', {
+          method: 'POST',
+          headers: asUserJson(userId),
+          body,
+        });
+        expect(res.status).toBe(400);
+        const err = (await res.json()) as { error: string };
+        expect(err.error).toBe('invalid_name');
+      }
+    });
+  });
+
+  it('enforces the active-token cap; revoked tokens do not count', async () => {
+    await withApp(async (app) => {
+      const userId = await seedUser();
+      for (let i = 0; i < 25; i++) {
+        await seedToken({ userId, name: `t${i}` });
+      }
+
+      const atCap = await app.request('/api/tokens', {
+        method: 'POST',
+        headers: asUserJson(userId),
+        body: JSON.stringify({ name: 'one-too-many' }),
+      });
+      expect(atCap.status).toBe(400);
+      const err = (await atCap.json()) as { error: string };
+      expect(err.error).toBe('token_limit');
+
+      // Revoking one frees a slot.
+      const list = await app.request('/api/tokens', { headers: asUserJson(userId) });
+      const listBody = (await list.json()) as ApiTokensListResponse;
+      const victim = listBody.tokens[0];
+      await app.request(`/api/tokens/${victim.id}`, {
+        method: 'DELETE',
+        headers: asUserJson(userId),
+      });
+
+      const afterRevoke = await app.request('/api/tokens', {
+        method: 'POST',
+        headers: asUserJson(userId),
+        body: JSON.stringify({ name: 'fits-now' }),
+      });
+      expect(afterRevoke.status).toBe(201);
     });
   });
 });

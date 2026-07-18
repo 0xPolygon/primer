@@ -78,6 +78,13 @@
       "when": 1783442137892,
       "tag": "0010_lean_colonel_america",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784317631209,
+      "tag": "0011_seed_service_user",
+      "breakpoints": true
     }
   ]
 }

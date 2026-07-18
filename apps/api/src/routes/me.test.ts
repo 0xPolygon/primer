@@ -6,25 +6,46 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockResolver, mockMultiResolver } from '../auth/resolver.ts';
-import type { UserDTO } from '@primer/shared';
+import { parseAdminEmails } from '../auth/admin.ts';
+import type { MeResponse } from '@primer/shared';
 
 describe('GET /api/me', () => {
-  it('returns the current user as UserDTO (mock resolver)', async () => {
+  it('returns the current user as MeResponse with isAdmin false by default', async () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-me-'));
     try {
       const app = createApp({
         storage: new FilesystemStorage(root),
         notifier: new NoopNotifier(),
         userResolver: mockResolver,
+        adminEmails: [],
       });
       const res = await app.request('/api/me');
       expect(res.status).toBe(200);
-      const body = (await res.json()) as UserDTO;
+      const body = (await res.json()) as MeResponse;
       expect(body).toEqual({
         id: 'mock-user-1',
         email: 'mock@polygon.technology',
         displayName: 'Mock User',
+        isAdmin: false,
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns isAdmin true when the email is allowlisted (case-insensitive)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-me-admin-'));
+    try {
+      const app = createApp({
+        storage: new FilesystemStorage(root),
+        notifier: new NoopNotifier(),
+        userResolver: mockResolver,
+        adminEmails: parseAdminEmails('Mock@Polygon.Technology'),
+      });
+      const res = await app.request('/api/me');
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as MeResponse;
+      expect(body.isAdmin).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

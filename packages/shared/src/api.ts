@@ -37,6 +37,10 @@ export interface UserDTO {
   displayName: string;
 }
 
+export interface MeResponse extends UserDTO {
+  isAdmin: boolean;
+}
+
 export interface VersionSummary {
   id: string;
   versionNumber: number;
@@ -261,6 +265,19 @@ export interface ApiTokenSummary {
 
 export interface ApiTokensListResponse {
   tokens: ApiTokenSummary[];
+}
+
+export interface CreateTokenRequest {
+  name: string;
+}
+
+/**
+ * `token` is the plaintext secret and appears ONLY in this response — it is
+ * never stored or returned again.
+ */
+export interface CreateTokenResponse {
+  token: string;
+  summary: ApiTokenSummary;
 }
 
 export interface Collaborator {

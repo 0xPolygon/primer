@@ -1,6 +1,7 @@
 import './env.ts';
 import { serve } from '@hono/node-server';
 import { createApp } from './app.ts';
+import { parseAdminEmails } from './auth/admin.ts';
 import { logger } from './logger.ts';
 import { FilesystemStorage } from './storage/filesystem.ts';
 import { NoopNotifier } from './notifications/notifier.ts';
@@ -98,6 +99,11 @@ if (authMode === 'okta') {
 // then the session/mock resolver as fallback.
 userResolver = composeResolvers(makeOAuthBearerResolver(), makeBearerResolver(), userResolver);
 
+// Count only — never log the emails themselves. Zero admins means the
+// service-token endpoints are unreachable (fail closed).
+const adminEmails = parseAdminEmails(process.env.ADMIN_EMAILS);
+logger.info({ adminCount: adminEmails.length }, 'admin allowlist loaded');
+
 const app = createApp({
   storage,
   notifier,
@@ -105,6 +111,7 @@ const app = createApp({
   oktaAdapter,
   authCookieName: sessionCookieName,
   authBaseUrl: process.env.AUTH_BASE_URL,
+  adminEmails,
 });
 
 const purgeIntervalMs = process.env.PURGE_INTERVAL_MS
