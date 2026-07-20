@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -157,11 +157,16 @@ describe('makeBearerResolver', () => {
     const got = await makeReq({ authorization: `Bearer ${token}` }).run(makeBearerResolver());
     expect(got.user).toBe(userId);
 
-    // The update is fire-and-forget; allow a tick for the promise to settle.
-    await new Promise((r) => setTimeout(r, 50));
-    const [row] = await db.select().from(apiTokens).where(eq(apiTokens.id, tokenId));
-    expect(row.lastUsedAt).not.toBeNull();
-    expect(row.lastUsedAt!.getTime()).toBeGreaterThan(Date.now() - 5_000);
+    // The update is fire-and-forget; poll until it lands rather than sleeping a
+    // fixed duration that can flake on slow CI runners.
+    await vi.waitFor(
+      async () => {
+        const [r] = await db.select().from(apiTokens).where(eq(apiTokens.id, tokenId));
+        expect(r.lastUsedAt).not.toBeNull();
+        expect(r.lastUsedAt!.getTime()).toBeGreaterThan(Date.now() - 5_000);
+      },
+      { timeout: 5_000, interval: 20 },
+    );
   });
 });
 
