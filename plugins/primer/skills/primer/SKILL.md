@@ -53,6 +53,28 @@ Call `primer_get_comments` with `{ documentId }` to target the latest version au
 
 The tool returns a markdown summary. For each open thread, use the quoted selection text (the `> ...` line) as the locator — that's the literal text the reviewer anchored to in the document, and it maps directly back to your source. Propose or apply fixes for each open thread, then push a new version via `primer_add_version` with a `versionNote` that references the addressed feedback.
 
+## Publishing large or interactive pages
+
+`primer_create_document`/`primer_add_version` take the whole document inline, and
+Primer renders it in a **sandboxed iframe** (`allow-scripts`, no
+`allow-same-origin`). Inline `<script>` runs, but this shapes how big/interactive
+pages must be built:
+
+- **Keep the payload small enough to send in one call.** A multi-hundred-KB page
+  of static markup is unreliable to transmit. For data-heavy pages (long tables,
+  catalogs), publish a **data-driven** doc: embed the data once as JSON and render
+  the DOM client-side with a small script, instead of emitting every row as markup.
+- **Chunk large embedded JSON.** Split it across several
+  `<script type="application/json" class="cat">…</script>` blocks (~15 KB each)
+  and reassemble at runtime (`[...document.querySelectorAll('script.cat')].map(s=>s.textContent).join('')` → `JSON.parse`). Escape `<` as `<` inside the JSON so it can't break out of the script tag.
+- **Clipboard:** the async `navigator.clipboard` API is **blocked** in the sandbox.
+  Any copy control must fall back to a hidden-`textarea` + `document.execCommand('copy')`.
+- **Copy affordance = a plain text button, not an icon.** SVG sprite `<use>` icons
+  lose their `fill`/`stroke` in the sandbox and render as black blobs.
+- **Full HTML documents are fine** (Primer serves them in the iframe), but the
+  viewer's iframe can be slow to first-paint on heavy pages — verify by loading
+  the version's `/api/versions/<id>/content` URL directly, which renders immediately.
+
 ## Error handling
 
 Every tool error result is JSON-encoded as `{ code, message }` in the result text. Branch on `code`:
