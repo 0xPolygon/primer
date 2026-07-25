@@ -84,6 +84,32 @@ export const comments = pgTable(
   }),
 );
 
+// ── SPIKE SCAFFOLD (spike/agent-messages) ─────────────────────────────
+// Structured agent messages: typed JSON an interactive artifact hands back
+// to its publishing agent, via companion → parent → API. A machine channel
+// parallel to threads/comments (which stay human-only). First consumer:
+// PADD review packets (payloadType 'padd/export').
+export const agentMessages = pgTable(
+  'agent_messages',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    // Nullable: a payload is usually about the version being viewed, but the
+    // channel is document-scoped (packet identity outlives any one version).
+    versionId: uuid('version_id').references(() => versions.id, { onDelete: 'set null' }),
+    authorId: text('author_id').notNull().references(() => users.id),
+    // Namespaced type, e.g. 'padd/export' — consumers filter on it.
+    payloadType: text('payload_type').notNull(),
+    payload: jsonb('payload').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDocCreated: index('agent_messages_doc_created_idx').on(t.documentId, t.createdAt),
+  }),
+);
+
 export const documentViews = pgTable(
   'document_views',
   {

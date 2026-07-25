@@ -293,6 +293,25 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
         return errFromException(e);
       }
     },
+
+    // SPIKE (spike/agent-messages): read the structured agent-message
+    // channel — the machine payloads interactive artifacts hand back
+    // (e.g. PADD review exports) — parallel to, and never mixed with,
+    // human comments.
+    primer_get_agent_messages: async (args) => {
+      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      if (!documentId) return err('bad_request', '`documentId` is required.');
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+      try {
+        // TODO(spike): add client.getAgentMessages(documentId, {since, payloadType})
+        // → GET /api/documents/:id/agent-messages; return the raw JSON list
+        // (payloads are machine data — no markdown prettification).
+        return err('bad_request', 'spike scaffold: wire client.getAgentMessages');
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
   };
 }
 
@@ -363,6 +382,15 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     inputSchema: {
       versionId: z.string().optional(),
       documentId: z.string().optional(),
+    },
+  },
+  primer_get_agent_messages: {
+    description:
+      'SPIKE: Fetch structured agent messages on a document — machine payloads submitted from interactive artifacts (e.g. review-packet exports), independent of human comments. Filter with `since` (ISO) and `payloadType` (e.g. "padd/export").',
+    inputSchema: {
+      documentId: z.string(),
+      since: z.string().optional(),
+      payloadType: z.string().optional(),
     },
   },
 };

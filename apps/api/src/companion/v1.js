@@ -479,6 +479,32 @@
     port.postMessage({ type: 'open_external', url });
   }
 
+  // ── SPIKE (spike/agent-messages): artifact → agent payload relay ──
+  // Artifact JS hands structured data to its publishing agent by
+  // dispatching a CustomEvent; we forward it over the port. The parent
+  // (authed) persists it via POST /api/documents/:id/agent-messages.
+  window.addEventListener('primer:agent-payload', (e) => {
+    if (!port) {
+      log.warn('agent-payload before init; dropping');
+      return;
+    }
+    const detail = e && e.detail ? e.detail : null;
+    if (!detail || typeof detail.payloadType !== 'string') {
+      log.warn('agent-payload missing payloadType; dropping');
+      return;
+    }
+    // Structured-clone safety + size sanity before it crosses the port;
+    // the shared parser re-validates on the parent side.
+    let payload = null;
+    try {
+      payload = JSON.parse(JSON.stringify(detail.payload ?? null));
+    } catch (err) {
+      log.warn('agent-payload not serializable; dropping');
+      return;
+    }
+    port.postMessage({ type: 'agent_payload', payloadType: detail.payloadType, payload });
+  });
+
   // (a) anchor clicks with target="_blank" or "_top"
   document.addEventListener(
     'click',

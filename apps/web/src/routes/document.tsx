@@ -219,6 +219,18 @@ function DocumentPageInner() {
         case 'open_external':
           if (isSafeExternalUrl(msg.url)) handleOpenExternal(msg);
           break;
+        // SPIKE (spike/agent-messages): the artifact handed back a
+        // structured payload for its publishing agent — persist it. The
+        // parent is the authed principal; the sandboxed artifact never
+        // touches the network itself.
+        case 'agent_payload':
+          // TODO(spike): react-query mutation →
+          //   POST /api/documents/${documentId}/agent-messages
+          //   { versionId: selectedVersionId, payloadType: msg.payloadType, payload: msg.payload }
+          // then toast success/failure back to the reviewer; optionally
+          // ack into the iframe (port message) so the artifact can show
+          // "delivered ✓" — needs a small outbound MsgAgentPayloadAck.
+          break;
         case 'companion_log': {
           const fn = msg.level === 'error' ? console.error
                    : msg.level === 'warn'  ? console.warn

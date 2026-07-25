@@ -144,6 +144,21 @@ export interface MsgCompanionLog {
   level: 'info' | 'warn' | 'error';
   message: string;
 }
+/** SPIKE (spike/agent-messages): structured agent payload handed back by
+ *  the artifact. The artifact's own JS dispatches
+ *  `window.dispatchEvent(new CustomEvent('primer:agent-payload',
+ *    { detail: { payloadType: 'padd/export', payload: {...} } }))`
+ *  — the companion forwards it here, and the parent (authed, outside the
+ *  sandbox) POSTs it to /api/documents/:id/agent-messages. This is the ONLY
+ *  way out for artifact data: the sandbox + connect-src 'none' deliberately
+ *  block every direct network path (see docs/prd-primer.md threat model). */
+export interface MsgAgentPayload {
+  type: 'agent_payload';
+  /** Namespaced kebab type, e.g. 'padd/export'. */
+  payloadType: string;
+  /** JSON-serializable payload; size-capped at parse time. */
+  payload: unknown;
+}
 
 export type InboundProtocolMessage =
   | MsgSelectionCaptured
@@ -155,7 +170,8 @@ export type InboundProtocolMessage =
   | MsgContentMetrics
   | MsgOpenExternal
   | MsgAnchorClicked
-  | MsgCompanionLog;
+  | MsgCompanionLog
+  | MsgAgentPayload;
 
 /** Window-level handshake messages — go via window.postMessage (not the
  *  port) because they exist for the case where the port isn't established
@@ -273,6 +289,19 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
       if (raw.level !== 'info' && raw.level !== 'warn' && raw.level !== 'error') return null;
       if (!isString(raw.message)) return null;
       return { type: 'companion_log', level: raw.level, message: raw.message };
+    }
+    case 'agent_payload': {
+      // SPIKE: namespaced type + size cap; payload shape is the consumer's
+      // contract, not the transport's.
+      if (!isString(raw.payloadType) || !/^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)+$/.test(raw.payloadType)) {
+        return null;
+      }
+      try {
+        if (JSON.stringify(raw.payload ?? null).length > 256 * 1024) return null;
+      } catch {
+        return null;
+      }
+      return { type: 'agent_payload', payloadType: raw.payloadType, payload: raw.payload ?? null };
     }
     default:
       return null;
