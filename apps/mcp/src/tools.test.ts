@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
+import * as nodePath from 'node:path';
 import { PrimerApiError, type PrimerClient } from './client.ts';
 import * as deviceLogin from './deviceLogin.ts';
 import { buildToolHandlers, type ToolDeps, type ToolResult } from './tools.ts';
@@ -345,6 +347,73 @@ describe('primer_create_document', () => {
       description: 'desc',
     });
     expect(parseSuccessPayload(result)).toEqual(created);
+  });
+
+  it('contentPath → server reads the file; content never transits the model', async () => {
+    const client = makeFakeClient();
+    const created = { documentId: 'd1', versionId: 'v1', url: '/d/d1' };
+    client.createDocument.mockResolvedValue(created);
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    const dir = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'primer-mcp-test-'));
+    const file = nodePath.join(dir, 'artifact.html');
+    await fsp.writeFile(file, '<h1>from disk</h1>', 'utf8');
+
+    const result = await handlers.primer_create_document({
+      title: 'Hello',
+      contentPath: file,
+      format: 'html',
+    });
+
+    expect(client.createDocument).toHaveBeenCalledWith({
+      title: 'Hello',
+      content: '<h1>from disk</h1>',
+      format: 'html',
+      description: undefined,
+    });
+    expect(parseSuccessPayload(result)).toEqual(created);
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+
+  it('both content and contentPath → bad_request', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_create_document({
+      title: 't',
+      content: 'c',
+      contentPath: '/tmp/x.html',
+      format: 'html',
+    });
+    const err = parseErrorPayload(result);
+    expect(err.code).toBe('bad_request');
+    expect(client.createDocument).not.toHaveBeenCalled();
+  });
+
+  it('neither content nor contentPath → bad_request', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_create_document({ title: 't', format: 'html' });
+    const err = parseErrorPayload(result);
+    expect(err.code).toBe('bad_request');
+    expect(client.createDocument).not.toHaveBeenCalled();
+  });
+
+  it('unreadable contentPath → bad_request with the fs error', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_create_document({
+      title: 't',
+      contentPath: '/nonexistent/padd.html',
+      format: 'html',
+    });
+    const err = parseErrorPayload(result);
+    expect(err.code).toBe('bad_request');
+    expect(err.message).toContain('Could not read contentPath');
+    expect(client.createDocument).not.toHaveBeenCalled();
   });
 });
 
