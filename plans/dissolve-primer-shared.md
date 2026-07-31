@@ -262,14 +262,15 @@ Runs the full repo verification exactly as CI does (typecheck → build → test
 
 Environment: requires the Docker daemon. `pnpm db:up` starts the compose Postgres (image `postgres:17.9`, hosts both `primer` and `primer_test` databases via `docker/init-db.sql`); `pnpm db:migrate:test` applies migrations to `primer_test`. If the daemon is unavailable, this stage is **blocked** (never skipped, never "verified partially").
 
-- [ ] **Action**: Add a `describe('anchor guards (from @polygonlabs/primer-api-types)')` block to `apps/web/src/companion/protocol.test.ts` importing `isTextRangeAnchor` and `isElementPathAnchor` directly from `@polygonlabs/primer-api-types`, covering: position-shape acceptance (`start`/`end` numbers, `end > start`), legacy-shape acceptance (`prefix`/`suffix`/`containerPath` strings), rejection of `end <= start`, rejection of non-objects and wrong `type` tags, and element-path acceptance/rejection on `path`/`innerHash` presence. (These live in the web suite deliberately: the contract package keeps a test stub, and the web suite is where every other protocol behavior is already pinned — no new test infrastructure for two functions.)
+- [x] **Action**: Add a `describe('anchor guards (from @polygonlabs/primer-api-types)')` block to `apps/web/src/companion/protocol.test.ts` importing `isTextRangeAnchor` and `isElementPathAnchor` directly from `@polygonlabs/primer-api-types`, covering: position-shape acceptance (`start`/`end` numbers, `end > start`), legacy-shape acceptance (`prefix`/`suffix`/`containerPath` strings), rejection of `end <= start`, rejection of non-objects and wrong `type` tags, and element-path acceptance/rejection on `path`/`innerHash` presence. (These live in the web suite deliberately: the contract package keeps a test stub, and the web suite is where every other protocol behavior is already pinned — no new test infrastructure for two functions.)
   - **Files**: apps/web/src/companion/protocol.test.ts
   - **Owner**: Implementation agent: test-plan
   - **Verify**: `pnpm --filter @primer/web run test` → passes with the new describe block included
-- [ ] **Action**: Run the full CI-equivalent verification against real Postgres.
+- [x] **Action**: Run the full CI-equivalent verification against real Postgres.
   - **Files**: (none — verification only)
   - **Owner**: Implementation agent: test-plan
   - **Verify**: `pnpm db:up && pnpm db:migrate:test && pnpm typecheck && pnpm -r run build && pnpm test` → every step passes (api: 67 test files against `primer_test`; web: 21; mcp: 5)
+  - **Deviation (executed) — pre-existing local-dev drift, environmental provisioning required**: `docker-compose.yml` defaults `POSTGRES_PASSWORD` to `primer_local_dev`, but `apps/api/vitest.config.ts` hardcodes `postgres://primer:primer@localhost:5432/primer_test` to match CI's service container. With no `.env` in a fresh worktree the verbatim command fails on password auth. Adjudicated as environment provisioning, not gate-weakening: the container was recreated with `POSTGRES_PASSWORD=primer` and `DATABASE_URL_TEST=postgres://primer:primer@localhost:5432/primer_test` exported (exactly what CI and a developer's `.env` provide), then the verbatim chain re-run green by the team lead (api 67 files/657 tests, web 21/223, mcp 5/100). Follow-up worth filing separately: align `.env.example`/compose defaults with what `vitest.config.ts` actually requires. No repo file was changed for this.
 
 ## Monitoring verification stage — omitted
 

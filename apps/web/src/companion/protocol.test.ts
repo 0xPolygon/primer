@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseInboundMessage, parseWindowEnvelope } from './protocol.ts';
+import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 
 describe('parseInboundMessage', () => {
   it('round-trips selection_captured', () => {
@@ -266,5 +267,115 @@ describe('parseWindowEnvelope', () => {
 
   it('returns null for companion_panic without reason string', () => {
     expect(parseWindowEnvelope({ type: 'companion_panic', reason: 42 })).toBeNull();
+  });
+});
+
+describe('anchor guards (from @polygonlabs/primer-api-types)', () => {
+  describe('isTextRangeAnchor', () => {
+    it('accepts the position-based shape (start/end numbers, end > start)', () => {
+      expect(
+        isTextRangeAnchor({
+          type: 'text-range',
+          selectorText: 'hello',
+          start: 5,
+          end: 10,
+        })
+      ).toBe(true);
+    });
+
+    it('accepts the legacy shape (prefix/suffix/containerPath strings)', () => {
+      expect(
+        isTextRangeAnchor({
+          type: 'text-range',
+          selectorText: 'hello',
+          prefix: 'before-',
+          suffix: '-after',
+          containerPath: 'body > p:nth-of-type(1)',
+        })
+      ).toBe(true);
+    });
+
+    it('rejects end <= start', () => {
+      expect(
+        isTextRangeAnchor({
+          type: 'text-range',
+          selectorText: 'hello',
+          start: 10,
+          end: 10,
+        })
+      ).toBe(false);
+      expect(
+        isTextRangeAnchor({
+          type: 'text-range',
+          selectorText: 'hello',
+          start: 10,
+          end: 5,
+        })
+      ).toBe(false);
+    });
+
+    it('rejects non-objects', () => {
+      expect(isTextRangeAnchor(null)).toBe(false);
+      expect(isTextRangeAnchor(undefined)).toBe(false);
+      expect(isTextRangeAnchor('text-range')).toBe(false);
+      expect(isTextRangeAnchor(42)).toBe(false);
+    });
+
+    it('rejects the wrong `type` tag', () => {
+      expect(
+        isTextRangeAnchor({
+          type: 'element-path',
+          selectorText: 'hello',
+          start: 5,
+          end: 10,
+        })
+      ).toBe(false);
+    });
+
+    it('rejects a shape with neither position nor legacy fields', () => {
+      expect(isTextRangeAnchor({ type: 'text-range', selectorText: 'hello' })).toBe(false);
+    });
+  });
+
+  describe('isElementPathAnchor', () => {
+    it('accepts when `path` and `innerHash` are present', () => {
+      expect(
+        isElementPathAnchor({
+          type: 'element-path',
+          path: 'body > div:nth-of-type(1) > canvas:nth-of-type(1)',
+          innerHash: '0123456789abcdef',
+        })
+      ).toBe(true);
+    });
+
+    it('rejects when `path` is missing', () => {
+      expect(
+        isElementPathAnchor({
+          type: 'element-path',
+          innerHash: '0123456789abcdef',
+        })
+      ).toBe(false);
+    });
+
+    it('rejects when `innerHash` is missing', () => {
+      expect(
+        isElementPathAnchor({
+          type: 'element-path',
+          path: 'body > div:nth-of-type(1)',
+        })
+      ).toBe(false);
+    });
+
+    it('rejects non-objects and the wrong `type` tag', () => {
+      expect(isElementPathAnchor(null)).toBe(false);
+      expect(isElementPathAnchor('element-path')).toBe(false);
+      expect(
+        isElementPathAnchor({
+          type: 'text-range',
+          path: 'body > div',
+          innerHash: 'abc',
+        })
+      ).toBe(false);
+    });
   });
 });
