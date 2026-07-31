@@ -13,9 +13,13 @@
 // extra setup step.
 
 import { build } from 'esbuild';
+import { execFile } from 'node:child_process';
 import { readFile, chmod } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+
+const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const mcpRoot = resolve(here, '..');
@@ -52,4 +56,49 @@ await build({
 // Make the bin entry executable.
 await chmod(outfile, 0o755);
 
-console.log('mcp build complete: dist/index.js');
+// ── Library entries (./client, ./token-store) ──────────────────────────────
+//
+// JS: same esbuild pass as the bin, one file per entry. Neither entry has a
+// runtime dependency on @primer/shared (client's response types live in
+// src/apiTypes.ts, type-only), so bundling here only inlines the package's
+// own modules.
+//
+// Declarations: plain `tsc --emitDeclarationOnly` via tsconfig.dts.json — no
+// bundler. apiTypes.ts keeps the public surface self-contained, so per-file
+// .d.ts output resolves entirely within dist/.
+await build({
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node20',
+  external: externalFiltered,
+  sourcemap: true,
+  logLevel: 'info',
+  entryPoints: [
+    resolve(mcpRoot, 'src/client.ts'),
+    resolve(mcpRoot, 'src/tokenStore.ts'),
+  ],
+  outdir: resolve(mcpRoot, 'dist'),
+});
+
+const tscBin = resolve(mcpRoot, 'node_modules/.bin/tsc');
+await execFileAsync(tscBin, ['-p', resolve(mcpRoot, 'tsconfig.dts.json')], {
+  cwd: mcpRoot,
+});
+
+// tsc's rewriteRelativeImportExtensions rewrites specifiers in emitted JS
+// only — declaration output preserves the source's `./apiTypes.ts` form,
+// which consumers' resolvers reject. Rewrite relative .ts specifiers to .js
+// in the emitted declarations; every referenced file ships in dist/, so the
+// result is self-contained.
+const { readdir, writeFile } = await import('node:fs/promises');
+const distDir = resolve(mcpRoot, 'dist');
+for (const name of await readdir(distDir)) {
+  if (!name.endsWith('.d.ts')) continue;
+  const p = resolve(distDir, name);
+  const src = await readFile(p, 'utf-8');
+  const rewritten = src.replace(/(from\s+['"])(\.\.?\/[^'"]+)\.ts(['"])/g, '$1$2.js$3');
+  if (rewritten !== src) await writeFile(p, rewritten);
+}
+
+console.log('mcp build complete: dist/index.js + library entries (client, tokenStore)');

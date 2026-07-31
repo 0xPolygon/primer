@@ -127,6 +127,46 @@ Inline content (passed via `primer_create_document` / `primer_add_version`)
 is capped at **10 MB per upload**. Larger payloads will be rejected by
 the API with `code: 'bad_request'`.
 
+## Programmatic use (library exports)
+
+The MCP tools are for agents deciding what to call in the moment.
+Deterministic automation — publish scripts, comment watchers, CI — should
+not run through an agent's context window at all. For that, the package
+exports the same typed REST client and token store the MCP server itself
+is built on:
+
+```ts
+import { PrimerClient } from '@polygonlabs/primer-mcp/client';
+import { resolveToken } from '@polygonlabs/primer-mcp/token-store';
+
+const baseUrl = process.env.PRIMER_API_URL ?? 'https://primer.example.com';
+const token = await resolveToken({ env: process.env, baseUrl });
+if (!token) throw new Error('not logged in — run primer_login first');
+
+const client = new PrimerClient({ baseUrl, token });
+const { threads } = await client.getVersionThreads(versionId);
+```
+
+`./client` exports `PrimerClient` (documents, versions, threads, upload,
+token revocation) plus `PrimerApiError` and the response
+types. `./token-store` exports `resolveToken` / `loadToken` / `saveToken` /
+`clearToken` / `normalizeBaseUrl`, reading the same store the login flow
+writes — so scripts reuse the token the user already approved instead of
+minting their own credential path.
+
+Use the client rather than hand-rolling `fetch` against the REST API: a
+shadow client copies the wire protocol (paths, multipart field names,
+token-store layout, env var names) and silently rots when any of it
+changes. Login stays on the MCP surface — the exports deliberately do
+not include the device flow.
+
+The response types on the `./client` surface are declared locally in
+`src/apiTypes.ts` (not imported from the private `@primer/shared`
+workspace package), so plain `tsc --emitDeclarationOnly` produces
+self-contained declarations — no declaration bundler in the toolchain.
+Drift against the server's types is a CI failure via the compile-time
+assertions in `src/apiTypes.drift.test.ts`.
+
 ## Error code taxonomy
 
 Every tool error returns `{ code, message }` JSON in `content[0].text`

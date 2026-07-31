@@ -15,7 +15,12 @@ export type TokenStoreFile = Record<string, TokenStoreEntry>;
  * Returns the default token store path: `$PRIMER_TOKEN_FILE` if set,
  * else `~/.config/primer/tokens.json`.
  */
-export function defaultStorePath(env: NodeJS.ProcessEnv = process.env): string {
+/** Structural stand-in for NodeJS.ProcessEnv so the published `./token-store`
+ *  declarations don't depend on the ambient `@types/node` namespace.
+ *  `process.env` is assignable to it. */
+export type EnvLike = Record<string, string | undefined>;
+
+export function defaultStorePath(env: EnvLike = process.env): string {
   const override = env.PRIMER_TOKEN_FILE;
   if (override && override.length > 0) return override;
   return path.join(os.homedir(), '.config', 'primer', 'tokens.json');
@@ -157,7 +162,7 @@ export async function clearToken(
  * The env override never reads the store.
  */
 export async function resolveToken(opts: {
-  env: NodeJS.ProcessEnv;
+  env: EnvLike;
   baseUrl: string;
   path?: string;
 }): Promise<string | undefined> {

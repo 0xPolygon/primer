@@ -1,10 +1,20 @@
 {
   "name": "@polygonlabs/primer-mcp",
-  "version": "1.0.0",
-  "description": "MCP server + device-flow login for Primer — lets Claude Code (or any MCP-capable agent) publish HTML/Markdown artifacts and pull reviewer comments.",
+  "version": "1.1.0",
+  "description": "MCP server + device-flow login for Primer \u2014 lets Claude Code (or any MCP-capable agent) publish HTML/Markdown artifacts and pull reviewer comments.",
   "type": "module",
   "bin": {
     "primer-mcp": "dist/index.js"
+  },
+  "exports": {
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./token-store": {
+      "types": "./dist/tokenStore.d.ts",
+      "import": "./dist/tokenStore.js"
+    }
   },
   "files": [
     "dist",

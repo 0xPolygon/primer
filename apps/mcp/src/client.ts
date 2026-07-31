@@ -1,3 +1,6 @@
+// Locally-declared response types (see apiTypes.ts for why these are not
+// imported from @primer/shared): the published `./client` surface must stay
+// self-contained, and a private workspace package cannot appear in it.
 import type {
   AddVersionResponse,
   DocumentDetailResponse,
@@ -5,7 +8,28 @@ import type {
   UploadResponse,
   UserDTO,
   VersionsListResponse,
-} from '@primer/shared/api';
+} from './apiTypes.ts';
+
+// Part of the public `./client` surface — consumers need to be able to name
+// the response types the client methods return (and their nested shapes).
+export type {
+  AddVersionResponse,
+  AnchorData,
+  CommentDTO,
+  DocumentDetail,
+  DocumentDetailResponse,
+  DocumentSummary,
+  ElementPathAnchor,
+  TextRangeAnchor,
+  ThreadDTO,
+  ThreadsListResponse,
+  UploadResponse,
+  UserDTO,
+  VersionSummary,
+  VersionSummaryDTO,
+  VersionsListResponse,
+  ViewerRole,
+} from './apiTypes.ts';
 
 /**
  * Machine-checkable error codes returned by every PrimerApiError.

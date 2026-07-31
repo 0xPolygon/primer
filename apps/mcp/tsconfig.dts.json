@@ -1,0 +1,22 @@
+{
+  // Declaration emit for the published library entries (./client and
+  // ./token-store). Plain tsc, no bundler: apiTypes.ts keeps the public
+  // surface free of @primer/shared, so per-file .d.ts output is already
+  // self-contained — the reason this file can exist instead of tsup.
+  //
+  // rewriteRelativeImportExtensions turns the source's `./apiTypes.ts`
+  // specifiers into `./apiTypes.js` in the emitted declarations so
+  // consumers' resolvers accept them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": [],
+  "files": ["src/client.ts", "src/tokenStore.ts"]
+}
