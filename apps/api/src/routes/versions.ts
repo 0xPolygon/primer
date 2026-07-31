@@ -1,8 +1,8 @@
 import type { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
-import type { VersionSummaryDTO } from '@primer/shared';
-import { documents, versions } from '@primer/shared/schema';
+import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
+import { documents, versions } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import {
   canRead, canEdit, effectiveRole, loadCollaboratorRole,

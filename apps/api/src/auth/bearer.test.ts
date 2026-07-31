@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
 import { db } from '../db/client.ts';
-import { apiTokens, users } from '@primer/shared/schema';
+import { apiTokens, users } from '../db/schema.ts';
 import { generateToken, TOKEN_PREFIX } from './tokens.ts';
 import { makeBearerResolver, composeResolvers } from './bearer.ts';
 import {

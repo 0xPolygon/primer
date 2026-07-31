@@ -9,7 +9,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { composeResolvers, makeBearerResolver } from '../auth/bearer.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { apiTokens, deviceAuthorizations, users } from '@primer/shared/schema';
+import { apiTokens, deviceAuthorizations, users } from '../db/schema.ts';
 import { asUserJson, CSRF_HEADERS } from '../test/harness.ts';
 import { logger } from '../logger.ts';
 

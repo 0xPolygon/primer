@@ -9,11 +9,11 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { composeResolvers, makeBearerResolver } from '../auth/bearer.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { apiTokens, comments, documents, users } from '@primer/shared/schema';
+import { apiTokens, comments, documents, users } from '../db/schema.ts';
 import { SERVICE_USER_ID } from '../auth/admin.ts';
 import { asUserJson } from './harness.ts';
 import { uploadFixture } from '../routes/upload.testlib.ts';
-import type { CreateTokenResponse } from '@primer/shared';
+import type { CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 /**
  * End-to-end flow for the Claude service account: an admin mints a token,

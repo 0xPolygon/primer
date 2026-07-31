@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { sessions, users } from '@primer/shared/schema';
+import { sessions, users } from '../db/schema.ts';
 
 export const SESSION_TTL_MS = Number(process.env.SESSION_TTL_DAYS ?? '14') * 24 * 60 * 60 * 1000;
 

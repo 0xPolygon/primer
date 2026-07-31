@@ -5,8 +5,8 @@ import type { AppVariables, AppDeps } from '../app.ts';
 import type {
   AddExternalRecipientRequest, ExternalShareResponse, ExternalShareViewsResponse,
   PublishExternalShareRequest,
-} from '@primer/shared';
-import { documents, versions, externalShares, externalRecipients } from '@primer/shared/schema';
+} from '@polygonlabs/primer-api-types';
+import { documents, versions, externalShares, externalRecipients } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 import {

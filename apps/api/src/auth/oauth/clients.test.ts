@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '../../db/client.ts';
-import { oauthClients } from '@primer/shared/schema';
+import { oauthClients } from '../../db/schema.ts';
 import {
   REDIRECT_URI_ALLOWLIST,
   isRedirectUriAllowed,

@@ -175,19 +175,20 @@ Repoint map (from research, exhaustive; R1 inventory):
 - **scripts/build.mjs**: the esbuild external-filter currently bundles `@primer/shared` (`external.filter((d) => d !== '@primer/shared')`); change the filtered name to `@polygonlabs/primer-api-types` (it must be bundled for the same reason: its dev-time entry is raw `.ts`, which Node cannot load at runtime from `dist/index.js`). Update the strategy comment accordingly.
 - **v1.js sync comments**: add the missing "keep in sync" cross-reference: a comment near the top of `apps/api/src/companion/v1.js`'s message-posting section noting the message shapes are mirrored in `apps/web/src/companion/protocol.ts` (post-S1B home) — matching the convention of v1.js's three other explicitly cross-referenced mirrors (v1.js:72, 615, 1592).
 
-- [ ] **Action**: Move schema and storage modules into apps/api as specified above (copy files in; do not delete from packages/shared), including the AnchorData import swap inside the moved schema file.
+- [x] **Action**: Move schema and storage modules into apps/api as specified above (copy files in; do not delete from packages/shared), including the AnchorData import swap inside the moved schema file.
   - **Files**: apps/api/src/db/schema.ts, apps/api/src/storage/types.ts
   - **Owner**: Implementation agent: api-fold
   - **Verify (manual)**: `apps/api/src/db/schema.ts` exports the same 22 table names as `packages/shared/src/schema.ts` (diff the export lists); `apps/api/src/storage/types.ts` exports `Storage` and `StorageKey`.
-- [ ] **Action**: Repoint every `@primer/shared*` import in apps/api per the repoint map (64 schema sites, 4 storage sites, 39 contract-type statements, 2 guard statements — 109 statements total), and update `drizzle.config.ts` and `scripts/build.mjs` as specified.
+- [x] **Action**: Repoint every `@primer/shared*` import in apps/api per the repoint map (64 schema sites, 4 storage sites, 39 contract-type statements, 2 guard statements — 109 statements total), and update `drizzle.config.ts` and `scripts/build.mjs` as specified.
   - **Files**: apps/api/src/ (import statements only, per the R1 inventory), apps/api/drizzle.config.ts, apps/api/scripts/build.mjs
   - **Owner**: Implementation agent: api-fold
   - **Verify**: `! grep -rn "@primer/shared" apps/api/src apps/api/drizzle.config.ts apps/api/scripts/build.mjs` → zero matches remain
-- [ ] **Action**: Add the v1.js ↔ protocol-module "keep in sync" comment described above.
+- [x] **Action**: Add the v1.js ↔ protocol-module "keep in sync" comment described above.
+  - **Deviation (executed)**: the comment sits immediately above the `── 1. Init handshake` section header (v1.js:309) — where message posting actually begins — rather than the literal top of file, per the plan's own "near the top of the message-posting section" phrasing.
   - **Files**: apps/api/src/companion/v1.js
   - **Owner**: Implementation agent: api-fold
   - **Verify**: `grep -n "apps/web/src/companion/protocol.ts" apps/api/src/companion/v1.js` → at least one match
-- [ ] **Action**: Confirm the app is independently green.
+- [x] **Action**: Confirm the app is independently green.
   - **Files**: (none — verification only)
   - **Owner**: Implementation agent: api-fold
   - **Verify**: `pnpm --filter @primer/api run typecheck && pnpm --filter @primer/api run build` → both pass
@@ -294,6 +295,8 @@ Research confirmed `packages/shared` contains zero monitored signals: no error c
 ## Execution mechanics
 
 The unit of dispatch is the wave, read off the Mermaid graph: **Wave 1** = S0 alone (single-stage wave → plain `Agent` dispatch, model per Stage Index). **Wave 2** = S1A + S1B + S1C compiled into a single ephemeral `Workflow` — one `agent()` per stage, `isolation: 'worktree'`, `schema` = the stage report contract above, `model` copied verbatim from the Stage Index. Derive the workflow script at execution time; never commit it. **Wave 3** = S2, **Wave 4** = S3 (single-stage waves), **Wave 5** = S4 (team lead directly).
+
+> **Deviation (executed) — Wave 2 degraded to sequential single-checkout dispatches.** The executing session had no `Workflow` tool available, and `Agent` worktree isolation could not be aimed at the primer repo: the harness resolves isolation from the shell CWD at spawn, the session's CWD reset to the workspace root between Bash calls (so isolation would have targeted the workspace repo), and isolated worktrees branch from `origin/master`, which lacks this run's local-only stage commits. Per the skill's documented Phase 3 degradation, S1A → S1B → S1C were dispatched **sequentially** as plain `Agent` calls operating directly in the dissolve-shared working tree — one file-editing agent at a time, models still pinned verbatim from the Stage Index, report contract requested as structured JSON output (not schema-enforced, so the team lead's post-merge re-verification is the binding gate, as it already was).
 
 Briefs are content-keyed: each stage brief embeds the plan blob hash (`git hash-object plans/dissolve-primer-shared.md`), the stage id, the base tree hash (`git rev-parse HEAD^{tree}` at wave start), the stage's verify commands quoted verbatim, a `READ FIRST:` mount of the plan's stage section by path and heading, and run-specific data (worktree path, report schema) only. Agents own *how* verify conditions reach green within their declared file set; they never run git mutations, never edit outside the file set, and report `blocked` rather than weakening a gate.
 

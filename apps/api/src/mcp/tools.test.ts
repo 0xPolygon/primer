@@ -6,7 +6,7 @@ import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
-import { documents, documentCollaborators, users, versions, threads, comments } from '@primer/shared/schema';
+import { documents, documentCollaborators, users, versions, threads, comments } from '../db/schema.ts';
 import { buildMcpToolHandlers, type ToolDeps } from './tools.ts';
 import { v7 as uuidv7 } from 'uuid';
 

@@ -2,7 +2,7 @@ import { writeFile, mkdir, stat, unlink } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
-import type { Storage } from '@primer/shared/storage';
+import type { Storage } from './types.ts';
 
 export class FilesystemStorage implements Storage {
   constructor(private readonly root: string) {}

@@ -1,6 +1,6 @@
 import { inArray } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { users } from '@primer/shared/schema';
+import { users } from '../db/schema.ts';
 import { logger } from '../logger.ts';
 import type {
   Notifier,

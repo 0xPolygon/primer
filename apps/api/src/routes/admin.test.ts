@@ -7,8 +7,8 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { documents, versions, threads, comments, documentViews, users } from '@primer/shared/schema';
-import type { AdminStatsResponse } from '@primer/shared';
+import { documents, versions, threads, comments, documentViews, users } from '../db/schema.ts';
+import type { AdminStatsResponse } from '@polygonlabs/primer-api-types';
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-admin-test-'));

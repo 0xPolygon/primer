@@ -11,7 +11,7 @@ import { NoopNotifier, type NotifyExternalOtpArgs, type NotifyExternalFirstViewA
 import { db } from '../db/client.ts';
 import {
   externalShares, externalRecipients, externalViews,
-} from '@primer/shared/schema';
+} from '../db/schema.ts';
 import { generateShareToken } from '../external/tokens.ts';
 import { _resetRateLimiterForTests } from '../lib/rateLimiter.ts';
 import { ARTIFACT_CSP } from './versionContent.ts';

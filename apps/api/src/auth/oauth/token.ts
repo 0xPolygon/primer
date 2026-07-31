@@ -5,7 +5,7 @@ import { db } from '../../db/client.ts';
 import {
   oauthAccessTokens,
   oauthRefreshTokens,
-} from '@primer/shared/schema';
+} from '../../db/schema.ts';
 import { getClient } from './clients.ts';
 import {
   generateAccessToken,

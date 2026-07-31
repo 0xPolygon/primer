@@ -7,7 +7,7 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockResolver, mockMultiResolver } from '../auth/resolver.ts';
 import { parseAdminEmails } from '../auth/admin.ts';
-import type { MeResponse } from '@primer/shared';
+import type { MeResponse } from '@polygonlabs/primer-api-types';
 
 describe('GET /api/me', () => {
   it('returns the current user as MeResponse with isAdmin false by default', async () => {

@@ -76,7 +76,7 @@ describe('canManage', () => {
 
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { documents, users, documentCollaborators } from '@primer/shared/schema';
+import { documents, users, documentCollaborators } from '../db/schema.ts';
 import { loadCollaboratorRole, loadCollaboratorRoles } from './permissions.ts';
 
 async function seedUser(id: string): Promise<void> {

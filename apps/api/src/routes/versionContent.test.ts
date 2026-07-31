@@ -10,7 +10,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { ARTIFACT_CSP } from './versionContent.ts';
 import { db } from '../db/client.ts';
-import { documents, versions as versionsTable, users, documentCollaborators } from '@primer/shared/schema';
+import { documents, versions as versionsTable, users, documentCollaborators } from '../db/schema.ts';
 import { CSRF_HEADERS, asUser } from '../test/harness.ts';
 
 async function upload(app: ReturnType<typeof createApp>): Promise<string> {

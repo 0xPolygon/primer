@@ -4,7 +4,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
 import {
   documents, externalShares, externalRecipients, externalViewerSessions,
-} from '@primer/shared/schema';
+} from '../db/schema.ts';
 import { generateShareToken } from './tokens.ts';
 import {
   createViewerSession, lookupViewerSession,

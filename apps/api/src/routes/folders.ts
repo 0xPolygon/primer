@@ -2,8 +2,8 @@ import type { Hono } from 'hono';
 import { and, eq, sql as drizzleSql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables } from '../app.ts';
-import type { FolderDTO } from '@primer/shared';
-import { folders, documentFolders } from '@primer/shared/schema';
+import type { FolderDTO } from '@polygonlabs/primer-api-types';
+import { folders, documentFolders } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 
 const MAX_NAME_LEN = 60;

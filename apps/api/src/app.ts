@@ -32,7 +32,7 @@ import { registerDocumentFolderRoutes } from './routes/documentFolder.ts';
 import { registerLibraryRoute } from './routes/library.ts';
 import { registerOAuthRoutes } from './auth/oauth/routes.ts';
 import { registerMcpRoute } from './mcp/routes.ts';
-import type { Storage } from '@primer/shared/storage';
+import type { Storage } from './storage/types.ts';
 import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
 

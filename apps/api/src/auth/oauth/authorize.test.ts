@@ -9,7 +9,7 @@ import {
   oauthConsents,
   sessions,
   users,
-} from '@primer/shared/schema';
+} from '../../db/schema.ts';
 import { registerOAuthAuthorizationRoutes } from './authorize.ts';
 import { createClient } from './clients.ts';
 import { csrfMiddleware } from '../csrf.ts';

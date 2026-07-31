@@ -10,7 +10,7 @@ import {
   oauthClients,
   oauthRefreshTokens,
   users,
-} from '@primer/shared/schema';
+} from '../../db/schema.ts';
 import { registerOAuthTokenRoute } from './token.ts';
 import { createClient, type OAuthClientRow } from './clients.ts';
 import { hashHex } from './tokens.ts';

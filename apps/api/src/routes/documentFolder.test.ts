@@ -8,9 +8,9 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { users, documents, documentCollaborators, documentFolders } from '@primer/shared/schema';
+import { users, documents, documentCollaborators, documentFolders } from '../db/schema.ts';
 import type { Notifier } from '../notifications/notifier.ts';
-import type { FolderDTO } from '@primer/shared/api';
+import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { asUser, asUserJson } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
 
