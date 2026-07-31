@@ -23,9 +23,6 @@ importers:
       '@polygonlabs/primer-api-types':
         specifier: workspace:^
         version: link:../../packages/api-types
-      '@primer/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -115,9 +112,6 @@ importers:
       '@polygonlabs/primer-api-types':
         specifier: workspace:^
         version: link:../../packages/api-types
-      '@primer/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@types/node':
         specifier: ^25.6.0
         version: 25.9.1
@@ -139,9 +133,6 @@ importers:
       '@polygonlabs/primer-api-types':
         specifier: workspace:^
         version: link:../../packages/api-types
-      '@primer/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       '@tanstack/react-query':
         specifier: ^5.100.6
         version: 5.101.0(react@19.2.7)
@@ -188,18 +179,6 @@ importers:
 
   packages/api-types:
     devDependencies:
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
-  packages/shared:
-    devDependencies:
-      drizzle-kit:
-        specifier: ^0.31.10
-        version: 0.31.10
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(postgres@3.4.9)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

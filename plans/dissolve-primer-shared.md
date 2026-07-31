@@ -243,15 +243,15 @@ Five statements, fully mapped. `@primer/shared` is a devDependency here (bundled
 
 All three consumers are off the package (S1A/S1B/S1C committed). Delete it and remove every remaining reference.
 
-- [ ] **Action**: Delete the `packages/shared` directory entirely. Remove the `"@primer/shared": "workspace:*"` entries from `apps/api/package.json` (dependencies), `apps/web/package.json` (dependencies), and `apps/mcp/package.json` (devDependencies). Run `pnpm install` to update the lockfile (drops the three link entries and the `packages/shared` importer section).
+- [x] **Action**: Delete the `packages/shared` directory entirely. Remove the `"@primer/shared": "workspace:*"` entries from `apps/api/package.json` (dependencies), `apps/web/package.json` (dependencies), and `apps/mcp/package.json` (devDependencies). Run `pnpm install` to update the lockfile (drops the three link entries and the `packages/shared` importer section).
   - **Files**: packages/shared/ (deleted), apps/api/package.json, apps/web/package.json, apps/mcp/package.json, pnpm-lock.yaml
   - **Owner**: Implementation agent: cleanup
   - **Verify**: `test ! -d packages/shared && pnpm install && ! grep -rn "@primer/shared" --include="*.ts" --include="*.tsx" --include="*.mjs" --include="*.json" --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=docs apps packages *.json` → directory gone, install green, zero live references (docs/superpowers historical design docs are deliberately excluded — they are records, not build inputs)
-- [ ] **Action**: Update the root `README.md` Architecture section: replace the `packages/shared` bullet (line ~62) with bullets for `packages/api-types` (published wire contract + validators) and note schema/storage now live in `apps/api`, the companion protocol module in `apps/web`.
+- [x] **Action**: Update the root `README.md` Architecture section: replace the `packages/shared` bullet (line ~62) with bullets for `packages/api-types` (published wire contract + validators) and note schema/storage now live in `apps/api`, the companion protocol module in `apps/web`.
   - **Files**: README.md
   - **Owner**: Implementation agent: cleanup
   - **Verify**: `grep -n "api-types" README.md && ! grep -n "packages/shared" README.md` → new bullet present, stale bullet gone
-- [ ] **Action**: Confirm the whole workspace is green without the package.
+- [x] **Action**: Confirm the whole workspace is green without the package.
   - **Files**: (none — verification only)
   - **Owner**: Implementation agent: cleanup
   - **Verify**: `pnpm typecheck && pnpm -r run build` → all workspace members pass (CI runs exactly these)

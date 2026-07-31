@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@polygonlabs/primer-api-types": "workspace:^",
-    "@primer/shared": "workspace:*",
     "@tanstack/react-query": "^5.100.6",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
