@@ -120,12 +120,46 @@ and removes the local entry. Idempotent.
 | `primer_create_document` | Create a new document with an initial version. |
 | `primer_add_version` | Upload a new version of an existing document. |
 | `primer_get_document` | Fetch a document + its latest-version metadata. |
+| `primer_get_version_content` | Fetch the stored content (HTML) of a version, or the latest version of a document. Pass `toDisk: true` to save it to a fresh server-owned temp file (returned as `savedTo`) instead of returning it inline. |
 | `primer_list_versions` | List all versions of a document, newest first. |
 | `primer_get_comments` | Fetch comment threads on a version (or the latest version of a document) as a markdown summary. |
 
 Inline content (passed via `primer_create_document` / `primer_add_version`)
 is capped at **10 MB per upload**. Larger payloads will be rejected by
 the API with `code: 'bad_request'`.
+
+### Disk round-tripping — content transfer without burning context
+
+Both directions of content transfer can move the document body over the
+filesystem so it never transits agent context:
+
+- **Write:** `primer_create_document` / `primer_add_version` take
+  `contentPath` *instead of* `content` — an absolute path to a local file
+  the server reads and uploads.
+- **Read:** `primer_get_version_content` takes `toDisk: true` *in addition
+  to* its lookup args — the server writes the fetched content to a **fresh
+  temp directory it owns** (`$TMPDIR/primer-<random>/content.html`) and
+  returns metadata (`savedTo`, `sizeBytes`, version ids) only. The agent
+  moves the file where it wants with its own tools.
+
+The read direction deliberately does **not** accept a destination path: an
+agent-chosen absolute path would let a read-shaped tool perform arbitrary
+filesystem writes (with overwrite) outside the permission model that
+governs the agent's own Write tool. Writing only to a fresh server-owned
+temp dir removes the traversal and overwrite surface; relocating the file
+goes back through the harness's gated file tools, and that move never
+spends context on the body.
+
+Note the asymmetry on the write side: `contentPath` reads are **not
+sandboxed to any directory** — the server will read whatever absolute path
+the process itself can access. That is equivalent in power to the agent
+reading the file and inlining it, but be aware the MCP process touches the
+filesystem based on tool arguments.
+
+This matters most for documents with embedded `data:`-URI images: base64
+tokenizes at ~2.5–3 characters per token, so inlining a 100 KB image costs
+~50k tokens in each direction — and a 10 MB document exceeds model context
+windows outright. A path costs a handful of tokens.
 
 ## Error code taxonomy
 

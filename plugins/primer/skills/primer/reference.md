@@ -6,6 +6,22 @@ Progressive-disclosure detail for the `primer` skill. Read this when you need ex
 
 Every MCP tool returns `{ content: [{ type: 'text', text: ... }] }`. On error it also sets `isError: true` and the text is JSON `{ code, message }` (parse it; branch on `code`, never on the message string). On success the text is either JSON (most tools) or a markdown summary (`primer_get_comments`).
 
+### Disk round-tripping (local stdio server only)
+
+The **locally-running** MCP server (`@polygonlabs/primer-mcp`, stdio transport) shares the agent's filesystem, so its content tools can move the document body **without it ever transiting agent context**:
+
+- `primer_create_document` / `primer_add_version`: pass `contentPath` (absolute path) *instead of* `content` — the server reads the file and uploads it byte-for-byte.
+- `primer_get_version_content`: pass `toDisk: true` *alongside* the lookup args — the server writes the fetched content to a **fresh temp file it owns** and returns metadata with the `savedTo` path. Move it where you need it with your own file tools; that move never spends context on the body. (The tool deliberately takes no destination path — a read-shaped tool must not perform agent-directed filesystem writes.)
+
+The **remote connector** (HTTP `/mcp` endpoint) runs on Primer's servers and cannot read or write your disk — its tools take/return inline `content` only. **How to tell:** check the registered tool's input schema; if it lists `contentPath` / `toDisk`, you're on the local server.
+
+**When to use it (local server present):**
+
+- **Always for writes when the artifact already exists on disk.** Inline re-emission pays output-token cost for every byte and risks byte-level reproduction errors; a path costs a handful of tokens and is byte-perfect.
+- **Always for reads whose destination is disk** (saving a copy, diffing against source, feeding a build step). Never spool content through context just to write it back out — fetch with `toDisk: true`, then `mv` the `savedTo` file into place.
+- **Always for documents with embedded `data:`-URI images**, either direction — base64 tokenizes at ~2.5–3 chars/token, so even a 100 KB image is ~50k tokens of opaque noise inline, and large documents exceed the context window outright.
+- Return/send content inline only when you genuinely need to *read* the body in context **and** it is small (roughly < 50 KB of text-only HTML). When in doubt, fetch with `toDisk: true` and Read the `savedTo` file — that path is cheaper and lets you read selectively.
+
 ### `primer_whoami`
 
 - **Input:** `{}`.
@@ -23,14 +39,14 @@ Parse a Primer document URL into ids the other tools can use.
 
 Create a new document and upload its first version.
 
-- **Input:** `{ title: string, description?: string, content: string, format: "html" | "markdown" }`.
+- **Input:** `{ title: string, description?: string, content?: string, contentPath?: string, format: "html" | "markdown" }`. Exactly one of `content` (inline) or `contentPath` (absolute path; local stdio server only — see Disk round-tripping above).
 - **Output:** `{ documentId, versionId, url }`.
 
 ### `primer_add_version`
 
 Upload a new version of an existing document.
 
-- **Input:** `{ documentId: string, content: string, format: "html" | "markdown", versionNote?: string }`.
+- **Input:** `{ documentId: string, content?: string, contentPath?: string, format: "html" | "markdown", versionNote?: string }`. Exactly one of `content` or `contentPath` (local stdio server only).
 - **Output:** `{ versionId, versionNumber, url }`.
 
 ### `primer_get_document`
@@ -40,14 +56,17 @@ Upload a new version of an existing document.
 
 ### `primer_get_version_content`
 
-Fetch the raw HTML content of a Primer version. Use when you need the actual document body — not just metadata — to summarize, iterate on, or reason about existing content.
+Fetch the raw HTML content of a Primer version. Use when you need the actual document body — not just metadata — to summarize, iterate on, or reason about existing content. **Before fetching inline, check `sizeBytes` on `primer_get_document` / `primer_list_versions`** — for anything beyond small text-only documents, or when the content's destination is disk, pass `toDisk: true` (local stdio server only; see Disk round-tripping above) so the body never transits context.
 
 - **Input:** any one of:
   - `{ versionId: string }` — direct lookup.
   - `{ documentId: string }` — resolves to the latest version.
-  - `{ url: string }` — a Primer URL. If it carries `/v/<n>`, that specific version; otherwise the latest.
-- **Output:** `{ documentId, versionId, versionNumber, sizeBytes, content }`. `content` is the HTML exactly as stored (already sanitized at upload time — safe to feed straight back into the model).
-- Errors with `code: 'bad_request'` when no input is given or the URL doesn't parse; `code: 'not_found'` for unknown versionIds, soft-deleted documents, or `/v/<n>` values that don't exist on the doc.
+  - `{ url: string }` — a Primer URL. If it carries `/v/<n>`, that specific version; otherwise the latest. (Remote connector only; the local server takes `versionId` or `documentId`.)
+
+  plus, on the local stdio server, optional `toDisk: true` — save to a fresh server-owned temp file instead of returning content inline.
+- **Output (inline):** `{ documentId, versionId, versionNumber, sizeBytes, content }`. `content` is the HTML exactly as stored (already sanitized at upload time — safe to feed straight back into the model).
+- **Output (with `toDisk`):** `{ documentId, versionId, versionNumber, sizeBytes, savedTo }` — metadata only; the content is on disk at `savedTo` (a fresh path under the OS temp dir, chosen by the server). Read it or move it with your own file tools.
+- Errors with `code: 'bad_request'` when no input is given, the URL doesn't parse, or the temp write fails; `code: 'not_found'` for unknown versionIds, soft-deleted documents, or `/v/<n>` values that don't exist on the doc.
 - No ownership gate — mirrors the API's share-by-URL read model.
 
 ### `primer_list_versions`
@@ -119,9 +138,9 @@ If `primer_whoami` returns `code: 'not_authenticated'`, the token was revoked (u
 - Anything else (`.html`, `.htm`, inline HTML, etc.) → `format: "html"`.
 - When the user gives raw content with no filename, default to `"html"` if the content opens with `<` (looks like markup), `"markdown"` otherwise.
 
-## 10 MB inline limit
+## 10 MB upload limit
 
-`content` is sent inline (no file paths). The API rejects uploads larger than 10 MB with `code: 'bad_request'`. If the artifact is genuinely large, ask the user to trim it before retrying — there is no file-path input.
+The API rejects uploads larger than 10 MB with `code: 'bad_request'`. On the **remote connector**, `content` is sent inline (no file-path input) — and inline transfer becomes impractical long before 10 MB (token cost, context limits), so ask the user to trim genuinely large artifacts. On the **local stdio server**, use `contentPath` — the 10 MB API cap is then the only limit; token cost is no longer a factor.
 
 ## Upload mutations Primer makes
 
@@ -144,7 +163,11 @@ must know:
 
 If a construct matters to your artifact, verify survival: publish, then
 `primer_get_version_content` and diff against your source. That
-round-trip is cheap and catches every silent mutation.
+round-trip is cheap and catches every silent mutation. On the local
+stdio server, do the whole check on disk — upload with `contentPath`,
+fetch back with `toDisk: true`, and `diff` your source against the
+returned `savedTo` file —
+so neither direction spends context on the document body.
 
 ## `.primer/document.json`
 

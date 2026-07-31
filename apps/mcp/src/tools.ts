@@ -294,6 +294,65 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
       }
     },
 
+    primer_get_version_content: async (args) => {
+      const versionId = typeof args.versionId === 'string' && args.versionId.length > 0
+        ? args.versionId
+        : undefined;
+      const documentId = typeof args.documentId === 'string' && args.documentId.length > 0
+        ? args.documentId
+        : undefined;
+      if ((versionId && documentId) || (!versionId && !documentId)) {
+        return err('bad_request', 'Provide exactly one of `versionId` or `documentId`.');
+      }
+
+      const toDisk = args.toDisk === true;
+
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+
+      try {
+        let resolvedVersionId: string;
+        let resolvedDocumentId = documentId;
+        let versionNumber: number | undefined;
+        if (versionId) {
+          resolvedVersionId = versionId;
+        } else {
+          const detail = await auth.client.getDocument(documentId!);
+          resolvedVersionId = detail.latestVersion.id;
+          versionNumber = detail.latestVersion.versionNumber;
+          resolvedDocumentId = detail.document.id;
+        }
+        const content = await auth.client.getVersionContent(resolvedVersionId);
+        const meta = {
+          documentId: resolvedDocumentId,
+          versionId: resolvedVersionId,
+          versionNumber,
+          sizeBytes: Buffer.byteLength(content, 'utf8'),
+        };
+        if (!toDisk) {
+          return ok({ ...meta, content });
+        }
+        // The destination is server-chosen, never agent-chosen: a fresh temp
+        // directory this process owns, one file, no overwrite possible. An
+        // agent-supplied absolute path here would be an arbitrary filesystem
+        // write laundered through a read-shaped tool, skipping the permission
+        // model that governs the harness's own Write tool (PR #76 review).
+        // The agent moves the file where it wants with its own gated tools —
+        // that `mv` never spends context on the body.
+        try {
+          const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'primer-'));
+          const savedTo = path.join(dir, 'content.html');
+          fs.writeFileSync(savedTo, content, { encoding: 'utf8', flag: 'wx' });
+          return ok({ ...meta, savedTo });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          return err('bad_request', `Could not write content to temp dir: ${message}`);
+        }
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
+
     primer_get_comments: async (args) => {
       const versionId = typeof args.versionId === 'string' && args.versionId.length > 0
         ? args.versionId
@@ -362,7 +421,7 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
   },
   primer_create_document: {
     description:
-      'Create a new Primer document and upload the initial version. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context).',
+      'Create a new Primer document and upload the initial version. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access.',
     inputSchema: {
       title: z.string(),
       description: z.string().optional(),
@@ -373,7 +432,7 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
   },
   primer_add_version: {
     description:
-      'Upload a new version of an existing Primer document. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context).',
+      'Upload a new version of an existing Primer document. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access.',
     inputSchema: {
       documentId: z.string(),
       content: z.string().optional(),
@@ -392,6 +451,15 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     description: 'List all versions of a Primer document, newest first.',
     inputSchema: {
       documentId: z.string(),
+    },
+  },
+  primer_get_version_content: {
+    description:
+      'Fetch the stored content of a Primer version (HTML as stored at rest). Provide `versionId` (specific version) or `documentId` (latest version). Pass `toDisk: true` to save the content to a fresh server-owned temp file instead of returning it inline — the response then carries `savedTo` (the temp path) and the content never transits agent context. Preferred for anything beyond small documents; embedded data-URI images make inline return prohibitively token-expensive. Move the file where you need it with your own file tools.',
+    inputSchema: {
+      versionId: z.string().optional(),
+      documentId: z.string().optional(),
+      toDisk: z.boolean().optional(),
     },
   },
   primer_get_comments: {

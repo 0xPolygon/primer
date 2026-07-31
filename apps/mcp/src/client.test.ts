@@ -116,6 +116,36 @@ describe('PrimerClient.getVersionThreads', () => {
   });
 });
 
+describe('PrimerClient.getVersionContent', () => {
+  it('GETs /api/versions/:versionId/content and returns the body verbatim (text/html, not JSON)', async () => {
+    const html = '<!doctype html><h1>stored</h1>';
+    const mockFetch = vi.fn(async () => new Response(html, {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    }));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+
+    const result = await client.getVersionContent('v1');
+
+    expect(result).toBe(html);
+    const [url, init] = firstCall(mockFetch);
+    expect(url).toBe('http://localhost:3000/api/versions/v1/content');
+    expect(init.method).toBe('GET');
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer primer_pat_test');
+  });
+
+  it('maps a 404 to PrimerApiError with code not_found', async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ error: 'not_found' }, 404));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+
+    await expect(client.getVersionContent('nope')).rejects.toMatchObject({
+      name: 'PrimerApiError',
+      code: 'not_found',
+      status: 404,
+    });
+  });
+});
+
 describe('PrimerClient.createDocument', () => {
   it('POSTs multipart to /api/upload with doc.md for markdown', async () => {
     const body = { documentId: 'd1', versionId: 'v1', url: '/d/d1' };
