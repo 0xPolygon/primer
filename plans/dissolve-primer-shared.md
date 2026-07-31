@@ -278,11 +278,11 @@ Research confirmed `packages/shared` contains zero monitored signals: no error c
 
 ## Stage S4: Team-lead final review
 
-- [ ] **Action**: Cross-check every stage's committed diff against its declared file set; confirm every checklist box above is ticked in the plan document as committed; re-run the S3 full verification one final time on the assembled branch; write the completion report (stages, verify results, diff summary).
+- [x] **Action**: Cross-check every stage's committed diff against its declared file set; confirm every checklist box above is ticked in the plan document as committed; re-run the S3 full verification one final time on the assembled branch; write the completion report (stages, verify results, diff summary).
   - **Files**: plans/dissolve-primer-shared.md
   - **Owner**: Team lead
   - **Verify**: `pnpm typecheck && pnpm -r run build && pnpm test` → green on the final assembled branch
-- [ ] **Action**: Do NOT open a pull request. Report the end state to the user and ask whether to push + open the draft PR (with this plan's Motivation section as the description) or review locally first.
+- [x] **Action**: Do NOT open a pull request. Report the end state to the user and ask whether to push + open the draft PR (with this plan's Motivation section as the description) or review locally first.
   - **Files**: (none)
   - **Owner**: Team lead
   - **Verify (manual)**: The branch is local-only at completion; no `git push` has occurred.
