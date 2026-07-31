@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ThreadsListResponse } from '@primer/shared/api';
+import type { ThreadsListResponse } from '@polygonlabs/primer-api-types';
 import { formatComments } from './format.ts';
 
 const baseAnchor = {

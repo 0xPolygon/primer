@@ -226,15 +226,15 @@ Repoint map (R1 inventory, exhaustive — 58 statements):
 
 Five statements, fully mapped. `@primer/shared` is a devDependency here (bundled at publish); after this stage the app types and bundles against the contract package instead. Green independently.
 
-- [ ] **Action**: Repoint the 4 `@primer/shared/api` type-import statements (`src/client.ts:1-8`, `src/deviceLogin.ts:1`, `src/format.test.ts:2`, `src/format.ts:1`) and the 1 root-barrel guard import (`src/format.ts:2` — `isElementPathAnchor, isTextRangeAnchor`) to `@polygonlabs/primer-api-types`.
+- [x] **Action**: Repoint the 4 `@primer/shared/api` type-import statements (`src/client.ts:1-8`, `src/deviceLogin.ts:1`, `src/format.test.ts:2`, `src/format.ts:1`) and the 1 root-barrel guard import (`src/format.ts:2` — `isElementPathAnchor, isTextRangeAnchor`) to `@polygonlabs/primer-api-types`.
   - **Files**: apps/mcp/src/client.ts, apps/mcp/src/deviceLogin.ts, apps/mcp/src/format.ts, apps/mcp/src/format.test.ts
   - **Owner**: Implementation agent: mcp-repoint
   - **Verify**: `! grep -rn "@primer/shared" apps/mcp/src` → zero matches remain
-- [ ] **Action**: Update `apps/mcp/scripts/build.mjs`: the esbuild external-filter that bundles `@primer/shared` now has nothing to filter once S2 removes the dep, but this stage must keep the bundle correct for the NEW package — since `@polygonlabs/primer-api-types` sits in `devDependencies` it is already absent from the externals list (which is built from `dependencies` only) and gets bundled automatically. Replace the `'@primer/shared'` filter and its strategy comment with a comment explaining that `@polygonlabs/primer-api-types` is bundled by virtue of being a devDependency (guards inline, types erase).
+- [x] **Action**: Update `apps/mcp/scripts/build.mjs`: the esbuild external-filter that bundles `@primer/shared` now has nothing to filter once S2 removes the dep, but this stage must keep the bundle correct for the NEW package — since `@polygonlabs/primer-api-types` sits in `devDependencies` it is already absent from the externals list (which is built from `dependencies` only) and gets bundled automatically. Replace the `'@primer/shared'` filter and its strategy comment with a comment explaining that `@polygonlabs/primer-api-types` is bundled by virtue of being a devDependency (guards inline, types erase).
   - **Files**: apps/mcp/scripts/build.mjs
   - **Owner**: Implementation agent: mcp-repoint
   - **Verify**: `! grep -n "@primer/shared" apps/mcp/scripts/build.mjs` → zero matches
-- [ ] **Action**: Confirm the app is independently green and the published bundle self-contains the guards.
+- [x] **Action**: Confirm the app is independently green and the published bundle self-contains the guards.
   - **Files**: (none — verification only)
   - **Owner**: Implementation agent: mcp-repoint
   - **Verify**: `pnpm --filter @polygonlabs/primer-mcp run typecheck && pnpm --filter @polygonlabs/primer-mcp run test && pnpm --filter @polygonlabs/primer-mcp run build && ! grep -n "@primer/shared\|@polygonlabs/primer-api-types" apps/mcp/dist/index.js` → typecheck/test/build pass; dist bundle contains no unresolved references to either package name (guards inlined)

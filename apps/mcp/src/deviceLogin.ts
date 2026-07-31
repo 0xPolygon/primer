@@ -1,4 +1,4 @@
-import type { DeviceAuthorizeResponse, DeviceTokenSuccess } from '@primer/shared/api';
+import type { DeviceAuthorizeResponse, DeviceTokenSuccess } from '@polygonlabs/primer-api-types';
 import { PrimerApiError } from './client.ts';
 
 /**

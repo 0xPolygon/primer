@@ -4,9 +4,10 @@
 // esbuild is a devDependency (build-time only); production runs `node dist/index.js`
 // so the runtime contains no TS executor or TS source. Same reasoning as apps/api.
 //
-// Strategy: bundle @primer/shared (workspace package whose package.json points
-// at .ts source) and resolve .ts extensions, but keep all node_modules deps
-// external so they load from the installed node_modules at runtime.
+// Strategy: keep all node_modules deps external so they load from the
+// installed node_modules at runtime, and bundle everything else (including
+// devDependencies like @polygonlabs/primer-api-types). The contract package
+// is a devDependency whose guards must inline into the bundle.
 //
 // Output gets a `#!/usr/bin/env node` shebang and is chmod 755 so the
 // `bin: { primer-mcp: dist/index.js }` entry in package.json works without an
@@ -26,9 +27,9 @@ const external = [
   ...Object.keys(pkg.dependencies ?? {}),
   // Sub-paths of declared deps also count as external. Node will resolve them.
 ];
-// @primer/shared is a workspace package whose entry points are .ts files —
-// it must be bundled, not external.
-const externalFiltered = external.filter((d) => d !== '@primer/shared');
+// devDependencies like @polygonlabs/primer-api-types are not in dependencies,
+// so they are bundled automatically. Their guards inline into the dist.
+const externalFiltered = external;
 
 const outfile = resolve(mcpRoot, 'dist/index.js');
 

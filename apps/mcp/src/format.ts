@@ -1,5 +1,5 @@
-import type { CommentDTO, ThreadDTO, ThreadsListResponse } from '@primer/shared/api';
-import { isElementPathAnchor, isTextRangeAnchor } from '@primer/shared';
+import type { CommentDTO, ThreadDTO, ThreadsListResponse } from '@polygonlabs/primer-api-types';
+import { isElementPathAnchor, isTextRangeAnchor } from '@polygonlabs/primer-api-types';
 
 /**
  * Renders a `ThreadsListResponse` as a markdown summary suited for an LLM
