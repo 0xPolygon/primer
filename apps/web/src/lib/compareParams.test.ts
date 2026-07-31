@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { VersionSummaryDTO } from '@primer/shared';
+import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import {
   parseViewParam,
   resolveCompareParams,

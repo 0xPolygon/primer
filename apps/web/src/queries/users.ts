@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { MentionableUsersResponse, MentionableUser } from '@primer/shared';
+import type { MentionableUsersResponse, MentionableUser } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 export function useMentionableUsers() {

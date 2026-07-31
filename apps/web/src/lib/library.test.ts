@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { filterAndSort, hashHue, normalizeFolderNameClient, FOLDER_UNCATEGORIZED } from './library';
-import type { LibraryDocument } from '@primer/shared';
+import type { LibraryDocument } from '@polygonlabs/primer-api-types';
 
 function doc(partial: Partial<LibraryDocument>): LibraryDocument {
   return {

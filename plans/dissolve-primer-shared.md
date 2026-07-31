@@ -208,15 +208,16 @@ Repoint map (R1 inventory, exhaustive — 58 statements):
 - 46 contract-type statements (full file:line list in R1 inventory) → `@polygonlabs/primer-api-types`.
 - Fix the stale comment at `src/lib/fitToWidth.ts:5` (mentions `MsgContentMetrics in @primer/shared`) to reference `src/companion/protocol.ts`.
 
-- [ ] **Action**: Create `apps/web/src/companion/protocol.ts` per the module-content spec above (moved code, not rewritten; contract names imported from `@polygonlabs/primer-api-types`; sync-comment header included).
+- [x] **Action**: Create `apps/web/src/companion/protocol.ts` per the module-content spec above (moved code, not rewritten; contract names imported from `@polygonlabs/primer-api-types`; sync-comment header included).
   - **Files**: apps/web/src/companion/protocol.ts
   - **Owner**: Implementation agent: web-rehome
   - **Verify**: `grep -n "keep in sync\|v1.js" apps/web/src/companion/protocol.ts` → cross-reference comment present
-- [ ] **Action**: Repoint all 58 `@primer/shared*` import statements in apps/web per the repoint map (envelope names → relative `protocol.ts` import; contract names → `@polygonlabs/primer-api-types`), and fix the `fitToWidth.ts` comment.
+- [x] **Action**: Repoint all 58 `@primer/shared*` import statements in apps/web per the repoint map (envelope names → relative `protocol.ts` import; contract names → `@polygonlabs/primer-api-types`), and fix the `fitToWidth.ts` comment.
+  - **Deviation (executed)**: as the plan itself anticipated, the two "mixed" statements (`queries/mutations.ts`, `components/CommentSidebar.tsx`) needed no split — all their names are contract names, so each repointed wholesale. `routes/devHarness.tsx` and `routes/document.tsx` DID split (envelope names → relative `protocol.ts`; contract names → contract package). `queries/documents.ts` had two now-same-source statements merged into one import from the contract package to avoid a duplicate-import smell.
   - **Files**: apps/web/src/ (import statements per the R1 inventory), apps/web/src/lib/fitToWidth.ts
   - **Owner**: Implementation agent: web-rehome
   - **Verify**: `! grep -rn "@primer/shared" apps/web/src` → zero matches remain
-- [ ] **Action**: Confirm the app is independently green, including its existing protocol tests against the moved module.
+- [x] **Action**: Confirm the app is independently green, including its existing protocol tests against the moved module.
   - **Files**: (none — verification only)
   - **Owner**: Implementation agent: web-rehome
   - **Verify**: `pnpm --filter @primer/web run typecheck && pnpm --filter @primer/web run test && pnpm --filter @primer/web run build` → all pass (21 test files, incl. `protocol.test.ts` now importing the local module)

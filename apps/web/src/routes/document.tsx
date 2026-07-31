@@ -8,13 +8,15 @@ import {
 } from 'react';
 import { Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import type {
-  AnchorData,
   InboundProtocolMessage,
   OutboundProtocolMessage,
+  SerializableRect,
+} from '../companion/protocol.ts';
+import type {
+  AnchorData,
   TextRangeAnchor,
   ElementPathAnchor,
-  SerializableRect,
-} from '@primer/shared';
+} from '@polygonlabs/primer-api-types';
 import { useDocument, useDeleteDocument, useEditDocument } from '../queries/documents.ts';
 import { useMe } from '../queries/me.ts';
 import { useVersionsQuery } from '../queries/versions.ts';

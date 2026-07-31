@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Collaborator } from '@primer/shared/api';
+import type { Collaborator } from '@polygonlabs/primer-api-types';
 import { useDocument } from '../queries/documents.ts';
 import {
   useCollaborators,

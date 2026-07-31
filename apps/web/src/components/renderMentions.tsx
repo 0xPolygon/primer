@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { MentionableUser } from '@primer/shared';
+import type { MentionableUser } from '@polygonlabs/primer-api-types';
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ThreadDTO, CommentDTO } from '@primer/shared';
+import type { ThreadDTO, CommentDTO } from '@polygonlabs/primer-api-types';
 import { commentsFilename, formatThreadsAsMarkdown, htmlFilename } from './exportComments.ts';
 
 const NOW = new Date('2026-05-21T12:00:00Z');

@@ -4,8 +4,8 @@ import type {
   InboundProtocolMessage,
   OutboundProtocolMessage,
   Theme,
-} from '@primer/shared';
-import { parseInboundMessage, parseWindowEnvelope } from '@primer/shared';
+} from '../companion/protocol.ts';
+import { parseInboundMessage, parseWindowEnvelope } from '../companion/protocol.ts';
 import { createMessageBuffer } from '../companion/buffer.ts';
 import {
   computeFitScale,

@@ -1,4 +1,4 @@
-import type { DailyStackPoint } from '@primer/shared';
+import type { DailyStackPoint } from '@polygonlabs/primer-api-types';
 import { linearScale, niceTicks, formatTickDate } from './chartGeom.ts';
 
 interface Props {

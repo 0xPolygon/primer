@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { DocumentDetailResponse } from '@primer/shared/api';
-import type { DocumentPatchRequest } from '@primer/shared';
+import type { DocumentDetailResponse, DocumentPatchRequest } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 export function useDocument(docId: string) {

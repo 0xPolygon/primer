@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { CommentDTO, ThreadDTO } from '@primer/shared';
+import type { CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
 import {
   useReply,
   useResolveThread,

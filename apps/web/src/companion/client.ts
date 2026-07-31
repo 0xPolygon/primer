@@ -1,4 +1,4 @@
-import type { MsgOpenExternal } from '@primer/shared';
+import type { MsgOpenExternal } from './protocol.ts';
 
 export function isSafeExternalUrl(raw: string): boolean {
   let u: URL;

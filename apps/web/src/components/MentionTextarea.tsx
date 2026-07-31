@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { MentionableUser } from '@primer/shared';
+import type { MentionableUser } from '@polygonlabs/primer-api-types';
 import { useMentionableUsers } from '../queries/users.ts';
 import { reconcileMentions } from './reconcileMentions.ts';
 

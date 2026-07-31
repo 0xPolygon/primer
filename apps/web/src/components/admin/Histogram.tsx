@@ -1,4 +1,4 @@
-import type { HistogramBucket } from '@primer/shared';
+import type { HistogramBucket } from '@polygonlabs/primer-api-types';
 
 interface Props {
   buckets: HistogramBucket[];

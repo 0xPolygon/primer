@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import type { FolderDTO } from '@primer/shared';
+import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { FolderPickerMenu } from './FolderPickerMenu.tsx';
 import { useAssignFolder, useCreateFolder } from '../queries/library.ts';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseInboundMessage, parseWindowEnvelope } from '@primer/shared';
+import { parseInboundMessage, parseWindowEnvelope } from './protocol.ts';
 
 describe('parseInboundMessage', () => {
   it('round-trips selection_captured', () => {

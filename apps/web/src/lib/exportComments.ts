@@ -1,4 +1,4 @@
-import type { ThreadDTO } from '@primer/shared';
+import type { ThreadDTO } from '@polygonlabs/primer-api-types';
 
 interface DocInfo {
   title: string;

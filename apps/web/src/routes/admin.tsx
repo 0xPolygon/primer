@@ -1,5 +1,5 @@
 import { useAdminStats } from '../queries/admin.ts';
-import type { AdminStatsResponse } from '@primer/shared';
+import type { AdminStatsResponse } from '@polygonlabs/primer-api-types';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
 import { StatCard, SkeletonCard } from '../components/admin/StatCard.tsx';
 import { AreaChart } from '../components/admin/AreaChart.tsx';
