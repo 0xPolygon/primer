@@ -410,7 +410,9 @@ export function registerDocumentRoutes(
       preparedHtml = text;
     }
 
-    const transformed = transformHtml(preparedHtml);
+    // Primer authored the HTML for Markdown uploads, so the parent app owns
+    // its theme; raw HTML uploads keep their own theme handling.
+    const transformed = transformHtml(preparedHtml, { themeManaged: isMarkdown });
     if (!transformed.ok) {
       return c.json({ error: transformed.error, message: transformed.message }, 400);
     }

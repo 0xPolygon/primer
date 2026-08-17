@@ -71,6 +71,8 @@ describe('POST /api/upload — happy path', () => {
       expect(combined).not.toContain('<iframe');
       expect(combined).toContain('<script src="/companion/v1.js"');
       expect(combined).toContain(STORAGE_POLYFILL_JS);
+      // Raw HTML owns its own theme — no Primer theme-ownership marker.
+      expect(combined).not.toContain('data-primer-theme');
     });
   });
 });
@@ -170,6 +172,9 @@ describe('POST /api/upload — markdown', () => {
       expect(combined).toContain('<h1>Hello</h1>');
       expect(combined).toContain('<p>World.</p>');
       expect(combined).toContain('data-theme="light"');
+      // Primer authored this HTML, so it carries the theme-ownership marker
+      // that lets the companion follow the app's light/dark theme.
+      expect(combined).toContain('data-primer-theme="managed"');
       expect(combined).toContain('<script src="/companion/v1.js"'); // companion still injected
       expect(combined).toContain(STORAGE_POLYFILL_JS); // polyfill on markdown path too
       expect(combined).not.toContain('---'); // frontmatter stripped

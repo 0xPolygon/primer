@@ -1,11 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { parse, serialize } from 'parse5';
-import { injectCompanionScript, injectStoragePolyfill, injectViewportMeta } from './inject.ts';
+import {
+  injectCompanionScript,
+  injectStoragePolyfill,
+  injectThemeOwnershipMarker,
+  injectViewportMeta,
+} from './inject.ts';
 import { STORAGE_POLYFILL_JS } from './storagePolyfill.ts';
 
 function inject(html: string): string {
   const doc = parse(html);
   injectCompanionScript(doc);
+  return serialize(doc);
+}
+
+function injectMarker(html: string): string {
+  const doc = parse(html);
+  injectThemeOwnershipMarker(doc);
   return serialize(doc);
 }
 
@@ -92,6 +103,34 @@ describe('injectStoragePolyfill', () => {
     expect(() =>
       injectStoragePolyfill(doc as Parameters<typeof injectStoragePolyfill>[0])
     ).toThrow(/no <head>/);
+  });
+});
+
+describe('injectThemeOwnershipMarker', () => {
+  it('sets data-primer-theme="managed" on the <html> element', () => {
+    const out = injectMarker('<html><head></head><body></body></html>');
+    expect(out).toMatch(/<html[^>]*data-primer-theme="managed"/);
+  });
+
+  it('preserves an existing data-theme while adding the ownership marker', () => {
+    const out = injectMarker(
+      '<html data-theme="light"><head></head><body></body></html>',
+    );
+    expect(out).toContain('data-theme="light"');
+    expect(out).toContain('data-primer-theme="managed"');
+  });
+
+  it('is idempotent — does not add a second marker attribute', () => {
+    const doc = parse('<html><head></head><body></body></html>');
+    injectThemeOwnershipMarker(doc);
+    injectThemeOwnershipMarker(doc);
+    const out = serialize(doc);
+    expect(out.match(/data-primer-theme=/g)?.length).toBe(1);
+  });
+
+  it('works when source has no explicit <html> (parse5 normalizes)', () => {
+    const out = injectMarker('<p>standalone</p>');
+    expect(out).toContain('data-primer-theme="managed"');
   });
 });
 

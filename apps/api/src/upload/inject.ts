@@ -93,6 +93,27 @@ export function injectViewportMeta(doc: Document): void {
   head.childNodes.push(metaEl as ChildNode);
 }
 
+// Marks the artifact as Primer-theme-managed by setting
+// `data-primer-theme="managed"` on <html>. The companion (v1.js) forces the
+// parent app's light/dark theme onto an artifact ONLY when this marker is
+// present. Self-themed HTML artifacts (which drive their own `data-theme` via
+// an in-artifact toggle) are left unmarked, so the companion never clobbers
+// their theme — that clobbering desyncs the artifact's own toggle from what's
+// displayed. Applied only to Primer-authored content (Markdown); see
+// transformHtml's `themeManaged` option.
+export function injectThemeOwnershipMarker(doc: Document): void {
+  const html = findHtml(doc);
+  if (!html) {
+    throw new Error('document has no <html> after parse5 normalization');
+  }
+  const existing = html.attrs.find((a) => a.name === 'data-primer-theme');
+  if (existing) {
+    existing.value = 'managed';
+    return;
+  }
+  html.attrs.push({ name: 'data-primer-theme', value: 'managed' });
+}
+
 // Injects an inline <script> with the storage polyfill source as the FIRST
 // child of <head>. Must be parser-blocking (no `src`, no `defer`, no `async`)
 // so it runs before any artifact <script> in either <head> or <body> —
