@@ -488,6 +488,8 @@ describe('POST /api/documents/:docId/versions', () => {
       expect(combined).toContain('<h1>v2</h1>');
       expect(combined).toContain('<p>New content.</p>');
       expect(combined).toContain('data-theme="light"');
+      // Primer-authored Markdown carries the theme-ownership marker.
+      expect(combined).toContain('data-primer-theme="managed"');
       expect(combined).toContain('<script src="/companion/v1.js"');
       expect(combined).not.toContain('---'); // frontmatter stripped
     } finally {

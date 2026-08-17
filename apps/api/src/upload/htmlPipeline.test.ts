@@ -42,6 +42,30 @@ describe('transformHtml', () => {
     expect(out.html).toContain('content="width=1200"');
   });
 
+  it('marks Primer-owned content with data-primer-theme="managed" when themeManaged', () => {
+    const input =
+      '<!doctype html><html data-theme="light"><head><meta charset="utf-8"></head>' +
+      '<body><article class="primer-md"><p>hi</p></article></body></html>';
+    const out = transformHtml(input, { themeManaged: true });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // The companion only forces the app theme onto artifacts carrying this
+    // marker, so Primer-authored Markdown keeps auto-theming.
+    expect(out.html).toMatch(/<html[^>]*data-primer-theme="managed"/);
+    // The baked-in default theme survives alongside the marker.
+    expect(out.html).toContain('data-theme="light"');
+  });
+
+  it('does not mark raw HTML artifacts (default — author owns theme)', () => {
+    const input = '<html><body><h1>Report</h1></body></html>';
+    const out = transformHtml(input);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // Self-themed HTML manages its own data-theme; the companion must not
+    // clobber it, so it carries no ownership marker.
+    expect(out.html).not.toContain('data-primer-theme');
+  });
+
   it('returns parse_failed when input is not parseable as HTML', () => {
     const out = transformHtml('');
     expect(out.ok).toBe(false);

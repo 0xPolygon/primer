@@ -9,7 +9,10 @@
  *
  * Theming: CSS variables under :root and [data-theme="dark"]. The companion
  * script sets `document.documentElement.dataset.theme` from a parent
- * postMessage; without the companion, the document stays light.
+ * postMessage; without the companion, the document stays light. Markdown is
+ * Primer-authored, so the upload pipeline marks it `data-primer-theme="managed"`
+ * — the signal the companion requires before it will drive the theme (raw HTML
+ * artifacts that manage their own theme are left alone). See inject.ts.
  */
 export const MARKDOWN_STYLESHEET = `
 :root, html[data-theme="light"] {

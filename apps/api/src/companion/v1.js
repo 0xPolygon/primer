@@ -358,6 +358,35 @@
     }, READY_RETRY_MS);
   }
 
+  // ── Theme ownership ──────────────────────────────────────────────
+  // The parent app pushes its light/dark theme on init and on every toggle.
+  // We only apply it to artifacts Primer authored — Markdown, which the upload
+  // pipeline marks with data-primer-theme="managed" on <html>. Raw HTML
+  // artifacts often ship their own theme toggle keyed on the same data-theme
+  // attribute; clobbering it here would desync that toggle from what's
+  // displayed (the light/dark flip bug), so for those we leave data-theme alone.
+  function primerOwnsTheme() {
+    try {
+      return document.documentElement.dataset.primerTheme === 'managed';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** Apply the parent's theme when (and only when) Primer owns it. Returns
+   *  true when the theme was applied, so callers can gate follow-up work
+   *  (e.g. Mermaid re-render). */
+  function applyParentTheme(theme) {
+    if (!primerOwnsTheme()) return false;
+    if (theme !== 'light' && theme !== 'dark') return false;
+    try {
+      document.documentElement.dataset.theme = theme;
+    } catch (e) {
+      // documentElement should always exist; defensive catch.
+    }
+    return true;
+  }
+
   /** @type {((event: MessageEvent) => void) | null} */
   let onWindowMessage = (event) => {
     if (!event.ports || event.ports.length === 0) return;
@@ -385,14 +414,9 @@
       log.warn('mermaid init render error:', e && e.message ? e.message : e),
     );
 
-    // Apply parent-provided theme. Field is optional for backward-compat with
-    // parents that haven't been updated yet (they won't set anything).
-    if (incoming.theme === 'light' || incoming.theme === 'dark') {
-      try {
-        document.documentElement.dataset.theme = incoming.theme;
-      } catch (e) {
-        // documentElement should always exist; defensive catch.
-      }
+    // Apply parent-provided theme when Primer owns it (see applyParentTheme).
+    // Field is optional for backward-compat with parents that don't send it.
+    if (applyParentTheme(incoming.theme)) {
       // Re-render any Mermaid diagrams that finished before init resolved.
       reRenderMermaidForTheme().catch((e) =>
         log.warn('mermaid init theme re-render error:', e && e.message ? e.message : e),
@@ -444,12 +468,9 @@
         }
         break;
       case 'theme_changed':
-        if (msg.theme === 'light' || msg.theme === 'dark') {
-          try {
-            document.documentElement.dataset.theme = msg.theme;
-          } catch (e) {
-            // defensive
-          }
+        // Only Primer-managed artifacts follow the parent theme; self-themed
+        // artifacts are left alone (see applyParentTheme).
+        if (applyParentTheme(msg.theme)) {
           // Re-render any existing Mermaid diagrams with the new theme.
           reRenderMermaidForTheme().catch((e) =>
             log.warn('mermaid theme re-render error:', e && e.message ? e.message : e),
