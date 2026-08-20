@@ -75,6 +75,23 @@ pages must be built:
   viewer's iframe can be slow to first-paint on heavy pages — verify by loading
   the version's `/api/versions/<id>/content` URL directly, which renders immediately.
 
+## Diagrams and inline SVG
+
+To embed a diagram, use inline SVG in an **HTML-format** document. Markdown
+format is a dead end for diagrams: the renderer escapes raw `<svg>` (it shows as
+source text) and does not parse data-URI images (`![](data:image/svg+xml;…)`
+stays literal text). Published as `format: "html"`, the sanitizer keeps SVG
+shape/`<text>`/`<path>`/`<marker>` tags and the diagram renders.
+
+- **Hand-author the SVG with each box sized to fit its label**, using native
+  `<text>`. Don't lean on Primer's ` ```mermaid ` rendering for flowcharts — it
+  under-measures label widths and clips node/edge text, and a
+  `%%{init: {flowchart: {htmlLabels: false}}}%%` directive does not fix it.
+- **HTML-format docs carry no default styling** — ship your own `<style>`
+  (fonts, tables, code, and light/dark via `@media (prefers-color-scheme: dark)`
+  plus `:root[data-theme]`). Pastel fills with dark text stay legible on both
+  themes; use a mid-grey (`#888`) for connectors so they show on either.
+
 ## Error handling
 
 Every tool error result is JSON-encoded as `{ code, message }` in the result text. Branch on `code`:
