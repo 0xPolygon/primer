@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 import { db } from '../../db/client.ts';
-import { oauthClients } from '@primer/shared/schema';
+import { oauthClients } from '../../db/schema.ts';
 import { registerOAuthRegistrationRoute } from './register.ts';
 
 async function makeApp(): Promise<Hono> {

@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
-import { documents, folders, documentFolders } from '@primer/shared/schema';
+import { documents, folders, documentFolders } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import {
   canRead,

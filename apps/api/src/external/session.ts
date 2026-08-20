@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { externalViewerSessions } from '@primer/shared/schema';
+import { externalViewerSessions } from '../db/schema.ts';
 
 export const VIEWER_COOKIE_NAME = 'primer_ext_sid';
 export const VIEWER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days, no sliding refresh

@@ -9,9 +9,9 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { documents, versions, threads, comments, users, documentCollaborators } from '@primer/shared/schema';
-import type { ThreadsListResponse } from '@primer/shared';
-import type { ThreadDTO, CreateThreadRequest } from '@primer/shared';
+import { documents, versions, threads, comments, users, documentCollaborators } from '../db/schema.ts';
+import type { ThreadsListResponse } from '@polygonlabs/primer-api-types';
+import type { ThreadDTO, CreateThreadRequest } from '@polygonlabs/primer-api-types';
 import { CSRF_HEADERS, asUser, asUserJson } from '../test/harness.ts';
 
 async function seedDocument({ uploaderId = 'mock-user-1' }: { uploaderId?: string } = {}) {

@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../../db/client.ts';
-import { oauthClients } from '@primer/shared/schema';
+import { oauthClients } from '../../db/schema.ts';
 import { generateClientId } from './tokens.ts';
 
 /**

@@ -9,8 +9,8 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { documents, versions, users, documentCollaborators } from '@primer/shared/schema';
-import type { VersionSummaryDTO } from '@primer/shared';
+import { documents, versions, users, documentCollaborators } from '../db/schema.ts';
+import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import { CSRF_HEADERS, asUser, asUserJson } from '../test/harness.ts';
 
 async function seedDocAndVersion(uploaderId: string = 'mock-user-1') {

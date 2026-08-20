@@ -8,8 +8,8 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { users, externalViews } from '@primer/shared/schema';
-import type { ExternalShareResponse, ExternalShareViewsResponse } from '@primer/shared';
+import { users, externalViews } from '../db/schema.ts';
+import type { ExternalShareResponse, ExternalShareViewsResponse } from '@polygonlabs/primer-api-types';
 import { CSRF_HEADERS, asUser, asUserJson } from '../test/harness.ts';
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {

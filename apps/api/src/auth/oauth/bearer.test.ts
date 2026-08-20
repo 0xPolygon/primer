@@ -3,7 +3,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../app.ts';
 import { db } from '../../db/client.ts';
-import { oauthAccessTokens, oauthClients, users } from '@primer/shared/schema';
+import { oauthAccessTokens, oauthClients, users } from '../../db/schema.ts';
 import { makeOAuthBearerResolver } from './bearer.ts';
 import { generateAccessToken } from './tokens.ts';
 import { createClient } from './clients.ts';

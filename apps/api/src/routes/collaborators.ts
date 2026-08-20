@@ -7,8 +7,8 @@ import type {
   Collaborator,
   CollaboratorsListResponse,
   UpdateCollaboratorRequest,
-} from '@primer/shared';
-import { documents, documentCollaborators, users } from '@primer/shared/schema';
+} from '@polygonlabs/primer-api-types';
+import { documents, documentCollaborators, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 import {

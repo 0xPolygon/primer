@@ -2,7 +2,7 @@ import type { Context, Hono } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/client.ts';
-import { oauthAuthorizationCodes, oauthConsents } from '@primer/shared/schema';
+import { oauthAuthorizationCodes, oauthConsents } from '../../db/schema.ts';
 import { parseCookie } from '../cookies.ts';
 import { lookupSession } from '../session.ts';
 import { generateAuthCode } from './tokens.ts';

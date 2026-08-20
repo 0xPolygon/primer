@@ -33,7 +33,7 @@ export function canManage(role: EffectiveRole): boolean {
 
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { documentCollaborators } from '@primer/shared/schema';
+import { documentCollaborators } from '../db/schema.ts';
 
 export async function loadCollaboratorRole(
   docId: string,

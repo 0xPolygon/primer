@@ -4,7 +4,7 @@ import type { AppVariables } from '../app.ts';
 import { mockMultiResolver, makeOktaResolver, MOCK_USER } from './resolver.ts';
 import { createSession } from './session.ts';
 import { db } from '../db/client.ts';
-import { users } from '@primer/shared/schema';
+import { users } from '../db/schema.ts';
 
 function makeReq(cookieHeader?: string) {
   const app = new Hono<{ Variables: AppVariables }>();

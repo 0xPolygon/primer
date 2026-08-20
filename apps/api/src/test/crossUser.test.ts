@@ -9,7 +9,7 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { documents, documentCollaborators, users, versions } from '@primer/shared/schema';
+import { documents, documentCollaborators, users, versions } from '../db/schema.ts';
 import { asUser, asUserJson, CSRF_HEADERS } from './harness.ts';
 import { uploadFixture } from '../routes/upload.testlib.ts';
 

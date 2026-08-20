@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import type { AppVariables } from '../app.ts';
-import type { AdminStatsResponse } from '@primer/shared';
+import type { AdminStatsResponse } from '@polygonlabs/primer-api-types';
 import {
   buildTotals,
   buildAdoption,

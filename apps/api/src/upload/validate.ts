@@ -1,4 +1,4 @@
-import type { UploadErrorCode } from '@primer/shared/api';
+import type { UploadErrorCode } from '@polygonlabs/primer-api-types';
 
 export const MAX_BYTES = 10 * 1024 * 1024; // 10 MiB
 export const MAX_TITLE = 200;

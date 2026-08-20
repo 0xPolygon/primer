@@ -1,8 +1,8 @@
 import type { Hono } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
-import type { UploadResponse } from '@primer/shared/api';
-import { documents, versions } from '@primer/shared/schema';
+import type { UploadResponse } from '@polygonlabs/primer-api-types';
+import { documents, versions } from '../db/schema.ts';
 import { validateUpload } from '../upload/validate.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { markdownToHtml } from '../upload/markdown.ts';

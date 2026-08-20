@@ -1,9 +1,9 @@
 import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { apiTokens } from '@primer/shared/schema';
+import { apiTokens } from '../db/schema.ts';
 import { generateToken } from '../auth/tokens.ts';
-import type { ApiTokenSummary, CreateTokenResponse } from '@primer/shared';
+import type { ApiTokenSummary, CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 export const MAX_ACTIVE_TOKENS_PER_USER = 25;
 export const MAX_TOKEN_NAME_LENGTH = 100;

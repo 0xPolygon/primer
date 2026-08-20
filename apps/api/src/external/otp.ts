@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { externalOtps } from '@primer/shared/schema';
+import { externalOtps } from '../db/schema.ts';
 import { generateOtpCode, hashOtpCode, otpHashesEqual } from './tokens.ts';
 
 export const OTP_TTL_MS = 10 * 60 * 1000;

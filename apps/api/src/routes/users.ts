@@ -1,9 +1,9 @@
 import type { Hono } from 'hono';
 import { and, eq, ilike, ne, notInArray, sql } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
-import { documents, documentCollaborators, users } from '@primer/shared/schema';
+import { documents, documentCollaborators, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
-import type { MentionableUsersResponse, UserSearchResponse } from '@primer/shared';
+import type { MentionableUsersResponse, UserSearchResponse } from '@polygonlabs/primer-api-types';
 import { SERVICE_USER_ID } from '../auth/admin.ts';
 
 const TYPEAHEAD_LIMIT = 20;

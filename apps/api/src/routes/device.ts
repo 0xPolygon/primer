@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables } from '../app.ts';
 import { db } from '../db/client.ts';
-import { apiTokens, deviceAuthorizations } from '@primer/shared/schema';
+import { apiTokens, deviceAuthorizations } from '../db/schema.ts';
 import { generateDeviceCode, generateToken, generateUserCode, hashToken } from '../auth/tokens.ts';
 
 const AUTH_TTL_SECONDS = 600;

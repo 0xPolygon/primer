@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
 import { db } from '../db/client.ts';
-import { externalViews } from '@primer/shared/schema';
+import { externalViews } from '../db/schema.ts';
 import { checkRateLimit } from '../lib/rateLimiter.ts';
 import { parseCookie, serializeCookie } from '../auth/cookies.ts';
 import { issueOtp, verifyOtp } from '../external/otp.ts';

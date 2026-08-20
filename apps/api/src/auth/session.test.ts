@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { sessions, users } from '@primer/shared/schema';
+import { sessions, users } from '../db/schema.ts';
 import {
   createSession,
   lookupSession,

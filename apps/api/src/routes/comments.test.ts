@@ -8,8 +8,8 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { documents, versions, threads, comments, users, documentCollaborators } from '@primer/shared/schema';
-import type { CommentDTO, ThreadDTO } from '@primer/shared';
+import { documents, versions, threads, comments, users, documentCollaborators } from '../db/schema.ts';
+import type { CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
 import { CSRF_HEADERS, asUserJson } from '../test/harness.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 

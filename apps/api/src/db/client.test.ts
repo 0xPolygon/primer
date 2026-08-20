@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db } from './client.ts';
-import { users } from '@primer/shared/schema';
+import { users } from './schema.ts';
 
 describe('db client', () => {
   it('reads the seeded mock user', async () => {

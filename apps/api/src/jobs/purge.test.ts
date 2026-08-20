@@ -12,7 +12,7 @@ import {
   users,
   apiTokens,
   deviceAuthorizations,
-} from '@primer/shared/schema';
+} from '../db/schema.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import {
   purgeExpiredDocuments,

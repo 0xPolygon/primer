@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { and, eq, isNull } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { documents, versions, externalShares, externalRecipients, externalOtps } from '@primer/shared/schema';
+import { documents, versions, externalShares, externalRecipients, externalOtps } from '../db/schema.ts';
 import { issueOtp, verifyOtp, OTP_MAX_ATTEMPTS } from './otp.ts';
 import { generateShareToken } from './tokens.ts';
 
