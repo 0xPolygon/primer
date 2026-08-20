@@ -10,6 +10,8 @@ description: >-
 
 Workflow brain over the Primer MCP tools. Use the five steps below in order; deeper detail (full tool I/O, error taxonomy, file schemas) lives in `reference.md` — read it on demand.
 
+**Disk round-tripping:** when the Primer MCP server runs locally (`@polygonlabs/primer-mcp` over stdio — its content tools list `contentPath` / `toDisk` params in their input schemas), keep the document body out of your context in **both** directions: upload with `contentPath` (absolute path the server reads) whenever the artifact already exists as a file, and fetch with `toDisk: true` whenever the content is large, has embedded images, or is destined for disk — the server saves to a fresh temp file it owns and returns its `savedTo` path; move it into place with your own file tools. Byte-perfect and orders of magnitude cheaper than inline. The remote connector (HTTP) has no filesystem access; with it, content is always inline. Details and thresholds: `reference.md` → Disk round-tripping.
+
 If the user reports the MCP tools aren't available, tell them to install/reconnect the Primer connector in their Claude client (Settings → Connectors → Primer), then re-run the request. Auth is one-time browser OAuth at install; there is no login flow inside the agent.
 
 ## 1. Auth preflight
@@ -55,24 +57,42 @@ The tool returns a markdown summary. For each open thread, use the quoted select
 
 ## Publishing large or interactive pages
 
-`primer_create_document`/`primer_add_version` take the whole document inline, and
-Primer renders it in a **sandboxed iframe** (`allow-scripts`, no
-`allow-same-origin`). Inline `<script>` runs, but this shapes how big/interactive
-pages must be built:
+### Getting the page to Primer: don't publish via context at all
 
-- **Keep the payload small enough to send in one call.** A multi-hundred-KB page
-  of static markup is unreliable to transmit. For data-heavy pages (long tables,
-  catalogs), publish a **data-driven** doc: embed the data once as JSON and render
-  the DOM client-side with a small script, instead of emitting every row as markup.
+**The correct transport for a large page is a file, not your context window.**
+Write the document to disk as you build it, then upload with `contentPath`
+(local stdio server — see "Disk round-tripping" above). Byte-perfect, a
+handful of tokens, and the only limit is the API's 10 MB cap. Page size stops
+being a publishing concern entirely: emitting a large page inline pays for
+every byte twice (into context, then out again in the tool call) and gambles
+on byte-level reproduction — there is no reason to do it when a path is
+available.
+
+**Inline-transmission fallbacks — remote connector only.** Only when the tools
+have no `contentPath` (HTTP connector, no filesystem) does payload size shape
+authorship:
+
+- A multi-hundred-KB page of static markup is unreliable to transmit in one
+  call. For data-heavy pages (long tables, catalogs), publish a
+  **data-driven** doc: embed the data once as JSON and render the DOM
+  client-side with a small script, instead of emitting every row as markup.
 - **Chunk large embedded JSON.** Split it across several
   `<script type="application/json" class="cat">…</script>` blocks (~15 KB each)
   and reassemble at runtime (`[...document.querySelectorAll('script.cat')].map(s=>s.textContent).join('')` → `JSON.parse`). Escape `<` as `<` inside the JSON so it can't break out of the script tag.
+
+### How the page behaves once published (any transport)
+
+Primer renders documents in a **sandboxed iframe** (`allow-scripts`, no
+`allow-same-origin`). Inline `<script>` runs, but the sandbox constrains
+interactive pages regardless of how they were uploaded:
+
 - **Clipboard:** the async `navigator.clipboard` API is **blocked** in the sandbox.
   Any copy control must fall back to a hidden-`textarea` + `document.execCommand('copy')`.
 - **Copy affordance = a plain text button, not an icon.** SVG sprite `<use>` icons
   lose their `fill`/`stroke` in the sandbox and render as black blobs.
 - **Full HTML documents are fine** (Primer serves them in the iframe), but the
-  viewer's iframe can be slow to first-paint on heavy pages — verify by loading
+  viewer's iframe can be slow to first-paint on heavy pages — a data-driven doc
+  (above) helps render weight too, not just transmission. Verify by loading
   the version's `/api/versions/<id>/content` URL directly, which renders immediately.
 
 ## Diagrams and inline SVG

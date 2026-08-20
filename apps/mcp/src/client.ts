@@ -184,9 +184,26 @@ export class PrimerClient {
     });
   }
 
+  /** Raw stored body of a version — `text/html`, not JSON, so this bypasses
+   *  the JSON success parser and returns the response text verbatim. */
+  async getVersionContent(versionId: string): Promise<string> {
+    const res = await this.send({
+      method: 'GET',
+      path: `/api/versions/${encodeURIComponent(versionId)}/content`,
+    });
+    return res.text();
+  }
+
   // ─────────────────────────────── Internals ───────────────────────────────
 
   private async request<T>(opts: RequestOptions): Promise<T> {
+    const res = await this.send(opts);
+    return parseSuccessBody<T>(res);
+  }
+
+  /** Fetch + error mapping shared by the JSON (`request`) and text
+   *  (`getVersionContent`) paths. Resolves only for 2xx responses. */
+  private async send(opts: RequestOptions): Promise<Response> {
     const url = `${this.baseUrl}${opts.path}`;
     // For multipart bodies we intentionally DO NOT set Content-Type — fetch
     // writes it with the correct boundary. Setting it manually breaks parsing.
@@ -215,7 +232,7 @@ export class PrimerClient {
       throw new PrimerApiError(code, message, res.status);
     }
 
-    return parseSuccessBody<T>(res);
+    return res;
   }
 }
 

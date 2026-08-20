@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
+import * as nodePath from 'node:path';
 import { PrimerApiError, type PrimerClient } from './client.ts';
 import * as deviceLogin from './deviceLogin.ts';
 import { buildToolHandlers, type ToolDeps, type ToolResult } from './tools.ts';
@@ -11,6 +14,7 @@ interface FakeClient {
   getDocument: ReturnType<typeof vi.fn>;
   listVersions: ReturnType<typeof vi.fn>;
   getVersionThreads: ReturnType<typeof vi.fn>;
+  getVersionContent: ReturnType<typeof vi.fn>;
   createDocument: ReturnType<typeof vi.fn>;
   addVersion: ReturnType<typeof vi.fn>;
   revokeToken: ReturnType<typeof vi.fn>;
@@ -22,6 +26,7 @@ function makeFakeClient(): FakeClient {
     getDocument: vi.fn(),
     listVersions: vi.fn(),
     getVersionThreads: vi.fn(),
+    getVersionContent: vi.fn(),
     createDocument: vi.fn(),
     addVersion: vi.fn(),
     revokeToken: vi.fn(),
@@ -346,6 +351,73 @@ describe('primer_create_document', () => {
     });
     expect(parseSuccessPayload(result)).toEqual(created);
   });
+
+  it('contentPath → server reads the file; content never transits the model', async () => {
+    const client = makeFakeClient();
+    const created = { documentId: 'd1', versionId: 'v1', url: '/d/d1' };
+    client.createDocument.mockResolvedValue(created);
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    const dir = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'primer-mcp-test-'));
+    const file = nodePath.join(dir, 'artifact.html');
+    await fsp.writeFile(file, '<h1>from disk</h1>', 'utf8');
+
+    const result = await handlers.primer_create_document({
+      title: 'Hello',
+      contentPath: file,
+      format: 'html',
+    });
+
+    expect(client.createDocument).toHaveBeenCalledWith({
+      title: 'Hello',
+      content: '<h1>from disk</h1>',
+      format: 'html',
+      description: undefined,
+    });
+    expect(parseSuccessPayload(result)).toEqual(created);
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+
+  it('both content and contentPath → bad_request', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_create_document({
+      title: 't',
+      content: 'c',
+      contentPath: '/tmp/x.html',
+      format: 'html',
+    });
+    const err = parseErrorPayload(result);
+    expect(err.code).toBe('bad_request');
+    expect(client.createDocument).not.toHaveBeenCalled();
+  });
+
+  it('neither content nor contentPath → bad_request', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_create_document({ title: 't', format: 'html' });
+    const err = parseErrorPayload(result);
+    expect(err.code).toBe('bad_request');
+    expect(client.createDocument).not.toHaveBeenCalled();
+  });
+
+  it('unreadable contentPath → bad_request with the fs error', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_create_document({
+      title: 't',
+      contentPath: '/nonexistent/padd.html',
+      format: 'html',
+    });
+    const err = parseErrorPayload(result);
+    expect(err.code).toBe('bad_request');
+    expect(err.message).toContain('Could not read contentPath');
+    expect(client.createDocument).not.toHaveBeenCalled();
+  });
 });
 
 describe('primer_add_version', () => {
@@ -424,6 +496,130 @@ describe('primer_list_versions', () => {
     const { deps } = buildDeps({ client: null });
     const handlers = buildToolHandlers(deps);
     const result = await handlers.primer_list_versions({ documentId: 'd1' });
+    expect(parseErrorPayload(result).code).toBe('not_authenticated');
+  });
+});
+
+describe('primer_get_version_content', () => {
+  const detailFixture = {
+    document: { id: 'd1', title: 'T', description: null, uploaderId: 'u1', uploaderDisplayName: 'A', createdAt: '2026-01-01T00:00:00.000Z' },
+    latestVersion: { id: 'v9', versionNumber: 7, versionNote: null, sizeBytes: 18, createdAt: '2026-01-01T00:00:00.000Z' },
+  };
+
+  it('with versionId: fetches content directly and returns it inline', async () => {
+    const client = makeFakeClient();
+    client.getVersionContent.mockResolvedValue('<h1>stored html</h1>');
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    const result = await handlers.primer_get_version_content({ versionId: 'v1' });
+
+    expect(client.getVersionContent).toHaveBeenCalledWith('v1');
+    expect(client.getDocument).not.toHaveBeenCalled();
+    expect(parseSuccessPayload(result)).toEqual({
+      documentId: undefined,
+      versionId: 'v1',
+      versionNumber: undefined,
+      sizeBytes: Buffer.byteLength('<h1>stored html</h1>', 'utf8'),
+      content: '<h1>stored html</h1>',
+    });
+  });
+
+  it('with documentId: resolves the latest version via getDocument first', async () => {
+    const client = makeFakeClient();
+    client.getDocument.mockResolvedValue(detailFixture);
+    client.getVersionContent.mockResolvedValue('<p>latest</p>');
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    const result = await handlers.primer_get_version_content({ documentId: 'd1' });
+
+    expect(client.getDocument).toHaveBeenCalledWith('d1');
+    expect(client.getVersionContent).toHaveBeenCalledWith('v9');
+    const payload = parseSuccessPayload<Record<string, unknown>>(result);
+    expect(payload).toEqual({
+      documentId: 'd1',
+      versionId: 'v9',
+      versionNumber: 7,
+      sizeBytes: Buffer.byteLength('<p>latest</p>', 'utf8'),
+      content: '<p>latest</p>',
+    });
+  });
+
+  it('toDisk → writes to a fresh server-owned temp file and returns metadata WITHOUT content', async () => {
+    const client = makeFakeClient();
+    client.getVersionContent.mockResolvedValue('<h1>saved to disk</h1>');
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    const result = await handlers.primer_get_version_content({
+      versionId: 'v1',
+      toDisk: true,
+    });
+
+    const payload = parseSuccessPayload<Record<string, unknown>>(result);
+    const savedTo = payload.savedTo as string;
+    // Destination is server-chosen under os.tmpdir() — never an agent path.
+    expect(nodePath.isAbsolute(savedTo)).toBe(true);
+    expect(savedTo.startsWith(fs.realpathSync(os.tmpdir()) + nodePath.sep)
+      || savedTo.startsWith(os.tmpdir() + nodePath.sep)).toBe(true);
+    expect(nodePath.basename(savedTo)).toBe('content.html');
+    expect(payload.sizeBytes).toBe(Buffer.byteLength('<h1>saved to disk</h1>', 'utf8'));
+    expect(payload.content).toBeUndefined();
+    expect(await fsp.readFile(savedTo, 'utf8')).toBe('<h1>saved to disk</h1>');
+    await fsp.rm(nodePath.dirname(savedTo), { recursive: true, force: true });
+  });
+
+  it('two toDisk calls land in distinct temp dirs — no overwrite surface', async () => {
+    const client = makeFakeClient();
+    client.getVersionContent.mockResolvedValueOnce('<p>one</p>').mockResolvedValueOnce('<p>two</p>');
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+
+    const first = parseSuccessPayload<Record<string, unknown>>(
+      await handlers.primer_get_version_content({ versionId: 'v1', toDisk: true }),
+    );
+    const second = parseSuccessPayload<Record<string, unknown>>(
+      await handlers.primer_get_version_content({ versionId: 'v1', toDisk: true }),
+    );
+
+    expect(first.savedTo).not.toBe(second.savedTo);
+    expect(await fsp.readFile(first.savedTo as string, 'utf8')).toBe('<p>one</p>');
+    expect(await fsp.readFile(second.savedTo as string, 'utf8')).toBe('<p>two</p>');
+    await fsp.rm(nodePath.dirname(first.savedTo as string), { recursive: true, force: true });
+    await fsp.rm(nodePath.dirname(second.savedTo as string), { recursive: true, force: true });
+  });
+
+  it('both versionId and documentId → bad_request', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_get_version_content({ versionId: 'v1', documentId: 'd1' });
+    expect(parseErrorPayload(result).code).toBe('bad_request');
+    expect(client.getVersionContent).not.toHaveBeenCalled();
+  });
+
+  it('neither versionId nor documentId → bad_request', async () => {
+    const client = makeFakeClient();
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_get_version_content({});
+    expect(parseErrorPayload(result).code).toBe('bad_request');
+  });
+
+  it('unknown version → not_found from the client is passed through', async () => {
+    const client = makeFakeClient();
+    client.getVersionContent.mockRejectedValue(new PrimerApiError('not_found', 'version not found', 404));
+    const { deps } = buildDeps({ client });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_get_version_content({ versionId: 'nope' });
+    expect(parseErrorPayload(result).code).toBe('not_found');
+  });
+
+  it('no token → not_authenticated', async () => {
+    const { deps } = buildDeps({ client: null });
+    const handlers = buildToolHandlers(deps);
+    const result = await handlers.primer_get_version_content({ versionId: 'v1' });
     expect(parseErrorPayload(result).code).toBe('not_authenticated');
   });
 });

@@ -1,4 +1,6 @@
+import * as fs from 'node:fs';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PrimerApiError, type PrimerClient, type PrimerErrorCode } from './client.ts';
@@ -82,6 +84,35 @@ function errFromException(e: unknown): ToolResult {
   if (e instanceof PrimerApiError) return err(e.code, e.message);
   const message = e instanceof Error ? e.message : String(e);
   return err('bad_request', message);
+}
+
+/** Resolves the document body from `content` (inline) or `contentPath` (a
+ *  local file this server reads). Exactly one must be provided. The path
+ *  variant exists so agents publishing generated artifacts ship a path
+ *  instead of streaming the whole file through model context (and risking
+ *  byte-level reproduction errors on the way). */
+function resolveContent(
+  args: Record<string, unknown>,
+): { ok: true; value: string } | { ok: false; result: ToolResult } {
+  const hasInline = typeof args.content === 'string' && args.content.length > 0;
+  const hasPath = typeof args.contentPath === 'string' && args.contentPath.length > 0;
+  if (hasInline === hasPath) {
+    return {
+      ok: false,
+      result: err('bad_request', 'Provide exactly one of `content` or `contentPath`.'),
+    };
+  }
+  if (hasInline) return { ok: true, value: args.content as string };
+  const p = args.contentPath as string;
+  if (!path.isAbsolute(p)) {
+    return { ok: false, result: err('bad_request', '`contentPath` must be an absolute path.') };
+  }
+  try {
+    return { ok: true, value: fs.readFileSync(p, 'utf8') };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, result: err('bad_request', `Could not read contentPath: ${message}`) };
+  }
 }
 
 /** Resolves a client; if no token is available, returns a typed error result
@@ -212,12 +243,13 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
     primer_create_document: async (args) => {
       const auth = await requireClient(deps);
       if (!auth.ok) return auth.result;
+      const content = resolveContent(args);
+      if (!content.ok) return content.result;
       try {
         const title = String(args.title);
-        const content = String(args.content);
         const format = args.format as 'html' | 'markdown';
         const description = typeof args.description === 'string' ? args.description : undefined;
-        const result = await auth.client.createDocument({ title, content, format, description });
+        const result = await auth.client.createDocument({ title, content: content.value, format, description });
         return ok(result);
       } catch (e) {
         return errFromException(e);
@@ -227,12 +259,13 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
     primer_add_version: async (args) => {
       const auth = await requireClient(deps);
       if (!auth.ok) return auth.result;
+      const content = resolveContent(args);
+      if (!content.ok) return content.result;
       try {
         const documentId = String(args.documentId);
-        const content = String(args.content);
         const format = args.format as 'html' | 'markdown';
         const versionNote = typeof args.versionNote === 'string' ? args.versionNote : undefined;
-        const result = await auth.client.addVersion({ documentId, content, format, versionNote });
+        const result = await auth.client.addVersion({ documentId, content: content.value, format, versionNote });
         return ok(result);
       } catch (e) {
         return errFromException(e);
@@ -256,6 +289,65 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
       try {
         const result = await auth.client.listVersions(String(args.documentId));
         return ok(result);
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
+
+    primer_get_version_content: async (args) => {
+      const versionId = typeof args.versionId === 'string' && args.versionId.length > 0
+        ? args.versionId
+        : undefined;
+      const documentId = typeof args.documentId === 'string' && args.documentId.length > 0
+        ? args.documentId
+        : undefined;
+      if ((versionId && documentId) || (!versionId && !documentId)) {
+        return err('bad_request', 'Provide exactly one of `versionId` or `documentId`.');
+      }
+
+      const toDisk = args.toDisk === true;
+
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+
+      try {
+        let resolvedVersionId: string;
+        let resolvedDocumentId = documentId;
+        let versionNumber: number | undefined;
+        if (versionId) {
+          resolvedVersionId = versionId;
+        } else {
+          const detail = await auth.client.getDocument(documentId!);
+          resolvedVersionId = detail.latestVersion.id;
+          versionNumber = detail.latestVersion.versionNumber;
+          resolvedDocumentId = detail.document.id;
+        }
+        const content = await auth.client.getVersionContent(resolvedVersionId);
+        const meta = {
+          documentId: resolvedDocumentId,
+          versionId: resolvedVersionId,
+          versionNumber,
+          sizeBytes: Buffer.byteLength(content, 'utf8'),
+        };
+        if (!toDisk) {
+          return ok({ ...meta, content });
+        }
+        // The destination is server-chosen, never agent-chosen: a fresh temp
+        // directory this process owns, one file, no overwrite possible. An
+        // agent-supplied absolute path here would be an arbitrary filesystem
+        // write laundered through a read-shaped tool, skipping the permission
+        // model that governs the harness's own Write tool (PR #76 review).
+        // The agent moves the file where it wants with its own gated tools —
+        // that `mv` never spends context on the body.
+        try {
+          const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'primer-'));
+          const savedTo = path.join(dir, 'content.html');
+          fs.writeFileSync(savedTo, content, { encoding: 'utf8', flag: 'wx' });
+          return ok({ ...meta, savedTo });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          return err('bad_request', `Could not write content to temp dir: ${message}`);
+        }
       } catch (e) {
         return errFromException(e);
       }
@@ -328,19 +420,23 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     inputSchema: {},
   },
   primer_create_document: {
-    description: 'Create a new Primer document and upload the initial version.',
+    description:
+      'Create a new Primer document and upload the initial version. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access.',
     inputSchema: {
       title: z.string(),
       description: z.string().optional(),
-      content: z.string(),
+      content: z.string().optional(),
+      contentPath: z.string().optional(),
       format: z.enum(['html', 'markdown']),
     },
   },
   primer_add_version: {
-    description: 'Upload a new version of an existing Primer document.',
+    description:
+      'Upload a new version of an existing Primer document. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access.',
     inputSchema: {
       documentId: z.string(),
-      content: z.string(),
+      content: z.string().optional(),
+      contentPath: z.string().optional(),
       format: z.enum(['html', 'markdown']),
       versionNote: z.string().optional(),
     },
@@ -355,6 +451,15 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     description: 'List all versions of a Primer document, newest first.',
     inputSchema: {
       documentId: z.string(),
+    },
+  },
+  primer_get_version_content: {
+    description:
+      'Fetch the stored content of a Primer version (HTML as stored at rest). Provide `versionId` (specific version) or `documentId` (latest version). Pass `toDisk: true` to save the content to a fresh server-owned temp file instead of returning it inline — the response then carries `savedTo` (the temp path) and the content never transits agent context. Preferred for anything beyond small documents; embedded data-URI images make inline return prohibitively token-expensive. Move the file where you need it with your own file tools.',
+    inputSchema: {
+      versionId: z.string().optional(),
+      documentId: z.string().optional(),
+      toDisk: z.boolean().optional(),
     },
   },
   primer_get_comments: {
