@@ -11,7 +11,7 @@ import {
   primaryKey,
   index,
 } from 'drizzle-orm/pg-core';
-import type { AnchorData } from './companion-protocol.ts';
+import type { AnchorData } from '@polygonlabs/primer-api-types';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),                                       // Okta sub (Phase 2) or "mock-user-1" (Phase 1)

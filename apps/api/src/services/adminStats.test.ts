@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
 import { utcDateString, buildDateSpine, leftJoinDailyCounts, buildAdoption, buildEngagement, buildOperational } from './adminStats.ts';
 import { db } from '../db/client.ts';
-import { users, documents, versions, threads, comments, documentViews } from '@primer/shared/schema';
+import { users, documents, versions, threads, comments, documentViews } from '../db/schema.ts';
 
 const MS_PER_DAY = 86_400_000;
 const daysAgo = (n: number) => new Date(Date.now() - n * MS_PER_DAY);

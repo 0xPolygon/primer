@@ -1,4 +1,4 @@
-import type { AdminStatsBucket } from '@primer/shared';
+import type { AdminStatsBucket } from '@polygonlabs/primer-api-types';
 
 interface StatCardProps {
   label: string;

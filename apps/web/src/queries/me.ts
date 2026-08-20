@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { MeResponse } from '@primer/shared';
+import type { MeResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 export function useMe() {

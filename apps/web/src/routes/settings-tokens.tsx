@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ApiTokenSummary, CreateTokenResponse } from '@primer/shared/api';
+import type { ApiTokenSummary, CreateTokenResponse } from '@polygonlabs/primer-api-types';
 import {
   useApiTokens,
   useCreateServiceToken,

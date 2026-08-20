@@ -8,7 +8,7 @@ import {
   oauthClients,
   oauthRefreshTokens,
   users,
-} from '@primer/shared/schema';
+} from '../../db/schema.ts';
 import { registerOAuthRevocationRoute } from './revoke.ts';
 import { createClient } from './clients.ts';
 import { generateAccessToken, generateRefreshToken } from './tokens.ts';

@@ -3,8 +3,8 @@ import { v7 as uuidv7 } from 'uuid';
 import { eq, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import { logger } from '../logger.ts';
-import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@primer/shared';
-import { threads, comments, users } from '@primer/shared/schema';
+import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
+import { threads, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import {

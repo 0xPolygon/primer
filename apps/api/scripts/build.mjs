@@ -5,9 +5,10 @@
 // so the runtime contains no TS executor or TS source. This addresses the
 // supply-chain audit finding around tsx being in the production runtime path.
 //
-// Strategy: bundle @primer/shared (workspace package whose package.json points
-// at .ts source) and resolve .ts extensions, but keep all node_modules deps
-// external so they load from the installed node_modules at runtime.
+// Strategy: bundle @polygonlabs/primer-api-types (workspace package whose
+// package.json points at .ts source) and resolve .ts extensions, but keep all
+// node_modules deps external so they load from the installed node_modules at
+// runtime.
 
 import { build } from 'esbuild';
 import { readFile, mkdir, copyFile } from 'node:fs/promises';
@@ -23,9 +24,9 @@ const external = [
   ...Object.keys(pkg.dependencies ?? {}),
   // Sub-paths of declared deps also count as external. Node will resolve them.
 ];
-// @primer/shared is a workspace package whose entry points are .ts files —
-// it must be bundled, not external.
-const externalFiltered = external.filter((d) => d !== '@primer/shared');
+// @polygonlabs/primer-api-types is a workspace package whose entry points are
+// .ts files — it must be bundled, not external.
+const externalFiltered = external.filter((d) => d !== '@polygonlabs/primer-api-types');
 
 const common = {
   bundle: true,

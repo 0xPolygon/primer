@@ -9,7 +9,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { composeResolvers } from '../auth/bearer.ts';
 import { makeOAuthBearerResolver } from '../auth/oauth/bearer.ts';
 import { db } from '../db/client.ts';
-import { oauthAccessTokens, oauthClients, users } from '@primer/shared/schema';
+import { oauthAccessTokens, oauthClients, users } from '../db/schema.ts';
 import { createClient } from '../auth/oauth/clients.ts';
 import { generateAccessToken } from '../auth/oauth/tokens.ts';
 

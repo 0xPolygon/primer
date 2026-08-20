@@ -9,9 +9,9 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { documents, documentViews, versions, users, documentCollaborators, externalShares } from '@primer/shared/schema';
-import type { DocumentDetailResponse, UploadResponse } from '@primer/shared/api';
-import type { DocumentPatchRequest } from '@primer/shared';
+import { documents, documentViews, versions, users, documentCollaborators, externalShares } from '../db/schema.ts';
+import type { DocumentDetailResponse, UploadResponse } from '@polygonlabs/primer-api-types';
+import type { DocumentPatchRequest } from '@polygonlabs/primer-api-types';
 import { CSRF_HEADERS, asUser, asUserJson } from '../test/harness.ts';
 import { generateShareToken } from '../external/tokens.ts';
 
@@ -336,7 +336,7 @@ describe('DELETE /api/documents/:docId', () => {
   });
 });
 
-import type { AddVersionResponse, VersionsListResponse } from '@primer/shared';
+import type { AddVersionResponse, VersionsListResponse } from '@polygonlabs/primer-api-types';
 
 function buildVersionFormData(html: string, versionNote?: string): FormData {
   const fd = new FormData();

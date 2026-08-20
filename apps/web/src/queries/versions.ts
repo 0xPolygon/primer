@@ -4,7 +4,7 @@ import type {
   VersionPatchRequest,
   VersionSummaryDTO,
   VersionsListResponse,
-} from '@primer/shared';
+} from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 export function useVersionsQuery(docId: string) {

@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import type { AppVariables } from '../app.ts';
-import type { ApiTokensListResponse } from '@primer/shared';
+import type { ApiTokensListResponse } from '@polygonlabs/primer-api-types';
 import { isAdmin, SERVICE_USER_ID } from '../auth/admin.ts';
 import {
   listTokensForUser,

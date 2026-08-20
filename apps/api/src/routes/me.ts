@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import type { AppVariables } from '../app.ts';
-import type { MeResponse } from '@primer/shared';
+import type { MeResponse } from '@polygonlabs/primer-api-types';
 import { isAdmin } from '../auth/admin.ts';
 
 export function registerMeRoute(

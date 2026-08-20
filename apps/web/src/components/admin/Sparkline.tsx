@@ -1,4 +1,4 @@
-import type { DailyPoint } from '@primer/shared';
+import type { DailyPoint } from '@polygonlabs/primer-api-types';
 import { linearScale } from './chartGeom.ts';
 
 interface Props {

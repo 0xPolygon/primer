@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { AdminStatsResponse } from '@primer/shared';
+import type { AdminStatsResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 export function useAdminStats() {

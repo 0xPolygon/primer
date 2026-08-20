@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { UploadErrorResponse, UploadResponse } from '@primer/shared/api';
+import type { UploadErrorResponse, UploadResponse } from '@polygonlabs/primer-api-types';
 import { FileDropZone } from '../components/FileDropZone.tsx';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
 import { api } from '../lib/fetch.ts';

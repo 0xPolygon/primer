@@ -3,10 +3,9 @@ import type {
   Anchor,
   InboundProtocolMessage,
   OutboundProtocolMessage,
-  TextRangeAnchor,
-  ElementPathAnchor,
   SerializableRect,
-} from '@primer/shared';
+} from '../companion/protocol.ts';
+import type { TextRangeAnchor, ElementPathAnchor } from '@polygonlabs/primer-api-types';
 import { ArtifactIframe } from '../components/ArtifactIframe.tsx';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';

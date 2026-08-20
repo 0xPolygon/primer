@@ -10,10 +10,10 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { composeResolvers, makeBearerResolver } from '../auth/bearer.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { apiTokens, users } from '@primer/shared/schema';
+import { apiTokens, users } from '../db/schema.ts';
 import { SERVICE_USER_ID, parseAdminEmails } from '../auth/admin.ts';
 import { asUserJson } from '../test/harness.ts';
-import type { ApiTokensListResponse, CreateTokenResponse } from '@primer/shared';
+import type { ApiTokensListResponse, CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 // mockMultiResolver synthesizes emails as `${id}@polygon.technology`.
 const ADMIN_ID = 'admin-user';

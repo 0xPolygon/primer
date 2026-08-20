@@ -1,16 +1,16 @@
 import { z, type ZodTypeAny } from 'zod';
 import { v7 as uuidv7 } from 'uuid';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import type { Storage } from '@primer/shared/storage';
+import type { Storage } from '../storage/types.ts';
 import type { Notifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { documents, versions, threads, comments, users } from '@primer/shared/schema';
+import { documents, versions, threads, comments, users } from '../db/schema.ts';
 import { markdownToHtml } from '../upload/markdown.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
 import { logger } from '../logger.ts';
-import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary } from '@primer/shared/api';
-import { isTextRangeAnchor, isElementPathAnchor } from '@primer/shared';
+import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary } from '@polygonlabs/primer-api-types';
+import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 import {
   canRead, canEdit, effectiveRole, loadCollaboratorRole, type Visibility,
 } from '../lib/permissions.ts';

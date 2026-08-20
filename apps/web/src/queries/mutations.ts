@@ -4,7 +4,7 @@ import type {
   CommentDTO,
   CreateThreadRequest,
   ThreadDTO,
-} from '@primer/shared';
+} from '@polygonlabs/primer-api-types';
 import { clearThreadsEtag, type ThreadsQueryShape } from './threads.ts';
 import { api } from '../lib/fetch.ts';
 

@@ -1,4 +1,4 @@
-import type { DeletedDocumentEntry } from '@primer/shared';
+import type { DeletedDocumentEntry } from '@polygonlabs/primer-api-types';
 import { useRestoreDocument } from '../queries/documents.ts';
 
 interface DeletedRowProps {

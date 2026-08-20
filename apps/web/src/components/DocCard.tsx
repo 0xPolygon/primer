@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import type { LibraryDocument, FolderDTO } from '@primer/shared';
+import type { LibraryDocument, FolderDTO } from '@polygonlabs/primer-api-types';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 import { DocKebabMenu } from './DocKebabMenu.tsx';
 import { DocFolderChip } from './DocFolderChip.tsx';

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { VersionSummaryDTO } from '@primer/shared';
+import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import { useVersionsQuery } from '../queries/versions.ts';
 import { useDocument } from '../queries/documents.ts';
 import { pickDefaultFromVersion } from '../lib/compareParams.ts';

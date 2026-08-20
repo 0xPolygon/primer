@@ -1,4 +1,4 @@
-import type { SerializableRect } from '@primer/shared';
+import type { SerializableRect } from '../companion/protocol.ts';
 
 export interface ComputePillPositionArgs {
   // Selection client rects in iframe-viewport space (what the companion

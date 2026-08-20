@@ -16,7 +16,7 @@ import {
   oauthRefreshTokens,
   sessions,
   users,
-} from '@primer/shared/schema';
+} from '../../db/schema.ts';
 
 const AUTH_BASE_URL = 'http://localhost:5173';
 const REDIRECT_URI = 'https://claude.ai/api/mcp/auth_callback';

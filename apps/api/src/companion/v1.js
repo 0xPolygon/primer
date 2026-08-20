@@ -309,6 +309,13 @@
     }
   }
 
+  // The message shapes posted from here on (companion_ready, companion_panic,
+  // and everything sent over the MessageChannel port below) are the iframe
+  // half of the companion protocol. The parent-side half — parsing, guards,
+  // and the TypeScript types for these same shapes — lives in
+  // apps/web/src/companion/protocol.ts. Kept in sync by hand; this is the
+  // standalone plain-JS half, loaded directly into the sandboxed iframe.
+
   // ── 1. Init handshake ────────────────────────────────────────────
   // Symmetric handshake: the companion announces readiness immediately and
   // retries every 500ms until the parent posts `init` (with a transferable

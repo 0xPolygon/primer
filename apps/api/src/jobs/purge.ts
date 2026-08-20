@@ -1,8 +1,8 @@
 import { sql, eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { documents, versions } from '@primer/shared/schema';
+import { documents, versions } from '../db/schema.ts';
 import { logger } from '../logger.ts';
-import type { Storage } from '@primer/shared';
+import type { Storage } from '../storage/types.ts';
 
 export const RESTORE_WINDOW_DAYS = 30;
 

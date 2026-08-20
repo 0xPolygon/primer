@@ -10,10 +10,10 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { composeResolvers, makeBearerResolver } from '../auth/bearer.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { apiTokens, users } from '@primer/shared/schema';
+import { apiTokens, users } from '../db/schema.ts';
 import { generateToken } from '../auth/tokens.ts';
 import { asUserJson } from '../test/harness.ts';
-import type { ApiTokenSummary, ApiTokensListResponse, CreateTokenResponse } from '@primer/shared';
+import type { ApiTokenSummary, ApiTokensListResponse, CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-tokens-test-'));

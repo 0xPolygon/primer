@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { LibraryDocument } from '@primer/shared';
+import type { LibraryDocument } from '@polygonlabs/primer-api-types';
 import { useLibraryQuery } from '../queries/library.ts';
 import { useAddVersion } from '../queries/versions.ts';
 import { FileDropZone } from './FileDropZone.tsx';

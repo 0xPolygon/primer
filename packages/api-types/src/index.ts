@@ -1,4 +1,97 @@
-import type { AnchorData } from './companion-protocol.ts';
+/**
+ * The single public home of Primer's REST API wire contract: every
+ * request/response DTO shape used by apps/api's routes, the anchor shapes
+ * stored in `threads.anchor` and returned by the threads endpoints, and the
+ * two runtime validators used to check untrusted anchor payloads at the
+ * edges of the system. Consumers: apps/api (routes, MCP tool bridge),
+ * apps/mcp (comment formatting), and apps/web (transitively, via the
+ * parent-side companion protocol module).
+ */
+
+// ───────────────────── Anchor shapes (wire contract) ─────────────────────
+// Moved from packages/shared/src/companion-protocol.ts. These are stored in
+// threads.anchor and returned by the threads endpoints, so they live here
+// alongside the DTOs that reference them rather than with the companion
+// postMessage envelope machinery (which stays app-local; see
+// apps/web/src/companion/protocol.ts).
+
+/** Text-range anchor. New captures (v1.1+) emit `start`/`end` raw
+ *  character offsets into the artifact's flattened text. Legacy
+ *  captures (pre-v1.1) carry `prefix`/`suffix`/`containerPath` for
+ *  text-pattern resolution. The companion's resolver dispatches on
+ *  which fields are present, so both shapes are valid on the wire and
+ *  in storage. New code should write the position-based shape. */
+export interface TextRangeAnchor {
+  type: 'text-range';
+  selectorText: string;
+  /** Inclusive raw cumulative character offset (position-based shape). */
+  start?: number;
+  /** Exclusive raw cumulative character offset (position-based shape). */
+  end?: number;
+  /** Legacy: text-context prefix. Present on pre-v1.1 anchors. */
+  prefix?: string;
+  /** Legacy: text-context suffix. Present on pre-v1.1 anchors. */
+  suffix?: string;
+  /** Legacy: CSS path to the nearest block ancestor. Present on
+   *  pre-v1.1 anchors. */
+  containerPath?: string;
+}
+
+export interface ElementPathAnchor {
+  type: 'element-path';
+  path: string;
+  innerHash: string;
+  /** Captured text content of the picked element at the moment it was picked.
+   * Used for human-readable previews in the comment sidebar. Optional for
+   * backward-compat with rows created before this field existed. */
+  innerText?: string;
+}
+
+export type AnchorData = TextRangeAnchor | ElementPathAnchor;
+
+// ───────────────────── Validation helpers ─────────────────────
+// Moved from packages/shared/src/companion-protocol.ts, along with the
+// private helpers they depend on. Dependency-free — the package's only
+// runtime exports.
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function isString(v: unknown): v is string {
+  return typeof v === 'string';
+}
+
+function isNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+export function isTextRangeAnchor(v: unknown): v is TextRangeAnchor {
+  if (!isObject(v) || v.type !== 'text-range' || !isString(v.selectorText)) {
+    return false;
+  }
+  // Position-based shape: start AND end must be finite numbers AND end > start.
+  // (A zero-length range would resolve to an invisible "ghost" highlight.)
+  const hasPosition =
+    isNumber(v.start) && isNumber(v.end) && (v.end as number) > (v.start as number);
+  // Legacy shape: prefix AND suffix AND containerPath must all be strings.
+  const hasLegacy =
+    isString(v.prefix) && isString(v.suffix) && isString(v.containerPath);
+  return hasPosition || hasLegacy;
+}
+
+export function isElementPathAnchor(v: unknown): v is ElementPathAnchor {
+  return (
+    isObject(v) &&
+    v.type === 'element-path' &&
+    isString(v.path) &&
+    isString(v.innerHash)
+  );
+}
+
+// ───────────────────── REST API DTOs ─────────────────────
+// Moved verbatim from packages/shared/src/api.ts. AnchorData is now local
+// (above) instead of imported from the companion-protocol module.
 
 export interface UploadResponse {
   documentId: string;

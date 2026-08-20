@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { VersionSummaryDTO } from '@primer/shared';
+import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import { VersionSelector } from './VersionSelector.tsx';
 import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
 

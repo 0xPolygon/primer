@@ -1,5 +1,5 @@
 import { parse, serialize } from 'parse5';
-import type { UploadErrorCode } from '@primer/shared/api';
+import type { UploadErrorCode } from '@polygonlabs/primer-api-types';
 import { sanitizeUploadedHtml } from './sanitize.ts';
 import {
   injectCompanionScript,

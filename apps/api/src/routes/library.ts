@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
-import type { LibraryResponse, LibraryDocument, FolderDTO, DeletedDocumentEntry } from '@primer/shared';
+import type { LibraryResponse, LibraryDocument, FolderDTO, DeletedDocumentEntry } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
 
 interface DocRow {

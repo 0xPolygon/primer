@@ -1,4 +1,4 @@
-import type { ThreadFlowPoint } from '@primer/shared';
+import type { ThreadFlowPoint } from '@polygonlabs/primer-api-types';
 import { linearScale, formatTickDate, niceTicks } from './chartGeom.ts';
 import { EmptyChart } from './AreaChart.tsx';
 

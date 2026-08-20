@@ -8,7 +8,7 @@ import type {
   HistogramBucket,
   DailyPoint,
   DailyStackPoint,
-} from '@primer/shared';
+} from '@polygonlabs/primer-api-types';
 import { db as defaultDb, type Db } from '../db/client.ts';
 import {
   users,
@@ -17,7 +17,7 @@ import {
   threads,
   comments,
   documentViews,
-} from '@primer/shared/schema';
+} from '../db/schema.ts';
 
 export interface AdminTotals {
   users: AdminStatsBucket;

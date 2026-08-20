@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { MailgunNotifier } from './mailgun.ts';
 import { db } from '../db/client.ts';
-import { users } from '@primer/shared/schema';
+import { users } from '../db/schema.ts';
 import type { NotifyCommentArgs, NotifyCollaboratorAddedArgs } from './notifier.ts';
 import { sql } from 'drizzle-orm';
 
