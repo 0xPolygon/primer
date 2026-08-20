@@ -49,7 +49,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@primer/shared": "workspace:*",
+    "@polygonlabs/primer-api-types": "workspace:^",
     "@types/node": "^25.6.0",
     "esbuild": "^0.27.0",
     "tsx": "^4.21.0",

@@ -57,9 +57,9 @@ Also ensure your Nix-store `node` binary is on `PATH` (otherwise pnpm postinstal
 
 ## Architecture
 
-- `apps/api` — Hono API server (Node 24, drizzle-orm, postgres, parse5, pino, markdown-it).
-- `apps/web` — React + Vite frontend (React 19, React Router 7, TanStack Query, Tailwind 4).
-- `packages/shared` — Drizzle schema, Storage interface, API DTOs. drizzle-orm is declared as a peer dep so workspaces share one instance.
+- `apps/api` — Hono API server (Node 24, drizzle-orm, postgres, parse5, pino, markdown-it). Contains the Drizzle schema and Storage interface.
+- `apps/web` — React + Vite frontend (React 19, React Router 7, TanStack Query, Tailwind 4). Contains the companion protocol module.
+- `packages/api-types` — Published wire contract (`@polygonlabs/primer-api-types`): REST API DTOs, anchor shapes, and type guards.
 - `apps/api/drizzle/` — committed migration SQL.
 - `docker/init-db.sql` — runs once on first Postgres boot, creates the `primer_test` database alongside `primer`.
 
