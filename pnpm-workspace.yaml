@@ -23,12 +23,30 @@ allowBuilds:
 # start — drizzle-kit only invokes esbuild as a CLI bundler. Force the
 # transitive copy to a patched version to clear the audit noise.
 #
-# Transitive override: jsdom (test DOM env, dev-only) pulls undici <7.28.0,
-# affected by several advisories (TLS bypass, WS DoS, SOCKS5 routing,
-# Set-Cookie injection, cache disclosure). undici is never in the production
-# path. Pin to the patched 7.28 line; kept on ^7 to stay compatible with jsdom.
+# Transitive override: jsdom (test DOM env, dev-only) pulls undici affected by
+# several advisories (TLS bypass, WS DoS, SOCKS5 routing, Set-Cookie injection,
+# cache disclosure, and cross-user info disclosure fixed in 7.29.0). undici is
+# never in the production path. Pin to the patched 7.29 line; kept on ^7 to stay
+# compatible with jsdom.
+#
+# Transitive DoS / parser-confusion advisories (all `high`, surfaced by
+# `pnpm audit --audit-level=high`): quadratic-complexity CPU DoS or host/path
+# confusion in transitive parsers. Each override pins the transitive to its
+# patched floor; none changes production behaviour. js-yaml is scoped per-major
+# because two consumers sit on different lines (gray-matter on 3.x, the diff
+# viewer on 4.x) and must not be force-migrated across a major.
 overrides:
   esbuild: '^0.25.0'
-  undici: '^7.28.0'
+  undici: '^7.29.0'
+  'js-yaml@3': '^3.15.1'   # gray-matter (api) — GHSA-52cp-r559-cp3m + !!omap quadratic CPU
+  'js-yaml@4': '^4.3.1'    # react-diff-viewer-continued (web) — same advisories, 4.x line
+  linkify-it: '^5.0.2'     # markdown-it (api) — GHSA-v245-v573-v5vm mailto: scan-loop DoS
+  fast-uri: '^3.1.5'       # @modelcontextprotocol/sdk>ajv (api) — host confusion (backslash/IDN)
+  ip-address: '^10.3.1'    # @modelcontextprotocol/sdk (api) — leading-zero octet decode
+  postcss: '^8.5.18'       # sanitize-html (api) — source-map path traversal
+  # nanoid: PENDING the 14-day gate — patched floor 3.3.18 (published
+  # 2026-08-07) clears ~2026-08-21 16:41 UTC. Add `nanoid: '^3.3.18'` and
+  # re-run `pnpm install` then to close the last high
+  # (sanitize-html>postcss>nanoid generator infinite-loop DoS).
 strictPeerDependencies: true
 engineStrict: true
