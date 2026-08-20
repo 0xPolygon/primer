@@ -1,6 +1,10 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+  # Versioning shells only — each plugin's package.json exists so changesets
+  # can version it; the mirror script copies that version into the plugin
+  # manifest Claude Code clients actually read (.claude-plugin/plugin.json).
+  - 'plugins/*'
 
 # Supply-chain hardening (see design spec, Section "Supply-chain hardening")
 minimumReleaseAge: 20160 # 14 days, in minutes
