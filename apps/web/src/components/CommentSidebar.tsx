@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AnchorData, ThreadDTO } from '@primer/shared';
+import type { AnchorData, ThreadDTO } from '@polygonlabs/primer-api-types';
 import { useThreadsQuery } from '../queries/threads.ts';
 import { ThreadCard } from './ThreadCard.tsx';
 import { NewThreadComposer } from './NewThreadComposer.tsx';

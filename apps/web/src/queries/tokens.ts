@@ -3,7 +3,7 @@ import type {
   ApiTokensListResponse,
   CreateTokenRequest,
   CreateTokenResponse,
-} from '@primer/shared/api';
+} from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 async function createToken(path: string, name: string): Promise<CreateTokenResponse> {

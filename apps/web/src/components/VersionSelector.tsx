@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { VersionSummaryDTO } from '@primer/shared';
+import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 
 interface Props {
   docId: string;

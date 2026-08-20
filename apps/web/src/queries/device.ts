@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { DeviceApproveResponse, DevicePendingResponse } from '@primer/shared/api';
+import type { DeviceApproveResponse, DevicePendingResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 /**

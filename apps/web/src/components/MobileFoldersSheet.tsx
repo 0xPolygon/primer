@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { FolderDTO } from '@primer/shared';
+import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { BottomSheet, type SnapPoint } from './BottomSheet.tsx';
 import { FOLDER_UNCATEGORIZED, normalizeFolderNameClient } from '../lib/library.ts';
 import { useCreateFolder } from '../queries/library.ts';

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AddExternalRecipientRequest, ExternalShareResponse, ExternalShareViewsResponse,
-} from '@primer/shared';
+} from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 const key = (docId: string) => ['external-share', docId] as const;

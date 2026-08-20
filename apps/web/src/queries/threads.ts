@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import type { ThreadsListResponse } from '@primer/shared/api';
+import type { ThreadsListResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 // Module-level ETag cache keyed by versionId so re-renders don't lose it.

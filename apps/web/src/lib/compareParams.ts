@@ -1,4 +1,4 @@
-import type { VersionSummaryDTO } from '@primer/shared';
+import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 
 export type CompareView = 'split' | 'unified';
 

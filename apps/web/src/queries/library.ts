@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
-import type { LibraryResponse, FolderDTO } from '@primer/shared';
+import type { LibraryResponse, FolderDTO } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 const LIBRARY_KEY = ['library'] as const;

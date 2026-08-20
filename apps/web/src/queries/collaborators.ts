@@ -3,7 +3,7 @@ import type {
   Collaborator,
   CollaboratorsListResponse,
   UserSearchResponse,
-} from '@primer/shared/api';
+} from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 type CollaboratorRole = 'commenter' | 'editor';

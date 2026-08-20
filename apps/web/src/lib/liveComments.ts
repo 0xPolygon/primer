@@ -1,4 +1,4 @@
-import type { CommentDTO, ThreadDTO } from '@primer/shared';
+import type { CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
 
 /** All comments in the thread that have NOT been tombstoned (deletedAt is null). */
 export function liveComments(thread: ThreadDTO): CommentDTO[] {

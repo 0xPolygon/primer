@@ -1,4 +1,4 @@
-import type { LibraryDocument } from '@primer/shared';
+import type { LibraryDocument } from '@polygonlabs/primer-api-types';
 
 export const FOLDER_UNCATEGORIZED = '' as const;
 

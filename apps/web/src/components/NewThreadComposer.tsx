@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { AnchorData } from '@primer/shared';
+import type { AnchorData } from '@polygonlabs/primer-api-types';
 import { MentionTextarea } from './MentionTextarea.tsx';
 
 interface Props {

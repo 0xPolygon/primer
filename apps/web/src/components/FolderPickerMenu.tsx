@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FolderDTO } from '@primer/shared';
+import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { normalizeFolderNameClient } from '../lib/library.ts';
 
 export interface FolderPickerMenuProps {

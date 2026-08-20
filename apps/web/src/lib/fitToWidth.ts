@@ -2,7 +2,7 @@
  *
  * The companion reports the artifact's intrinsic content width when it
  * overflows the iframe viewport (see companion/v1.js reportContentMetrics
- * and MsgContentMetrics in @primer/shared). The parent converts that into
+ * and MsgContentMetrics in src/companion/protocol.ts). The parent converts that into
  * a CSS transform scale. All decision logic lives here as pure functions
  * so the node-environment test suite covers it. */
 

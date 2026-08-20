@@ -1,4 +1,4 @@
-import type { ViewerRole } from '@primer/shared/api';
+import type { ViewerRole } from '@polygonlabs/primer-api-types';
 
 /** Pure function: can the viewer edit the document (add versions, edit
  *  title/description)? Mirrors canEdit in apps/api/src/lib/permissions.ts.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ThreadDTO, CommentDTO } from '@primer/shared';
+import type { ThreadDTO, CommentDTO } from '@polygonlabs/primer-api-types';
 import { liveComments, hasLiveComments } from './liveComments.ts';
 
 function comment(over: Partial<CommentDTO> = {}): CommentDTO {
