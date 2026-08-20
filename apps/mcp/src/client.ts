@@ -5,7 +5,7 @@ import type {
   UploadResponse,
   UserDTO,
   VersionsListResponse,
-} from '@primer/shared/api';
+} from '@polygonlabs/primer-api-types';
 
 /**
  * Machine-checkable error codes returned by every PrimerApiError.
