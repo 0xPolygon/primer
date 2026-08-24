@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/primer-api-types",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Primer REST API wire contract: request/response DTOs, anchor shapes, and their runtime validators.",
   "type": "module",
   "main": "./src/index.ts",
