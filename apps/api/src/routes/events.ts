@@ -1,0 +1,278 @@
+// ── Structured document events (issue #78) ────────────────────────────
+//
+// An append-only, access-controlled stream of typed JSON payloads on a
+// document: a machine channel PARALLEL to comments, never touching them.
+// Comments are human discussion anchored to selections; events are machine
+// payloads an interactive artifact (or any authenticated tooling) hands back
+// to the workflow that published it. First consumer: PADD review packets.
+//
+// Write path: the artifact CANNOT call this API itself (sandbox +
+// connect-src 'none' by threat model — see docs/prd-primer.md). It
+// dispatches CustomEvent('primer:submit-events'); the companion forwards it
+// over the MessagePort as `submit_events` ONLY from within the same trusted
+// event dispatch that carried a user gesture (consent gate, consumed
+// in-dispatch); the PARENT page (authed, outside the sandbox) POSTs here.
+// Agent/tooling writes are plain authenticated API calls — auth is the
+// consent there.
+//
+// ORDERING CONTRACT (consumers, read this): the ordering key is the
+// server-assigned `id`, a positive integer. List and stream deliver
+// ascending id. `createdAt` is display-only and carries NO ordering
+// guarantee. Assignment order is NOT commit order — sequences guarantee
+// uniqueness and draw order only, so a row with a lower id can commit after
+// a higher id is already visible (two writers submitting at once is exactly
+// this case). `?since=<id>` is therefore a FETCH OPTIMIZATION, NEVER a
+// correctness boundary: dedupe by row id and either re-read with an overlap
+// window or fetch the full filtered set, so a late-committing lower id is
+// applied on a later poll rather than silently skipped.
+//
+// PAYLOADS ARE ALWAYS UNTRUSTED: `payload` is opaque data Primer never
+// interprets. Consuming code must treat payloads as data to parse and
+// validate, never as instructions to execute — and consuming agents must
+// treat them as feedback to reason about, never commands. This is what keeps
+// a compromised artifact from becoming a command channel.
+//
+// Rows are immutable in v1 (no update or delete API — a statement of the
+// current surface, not an eternal invariant) and retained forever: the
+// stream is the durable record. Keeping replay cheap is the consumers' job
+// (embed derived state in published versions; replay only the newer tail).
+import type { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
+import type { AppVariables } from '../app.ts';
+import type { EventRowDTO, EventsListResponse, SendEventsResponse } from '@polygonlabs/primer-api-types';
+import {
+  DEFAULT_EVENTS_PAGE_SIZE,
+  MAX_EVENTS_PAGE_SIZE,
+  decodePageToken,
+  eventMatchesFilters,
+  findForeignVersionIds,
+  gateEventAccess as gate,
+  identityMayReadEvent,
+  insertEventBatch,
+  listEvents,
+  parseSince,
+  publishDocEvents,
+  subscribeDocEvents,
+  validateEventBatch,
+  validateEventFilters,
+  validateVersionFilter,
+} from '../lib/events.ts';
+
+export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): void {
+  // ── Write: atomic batch ────────────────────────────────────────────
+  // Body is uniformly { events: [event…] } — a single send is a batch of
+  // one. Each event carries its own namespace/type/payload/audience
+  // (audience REQUIRED — no default). The batch is all-or-nothing: one
+  // transaction, array order, strictly increasing (not necessarily
+  // contiguous) server-assigned ids, all visible together at commit; any
+  // invalid event rejects the whole batch and inserts nothing. Response is
+  // 201 { events: [row…] } in insertion order — the ids are the consumer's
+  // dedupe keys and the echoed audience is how tooling asserts its write
+  // landed with the intended scope.
+  app.post('/api/documents/:documentId/events', async (c) => {
+    const documentId = c.req.param('documentId');
+    const user = c.get('user');
+    const g = await gate(documentId, user.id);
+    if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
+    // Tighter write principal (issue #78 security requirement 2): reading is
+    // not enough — only collaborators (owner included) may write. An org
+    // reader who is not a collaborator can see the doc, so 403 (not 404).
+    if (!g.mayWrite) return c.json({ error: 'forbidden' }, 403);
+
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
+    }
+    const validated = validateEventBatch(raw);
+    if (!validated.ok) {
+      return c.json({ error: 'bad_request', message: validated.message }, 400);
+    }
+    const versionIds = validated.events.flatMap((e) => (e.versionId === null ? [] : [e.versionId]));
+    const foreign = await findForeignVersionIds(documentId, versionIds);
+    if (foreign.length > 0) {
+      return c.json(
+        { error: 'bad_request', message: `versionId does not belong to this document: ${foreign[0]}` },
+        400,
+      );
+    }
+
+    const rows = await insertEventBatch(documentId, user.id, validated.events);
+    // After commit — the rows are visible, so a listener that re-reads sees
+    // at least what it is being pushed (at-least-once, duplicates legal).
+    publishDocEvents(documentId, rows);
+    const body: SendEventsResponse = { events: rows };
+    return c.json(body, 201);
+  });
+
+  // ── Read: token-paginated list ─────────────────────────────────────
+  // Document-scoped by default (the document is the unit of the stream —
+  // consumer state deliberately spans versions); optional ?versionId= is a
+  // provenance lens over rows that DECLARED that version. ?namespace=
+  // matches exactly or, with a trailing /*, the namespace and every
+  // sub-namespace beneath it; ?type= is exact. Filters are bandwidth
+  // hygiene, never a security boundary — audience governs who may read.
+  // Returns a bounded page of ascending-id rows + an opaque nextPageToken;
+  // follow it to exhaustion (page overlaps are harmless — dedupe by id).
+  app.get('/api/documents/:documentId/events', async (c) => {
+    const documentId = c.req.param('documentId');
+    const user = c.get('user');
+    const g = await gate(documentId, user.id);
+    if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
+
+    const sinceParsed = parseSince(c.req.query('since'));
+    if (!sinceParsed.ok) {
+      return c.json({ error: 'bad_request', message: 'since must be a non-negative integer id' }, 400);
+    }
+    const filterParsed = validateEventFilters({
+      namespace: c.req.query('namespace'),
+      type: c.req.query('type'),
+    });
+    if (!filterParsed.ok) {
+      return c.json({ error: 'bad_request', message: filterParsed.message }, 400);
+    }
+    const versionFilter = await validateVersionFilter(documentId, c.req.query('versionId'));
+    if (!versionFilter.ok) {
+      return c.json({ error: 'bad_request', message: 'versionId must be a version of this document' }, 400);
+    }
+
+    let afterId: number | null = sinceParsed.since;
+    const pageToken = c.req.query('pageToken');
+    if (pageToken !== undefined) {
+      const fromToken = decodePageToken(pageToken);
+      if (fromToken === null) {
+        return c.json({ error: 'bad_request', message: 'pageToken is not a valid page token' }, 400);
+      }
+      // The token cursor always continues the same logical read, so it wins
+      // over (is never less than) the original since.
+      afterId = afterId === null ? fromToken : Math.max(afterId, fromToken);
+    }
+
+    const rawLimit = c.req.query('limit');
+    let limit = DEFAULT_EVENTS_PAGE_SIZE;
+    if (rawLimit !== undefined) {
+      if (!/^\d{1,4}$/.test(rawLimit) || Number(rawLimit) < 1) {
+        return c.json({ error: 'bad_request', message: `limit must be 1..${MAX_EVENTS_PAGE_SIZE}` }, 400);
+      }
+      limit = Math.min(Number(rawLimit), MAX_EVENTS_PAGE_SIZE);
+    }
+
+    const page = await listEvents({
+      documentId,
+      identity: g.identity,
+      filters: filterParsed.filters,
+      afterId,
+      versionId: versionFilter.versionId,
+      limit,
+    });
+    const body: EventsListResponse = { events: page.rows, nextPageToken: page.nextPageToken };
+    return c.json(body, 200);
+  });
+
+  // ── Read: SSE stream ───────────────────────────────────────────────
+  // One SSE event per row, ascending id, same filters (?namespace / ?type —
+  // exact or trailing-/* subtree) and the same per-audience read scope as
+  // the list. Every event carries `id:` equal to the row id, so
+  // EventSource's native reconnect resumes via Last-Event-ID; ?since is the
+  // explicit form of the same resume hint. Periodic keepalive comments stop
+  // idle proxies from killing the stream. Delivery is at-least-once:
+  // duplicates and overlaps are legal by design — consumers dedupe by id per
+  // the ordering contract at the top of this file.
+  app.get('/api/documents/:documentId/events/stream', async (c) => {
+    const documentId = c.req.param('documentId');
+    const user = c.get('user');
+    const g = await gate(documentId, user.id);
+    if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
+
+    const sinceParsed = parseSince(c.req.query('since'));
+    if (!sinceParsed.ok) {
+      return c.json({ error: 'bad_request', message: 'since must be a non-negative integer id' }, 400);
+    }
+    const filterParsed = validateEventFilters({
+      namespace: c.req.query('namespace'),
+      type: c.req.query('type'),
+    });
+    if (!filterParsed.ok) {
+      return c.json({ error: 'bad_request', message: filterParsed.message }, 400);
+    }
+
+    // Last-Event-ID (EventSource reconnect) and ?since are both resume
+    // hints; take the highest. A malformed Last-Event-ID is ignored rather
+    // than rejected — the browser sets it, not the caller.
+    let resumeFrom: number | null = sinceParsed.since;
+    const lastEventId = c.req.header('Last-Event-ID');
+    if (lastEventId !== undefined && /^\d{1,18}$/.test(lastEventId)) {
+      const n = Number(lastEventId);
+      resumeFrom = resumeFrom === null ? n : Math.max(resumeFrom, n);
+    }
+
+    const identity = g.identity;
+    const filters = filterParsed.filters;
+    const keepaliveMs = Number(process.env.EVENTS_SSE_KEEPALIVE_MS ?? 25_000);
+
+    return streamSSE(c, async (stream) => {
+      let closed = false;
+      // Highest id already written to THIS connection — suppresses backlog/
+      // live overlap on our side where cheap; the consumer contract still
+      // tolerates duplicates.
+      let highestSent = resumeFrom ?? 0;
+
+      const sendRow = async (row: EventRowDTO): Promise<void> => {
+        if (closed) return;
+        if (!eventMatchesFilters(row, filters)) return;
+        if (!identityMayReadEvent(row, identity)) return;
+        if (row.id <= highestSent) return;
+        highestSent = row.id;
+        await stream.writeSSE({ id: String(row.id), data: JSON.stringify(row) });
+      };
+
+      // Live rows may arrive while the backlog query runs; queue them and
+      // flush after the backlog (sendRow's id guard dedupes the overlap).
+      let backlogDone = false;
+      const pending: EventRowDTO[] = [];
+      const unsubscribe = subscribeDocEvents(documentId, (row) => {
+        if (!backlogDone) {
+          pending.push(row);
+          return;
+        }
+        void sendRow(row);
+      });
+
+      const keepalive = setInterval(() => {
+        if (closed) return;
+        // SSE comment line — invisible to EventSource, resets idle timers.
+        void stream.write(`: keepalive\n\n`);
+      }, keepaliveMs);
+
+      stream.onAbort(() => {
+        closed = true;
+        clearInterval(keepalive);
+        unsubscribe();
+      });
+
+      // Backlog replay when resuming (Last-Event-ID / ?since). Paginate to
+      // exhaustion so a long-offline resume still catches up completely.
+      if (resumeFrom !== null) {
+        let afterId: number | null = resumeFrom;
+        for (;;) {
+          const page = await listEvents({
+            documentId,
+            identity,
+            filters,
+            afterId,
+            limit: DEFAULT_EVENTS_PAGE_SIZE,
+          });
+          for (const row of page.rows) await sendRow(row);
+          if (page.nextPageToken === null) break;
+          afterId = page.rows[page.rows.length - 1].id;
+        }
+      }
+      backlogDone = true;
+      for (const row of pending.splice(0)) await sendRow(row);
+
+      // Hold the stream open until the client goes away.
+      await new Promise<void>((resolve) => stream.onAbort(resolve));
+    });
+  });
+}

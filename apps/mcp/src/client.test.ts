@@ -393,3 +393,72 @@ describe('PrimerClient error mapping', () => {
     }
   });
 });
+
+describe('PrimerClient.getEvents / sendEvents (issue #78)', () => {
+  it('GETs /events with encoded filters and returns the page', async () => {
+    const page = { events: [], nextPageToken: null };
+    const mockFetch = vi.fn(async () => jsonResponse(page, 200));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+    const result = await client.getEvents('doc-1', {
+      since: 5,
+      namespace: 'padd/*',
+      type: 'export',
+      pageToken: 'tok',
+      limit: 50,
+    });
+    expect(result).toEqual(page);
+    const [url, init] = firstCall(mockFetch);
+    expect(url).toBe(
+      'http://localhost:3000/api/documents/doc-1/events?since=5&namespace=padd%2F*&type=export&pageToken=tok&limit=50',
+    );
+    expect(init.method).toBe('GET');
+  });
+
+  it('POSTs /events with a JSON body and content-type header', async () => {
+    const created = { events: [{ id: 1 }] };
+    const mockFetch = vi.fn(async () => jsonResponse(created, 201));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+    const batch = [
+      { namespace: 'padd', type: 'grant', payload: { user: 'u2' }, audience: 'artifact' as const },
+    ];
+    const result = await client.sendEvents('doc-1', batch);
+    expect(result).toEqual(created);
+    const [url, init] = firstCall(mockFetch);
+    expect(url).toBe('http://localhost:3000/api/documents/doc-1/events');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
+    expect(JSON.parse(init.body as string)).toEqual({ events: batch });
+  });
+
+  it('maps a 400 on sendEvents to a bad_request PrimerApiError', async () => {
+    const mockFetch = vi.fn(async () =>
+      jsonResponse({ error: 'bad_request', message: 'audience is required' }, 400),
+    );
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+    await expect(
+      client.sendEvents('doc-1', [
+        { namespace: 'padd', type: 'x', payload: {}, audience: 'artifact' },
+      ]),
+    ).rejects.toMatchObject({ code: 'bad_request', message: 'audience is required' });
+  });
+
+  it('lookupUser GETs /api/users/lookup?email=…', async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ id: 'okta-sub-1' }, 200));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+    const result = await client.lookupUser('reviewer@polygon.technology');
+    expect(result).toEqual({ id: 'okta-sub-1' });
+    const [url] = firstCall(mockFetch);
+    expect(url).toBe(
+      'http://localhost:3000/api/users/lookup?email=reviewer%40polygon.technology',
+    );
+  });
+
+  it('addCollaborator POSTs the userId and role as JSON', async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({}, 201));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+    await client.addCollaborator('doc-1', 'okta-sub-1', 'editor');
+    const [url, init] = firstCall(mockFetch);
+    expect(url).toBe('http://localhost:3000/api/documents/doc-1/collaborators');
+    expect(JSON.parse(init.body as string)).toEqual({ userId: 'okta-sub-1', role: 'editor' });
+  });
+});

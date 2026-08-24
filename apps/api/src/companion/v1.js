@@ -484,6 +484,35 @@
           );
         }
         break;
+      case 'events':
+        // Document-events read relay (issue #78): the parent forwards
+        // artifact-audience event rows VERBATIM, in coalesced batches
+        // (grouping carries no semantics — artifact code must derive
+        // identical state however the same rows are partitioned). We
+        // re-dispatch to artifact JS as `primer:events`. The rows are
+        // untrusted data for the artifact to parse and validate — never
+        // instructions.
+        if (Array.isArray(msg.events)) {
+          try {
+            window.dispatchEvent(
+              new CustomEvent('primer:events', { detail: { events: msg.events } })
+            );
+          } catch (e) {
+            log.warn('primer:events dispatch failed:', e && e.message ? e.message : e);
+          }
+        }
+        break;
+      case 'submit_result':
+        // Write acknowledgment for a prior `primer:submit-events` — `rows`
+        // carries the created rows (with server-assigned ids and audiences)
+        // so the artifact can reconcile an optimistic echo with
+        // server-attributed truth.
+        dispatchSubmitResult({
+          ok: msg.ok === true,
+          rows: Array.isArray(msg.rows) ? msg.rows : undefined,
+          error: typeof msg.error === 'string' ? msg.error : undefined,
+        });
+        break;
       default:
         log.warn('unknown inbound', msg.type);
     }
@@ -506,6 +535,135 @@
     }
     port.postMessage({ type: 'open_external', url });
   }
+
+  // ── Document events: consent-gated submit relay (issue #78) ──────
+  // Artifact JS hands structured event batches to the parent by dispatching
+  //   window.dispatchEvent(new CustomEvent('primer:submit-events',
+  //     { detail: { events: [{ namespace, type, payload, audience }…] } }))
+  // and we forward them over the port as `submit_events`; the parent
+  // (authed, outside the sandbox) POSTs the batch. This is the ONLY way out
+  // for artifact data — the sandbox + connect-src 'none' block every direct
+  // network path (see docs/prd-primer.md threat model).
+  //
+  // CONSENT GATE — activation consumed in-dispatch (issue #78 security
+  // requirement 1). An artifact is untrusted code running in every viewer's
+  // browser; without this gate its JS could fire the submit event on load or
+  // in a loop and inject into a consumer's work queue under the viewer's
+  // name. We forward ONLY when the dispatch happens synchronously inside the
+  // same trusted event dispatch that carried a user gesture:
+  //   - a capture-phase listener on each gesture event mints a token while
+  //     that trusted dispatch is on the stack;
+  //   - a microtask queued at mint time retires the token as soon as the
+  //     dispatch's synchronous run completes — BEFORE any microtask the
+  //     artifact's own handler queued (ours enters the queue first), so a
+  //     dispatch deferred with setTimeout/Promise into the activation window
+  //     of an unrelated click finds no token;
+  //   - a successful forward CONSUMES the token: one gesture authorizes one
+  //     submission (which may be a batch).
+  // Checking `navigator.userActivation.isActive` alone would leave exactly
+  // that activation-laundering window open — this gate does not use it.
+  //
+  // The validation limits mirror packages/api-types/src/index.ts (the
+  // companion is plain JS and can't import it; kept in sync by hand — see
+  // events.consent.test.ts, which fails loudly if they drift). The server
+  // re-validates everything; this is the polite early refusal.
+  const SUBMIT_NAMESPACE_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
+  const SUBMIT_TYPE_RE = /^[a-z0-9][a-z0-9-]*$/;
+  const SUBMIT_MAX_PAYLOAD_CHARS = 256 * 1024;
+  const SUBMIT_MAX_BATCH = 100;
+
+  /** @type {{ consumed: boolean } | null} */
+  let activeGestureToken = null;
+  const GESTURE_EVENT_TYPES = [
+    'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click',
+    'keydown', 'keyup', 'touchstart', 'touchend',
+  ];
+  for (const type of GESTURE_EVENT_TYPES) {
+    window.addEventListener(
+      type,
+      (e) => {
+        if (!e.isTrusted) return;
+        const token = { consumed: false };
+        activeGestureToken = token;
+        queueMicrotask(() => {
+          if (activeGestureToken === token) activeGestureToken = null;
+        });
+      },
+      true /* capture, so the token exists before any artifact handler runs */
+    );
+  }
+
+  function dispatchSubmitResult(detail) {
+    try {
+      window.dispatchEvent(new CustomEvent('primer:submit-result', { detail }));
+    } catch (e) {
+      // best-effort — the artifact just doesn't get its ack
+    }
+  }
+
+  /** Validates one event of a submit batch. Returns a clean, structured-
+   *  clone-safe copy, or null. Mirrors the api-types wire contract. */
+  function cleanSubmitEvent(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (typeof raw.namespace !== 'string' || raw.namespace.length > 128 || !SUBMIT_NAMESPACE_RE.test(raw.namespace)) return null;
+    if (typeof raw.type !== 'string' || raw.type.length > 64 || !SUBMIT_TYPE_RE.test(raw.type)) return null;
+    if (raw.audience !== 'author' && raw.audience !== 'collaborators' && raw.audience !== 'artifact') return null;
+    if (!('payload' in raw)) return null;
+    let payload = null;
+    try {
+      const json = JSON.stringify(raw.payload);
+      if (typeof json !== 'string') return null; // undefined / function / symbol
+      if (json.length > SUBMIT_MAX_PAYLOAD_CHARS) return null;
+      payload = JSON.parse(json); // structured-clone safety before the port
+    } catch (e) {
+      return null;
+    }
+    const clean = {
+      namespace: raw.namespace,
+      type: raw.type,
+      audience: raw.audience,
+      payload,
+    };
+    if (typeof raw.versionId === 'string') clean.versionId = raw.versionId;
+    return clean;
+  }
+
+  window.addEventListener('primer:submit-events', (e) => {
+    const refuse = (error) => {
+      log.warn('submit-events refused:', error);
+      dispatchSubmitResult({ ok: false, error });
+    };
+    const token = activeGestureToken;
+    if (!token || token.consumed) {
+      refuse('consent_required: primer:submit-events must be dispatched from within the user gesture that authorizes it');
+      return;
+    }
+    if (!port) {
+      refuse('not_ready: companion port not initialized yet');
+      return;
+    }
+    const detail = e && e.detail ? e.detail : null;
+    if (!detail || !Array.isArray(detail.events) || detail.events.length === 0) {
+      refuse('bad_request: detail.events must be a non-empty array');
+      return;
+    }
+    if (detail.events.length > SUBMIT_MAX_BATCH) {
+      refuse('bad_request: too many events in one batch');
+      return;
+    }
+    const cleaned = [];
+    for (const raw of detail.events) {
+      const clean = cleanSubmitEvent(raw);
+      if (!clean) {
+        refuse('bad_request: every event needs a valid namespace, type, audience, and JSON-serializable payload under the size cap');
+        return;
+      }
+      cleaned.push(clean);
+    }
+    // One gesture, one submission — consume the activation in-dispatch.
+    token.consumed = true;
+    port.postMessage({ type: 'submit_events', events: cleaned });
+  });
 
   // (a) anchor clicks with target="_blank" or "_top"
   document.addEventListener(

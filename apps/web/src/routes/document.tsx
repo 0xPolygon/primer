@@ -14,6 +14,7 @@ import type {
 } from '../companion/protocol.ts';
 import type {
   AnchorData,
+  EventRowDTO,
   TextRangeAnchor,
   ElementPathAnchor,
 } from '@polygonlabs/primer-api-types';
@@ -44,6 +45,9 @@ import {
   type PillPosition,
 } from '../lib/computePillPosition.ts';
 import { useLibraryQuery } from '../queries/library.ts';
+import { useSendEvents } from '../queries/events.ts';
+import { browserEventSourceFactory, createEventsFeed } from '../lib/eventsFeed.ts';
+import { api } from '../lib/fetch.ts';
 import { DocDetailFolderControl } from '../components/DocDetailFolderControl.tsx';
 import { relativeTime } from '../lib/relativeTime.ts';
 
@@ -158,16 +162,55 @@ function DocumentPageInner() {
     composerDirtyRef.current = dirty;
   }, []);
 
+  // Every artifact-audience event row relayed so far for this document.
+  // A new iframe mount (version switch, remount) starts with fresh artifact
+  // state, so registerSender re-plays the accumulated rows as its "initial
+  // batch on load" — batch grouping carries no semantics, so one big batch
+  // and the original dispatch sequence produce identical artifact state.
+  const relayedEventsRef = useRef<EventRowDTO[]>([]);
+  const sendEventsMutation = useSendEvents(docId ?? '');
+
   const registerSender = useCallback(
     (s: ((m: OutboundProtocolMessage) => void) | null) => {
       senderRef.current = s;
       if (s) {
         s({ type: 'update_anchors', anchors: anchorsForCompanion });
         s({ type: 'request_anchor_positions' });
+        if (relayedEventsRef.current.length > 0) {
+          s({ type: 'events', events: relayedEventsRef.current });
+        }
       }
     },
     [anchorsForCompanion]
   );
+
+  // Document-events read relay (issue #78): hydrate the visible list, hold
+  // an SSE subscription, and forward `artifact`-audience rows verbatim into
+  // the iframe in coalesced batches. Delivery mechanics (reconnect resume
+  // via Last-Event-ID, overlap re-fetch on visibility regain) live in
+  // createEventsFeed and are invisible to the artifact.
+  useEffect(() => {
+    if (!docId) return;
+    relayedEventsRef.current = [];
+    const feed = createEventsFeed({
+      documentId: docId,
+      onBatch: (rows) => {
+        relayedEventsRef.current = relayedEventsRef.current.concat(rows);
+        senderRef.current?.({ type: 'events', events: rows });
+      },
+      fetchImpl: (url) => api(url),
+      eventSourceFactory: browserEventSourceFactory,
+    });
+    void feed.start();
+    const onVisibility = () => {
+      if (!window.document.hidden) void feed.refresh();
+    };
+    window.document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.document.removeEventListener('visibilitychange', onVisibility);
+      feed.stop();
+    };
+  }, [docId]);
 
   useEffect(() => {
     setPositionsByAnchorId(new Map());
@@ -221,6 +264,31 @@ function DocumentPageInner() {
         case 'open_external':
           if (isSafeExternalUrl(msg.url)) handleOpenExternal(msg);
           break;
+        // Consent-gated artifact submission (issue #78): the companion only
+        // forwards this from within a trusted user-gesture dispatch, and the
+        // protocol parser has already re-validated the batch. The parent is
+        // the authed principal — POST it, then ack into the iframe with the
+        // created rows (server-attributed truth) or the failure.
+        case 'submit_events': {
+          // Stamp write-time provenance (the version being viewed) on events
+          // that didn't declare their own — the artifact has no version
+          // awareness by design (a companion version hook is a v1 non-goal).
+          const stamped = msg.events.map((e) =>
+            e.versionId !== undefined || !currentVersionId
+              ? e
+              : { ...e, versionId: currentVersionId },
+          );
+          sendEventsMutation
+            .mutateAsync(stamped)
+            .then((resp) => {
+              senderRef.current?.({ type: 'submit_result', ok: true, rows: resp.events });
+            })
+            .catch((err: unknown) => {
+              const message = err instanceof Error ? err.message : 'submit failed';
+              senderRef.current?.({ type: 'submit_result', ok: false, error: message });
+            });
+          break;
+        }
         case 'companion_log': {
           const fn = msg.level === 'error' ? console.error
                    : msg.level === 'warn'  ? console.warn
@@ -245,7 +313,7 @@ function DocumentPageInner() {
           break;
       }
     },
-    [readMostly]
+    [readMostly, currentVersionId, sendEventsMutation]
   );
 
   function openFullScreen() {

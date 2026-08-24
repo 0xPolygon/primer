@@ -210,8 +210,56 @@ The companion script makes no network requests, accesses no parent state, and st
 - `anchor_positions(positions[])` — response to position request
 - `resize(height)` — iframe content height changed, parent adjusts container
 - `open_external(url)` — user clicked `<a target="_blank">` or artifact called `window.open()`; parent validates `https:` and opens a new tab
+- `submit_events(events[])` — consent-gated batch of structured document events the artifact handed back (see "Document events" below); parent POSTs it and answers with `submit_result`
+
+**Parent → Iframe (document events):**
+- `events(rows[])` — `artifact`-audience event rows relayed verbatim, in coalesced batches; re-dispatched to artifact JS as `CustomEvent('primer:events')`
+- `submit_result({ ok, rows?, error? })` — write acknowledgment; re-dispatched as `CustomEvent('primer:submit-result')`
 
 All messages include a shared token established at iframe initialization to reject cross-document interference.
+
+### Document events: the artifact→backend write path (threat model)
+
+Structured document events (issue #78) add the one sanctioned path by which
+data originating INSIDE the sandboxed artifact reaches Primer's backend —
+and, via the `artifact` audience tier, the one path by which stored rows are
+injected back INTO sandboxed artifact code. Both directions are additions to
+the threat model:
+
+- **Write path (artifact → backend).** The sandbox and `connect-src 'none'`
+  still block every direct network path; nothing here loosens them. The
+  artifact can only dispatch `CustomEvent('primer:submit-events')`; the
+  companion forwards it over the MessagePort **only from within the same
+  trusted event dispatch that carried a user gesture**, consuming the
+  activation (one gesture = one submission). Checking
+  `navigator.userActivation.isActive` alone is explicitly NOT sufficient — a
+  malicious artifact could defer its dispatch into the activation window of
+  an unrelated click, degrading "the reviewer tapped Send" to "the reviewer
+  tapped anything" (silent injection into a consumer's work queue under the
+  viewer's name). An artifact is untrusted code running in every viewer's
+  browser, regardless of what produced it. The parent page remains the sole
+  authed principal: it re-validates the batch and POSTs it; the server
+  validates again and stamps the authenticated user as the row author —
+  attribution can never be asserted from inside the iframe. Writes require
+  the caller to be a document collaborator (owner included); external-share
+  and public viewers cannot authenticate to these routes at all.
+
+- **`artifact` audience tier (backend → artifact).** Every event row carries
+  a required `audience` (`author` | `collaborators` | `artifact`); the
+  server returns to each caller exactly the rows their identity may read.
+  `artifact` is the **injection boundary**: only rows that explicitly
+  declared it are relayed by the parent into the sandboxed iframe, where
+  they become input to untrusted artifact code in every viewer's browser.
+  It must never be collapsed into `collaborators` as a simplification, and
+  no audience is ever inferred from a namespace or payload. Rows are relayed
+  verbatim; Primer never interprets payloads.
+
+- **Payloads are always untrusted.** Event payloads are opaque data. Code
+  consuming them (artifacts, CLIs, services) must parse and validate them,
+  never execute them as instructions; agents consuming them must treat them
+  as feedback to reason about, never commands. This is what keeps a
+  compromised artifact — or a hostile collaborator's writes — from becoming
+  a command channel into consumers.
 
 ### Anchor resolution & drift handling
 

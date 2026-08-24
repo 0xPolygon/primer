@@ -3,7 +3,7 @@ import { afterAll, beforeEach } from 'vitest';
 
 beforeEach(async () => {
   // Wipe transactional tables between tests; keep the seeded mock user row.
-  await sql`truncate table external_views, external_viewer_sessions, external_otps, external_recipients, external_shares, document_collaborators, document_views, comments, threads, versions, documents, document_folders, folders restart identity cascade`;
+  await sql`truncate table events, external_views, external_viewer_sessions, external_otps, external_recipients, external_shares, document_collaborators, document_views, comments, threads, versions, documents, document_folders, folders restart identity cascade`;
   // Wipe sessions and non-mock users so session tests start clean.
   await sql`truncate table sessions restart identity cascade`;
   await sql`delete from users where id != 'mock-user-1'`;

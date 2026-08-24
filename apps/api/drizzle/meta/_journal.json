@@ -85,6 +85,13 @@
       "when": 1784317631209,
       "tag": "0011_seed_service_user",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787576739833,
+      "tag": "0012_hard_swordsman",
+      "breakpoints": true
     }
   ]
 }

@@ -478,3 +478,105 @@ export interface AddExternalRecipientRequest {
 export interface PublishExternalShareRequest {
   versionId: string;
 }
+
+// ───────────────────── Document events (wire contract) ─────────────────────
+// Structured document events (issue #78): typed JSON payloads written by
+// tooling, humans (via the consent-gated companion path), or agents, stored
+// on a document as an append-only, access-controlled stream. Primer enforces
+// behavior ONLY on its own columns (id → ordering, authorId → attribution,
+// audience → read scope, namespace/type → validation + filtering); `payload`
+// is opaque data Primer never interprets, and NOTHING consuming these rows
+// may treat a payload as instructions to execute — payloads are always
+// untrusted data to parse and validate.
+
+/** Per-row read scope. REQUIRED on write — there is no default, because a
+ *  default would be an implicit behavior and every writer is code that can
+ *  state intent.
+ *  - `author`: readable by the row's author + the document owner.
+ *  - `collaborators`: readable by all authenticated document collaborators
+ *    (owner included).
+ *  - `artifact`: readable by the same set as `collaborators`, AND the
+ *    companion relays the row into the sandboxed artifact iframe. This tier
+ *    is the injection boundary — whether the row may become input to
+ *    untrusted artifact code running in every viewer's browser — so it must
+ *    never be collapsed into `collaborators`. */
+export type EventAudience = 'author' | 'collaborators' | 'artifact';
+
+export function isEventAudience(v: unknown): v is EventAudience {
+  return v === 'author' || v === 'collaborators' || v === 'artifact';
+}
+
+/** `namespace` is hierarchical: `/`-separated lowercase kebab segments
+ *  (`padd`, `padd/telemetry`). Namespace MEANING is the consumers' domain —
+ *  the server validates shape only and never infers behavior from it. */
+export const EVENT_NAMESPACE_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
+/** `type` is a single name within a namespace (`export`, `verdict`). */
+export const EVENT_TYPE_RE = /^[a-z0-9][a-z0-9-]*$/;
+export const MAX_EVENT_NAMESPACE_LENGTH = 128;
+export const MAX_EVENT_TYPE_LENGTH = 64;
+/** Serialized (UTF-8) size cap per event payload. */
+export const MAX_EVENT_PAYLOAD_BYTES = 256 * 1024;
+/** Maximum events per POST batch (the batch cap is Primer's to own). */
+export const MAX_EVENTS_PER_BATCH = 100;
+
+/** One event as submitted by a writer (each event in a batch carries its own
+ *  namespace/type/payload/audience; `versionId` is optional write-time
+ *  provenance — the version that was the entry point when the row was
+ *  written). */
+export interface EventInput {
+  namespace: string;
+  type: string;
+  payload: unknown;
+  audience: EventAudience;
+  versionId?: string;
+}
+
+/** A stored event row. `id` is the server-assigned ordering key — a positive
+ *  integer (bigserial), NOT a uuid. Ids are strictly increasing in insertion
+ *  order within a batch, but assignment order is not commit order across
+ *  concurrent writers: consumers dedupe by `id` and overlap re-read rather
+ *  than treating any single fetch as gap-free. `createdAt` is display-only
+ *  and carries no ordering guarantee. `versionId` is present only when the
+ *  writer declared it. */
+export interface EventRowDTO {
+  id: number;
+  documentId: string;
+  versionId?: string;
+  authorId: string;
+  audience: EventAudience;
+  namespace: string;
+  type: string;
+  payload: unknown;
+  createdAt: string; // ISO
+}
+
+/** POST /api/documents/:id/events — the body is uniformly a batch (a single
+ *  send is a batch of one). All-or-nothing: any invalid event rejects the
+ *  whole batch and nothing is inserted. */
+export interface SendEventsRequest {
+  events: EventInput[];
+}
+
+/** 201 response: the created rows, in insertion (array) order, with their
+ *  server-assigned ids and stored audiences — the ids are the consumer's
+ *  dedupe keys and the echoed audience is how tooling asserts its write
+ *  landed with the intended scope. */
+export interface SendEventsResponse {
+  events: EventRowDTO[];
+}
+
+/** GET /api/documents/:id/events — one token-paginated page of ascending-id
+ *  rows. Follow `nextPageToken` to exhaustion; page overlaps are harmless
+ *  because consumers dedupe by id. */
+export interface EventsListResponse {
+  events: EventRowDTO[];
+  nextPageToken: string | null;
+}
+
+/** GET /api/users/lookup?email= — resolve a human-entered email to the
+ *  canonical server user id, so consumers can classify authority by
+ *  comparing identities against server-attributed row authors in the same
+ *  id space. */
+export interface UserLookupResponse {
+  id: string;
+}
