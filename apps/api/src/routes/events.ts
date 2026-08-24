@@ -213,17 +213,23 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
 
     return streamSSE(c, async (stream) => {
       let closed = false;
-      // Highest id already written to THIS connection — suppresses backlog/
-      // live overlap on our side where cheap; the consumer contract still
-      // tolerates duplicates.
-      let highestSent = resumeFrom ?? 0;
+      // Ids already written to THIS connection. A set (rather than a
+      // highest-id watermark) so a LIVE row whose id is lower than one
+      // already sent — a late-committing concurrent writer, exactly the
+      // case the ordering contract warns about — is still delivered rather
+      // than silently dropped until the consumer's next overlap re-fetch.
+      // Out-of-order delivery is harmless: consumers interpret rows by id,
+      // never by arrival order, and duplicates are legal (EventSource's
+      // Last-Event-ID may regress past such a row; the reconnect replay
+      // that causes just re-delivers rows the consumer dedupes).
+      const sent = new Set<number>();
 
       const sendRow = async (row: EventRowDTO): Promise<void> => {
         if (closed) return;
         if (!eventMatchesFilters(row, filters)) return;
         if (!identityMayReadEvent(row, identity)) return;
-        if (row.id <= highestSent) return;
-        highestSent = row.id;
+        if (sent.has(row.id)) return;
+        sent.add(row.id);
         await stream.writeSSE({ id: String(row.id), data: JSON.stringify(row) });
       };
 

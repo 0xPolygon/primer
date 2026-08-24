@@ -22,6 +22,7 @@ import type {
 } from '@polygonlabs/primer-api-types';
 import { asUser, asUserJson } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
+import { publishDocEvents } from '../lib/events.ts';
 
 class NullNotifier implements Notifier {
   readonly emailEnabled = false;
@@ -636,6 +637,25 @@ describe('GET /api/documents/:id/events/stream — SSE', () => {
       const dataFrames = sse.frames.filter((f) => f.data !== undefined);
       expect(dataFrames).toHaveLength(1);
       expect((JSON.parse(dataFrames[0].data ?? '{}') as EventRowDTO).type).toBe('export');
+      await sse.close();
+    });
+  });
+
+  it('delivers a live late-committing LOWER id rather than dropping it (consumers fold by id)', async () => {
+    await withApp(async (app) => {
+      const { documentId } = await uploadFixture(app);
+      const posted = await postEvents(app, documentId, OWNER, [ev(), ev()]);
+      const [lowId, highId] = posted.body.events.map((r) => r.id);
+      // Resume from the highest id — the client believes it is caught up.
+      const res = await app.request(`/api/documents/${documentId}/events/stream`, {
+        headers: { ...asUser(OWNER), 'Last-Event-ID': String(highId) },
+      });
+      const sse = makeSseReader(res);
+      // A concurrent writer whose transaction drew a LOWER id commits only
+      // now — simulate by publishing the earlier row into the live fanout.
+      publishDocEvents(documentId, [posted.body.events[0]]);
+      const frame = await sse.waitFor((f) => f.id === String(lowId));
+      expect((JSON.parse(frame.data ?? '{}') as EventRowDTO).id).toBe(lowId);
       await sse.close();
     });
   });
