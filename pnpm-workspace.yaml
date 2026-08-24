@@ -44,9 +44,6 @@ overrides:
   fast-uri: '^3.1.5'       # @modelcontextprotocol/sdk>ajv (api) — host confusion (backslash/IDN)
   ip-address: '^10.3.1'    # @modelcontextprotocol/sdk (api) — leading-zero octet decode
   postcss: '^8.5.18'       # sanitize-html (api) — source-map path traversal
-  # nanoid: PENDING the 14-day gate — patched floor 3.3.18 (published
-  # 2026-08-07) clears ~2026-08-21 16:41 UTC. Add `nanoid: '^3.3.18'` and
-  # re-run `pnpm install` then to close the last high
-  # (sanitize-html>postcss>nanoid generator infinite-loop DoS).
+  nanoid: '^3.3.18'        # sanitize-html>postcss (api) — generator infinite-loop DoS
 strictPeerDependencies: true
 engineStrict: true
