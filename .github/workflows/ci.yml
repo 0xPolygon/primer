@@ -58,6 +58,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Fails if a plugin's .claude-plugin/plugin.json version was hand-edited
+      # out of sync with its package.json — changesets owns plugin versions
+      # (mirrored at release time by `ci:version`; see release.yml).
+      - name: Check plugin version sync
+        run: pnpm run codegen-drift-check
+
       - name: Migrate test database
         run: pnpm db:migrate:test
         env:

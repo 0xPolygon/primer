@@ -18,6 +18,14 @@
     "db:migrate": "pnpm --filter @primer/api run db:migrate",
     "db:migrate:test": "pnpm --filter @primer/api run db:migrate:test",
     "db:generate": "pnpm --filter @primer/api run db:generate",
-    "db:purge": "pnpm --filter @primer/api run db:purge"
+    "db:purge": "pnpm --filter @primer/api run db:purge",
+    "sync:plugin-versions": "pnpm -r exec node \"$PNPM_SCRIPT_SRC_DIR/scripts/mirror-plugin-version.mjs\"",
+    "codegen-drift-check": "pnpm run sync:plugin-versions && git diff --exit-code -- 'plugins/*/.claude-plugin/plugin.json'",
+    "ci:version": "changeset version && pnpm run sync:plugin-versions",
+    "ci:publish": "pnpm exec changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.1"
   }
 }
