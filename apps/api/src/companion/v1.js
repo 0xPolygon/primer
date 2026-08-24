@@ -592,12 +592,16 @@
   //      included) is one activation cluster.
   //
   // Checking `navigator.userActivation.isActive` alone would leave the
-  // activation-laundering window open — this gate does not use it. Residual
-  // (documented in docs/prd-primer.md): the companion cannot attest WHICH
-  // element the user activated — the submit affordance lives inside the
-  // untrusted artifact — so the guarantee is per-activation, not
-  // per-"Send-button". Closing that fully needs a parent-owned trusted
-  // submit affordance (a possible contract change; pending ruling).
+  // activation-laundering window open — this gate does not use it. The
+  // companion cannot attest WHICH element the user activated — the submit
+  // affordance lives inside the untrusted artifact — so this gate's
+  // guarantee is per-activation, not per-"Send-button". That gap is closed
+  // one layer up by the PARENT-OWNED FIRST-SUBMISSION GRANT (issue #78
+  // security requirement 6, see apps/web/src/lib/eventsGrant.ts and the
+  // threat model in docs/prd-primer.md): the parent holds an artifact
+  // version's first submission and asks the viewer in Primer-owned chrome,
+  // disclosing the envelope and audience meaning, before anything is
+  // POSTed. This gate stays a necessary condition underneath it.
   //
   // The validation limits mirror packages/api-types/src/index.ts (the
   // companion is plain JS and can't import it; kept in sync by hand — see

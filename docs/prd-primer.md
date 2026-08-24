@@ -250,20 +250,35 @@ the threat model:
   included); external-share and public viewers cannot authenticate to these
   routes at all.
 
-- **ACCEPTED RISK (pending ruling) — element-level intent is not
-  attestable.** The consent gate's guarantee is per physical activation, not
-  per "Send button": because the submit affordance lives INSIDE the
-  untrusted artifact, the companion cannot distinguish "the reviewer tapped
-  Send" from "the reviewer tapped anything" when the artifact registers a
-  handler on an arbitrary element and submits synchronously within that
-  interaction's dispatch. The fix above caps the damage at one attributed
-  submission per physical interaction; fully closing the residual would
-  require a **parent-owned trusted submit affordance** (the confirm/send UI
-  rendered outside the iframe) — a contract change deliberately NOT made
-  here; it is the document owner's call. Until then: a hostile artifact can
-  convert each incidental interaction inside its viewport into at most one
-  reviewer-attributed event batch, subject to server-side validation, the
-  batch/payload caps, and full audit attribution.
+- **Element-level intent — RESOLVED by the first-submission grant (issue
+  #78 security requirement 6).** The consent gate's guarantee is per
+  physical activation, not per "Send button": the submit affordance lives
+  INSIDE the untrusted artifact, so the companion cannot distinguish "the
+  reviewer tapped Send" from "the reviewer tapped anything". The mitigation
+  is a **parent-owned first-submission grant**: the first time a given
+  artifact content version attempts an artifact-originated submission on a
+  document, Primer-owned chrome — rendered in the parent page's DOM, which
+  the artifact cannot draw over, dispatch events into, or synthesize
+  acceptance of (the iframe's opaque origin reaches the parent only via the
+  companion MessagePort, which carries data, never UI events) — discloses
+  the envelope (event count, namespaces, and each event's `audience` with
+  its plain-language meaning: who will see the data) and asks the viewer to
+  allow it. Never the payload bytes. The grant persists per (viewer,
+  document, artifact content version): a republished artifact is a new
+  version and re-prompts; a submission carrying a broader audience tier
+  than was granted (author < collaborators < artifact) re-prompts, and
+  batch-splitting cannot bypass that because every submission's required
+  tier is checked independently. While a prompt is open exactly ONE
+  submission is held — the one whose envelope is being disclosed; anything
+  else arriving is refused, so nothing queue-jumps or piggybacks on the
+  grant click. Deny answers the artifact with an error
+  `primer:submit-result`. **Remaining residual:** within an existing grant
+  and within the granted audience tier, a hostile artifact can still ride a
+  genuine physical interaction to submit content the viewer didn't
+  deliberately author — capped at one submission per physical interaction
+  by the activation-cluster gate, always inside the disclosed audience
+  scope, always server-attributed and auditable, and bounded by the
+  batch/payload caps and server-side validation.
 
 - **`artifact` audience tier (backend → artifact).** Every event row carries
   a required `audience` (`author` | `collaborators` | `artifact`); the
