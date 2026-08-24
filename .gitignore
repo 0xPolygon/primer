@@ -10,4 +10,5 @@ coverage/
 .vitest-tmp/
 .vite/
 .superpowers/
+.primer/
 tmp
