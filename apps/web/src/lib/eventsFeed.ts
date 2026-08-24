@@ -11,9 +11,15 @@
  *
  *  - every stream event carries an SSE `id:` equal to the row id, so
  *    EventSource's native reconnect resumes via Last-Event-ID;
- *  - on (re)connect and on page-visibility regain — or any doubt — we
- *    re-fetch the list with an overlap window strictly below the highest id
- *    we've seen and re-relay anything missed;
+ *  - on reconnect-after-error and on page-visibility regain — or any doubt
+ *    — we re-hydrate the FULL visible list (the "fetch the full filtered
+ *    set" arm of the ordering contract) and re-relay anything missed. A
+ *    fixed overlap window would silently skip a row that committed more
+ *    than the window below the frontier while we were disconnected; the
+ *    contract says never silently skipped, unconditionally, so the refresh
+ *    is unconditional too. The seen-set makes re-hydrates cheap to relay
+ *    (only unseen rows dispatch) and the pagination keeps them a handful of
+ *    sequential reads even at hundreds of events;
  *  - duplicates and overlaps are legal by design (this module suppresses
  *    them by id as a courtesy; artifact code must dedupe by id anyway).
  *
@@ -44,8 +50,6 @@ export interface EventsFeedOptions {
   eventSourceFactory: (url: string) => EventSourceLike;
   /** Stream-burst coalescing window, ms. */
   coalesceMs?: number;
-  /** How far below the highest seen id an overlap re-fetch starts. */
-  overlapWindow?: number;
   setTimeoutImpl?: (fn: () => void, ms: number) => unknown;
   clearTimeoutImpl?: (handle: unknown) => void;
 }
@@ -54,12 +58,11 @@ export interface EventsFeed {
   /** Hydrates the list (one relay batch), then subscribes to the stream. */
   start(): Promise<void>;
   stop(): void;
-  /** Call on page-visibility regain (or any doubt): overlap re-fetch. */
+  /** Call on page-visibility regain (or any doubt): full re-hydrate. */
   refresh(): Promise<void>;
 }
 
 const DEFAULT_COALESCE_MS = 25;
-const DEFAULT_OVERLAP_WINDOW = 100;
 
 /** Browser glue: adapts a real EventSource to the injectable interface
  *  (the native handler-property types don't structurally match the minimal
@@ -85,7 +88,6 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
     fetchImpl,
     eventSourceFactory,
     coalesceMs = DEFAULT_COALESCE_MS,
-    overlapWindow = DEFAULT_OVERLAP_WINDOW,
     setTimeoutImpl = (fn, ms) => setTimeout(fn, ms),
     clearTimeoutImpl = (h) => clearTimeout(h as Parameters<typeof clearTimeout>[0]),
   } = opts;
@@ -107,8 +109,9 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
       .filter((r) => r.audience === 'artifact' && !seen.has(r.id))
       .sort((a, b) => a.id - b.id);
     for (const r of rows) {
-      // Track EVERY delivered row (any audience) for the overlap cursor —
-      // the stream's Last-Event-ID advances over them all.
+      // Track EVERY delivered row (any audience) — the stream subscription
+      // resumes from this frontier (a resume hint only; completeness comes
+      // from the full re-hydrates).
       if (r.id > highestSeen) highestSeen = r.id;
     }
     if (fresh.length === 0) return;
@@ -151,11 +154,14 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
 
   async function refresh(): Promise<void> {
     if (stopped) return;
-    // Overlap window strictly below the highest seen id, so a
-    // late-committing lower id is picked up rather than silently skipped.
-    const since = Math.max(0, highestSeen - overlapWindow);
+    // FULL re-hydrate — no since, no window. While disconnected (or
+    // suspended without a recorded error), a late-committing row can land
+    // arbitrarily far below the highest id we've seen; any bounded overlap
+    // window would silently skip it, and the ordering contract forbids
+    // that unconditionally. The seen-set dedupe means only genuinely
+    // missed rows produce a dispatch.
     try {
-      await hydrate(since > 0 ? since : null);
+      await hydrate(null);
     } catch {
       // Best-effort: the stream (or the next refresh) will catch us up.
     }
@@ -180,7 +186,7 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
     };
     source.onerror = () => {
       // EventSource reconnects on its own (with Last-Event-ID). We just
-      // remember to overlap-re-fetch once it comes back.
+      // remember to re-hydrate in full once it comes back.
       sawError = true;
     };
     source.onopen = () => {

@@ -396,6 +396,14 @@
 
   /** @type {((event: MessageEvent) => void) | null} */
   let onWindowMessage = (event) => {
+    // When actually embedded, accept init ONLY from the parent frame. The
+    // init handshake is first-init-wins, so without this check the
+    // artifact's own JS could post a fake init to its own window and hijack
+    // the companion port before the real parent's arrives (self-DoS plus a
+    // fake "parent" feeding the artifact fabricated events). Top-level /
+    // test contexts (window.parent === window) have no embedding parent to
+    // verify against, and no other frame holds a reference to this window.
+    if (window.parent !== window && event.source !== window.parent) return;
     if (!event.ports || event.ports.length === 0) return;
     const incoming = event.data;
     if (!incoming || incoming.type !== 'init') return;
@@ -545,23 +553,51 @@
   // for artifact data — the sandbox + connect-src 'none' block every direct
   // network path (see docs/prd-primer.md threat model).
   //
-  // CONSENT GATE — activation consumed in-dispatch (issue #78 security
-  // requirement 1). An artifact is untrusted code running in every viewer's
-  // browser; without this gate its JS could fire the submit event on load or
-  // in a loop and inject into a consumer's work queue under the viewer's
-  // name. We forward ONLY when the dispatch happens synchronously inside the
-  // same trusted event dispatch that carried a user gesture:
-  //   - a capture-phase listener on each gesture event mints a token while
-  //     that trusted dispatch is on the stack;
-  //   - a microtask queued at mint time retires the token as soon as the
-  //     dispatch's synchronous run completes — BEFORE any microtask the
-  //     artifact's own handler queued (ours enters the queue first), so a
-  //     dispatch deferred with setTimeout/Promise into the activation window
-  //     of an unrelated click finds no token;
-  //   - a successful forward CONSUMES the token: one gesture authorizes one
-  //     submission (which may be a batch).
-  // Checking `navigator.userActivation.isActive` alone would leave exactly
-  // that activation-laundering window open — this gate does not use it.
+  // CONSENT GATE — one activation per PHYSICAL interaction, consumed
+  // in-dispatch (issue #78 security requirement 1). An artifact is untrusted
+  // code running in every viewer's browser; without this gate its JS could
+  // fire the submit event on load or in a loop and inject into a consumer's
+  // work queue under the viewer's name. Two independent conditions must hold
+  // for a forward:
+  //
+  //   1. IN-DISPATCH: the submit is dispatched synchronously inside a
+  //      trusted gesture-event dispatch. A capture-phase listener flags the
+  //      dispatch; a microtask queued at flag time retires it as soon as the
+  //      dispatch's synchronous run completes — BEFORE any microtask the
+  //      artifact's own handler queued (ours enters the queue first) — so a
+  //      dispatch deferred with setTimeout/Promise into the activation
+  //      window of an unrelated interaction finds no flag.
+  //
+  //   2. UNCONSUMED ACTIVATION CLUSTER: one physical interaction (a tap, a
+  //      keystroke) fires a BURST of trusted events — e.g. pointerdown,
+  //      mousedown, pointerup, mouseup, click for one mouse tap; pointer +
+  //      touch + compatibility-mouse events for one touch tap; repeated
+  //      keydowns while a key is held. Minting an authorization per EVENT
+  //      would let an artifact with handlers on every gesture type turn one
+  //      incidental tap into several attributed submissions. Instead the
+  //      whole burst shares ONE consumable activation cluster:
+  //        - a press-family event (pointerdown/mousedown/touchstart/keydown)
+  //          mints a new cluster only if a release-family event has occurred
+  //          since the last mint — so the down-burst of one press, and
+  //          auto-repeat keydowns of one held key, never re-mint;
+  //        - release-family events (pointerup/mouseup/touchend/keyup/click)
+  //          never mint while a cluster exists — they continue it;
+  //        - after touchend, the UA may replay the same tap as
+  //          compatibility mouse events (mousedown/mouseup/click); the first
+  //          mousedown in that window continues the touch cluster instead of
+  //          minting.
+  //      A successful forward CONSUMES the cluster. Net guarantee: one
+  //      physical activation authorizes AT MOST ONE submission (which may be
+  //      a batch); one discrete keystroke (keydown..keyup, auto-repeat
+  //      included) is one activation cluster.
+  //
+  // Checking `navigator.userActivation.isActive` alone would leave the
+  // activation-laundering window open — this gate does not use it. Residual
+  // (documented in docs/prd-primer.md): the companion cannot attest WHICH
+  // element the user activated — the submit affordance lives inside the
+  // untrusted artifact — so the guarantee is per-activation, not
+  // per-"Send-button". Closing that fully needs a parent-owned trusted
+  // submit affordance (a possible contract change; pending ruling).
   //
   // The validation limits mirror packages/api-types/src/index.ts (the
   // companion is plain JS and can't import it; kept in sync by hand — see
@@ -572,24 +608,68 @@
   const SUBMIT_MAX_PAYLOAD_CHARS = 256 * 1024;
   const SUBMIT_MAX_BATCH = 100;
 
-  /** @type {{ consumed: boolean } | null} */
-  let activeGestureToken = null;
-  const GESTURE_EVENT_TYPES = [
-    'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click',
-    'keydown', 'keyup', 'touchstart', 'touchend',
-  ];
-  for (const type of GESTURE_EVENT_TYPES) {
+  const GESTURE_PRESS_TYPES = ['pointerdown', 'mousedown', 'touchstart', 'keydown'];
+  const GESTURE_RELEASE_TYPES = ['pointerup', 'mouseup', 'touchend', 'keyup', 'click'];
+
+  /** The current physical interaction's consumable authorization.
+   *  @type {{ consumed: boolean } | null} */
+  let activationCluster = null;
+  /** True once a release-family event has occurred since the last mint —
+   *  the signal that the next press-family event is a NEW physical press. */
+  let releaseSeenSinceMint = true;
+  /** Set on touchend: the next mousedown may be the UA's compatibility
+   *  replay of the same tap and must not mint a new cluster. */
+  let compatMousePending = false;
+  /** In-dispatch flag: non-null only while a trusted gesture dispatch is on
+   *  the stack. @type {object | null} */
+  let activeGestureDispatch = null;
+
+  function flagGestureDispatch() {
+    const token = {};
+    activeGestureDispatch = token;
+    queueMicrotask(() => {
+      if (activeGestureDispatch === token) activeGestureDispatch = null;
+    });
+  }
+
+  for (const type of GESTURE_PRESS_TYPES) {
     window.addEventListener(
       type,
       (e) => {
         if (!e.isTrusted) return;
-        const token = { consumed: false };
-        activeGestureToken = token;
-        queueMicrotask(() => {
-          if (activeGestureToken === token) activeGestureToken = null;
-        });
+        flagGestureDispatch();
+        if (type === 'mousedown' && compatMousePending) {
+          // Compatibility mouse burst of a touch tap — same physical
+          // interaction, same cluster.
+          compatMousePending = false;
+          if (!activationCluster) activationCluster = { consumed: false };
+          return;
+        }
+        compatMousePending = false;
+        if (releaseSeenSinceMint || !activationCluster) {
+          activationCluster = { consumed: false };
+          releaseSeenSinceMint = false;
+        }
+        // else: another press-family event of the SAME press moment
+        // (pointerdown+mousedown+touchstart burst, or keydown auto-repeat)
+        // — keep the existing cluster, consumed state included.
       },
-      true /* capture, so the token exists before any artifact handler runs */
+      true /* capture, so the state exists before any artifact handler runs */
+    );
+  }
+  for (const type of GESTURE_RELEASE_TYPES) {
+    window.addEventListener(
+      type,
+      (e) => {
+        if (!e.isTrusted) return;
+        flagGestureDispatch();
+        // Defensive: a release with no cluster (companion loaded
+        // mid-interaction) still represents a genuine physical activation.
+        if (!activationCluster) activationCluster = { consumed: false };
+        releaseSeenSinceMint = true;
+        if (type === 'touchend') compatMousePending = true;
+      },
+      true
     );
   }
 
@@ -633,9 +713,8 @@
       log.warn('submit-events refused:', error);
       dispatchSubmitResult({ ok: false, error });
     };
-    const token = activeGestureToken;
-    if (!token || token.consumed) {
-      refuse('consent_required: primer:submit-events must be dispatched from within the user gesture that authorizes it');
+    if (!activeGestureDispatch || !activationCluster || activationCluster.consumed) {
+      refuse('consent_required: primer:submit-events must be dispatched from within the user gesture that authorizes it (one physical activation authorizes at most one submission)');
       return;
     }
     if (!port) {
@@ -660,8 +739,10 @@
       }
       cleaned.push(clean);
     }
-    // One gesture, one submission — consume the activation in-dispatch.
-    token.consumed = true;
+    // One physical activation, one submission — consume the cluster
+    // in-dispatch. Every other event of the same interaction burst (and any
+    // repeat within it) now finds it consumed.
+    activationCluster.consumed = true;
     port.postMessage({ type: 'submit_events', events: cleaned });
   });
 

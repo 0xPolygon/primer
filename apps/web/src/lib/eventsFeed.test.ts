@@ -72,7 +72,6 @@ function makeHarness(initialRows: EventRowDTO[], pageSize = 2) {
       return timers.length - 1;
     },
     clearTimeoutImpl: () => {},
-    overlapWindow: 10,
   });
 
   return {
@@ -131,7 +130,7 @@ describe('createEventsFeed', () => {
     expect(h.sources[0].url).toContain('/events/stream?since=9');
   });
 
-  it('overlap re-fetches on reconnect: rows that committed late (lower id) are still delivered', async () => {
+  it('re-hydrates in FULL on reconnect: a late-committing lower id is delivered', async () => {
     const h = makeHarness([row(20), row(21)]);
     await h.feed.start();
     const src = h.sources[0];
@@ -145,12 +144,27 @@ describe('createEventsFeed', () => {
 
     const delivered = h.batches.flat().map((r) => r.id);
     expect(delivered).toContain(15);
-    // The overlap re-fetch asked for ids strictly below the highest seen.
-    const overlapCall = h.state.listCalls.find((u) => u.includes('since=11'));
-    expect(overlapCall).toBeDefined();
+    // The reconnect re-fetch was FULL — no since param (any bounded window
+    // could silently skip a row that committed far below the frontier).
+    const reconnectCalls = h.state.listCalls.slice(1); // [0] is the initial hydrate
+    expect(reconnectCalls.length).toBeGreaterThan(0);
+    for (const u of reconnectCalls) expect(u).not.toContain('since=');
   });
 
-  it('refresh() (visibility regain) overlap re-fetches without a connection error', async () => {
+  it('delivers a row committed ARBITRARILY far below the frontier during a disconnect (no bounded window)', async () => {
+    const h = makeHarness([row(500), row(501)]);
+    await h.feed.start();
+    const src = h.sources[0];
+    src.onerror?.({});
+    // While disconnected, a transaction that drew id 3 long ago finally
+    // commits — 497 ids below the frontier, beyond any plausible window.
+    h.state.rows.push(row(3));
+    src.onopen?.({});
+    await new Promise((r) => setTimeout(r, 0));
+    expect(h.batches.flat().map((r) => r.id)).toContain(3);
+  });
+
+  it('refresh() (visibility regain) re-hydrates in full without a connection error', async () => {
     const h = makeHarness([row(30)]);
     await h.feed.start();
     h.state.rows.push(row(25)); // late-committing lower id
