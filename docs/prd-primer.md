@@ -276,12 +276,17 @@ the threat model:
   are frozen by the same shim as behavior-preserving defense-in-depth. See
   `apps/api/src/upload/eventGuardShim.ts` and the poison/control test pairs
   (prototype, per-instance, and apply-primitive) in
-  `consent.browser.test.ts`.<br>The remaining bound if the guard is ever
-  absent (only possible outside the upload pipeline — the shim always
-  precedes the companion in a real artifact; the companion then fails safe,
-  treating a missing guard as not-in-dispatch): the `isTrusted` re-check
-  (unforgeable) still holds, so the worst case is timing/deferral decoupling
-  of an already-bounded submission — ≤1 per genuine gesture, grant-gated,
+  `consent.browser.test.ts`.<br>Two degraded paths, both immaterial to
+  production security: if the guard is present but its native read *throws*
+  unexpectedly, the companion treats the phase as NONE (fail-safe → refuse).
+  If the guard is *absent* entirely, the companion falls back to a plain
+  `e.eventPhase` read — but that is reachable only OUTSIDE the upload
+  pipeline (e.g. the jsdom unit harness that evals `v1.js` with no shim);
+  in a real artifact the pipeline always injects the shim ahead of the
+  companion, so the guard is always present and the plain-read fallback is
+  never taken. Even on that fallback the `isTrusted` re-check (unforgeable)
+  still holds, so the worst case is timing/deferral decoupling of an
+  already-bounded submission — ≤1 per genuine gesture, grant-gated,
   in-audience, server-attributed — never a no-gesture auto-fire and never a
   grant bypass.
   <br>**The activation cluster** (the second necessary condition above): one
