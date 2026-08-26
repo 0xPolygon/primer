@@ -401,7 +401,10 @@ describe('source ties (fail loudly if the gate is edited away)', () => {
     // handler ran. The isTrusted re-check defeats replaying a captured
     // trusted event via dispatchEvent().
     expect(COMPANION_SOURCE).toContain('function inTrustedGestureDispatch()');
-    expect(COMPANION_SOURCE).toContain('e.eventPhase !== 0');
+    // Phase is read through the guard's captured native getter, not a plain
+    // instance read (which is forgeable by a per-instance own-prop shadow).
+    expect(COMPANION_SOURCE).toContain('readEventPhase(e) !== 0');
+    expect(COMPANION_SOURCE).toContain('EVENT_GUARD.eventPhase(e)');
     expect(COMPANION_SOURCE).toContain('e.isTrusted === true');
     expect(COMPANION_SOURCE).not.toContain('userActivation.isActive)');
   });

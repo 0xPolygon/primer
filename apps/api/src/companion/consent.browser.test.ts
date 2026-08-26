@@ -50,6 +50,8 @@ const PROBE_HTML = `<!doctype html><meta charset="utf-8"><title>consent probe</t
 <button id="deferred">deferred</button>
 <button id="micro">micro</button>
 <button id="greedy">greedy</button>
+<button id="instpoison">instpoison</button>
+<button id="primpoison">primpoison</button>
 <script>
   window.__forwarded = [];
   window.__results = [];
@@ -66,6 +68,24 @@ const PROBE_HTML = `<!doctype html><meta charset="utf-8"><title>consent probe</t
   for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
     document.getElementById('greedy').addEventListener(t, () => window.__submit('greedy:' + t));
   }
+  // Per-instance shadow: the SAME event object is handed to this listener,
+  // so define an own eventPhase accessor on it, then defer a submit. The
+  // instance own-prop beats even a frozen prototype getter on a plain read.
+  document.getElementById('instpoison').addEventListener('click', (ev) => {
+    try { Object.defineProperty(ev, 'eventPhase', { configurable: true, get: () => 2 }); window.__instDefine = 'ok'; }
+    catch (e) { window.__instDefine = 'threw:' + (e && e.name); }
+    setTimeout(() => window.__submit('inst'), 0);
+  });
+  // Reflection hall-of-mirrors: try to poison the apply primitives the
+  // guard might use, THEN instance-shadow + defer. The guard captured its
+  // own references first-run, so these reassignments change nothing.
+  document.getElementById('primpoison').addEventListener('click', (ev) => {
+    try { Reflect.apply = () => 2; } catch (e) {}
+    try { Function.prototype.call = () => 2; } catch (e) {}
+    try { Function.prototype.apply = () => 2; } catch (e) {}
+    try { Object.defineProperty(ev, 'eventPhase', { configurable: true, get: () => 2 }); } catch (e) {}
+    setTimeout(() => window.__submit('prim'), 0);
+  });
 </script>
 <script src="/companion/v1.js"></script>
 </body>`;
@@ -103,18 +123,28 @@ beforeAll(async () => {
       '<!doctype html><meta charset="utf-8"><title>consent probe</title>\n',
       '',
     );
-    if ((req.url ?? '').startsWith('/poisoned-shimmed.html')) {
-      // Guard shim as head's first child (pipeline order), THEN the
-      // artifact's poison attempt, THEN the probe body + companion.
+    const shimHead = `<!doctype html><head><script>${EVENT_GUARD_SHIM_JS}</script></head>`;
+    const url = req.url ?? '';
+    if (url.startsWith('/shimmed.html')) {
+      // Production shape: guard shim as head's first child, then the
+      // artifact. The base tests run here — the guarded path IS the one
+      // that enforces the guarantee.
+      res.end(shimHead + body);
+      return;
+    }
+    if (url.startsWith('/poisoned-shimmed.html')) {
+      // Prototype poison AFTER the shim → shim froze it, redefine throws.
       res.end(`<!doctype html><head><script>${EVENT_GUARD_SHIM_JS}</script>${POISON_HEAD}</head>` + body);
       return;
     }
-    if ((req.url ?? '').startsWith('/poisoned-unshimmed.html')) {
-      // CONTROL: poison, NO guard shim — proves the vector is real and the
-      // test discriminates (deferred submit forwards when unprotected).
+    if (url.startsWith('/poisoned-unshimmed.html')) {
+      // CONTROL: prototype poison, NO shim — proves the vector is real.
       res.end(`<!doctype html><head>${POISON_HEAD}</head>` + body);
       return;
     }
+    // Default: NO shim (guard absent → companion's documented fallback
+    // path). Used only by the instance/primitive-poison CONTROLS, which
+    // must launder to prove the guarded tests above discriminate.
     res.end(PROBE_HTML);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -149,7 +179,9 @@ async function initHandshake(): Promise<void> {
 }
 
 beforeEach(async () => {
-  await page.goto(`${baseUrl}/probe.html`);
+  // Base tests run on the PRODUCTION shape (guard shim present) — the
+  // guarded native-getter path is what enforces the guarantee.
+  await page.goto(`${baseUrl}/shimmed.html`);
   await initHandshake();
   await settle();
 });
@@ -234,6 +266,53 @@ describe('consent gate under real UA input dispatch', () => {
     // for a deferred submit → it forwards. This is exactly what the shim
     // prevents in the test above.
     expect(state.forwarded).toHaveLength(1);
+  });
+
+  it('per-INSTANCE eventPhase shadow CANNOT launder a deferred submit under the shim (round-6 residual closed)', async () => {
+    // The artifact defines an own `eventPhase` accessor on the SAME event
+    // object its listener receives (shared across all listeners), then
+    // defers a submit. A plain instance read would honor that own accessor
+    // even over a frozen prototype — but the companion reads via the
+    // guard's captured native getter, which reads the internal slot.
+    await page.goto(`${baseUrl}/shimmed.html`);
+    await initHandshake();
+    await settle();
+    await page.click('#instpoison');
+    await settle(300);
+    const state = await readState();
+    // The instance own-prop definition itself SUCCEEDS (proving the shadow
+    // is real) — the defense is that the gate doesn't consult it.
+    const instDefine = await page.evaluate(
+      () => (window as unknown as { __instDefine?: string }).__instDefine,
+    );
+    expect(instDefine).toBe('ok');
+    expect(state.forwarded).toHaveLength(0);
+    expect(state.results[0].error).toContain('consent_required');
+  });
+
+  it('CONTROL: the same per-instance shadow WITHOUT the shim DOES launder (vector is real, test discriminates)', async () => {
+    await page.goto(`${baseUrl}/probe.html`); // no shim → companion fallback reads e.eventPhase
+    await initHandshake();
+    await settle();
+    await page.click('#instpoison');
+    await settle(300);
+    const state = await readState();
+    expect(state.forwarded).toHaveLength(1);
+  });
+
+  it('poisoning the apply/call primitives before submitting does NOT defeat the guard (captured first-run)', async () => {
+    // The artifact reassigns Reflect.apply / Function.prototype.call/apply
+    // AND instance-shadows eventPhase, then defers. The guard captured its
+    // own Reflect.apply + native getter in the shim before any artifact
+    // code ran, so none of these reassignments affect the phase read.
+    await page.goto(`${baseUrl}/shimmed.html`);
+    await initHandshake();
+    await settle();
+    await page.click('#primpoison');
+    await settle(300);
+    const state = await readState();
+    expect(state.forwarded).toHaveLength(0);
+    expect(state.results[0].error).toContain('consent_required');
   });
 
   it('microtask-deferred submit: never more than one forward per gesture (observed behavior pinned by the invariant, not the mechanism)', async () => {

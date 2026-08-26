@@ -231,42 +231,57 @@ the threat model:
   artifact can only dispatch `CustomEvent('primer:submit-events')`; the
   companion forwards it over the MessagePort only when BOTH hold: the
   dispatch happens **while the trusted gesture event's dispatch is still in
-  progress** (detected via the stored event's UA-managed `eventPhase`, with
+  progress** (the stored event's UA-managed dispatch phase, read through a
+  captured native getter so neither a prototype redefine nor a per-instance
+  own-property shadow can forge it — see the forging subsection below — plus
   an `isTrusted` re-check that defeats replaying a captured trusted event
-  through `dispatchEvent()` — NOT via a timer- or microtask-retired flag,
-  which real UA dispatch kills at the per-listener microtask checkpoint
-  before the artifact's handler runs; this class of behavior is provable
-  only under real input, hence the real-browser consent test tier,
+  through `dispatchEvent()`; NOT a timer- or microtask-retired flag, which
+  real UA dispatch kills at the per-listener microtask checkpoint before the
+  artifact's handler runs; this class is provable only under real input,
+  hence the real-browser consent test tier,
   `pnpm --filter @primer/api test:browser`),
   AND the current **physical activation cluster** is unconsumed (detailed
   below).
-  <br>**Prototype-poisoning of the `eventPhase` getter — closed by a freeze
-  shim.** `Event.prototype.eventPhase` is a *configurable* prototype getter
-  in Chrome, and artifact scripts run before the deferred companion, so a
-  hostile artifact could `Object.defineProperty(Event.prototype,
-  'eventPhase', { get: () => 2 })` to make the getter always report
-  "in dispatch" — collapsing the in-dispatch check to "was there ever a
-  genuine gesture" and letting a `setTimeout`-deferred submit ride a real
-  click (the exact laundering window). Mitigation: the upload pipeline
-  injects an inline shim as the **first child of `<head>`** (before any
-  artifact script) that captures the native getter and re-defines
-  `eventPhase` **non-configurable** (native getter intact), so the
-  artifact's later redefine throws and `delete` no-ops; the gate reads the
-  true, live phase. Audit of the whole class the gate + activation-cluster
-  logic touch: `isTrusted` is per-instance `[LegacyUnforgeable]`
-  (non-configurable, and a prototype poison is shadowed by the instance own
-  property — verified, no fix needed); the cluster keys on the **registered
-  event-type string** (a listener loop variable), never `e.type` off the
-  instance; `MessageEvent`'s `source`/`ports`/`data` getters (init-handshake
-  path only, misuse is self-harm to the artifact's own realm) are frozen by
-  the same shim as behavior-preserving defense-in-depth. The stored trusted
-  event instance never escapes the companion's closure, so the artifact
-  cannot shadow `eventPhase` per-instance on it either. See
-  `apps/api/src/upload/eventGuardShim.ts` and the poison/control tests in
-  `consent.browser.test.ts`.<br>The remaining bound if a browser ever
-  refused the freeze: the `isTrusted` re-check (unforgeable) still holds, so
-  the worst case degrades to timing/deferral decoupling of an
-  already-bounded submission — ≤1 per genuine gesture, grant-gated,
+  <br>**Forging `eventPhase` — closed by reading through a captured native
+  getter.** `eventPhase` is forgeable by untrusted artifact JS two ways, and
+  BOTH must be closed: (1) `Event.prototype.eventPhase` is a *configurable*
+  prototype getter in Chrome, so an artifact could
+  `Object.defineProperty(Event.prototype, 'eventPhase', { get: () => 2 })`;
+  and (2) — the subtler one — **the same event instance is handed to every
+  listener in a dispatch, including the artifact's own**, so the event is
+  NOT private to the companion: the artifact captures it in its own listener
+  and defines an own `eventPhase` accessor on the INSTANCE, which a plain
+  property read honors over even a frozen prototype getter. Either forgery
+  makes the in-dispatch check always say "in dispatch", laundering a
+  `setTimeout`-deferred submit past it. Mitigation (defeats both): the upload
+  pipeline injects an inline shim as the **first child of `<head>`** — before
+  any artifact script exists — that captures the pristine native `eventPhase`
+  getter and a native `Reflect.apply`, and publishes a frozen,
+  non-configurable, non-writable global exposing `guard.eventPhase(ev) =
+  Reflect.apply(nativeGetter, ev, [])`. The companion reads the phase through
+  that guard, so it reads the event's internal UA-managed slot directly and
+  never consults either the prototype getter or an instance own-accessor.
+  Correctness rests on "captured before any hostile code runs, then frozen",
+  NOT on freezing the prototype (which the shim also does, as
+  defense-in-depth and to keep the honest path obvious). The
+  `Function.prototype.call`/`.apply` hall-of-mirrors is closed the same way —
+  the apply primitive is a captured reference, invoked directly, never the
+  live (poisonable) global. Audit of the whole class the gate +
+  activation-cluster logic touch: `isTrusted` is per-instance
+  `[LegacyUnforgeable]` (non-configurable, and a prototype poison is shadowed
+  by the instance own property — verified, no fix needed); the cluster keys
+  on the **registered event-type string** (a listener loop variable), never
+  `e.type` off the instance; `MessageEvent`'s `source`/`ports`/`data` getters
+  (init-handshake path only, misuse is self-harm to the artifact's own realm)
+  are frozen by the same shim as behavior-preserving defense-in-depth. See
+  `apps/api/src/upload/eventGuardShim.ts` and the poison/control test pairs
+  (prototype, per-instance, and apply-primitive) in
+  `consent.browser.test.ts`.<br>The remaining bound if the guard is ever
+  absent (only possible outside the upload pipeline — the shim always
+  precedes the companion in a real artifact; the companion then fails safe,
+  treating a missing guard as not-in-dispatch): the `isTrusted` re-check
+  (unforgeable) still holds, so the worst case is timing/deferral decoupling
+  of an already-bounded submission — ≤1 per genuine gesture, grant-gated,
   in-audience, server-attributed — never a no-gesture auto-fire and never a
   grant bypass.
   <br>**The activation cluster** (the second necessary condition above): one

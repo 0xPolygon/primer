@@ -563,16 +563,21 @@
   //   1. IN-DISPATCH: the submit is dispatched while the trusted gesture
   //      event's own dispatch is still IN PROGRESS. The capture-phase
   //      listener stores the trusted event object; the submit handler then
-  //      checks `event.eventPhase !== Event.NONE` on it — the UA sets
-  //      eventPhase for the duration of the dispatch and resets it to NONE
-  //      when the dispatch completes (DOM §dispatch), so the window closes
-  //      exactly when the gesture's dispatch does, no timers or microtasks
-  //      involved. A setTimeout-deferred submit always finds NONE (tasks
-  //      never interleave mid-dispatch). The check also re-verifies
-  //      `isTrusted`: an artifact replaying a CAPTURED trusted event object
-  //      via dispatchEvent() would set its eventPhase again, but the spec
-  //      flips isTrusted to false on any dispatchEvent(), so the replay
-  //      fails the check.
+  //      checks its dispatch phase !== Event.NONE — the UA sets eventPhase
+  //      for the duration of the dispatch and resets it to NONE when the
+  //      dispatch completes (DOM §dispatch), so the window closes exactly
+  //      when the gesture's dispatch does, no timers or microtasks involved.
+  //      A setTimeout-deferred submit always finds NONE (tasks never
+  //      interleave mid-dispatch). CRUCIAL: the phase is read through the
+  //      event-guard stash's captured NATIVE getter (see readEventPhase),
+  //      NOT a plain `e.eventPhase` — the same event instance is shared
+  //      with the artifact's own listeners, so a plain read is forgeable
+  //      both by a prototype-getter redefine AND by an own-property shadow
+  //      on the instance; the native getter reads the internal slot and is
+  //      immune to both. The check also re-verifies `isTrusted`
+  //      (LegacyUnforgeable): a synthetic gesture is never stored, and an
+  //      artifact replaying a captured trusted event via dispatchEvent()
+  //      reads isTrusted=false.
   //      Why not a microtask-retired flag: in a REAL browser the HTML spec
   //      runs a microtask checkpoint after EVERY listener callback, so a
   //      flag minted in our capture listener and retired by queueMicrotask
@@ -650,15 +655,48 @@
    *  listeners below). @type {Event | null} */
   let lastTrustedGestureEvent = null;
 
-  /** True iff a trusted gesture event's dispatch is in progress right now.
-   *  eventPhase is UA-managed: set for the dispatch's duration, reset to
-   *  NONE (0) when it completes — the artifact can neither forge it (a
-   *  synthetic gesture is never stored) nor reuse it (replaying a captured
-   *  trusted event via dispatchEvent() flips its isTrusted to false, per
-   *  spec, so the re-check here fails). */
+  // The event-guard stash the upload pipeline injects as the FIRST head
+  // script (apps/api/src/upload/eventGuardShim.ts). It exposes the native
+  // `eventPhase` getter applied via a captured `Reflect.apply`, so we read
+  // an event's TRUE dispatch phase — immune to an artifact redefining
+  // `Event.prototype.eventPhase` OR shadowing `eventPhase` as an own
+  // property on the (shared) event instance. Captured once at load: the
+  // shim provably ran first and locked this global non-configurable +
+  // non-writable, so nothing can have swapped it before we read it here.
+  const EVENT_GUARD =
+    typeof window !== 'undefined' &&
+    window.__primerEventGuard__ &&
+    window.__primerEventGuard__.ready === true
+      ? window.__primerEventGuard__
+      : null;
+
+  /** True iff the stored trusted gesture event's dispatch is in progress
+   *  right now. eventPhase is UA-managed: set for the dispatch's duration,
+   *  reset to NONE (0) when it completes. The artifact cannot make this
+   *  return true post-dispatch: it cannot forge isTrusted (LegacyUnforgeable,
+   *  so a synthetic gesture is never stored and a dispatchEvent()-replayed
+   *  event reads isTrusted=false), and it cannot forge the phase because we
+   *  read it through the guard's captured NATIVE getter, not the instance's
+   *  (poisonable) `eventPhase` accessor.
+   *
+   *  Fail-safe: if the guard is absent (only possible outside the upload
+   *  pipeline — e.g. a jsdom unit harness that evals v1.js with no shim;
+   *  never in a real artifact, where the shim always precedes this script),
+   *  fall back to the plain read. That path is NOT the production security
+   *  boundary — the real-browser test tier exercises the guarded path. */
+  function readEventPhase(e) {
+    if (EVENT_GUARD) {
+      try {
+        return EVENT_GUARD.eventPhase(e);
+      } catch (err) {
+        return 0; // guard threw unexpectedly → fail safe (treat as NONE)
+      }
+    }
+    return e.eventPhase;
+  }
   function inTrustedGestureDispatch() {
     const e = lastTrustedGestureEvent;
-    return !!e && e.isTrusted === true && e.eventPhase !== 0 /* Event.NONE */;
+    return !!e && e.isTrusted === true && readEventPhase(e) !== 0 /* Event.NONE */;
   }
 
   for (const type of GESTURE_PRESS_TYPES) {
