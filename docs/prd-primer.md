@@ -238,7 +238,38 @@ the threat model:
   before the artifact's handler runs; this class of behavior is provable
   only under real input, hence the real-browser consent test tier,
   `pnpm --filter @primer/api test:browser`),
-  AND the current **physical activation cluster** is unconsumed — where one
+  AND the current **physical activation cluster** is unconsumed (detailed
+  below).
+  <br>**Prototype-poisoning of the `eventPhase` getter — closed by a freeze
+  shim.** `Event.prototype.eventPhase` is a *configurable* prototype getter
+  in Chrome, and artifact scripts run before the deferred companion, so a
+  hostile artifact could `Object.defineProperty(Event.prototype,
+  'eventPhase', { get: () => 2 })` to make the getter always report
+  "in dispatch" — collapsing the in-dispatch check to "was there ever a
+  genuine gesture" and letting a `setTimeout`-deferred submit ride a real
+  click (the exact laundering window). Mitigation: the upload pipeline
+  injects an inline shim as the **first child of `<head>`** (before any
+  artifact script) that captures the native getter and re-defines
+  `eventPhase` **non-configurable** (native getter intact), so the
+  artifact's later redefine throws and `delete` no-ops; the gate reads the
+  true, live phase. Audit of the whole class the gate + activation-cluster
+  logic touch: `isTrusted` is per-instance `[LegacyUnforgeable]`
+  (non-configurable, and a prototype poison is shadowed by the instance own
+  property — verified, no fix needed); the cluster keys on the **registered
+  event-type string** (a listener loop variable), never `e.type` off the
+  instance; `MessageEvent`'s `source`/`ports`/`data` getters (init-handshake
+  path only, misuse is self-harm to the artifact's own realm) are frozen by
+  the same shim as behavior-preserving defense-in-depth. The stored trusted
+  event instance never escapes the companion's closure, so the artifact
+  cannot shadow `eventPhase` per-instance on it either. See
+  `apps/api/src/upload/eventGuardShim.ts` and the poison/control tests in
+  `consent.browser.test.ts`.<br>The remaining bound if a browser ever
+  refused the freeze: the `isTrusted` re-check (unforgeable) still holds, so
+  the worst case degrades to timing/deferral decoupling of an
+  already-bounded submission — ≤1 per genuine gesture, grant-gated,
+  in-audience, server-attributed — never a no-gesture auto-fire and never a
+  grant bypass.
+  <br>**The activation cluster** (the second necessary condition above): one
   cluster spans the whole trusted-event burst of one physical interaction
   (pointer + mouse + touch + compatibility-mouse events of one tap; a
   keydown-through-keyup keystroke, auto-repeat included). A successful

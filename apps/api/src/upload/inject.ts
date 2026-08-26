@@ -1,5 +1,6 @@
 import type { DefaultTreeAdapterMap } from 'parse5';
 import { STORAGE_POLYFILL_JS } from './storagePolyfill.ts';
+import { EVENT_GUARD_SHIM_JS } from './eventGuardShim.ts';
 
 type Document = DefaultTreeAdapterMap['document'];
 type Element = DefaultTreeAdapterMap['element'];
@@ -121,6 +122,25 @@ export function injectThemeOwnershipMarker(doc: Document): void {
 // SecurityError in the opaque-origin iframe sandbox. See storagePolyfill.ts
 // for the rationale and issue #25 for the failure mode.
 export function injectStoragePolyfill(doc: Document): void {
+  unshiftInlineHeadScript(doc, STORAGE_POLYFILL_JS);
+}
+
+// Injects the event-guard shim as the VERY FIRST child of <head>
+// (parser-blocking inline script), so it runs before any artifact script —
+// including before the storage polyfill, which is why this must be called
+// LAST among the head-unshifting injectors. The shim pins
+// `Event.prototype.eventPhase` (and MessageEvent's source/ports/data)
+// non-configurable so a hostile artifact cannot poison the getter the
+// companion's consent gate reads to detect an in-progress gesture dispatch.
+// See eventGuardShim.ts for the full rationale and the property audit.
+export function injectEventGuardShim(doc: Document): void {
+  unshiftInlineHeadScript(doc, EVENT_GUARD_SHIM_JS);
+}
+
+// Shared helper: prepend a parser-blocking inline <script> (no src/defer/
+// async) as the first child of <head>. The most recently unshifted script
+// runs first, so call order among unshifters is reverse of run order.
+function unshiftInlineHeadScript(doc: Document, source: string): void {
   const head = findHead(doc);
   if (!head) {
     throw new Error('document has no <head> after parse5 normalization');
@@ -137,7 +157,7 @@ export function injectStoragePolyfill(doc: Document): void {
 
   const textNode: TextNode = {
     nodeName: '#text',
-    value: STORAGE_POLYFILL_JS,
+    value: source,
     parentNode: scriptEl,
   } as unknown as TextNode;
 

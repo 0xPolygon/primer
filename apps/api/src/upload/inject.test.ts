@@ -3,6 +3,7 @@ import { parse, serialize } from 'parse5';
 import {
   injectCompanionScript,
   injectStoragePolyfill,
+  injectEventGuardShim,
   injectThemeOwnershipMarker,
   injectViewportMeta,
 } from './inject.ts';
@@ -194,5 +195,48 @@ describe('injection composition', () => {
     expect(
       out.match(new RegExp(STORAGE_POLYFILL_JS.split('\n')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))?.length,
     ).toBe(1);
+  });
+});
+
+describe('injectEventGuardShim', () => {
+  function injectGuard(html: string): string {
+    const doc = parse(html);
+    injectEventGuardShim(doc);
+    return serialize(doc);
+  }
+
+  it('inserts an inline (parser-blocking) <script> as the first child of <head>', () => {
+    const out = injectGuard('<html><head><title>t</title></head><body></body></html>');
+    expect(out).toMatch(/<head><script>/);
+    expect(out).toContain('Event.prototype');
+    expect(out).toContain('eventPhase');
+    // No src/defer/async — must run synchronously before artifact scripts.
+    expect(out).not.toMatch(/<script[^>]*\bsrc=/i);
+  });
+
+  it('freezes only via the native descriptor (configurable:false, getter preserved)', () => {
+    const out = injectGuard('<html><head></head><body></body></html>');
+    expect(out).toContain('configurable: false');
+    expect(out).toContain('MessageEvent.prototype');
+  });
+});
+
+describe('full-pipeline head ordering', () => {
+  it('the event-guard shim is head’s FIRST child — ahead of the storage polyfill and every artifact script', () => {
+    const doc = parse('<html><head></head><body><script>window.x=1</script></body></html>');
+    // Mirror htmlPipeline order: viewport, storage, guard (last unshift → first), companion.
+    injectStoragePolyfill(doc);
+    injectEventGuardShim(doc);
+    injectCompanionScript(doc);
+    const out = serialize(doc);
+    // Unique markers: both shims are IIFEs opening with the same line, so
+    // key on body identifiers unique to each.
+    const guardIdx = out.indexOf('Event.prototype');
+    const storageIdx = out.indexOf('makeStorage');
+    const artifactIdx = out.indexOf('window.x=1');
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(storageIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(storageIdx);
+    expect(guardIdx).toBeLessThan(artifactIdx);
   });
 });
