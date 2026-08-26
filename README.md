@@ -125,6 +125,15 @@ Watching the raw stream directly also works:
 `curl -N -H "Authorization: Bearer $PRIMER_TOKEN"
 http://localhost:3000/api/documents/<docId>/events/stream`.
 
+Two consumer gotchas when testing artifacts locally: (1) the sandboxed
+iframe has no Clipboard API (`navigator.clipboard.writeText` rejects with a
+permissions-policy violation) — artifact fallback UX must not rely on
+in-iframe clipboard writes; (2) the consent gate's real-input behavior is
+only provable in a real browser — after any change to `v1.js`'s gate, run
+the real-browser test tier: `pnpm --filter @primer/api test:browser`
+(launches your installed Chrome headless; not part of the default
+`pnpm test`).
+
 ## Architecture
 
 - `apps/api` — Hono API server (Node 24, drizzle-orm, postgres, parse5, pino, markdown-it). Contains the Drizzle schema and Storage interface.

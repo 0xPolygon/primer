@@ -5,6 +5,18 @@
 // the init handshake performed with a genuine MessageChannel, so these tests
 // exercise the actual gate — not a mirror.
 //
+// SCOPE OF THIS TIER: jsdom dispatches every event via dispatchEvent() from
+// JS, so a whole dispatch shares one synchronous stack and microtasks never
+// interleave between listeners — which is NOT how a real UA dispatches
+// trusted input (a microtask checkpoint runs after every listener). The
+// gate's in-dispatch detection (event.eventPhase on the stored trusted
+// event) is designed to be correct under both, but ONLY the real-browser
+// tier (consent.browser.test.ts, run via `pnpm --filter @primer/api
+// test:browser`) proves the real-dispatch behavior: legit sync-in-click
+// forwarding, deferral refusal, and one-tap-one-forward under genuine UA
+// input. Treat this file as the fast adversarial-logic tier, not as proof
+// of real-browser behavior.
+//
 // The load-bearing property (issue #78 security requirement 1): the
 // companion relays `primer:submit-events` ONLY from within the same trusted
 // event dispatch that carried the user gesture — transient activation
@@ -178,7 +190,7 @@ describe('consent gate — activation consumed in-dispatch', () => {
     expect(submitResults[0].error).toContain('consent_required');
   });
 
-  it('(b′) refuses a microtask-deferred dispatch too — the token retires before artifact microtasks run', async () => {
+  it('(b′) refuses a microtask-deferred dispatch [jsdom dispatch semantics: the microtask runs after dispatchEvent() returns, when eventPhase is reset; in a real UA a handler-queued microtask may still ride the SAME in-progress gesture dispatch — same activation cluster, so at most one submission either way — see the browser tier]', async () => {
     const button = document.createElement('button');
     document.body.appendChild(button);
     button.addEventListener('click', () => {
@@ -383,7 +395,14 @@ describe('source ties (fail loudly if the gate is edited away)', () => {
     expect(COMPANION_SOURCE).toContain('activationCluster.consumed = true');
     expect(COMPANION_SOURCE).toContain('releaseSeenSinceMint');
     expect(COMPANION_SOURCE).toContain('compatMousePending');
-    expect(COMPANION_SOURCE).toContain('queueMicrotask');
+    // In-dispatch detection is eventPhase-based (UA-managed dispatch state),
+    // NOT a microtask-retired flag — a microtask checkpoint runs after every
+    // listener in a real UA, which killed the flag before the artifact's
+    // handler ran. The isTrusted re-check defeats replaying a captured
+    // trusted event via dispatchEvent().
+    expect(COMPANION_SOURCE).toContain('function inTrustedGestureDispatch()');
+    expect(COMPANION_SOURCE).toContain('e.eventPhase !== 0');
+    expect(COMPANION_SOURCE).toContain('e.isTrusted === true');
     expect(COMPANION_SOURCE).not.toContain('userActivation.isActive)');
   });
 

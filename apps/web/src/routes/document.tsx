@@ -766,14 +766,19 @@ function DocumentPageInner() {
 
       <div className="flex flex-1 overflow-hidden">
         <div ref={iframeWrapperRef} className="flex-1 overflow-hidden">
-          <ArtifactIframe
-            src={`/api/versions/${currentVersionId}/content`}
-            anchors={anchorsForCompanion}
-            theme={theme}
-            fitToWidth={isMobile}
-            onMessage={onMessage}
-            registerSender={registerSender}
-          />
+          {/* Mount only once the version id has resolved: an empty id would
+              build src="/api/versions//content" and 404 on first render
+              while the versions query is still in flight. */}
+          {currentVersionId && (
+            <ArtifactIframe
+              src={`/api/versions/${currentVersionId}/content`}
+              anchors={anchorsForCompanion}
+              theme={theme}
+              fitToWidth={isMobile}
+              onMessage={onMessage}
+              registerSender={registerSender}
+            />
+          )}
         </div>
         {!isMobile && (
           <CommentSidebar

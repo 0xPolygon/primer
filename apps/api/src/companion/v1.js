@@ -560,13 +560,33 @@
   // work queue under the viewer's name. Two independent conditions must hold
   // for a forward:
   //
-  //   1. IN-DISPATCH: the submit is dispatched synchronously inside a
-  //      trusted gesture-event dispatch. A capture-phase listener flags the
-  //      dispatch; a microtask queued at flag time retires it as soon as the
-  //      dispatch's synchronous run completes — BEFORE any microtask the
-  //      artifact's own handler queued (ours enters the queue first) — so a
-  //      dispatch deferred with setTimeout/Promise into the activation
-  //      window of an unrelated interaction finds no flag.
+  //   1. IN-DISPATCH: the submit is dispatched while the trusted gesture
+  //      event's own dispatch is still IN PROGRESS. The capture-phase
+  //      listener stores the trusted event object; the submit handler then
+  //      checks `event.eventPhase !== Event.NONE` on it — the UA sets
+  //      eventPhase for the duration of the dispatch and resets it to NONE
+  //      when the dispatch completes (DOM §dispatch), so the window closes
+  //      exactly when the gesture's dispatch does, no timers or microtasks
+  //      involved. A setTimeout-deferred submit always finds NONE (tasks
+  //      never interleave mid-dispatch). The check also re-verifies
+  //      `isTrusted`: an artifact replaying a CAPTURED trusted event object
+  //      via dispatchEvent() would set its eventPhase again, but the spec
+  //      flips isTrusted to false on any dispatchEvent(), so the replay
+  //      fails the check.
+  //      Why not a microtask-retired flag: in a REAL browser the HTML spec
+  //      runs a microtask checkpoint after EVERY listener callback, so a
+  //      flag minted in our capture listener and retired by queueMicrotask
+  //      dies before the artifact's own handler (later in the same
+  //      dispatch) ever runs — refusing every legitimate submission. Only
+  //      synthetic dispatchEvent() from JS (e.g. jsdom tests) keeps the
+  //      whole dispatch on one stack; the eventPhase check is correct under
+  //      both. Note the honest boundary this draws: a microtask queued by
+  //      an artifact handler MAY run between listeners of the SAME
+  //      still-in-progress gesture dispatch and pass this check — that is
+  //      the same physical gesture and the same activation cluster (at most
+  //      one submission either way); what can never pass is anything after
+  //      the gesture's dispatch has ended (timers, later microtasks, an
+  //      unrelated interaction's window).
   //
   //   2. UNCONSUMED ACTIVATION CLUSTER: one physical interaction (a tap, a
   //      keystroke) fires a BURST of trusted events — e.g. pointerdown,
@@ -624,16 +644,21 @@
   /** Set on touchend: the next mousedown may be the UA's compatibility
    *  replay of the same tap and must not mint a new cluster. */
   let compatMousePending = false;
-  /** In-dispatch flag: non-null only while a trusted gesture dispatch is on
-   *  the stack. @type {object | null} */
-  let activeGestureDispatch = null;
+  /** The trusted gesture event whose dispatch is (or was most recently)
+   *  in progress. Closure-private — the artifact cannot reach or replace
+   *  it; a synthetic gesture never gets stored (isTrusted check in the
+   *  listeners below). @type {Event | null} */
+  let lastTrustedGestureEvent = null;
 
-  function flagGestureDispatch() {
-    const token = {};
-    activeGestureDispatch = token;
-    queueMicrotask(() => {
-      if (activeGestureDispatch === token) activeGestureDispatch = null;
-    });
+  /** True iff a trusted gesture event's dispatch is in progress right now.
+   *  eventPhase is UA-managed: set for the dispatch's duration, reset to
+   *  NONE (0) when it completes — the artifact can neither forge it (a
+   *  synthetic gesture is never stored) nor reuse it (replaying a captured
+   *  trusted event via dispatchEvent() flips its isTrusted to false, per
+   *  spec, so the re-check here fails). */
+  function inTrustedGestureDispatch() {
+    const e = lastTrustedGestureEvent;
+    return !!e && e.isTrusted === true && e.eventPhase !== 0 /* Event.NONE */;
   }
 
   for (const type of GESTURE_PRESS_TYPES) {
@@ -641,7 +666,7 @@
       type,
       (e) => {
         if (!e.isTrusted) return;
-        flagGestureDispatch();
+        lastTrustedGestureEvent = e;
         if (type === 'mousedown' && compatMousePending) {
           // Compatibility mouse burst of a touch tap — same physical
           // interaction, same cluster.
@@ -666,7 +691,7 @@
       type,
       (e) => {
         if (!e.isTrusted) return;
-        flagGestureDispatch();
+        lastTrustedGestureEvent = e;
         // Defensive: a release with no cluster (companion loaded
         // mid-interaction) still represents a genuine physical activation.
         if (!activationCluster) activationCluster = { consumed: false };
@@ -717,7 +742,7 @@
       log.warn('submit-events refused:', error);
       dispatchSubmitResult({ ok: false, error });
     };
-    if (!activeGestureDispatch || !activationCluster || activationCluster.consumed) {
+    if (!inTrustedGestureDispatch() || !activationCluster || activationCluster.consumed) {
       refuse('consent_required: primer:submit-events must be dispatched from within the user gesture that authorizes it (one physical activation authorizes at most one submission)');
       return;
     }

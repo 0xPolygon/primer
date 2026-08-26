@@ -230,7 +230,14 @@ the threat model:
   still block every direct network path; nothing here loosens them. The
   artifact can only dispatch `CustomEvent('primer:submit-events')`; the
   companion forwards it over the MessagePort only when BOTH hold: the
-  dispatch happens **synchronously inside a trusted gesture-event dispatch**,
+  dispatch happens **while the trusted gesture event's dispatch is still in
+  progress** (detected via the stored event's UA-managed `eventPhase`, with
+  an `isTrusted` re-check that defeats replaying a captured trusted event
+  through `dispatchEvent()` — NOT via a timer- or microtask-retired flag,
+  which real UA dispatch kills at the per-listener microtask checkpoint
+  before the artifact's handler runs; this class of behavior is provable
+  only under real input, hence the real-browser consent test tier,
+  `pnpm --filter @primer/api test:browser`),
   AND the current **physical activation cluster** is unconsumed — where one
   cluster spans the whole trusted-event burst of one physical interaction
   (pointer + mouse + touch + compatibility-mouse events of one tap; a
@@ -318,6 +325,17 @@ the threat model:
   are bounded by a single document's stream length and by the connection /
   page lifetime; revisit if any document's stream reaches a size where this
   matters.
+
+- **The Clipboard API does not work inside the artifact iframe
+  (pre-existing; informational for artifact authors).** The sandboxed,
+  opaque-origin iframe is denied `clipboard-write` by permissions policy,
+  so `navigator.clipboard.writeText(...)` from artifact JS rejects with a
+  policy violation (observed live, 2026-08-26). Artifacts must not build
+  fallback UX on in-iframe clipboard writes (e.g. "couldn't send — copied
+  to clipboard instead" silently does neither); surface data visibly (a
+  selectable text block) or hand it out through the sanctioned channels
+  instead. Not a security gap — one less way for artifact code to touch
+  the viewer's environment — but a known consumer-facing limitation.
 
 - **Navigation is an exfil channel the CSP does not close (pre-existing).**
   `connect-src 'none'` blocks fetch/XHR/WebSocket and `form-action 'none'`
