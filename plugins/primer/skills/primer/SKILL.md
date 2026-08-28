@@ -103,6 +103,15 @@ source text) and does not parse data-URI images (`![](data:image/svg+xml;…)`
 stays literal text). Published as `format: "html"`, the sanitizer keeps SVG
 shape/`<text>`/`<path>`/`<marker>` tags and the diagram renders.
 
+**Mind the transport on the remote connector.** With the local stdio server,
+inline SVG is free to publish — `contentPath` keeps the whole body (SVG
+included) out of context (see "Disk round-tripping" above), so author diagrams
+as richly as you like. With the **remote HTTP connector** there is no
+`contentPath`: the model is the sole transport to the server, so every byte of
+inline SVG is an output-token cost paid *on every version*. That makes a large
+inline diagram something to actively avoid there, not a neutral default — apply
+the decision rule in the last bullet below.
+
 - **Hand-author the SVG with each box sized to fit its label**, using native
   `<text>`. Don't lean on Primer's ` ```mermaid ` rendering for flowcharts — it
   under-measures label widths and clips node/edge text, and a
@@ -111,6 +120,17 @@ shape/`<text>`/`<path>`/`<marker>` tags and the diagram renders.
   (fonts, tables, code, and light/dark via `@media (prefers-color-scheme: dark)`
   plus `:root[data-theme]`). Pastel fills with dark text stay legible on both
   themes; use a mid-grey (`#888`) for connectors so they show on either.
+- **On the remote connector, keep SVG compact and hand-authored.** A tidy
+  hand-authored flowchart is a few KB and fine to inline anywhere. Avoid pasting
+  large machine-exported or rasterized-to-vector SVG (illustration exports,
+  traced images) — they run to hundreds of KB and re-transit on every version.
+  When a diagram is genuinely large, don't inline it: prefer a **data-driven
+  render** (embed the data once and draw with a small script — see "Publishing
+  large or interactive pages" above), or **reference a hosted asset by URL**
+  where one exists (e.g. the `/brand` assets). A hosted-asset upload path for
+  arbitrary assets is tracked in #87. On the local stdio server none of this
+  applies — `contentPath` already keeps the body out of context, so inline
+  freely.
 
 ## Error handling
 
