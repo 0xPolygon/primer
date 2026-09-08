@@ -38,8 +38,15 @@
 // (embed derived state in published versions; replay only the newer tail).
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { bodyLimit } from 'hono/body-limit';
 import type { AppVariables } from '../app.ts';
-import type { EventRowDTO, EventsListResponse, SendEventsResponse } from '@polygonlabs/primer-api-types';
+import {
+  type EventRowDTO,
+  type EventsListResponse,
+  type SendEventsResponse,
+  MAX_EVENT_PAYLOAD_BYTES,
+  MAX_EVENTS_PER_BATCH,
+} from '@polygonlabs/primer-api-types';
 import {
   DEFAULT_EVENTS_PAGE_SIZE,
   MAX_EVENTS_PAGE_SIZE,
@@ -58,6 +65,15 @@ import {
   validateVersionFilter,
 } from '../lib/events.ts';
 
+// Coarse request-body cap so an authenticated collaborator cannot make the
+// node adapter buffer an oversized body before the handler runs. The precise
+// limits — 256 KB per payload, 100 events per batch — are enforced in
+// validateEventBatch after JSON parse; this bounds the worst-case legitimate
+// body (every event at the payload cap) plus 4 KB/event of framing/metadata
+// headroom, so a valid max batch never trips it while an abusive body is
+// rejected before it is fully read.
+const MAX_EVENTS_BODY_BYTES = MAX_EVENTS_PER_BATCH * (MAX_EVENT_PAYLOAD_BYTES + 4 * 1024);
+
 export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): void {
   // ── Write: atomic batch ────────────────────────────────────────────
   // Body is uniformly { events: [event…] } — a single send is a batch of
@@ -69,7 +85,14 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   // 201 { events: [row…] } in insertion order — the ids are the consumer's
   // dedupe keys and the echoed audience is how tooling asserts its write
   // landed with the intended scope.
-  app.post('/api/documents/:documentId/events', async (c) => {
+  app.post('/api/documents/:documentId/events', bodyLimit({
+    maxSize: MAX_EVENTS_BODY_BYTES,
+    onError: (c) =>
+      c.json(
+        { error: 'payload_too_large', message: `request body exceeds ${MAX_EVENTS_BODY_BYTES} bytes` },
+        413,
+      ),
+  }), async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
     const g = await gate(documentId, user.id);
