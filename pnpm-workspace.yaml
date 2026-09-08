@@ -45,9 +45,14 @@ overrides:
   'js-yaml@3': '^3.15.1'   # gray-matter (api) — GHSA-52cp-r559-cp3m + !!omap quadratic CPU
   'js-yaml@4': '^4.3.1'    # react-diff-viewer-continued (web) — same advisories, 4.x line
   linkify-it: '^5.0.2'     # markdown-it (api) — GHSA-v245-v573-v5vm mailto: scan-loop DoS
-  fast-uri: '^3.1.5'       # @modelcontextprotocol/sdk>ajv (api) — host confusion (backslash/IDN)
+  fast-uri: '^3.1.6'       # @modelcontextprotocol/sdk>ajv (api) — host confusion + SSRF (patched 3.1.6)
   ip-address: '^10.3.1'    # @modelcontextprotocol/sdk (api) — leading-zero octet decode
   postcss: '^8.5.18'       # sanitize-html (api) — source-map path traversal
   nanoid: '^3.3.18'        # sanitize-html>postcss (api) — generator infinite-loop DoS
+  hono: '^4.12.34'         # @modelcontextprotocol/sdk + @hono/node-server (api) — CORS ReDoS, memo() SSR bleed, lang-mw DoS, proxy-header leak (patched 4.12.34)
+  '@hono/node-server@1': '^1.19.15'  # @modelcontextprotocol/sdk (api) — serve-static path traversal; SDK stays on its 1.x line
+  body-parser: '^2.3.0'    # @modelcontextprotocol/sdk>express (api) — DoS via invalid limit disabling the size cap (patched 2.3.0)
+  # qs '^6.16.0' (2 moderate: array-limit bypass + isBuffer DoS) is DEFERRED:
+  # 6.16.0 (published 2026-08-29) sits inside the 14-day gate until ~2026-09-12.
 strictPeerDependencies: true
 engineStrict: true
