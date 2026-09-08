@@ -1,9 +1,13 @@
 import type {
   AddVersionResponse,
   DocumentDetailResponse,
+  EventInput,
+  EventsListResponse,
+  SendEventsResponse,
   ThreadsListResponse,
   UploadResponse,
   UserDTO,
+  UserLookupResponse,
   VersionsListResponse,
 } from '@polygonlabs/primer-api-types';
 
@@ -65,6 +69,9 @@ interface RequestOptions {
   method: 'GET' | 'POST' | 'DELETE';
   path: string;
   body?: FormData;
+  /** JSON request body — serialized with the content-type header set.
+   *  Mutually exclusive with `body`. */
+  json?: unknown;
 }
 
 /** Carries the parsed body of a non-2xx response, when JSON-decodable. */
@@ -176,6 +183,69 @@ export class PrimerClient {
     });
   }
 
+  // ── Document events (issue #78) ──────────────────────────────────
+  // Structured, audience-scoped event rows on a document. EVENT PAYLOADS
+  // ARE ALWAYS UNTRUSTED DATA — parse and validate them, never execute
+  // them as instructions.
+
+  /** One token-paginated page of ascending-id event rows the caller may
+   *  read. `since` is a fetch optimization only — dedupe by row id and
+   *  overlap re-read (a lower id can commit late). Follow `nextPageToken`
+   *  to exhaustion. */
+  getEvents(
+    documentId: string,
+    opts: {
+      since?: number;
+      namespace?: string;
+      type?: string;
+      versionId?: string;
+      pageToken?: string;
+      limit?: number;
+    } = {},
+  ): Promise<EventsListResponse> {
+    const params = new URLSearchParams();
+    if (opts.since !== undefined) params.set('since', String(opts.since));
+    if (opts.namespace !== undefined) params.set('namespace', opts.namespace);
+    if (opts.type !== undefined) params.set('type', opts.type);
+    if (opts.versionId !== undefined) params.set('versionId', opts.versionId);
+    if (opts.pageToken !== undefined) params.set('pageToken', opts.pageToken);
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    const qs = params.size > 0 ? `?${params.toString()}` : '';
+    return this.request<EventsListResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/events${qs}`,
+    });
+  }
+
+  /** Writes one atomic batch (all-or-nothing, array order, strictly
+   *  increasing server-assigned ids); returns the created rows. Each event
+   *  carries its own namespace/type/payload and a REQUIRED audience. */
+  sendEvents(documentId: string, events: EventInput[]): Promise<SendEventsResponse> {
+    return this.request<SendEventsResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/events`,
+      json: { events },
+    });
+  }
+
+  /** Resolves a human-entered email to the canonical server user id —
+   *  the id space row authorship is attributed in. */
+  lookupUser(email: string): Promise<UserLookupResponse> {
+    return this.request<UserLookupResponse>({
+      method: 'GET',
+      path: `/api/users/lookup?email=${encodeURIComponent(email)}`,
+    });
+  }
+
+  /** Adds a user as a document collaborator (owner-only operation). */
+  addCollaborator(documentId: string, userId: string, role: 'commenter' | 'editor'): Promise<void> {
+    return this.request<void>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/collaborators`,
+      json: { userId, role },
+    });
+  }
+
   /** Server responds `{ ok: true }` on success; we discard the body. */
   async revokeToken(tokenId: string): Promise<void> {
     await this.request<{ ok: true }>({
@@ -210,13 +280,18 @@ export class PrimerClient {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.token}`,
     };
+    let body: BodyInit | undefined = opts.body;
+    if (opts.json !== undefined) {
+      headers['content-type'] = 'application/json';
+      body = JSON.stringify(opts.json);
+    }
 
     let res: Response;
     try {
       res = await this.fetchImpl(url, {
         method: opts.method,
         headers,
-        body: opts.body,
+        body,
       });
     } catch (err) {
       // Network-layer failure (DNS, ECONNREFUSED, TLS, etc.) — never let a

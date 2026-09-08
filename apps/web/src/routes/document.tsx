@@ -14,6 +14,8 @@ import type {
 } from '../companion/protocol.ts';
 import type {
   AnchorData,
+  EventInput,
+  EventRowDTO,
   TextRangeAnchor,
   ElementPathAnchor,
 } from '@polygonlabs/primer-api-types';
@@ -44,6 +46,34 @@ import {
   type PillPosition,
 } from '../lib/computePillPosition.ts';
 import { useLibraryQuery } from '../queries/library.ts';
+import { useSendEvents } from '../queries/events.ts';
+import { browserEventSourceFactory, createEventsFeed } from '../lib/eventsFeed.ts';
+import {
+  createGrantStore,
+  decideSubmission,
+  summarizeEnvelope,
+  type GrantEnvelope,
+  type GrantScope,
+} from '../lib/eventsGrant.ts';
+import { EventsGrantPrompt } from '../components/EventsGrantPrompt.tsx';
+import { api } from '../lib/fetch.ts';
+
+// First-submission grants (issue #78, security requirement 6): per
+// (viewer, document, artifact content version), fronted by an in-memory map
+// so a blocked localStorage degrades to per-page-load grants (more
+// prompting, never less). Module-scoped so grants survive route remounts.
+const eventsGrantStore = createGrantStore(
+  typeof window !== 'undefined' ? window.localStorage : null,
+);
+
+interface PendingGrant {
+  /** The held submission — forwarded verbatim on Allow, never anything else. */
+  events: EventInput[];
+  envelope: GrantEnvelope;
+  /** Captured at hold time so an Allow can never bind the grant to a
+   *  version the viewer navigated to while the prompt was open. */
+  scope: GrantScope;
+}
 import { DocDetailFolderControl } from '../components/DocDetailFolderControl.tsx';
 import { relativeTime } from '../lib/relativeTime.ts';
 
@@ -158,20 +188,96 @@ function DocumentPageInner() {
     composerDirtyRef.current = dirty;
   }, []);
 
+  // Every artifact-audience event row relayed so far for this document.
+  // A new iframe mount (version switch, remount) starts with fresh artifact
+  // state, so registerSender re-plays the accumulated rows as its "initial
+  // batch on load" — batch grouping carries no semantics, so one big batch
+  // and the original dispatch sequence produce identical artifact state.
+  const relayedEventsRef = useRef<EventRowDTO[]>([]);
+  const sendEventsMutation = useSendEvents(docId ?? '');
+
+  // First-submission grant prompt state. The ref is the authoritative
+  // "prompt open" flag for the message handler — two submissions arriving
+  // in the same render window must both see the hold, which React state
+  // alone (stale in the closure until re-render) cannot guarantee.
+  const [pendingGrant, setPendingGrant] = useState<PendingGrant | null>(null);
+  const pendingGrantRef = useRef<PendingGrant | null>(null);
+
+  const ackSubmitResult = useCallback(
+    (result: { ok: boolean; rows?: EventRowDTO[]; error?: string }) => {
+      senderRef.current?.({ type: 'submit_result', ...result });
+    },
+    [],
+  );
+
+  /** The actual authed POST + ack — runs only AFTER every consent layer
+   *  (companion in-dispatch gate, protocol validation, first-submission
+   *  grant) has passed. */
+  const postSubmission = useCallback(
+    (events: EventInput[]) => {
+      sendEventsMutation
+        .mutateAsync(events)
+        .then((resp) => {
+          ackSubmitResult({ ok: true, rows: resp.events });
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : 'submit failed';
+          ackSubmitResult({ ok: false, error: message });
+        });
+    },
+    [sendEventsMutation, ackSubmitResult],
+  );
+
   const registerSender = useCallback(
     (s: ((m: OutboundProtocolMessage) => void) | null) => {
       senderRef.current = s;
       if (s) {
         s({ type: 'update_anchors', anchors: anchorsForCompanion });
         s({ type: 'request_anchor_positions' });
+        if (relayedEventsRef.current.length > 0) {
+          s({ type: 'events', events: relayedEventsRef.current });
+        }
       }
     },
     [anchorsForCompanion]
   );
 
+  // Document-events read relay (issue #78): hydrate the visible list, hold
+  // an SSE subscription, and forward `artifact`-audience rows verbatim into
+  // the iframe in coalesced batches. Delivery mechanics (reconnect resume
+  // via Last-Event-ID, overlap re-fetch on visibility regain) live in
+  // createEventsFeed and are invisible to the artifact.
+  useEffect(() => {
+    if (!docId) return;
+    relayedEventsRef.current = [];
+    const feed = createEventsFeed({
+      documentId: docId,
+      onBatch: (rows) => {
+        relayedEventsRef.current = relayedEventsRef.current.concat(rows);
+        senderRef.current?.({ type: 'events', events: rows });
+      },
+      fetchImpl: (url) => api(url),
+      eventSourceFactory: browserEventSourceFactory,
+    });
+    void feed.start();
+    const onVisibility = () => {
+      if (!window.document.hidden) void feed.refresh();
+    };
+    window.document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.document.removeEventListener('visibilitychange', onVisibility);
+      feed.stop();
+    };
+  }, [docId]);
+
   useEffect(() => {
     setPositionsByAnchorId(new Map());
     setFocusedThreadId(null);
+    // A version switch remounts the iframe; a submission held for the OLD
+    // artifact instance can no longer be acked or meaningfully granted —
+    // drop it (never carry a held submission across artifact versions).
+    pendingGrantRef.current = null;
+    setPendingGrant(null);
   }, [currentVersionId]);
 
   useEffect(() => {
@@ -221,6 +327,54 @@ function DocumentPageInner() {
         case 'open_external':
           if (isSafeExternalUrl(msg.url)) handleOpenExternal(msg);
           break;
+        // Consent-gated artifact submission (issue #78): the companion only
+        // forwards this from within a trusted user-gesture dispatch, and the
+        // protocol parser has already re-validated the batch. Before the
+        // authed POST, the FIRST-SUBMISSION GRANT (security requirement 6)
+        // must cover this submission's audience tier: the first submission
+        // by this artifact version — or one escalating past the granted
+        // tier — is HELD while Primer-owned chrome discloses the envelope
+        // and asks the viewer; grant forwards the held submission, deny
+        // answers with an error ack.
+        case 'submit_events': {
+          // Stamp write-time provenance (the version being viewed) on events
+          // that didn't declare their own — the artifact has no version
+          // awareness by design (a companion version hook is a v1 non-goal).
+          const stamped = msg.events.map((e) =>
+            e.versionId !== undefined || !currentVersionId
+              ? e
+              : { ...e, versionId: currentVersionId },
+          );
+          const scope: GrantScope = {
+            userId: me.data?.id ?? '',
+            documentId: docId ?? '',
+            versionId: currentVersionId,
+          };
+          const decision = decideSubmission({
+            events: stamped,
+            granted: eventsGrantStore.load(scope),
+            promptOpen: pendingGrantRef.current !== null,
+          });
+          if (decision === 'refuse_pending') {
+            // Exactly one submission may be held per prompt: nothing
+            // queue-jumps or piggybacks on the viewer's grant click.
+            ackSubmitResult({
+              ok: false,
+              error: 'grant_pending: a submission is already awaiting the viewer’s decision',
+            });
+          } else if (decision === 'prompt') {
+            const held: PendingGrant = {
+              events: stamped,
+              envelope: summarizeEnvelope(stamped),
+              scope,
+            };
+            pendingGrantRef.current = held;
+            setPendingGrant(held);
+          } else {
+            postSubmission(stamped);
+          }
+          break;
+        }
         case 'companion_log': {
           const fn = msg.level === 'error' ? console.error
                    : msg.level === 'warn'  ? console.warn
@@ -245,7 +399,7 @@ function DocumentPageInner() {
           break;
       }
     },
-    [readMostly]
+    [readMostly, currentVersionId, docId, me.data?.id, ackSubmitResult, postSubmission]
   );
 
   function openFullScreen() {
@@ -612,14 +766,19 @@ function DocumentPageInner() {
 
       <div className="flex flex-1 overflow-hidden">
         <div ref={iframeWrapperRef} className="flex-1 overflow-hidden">
-          <ArtifactIframe
-            src={`/api/versions/${currentVersionId}/content`}
-            anchors={anchorsForCompanion}
-            theme={theme}
-            fitToWidth={isMobile}
-            onMessage={onMessage}
-            registerSender={registerSender}
-          />
+          {/* Mount only once the version id has resolved: an empty id would
+              build src="/api/versions//content" and 404 on first render
+              while the versions query is still in flight. */}
+          {currentVersionId && (
+            <ArtifactIframe
+              src={`/api/versions/${currentVersionId}/content`}
+              anchors={anchorsForCompanion}
+              theme={theme}
+              fitToWidth={isMobile}
+              onMessage={onMessage}
+              registerSender={registerSender}
+            />
+          )}
         </div>
         {!isMobile && (
           <CommentSidebar
@@ -703,6 +862,30 @@ function DocumentPageInner() {
             ×
           </button>
         </div>
+      )}
+      {pendingGrant && (
+        <EventsGrantPrompt
+          envelope={pendingGrant.envelope}
+          documentTitle={document.title}
+          onAllow={() => {
+            const held = pendingGrantRef.current;
+            pendingGrantRef.current = null;
+            setPendingGrant(null);
+            if (!held) return;
+            // Record the DISCLOSED tier, then forward exactly the held
+            // submission — never anything that arrived since.
+            eventsGrantStore.save(held.scope, held.envelope.required);
+            postSubmission(held.events);
+          }}
+          onDeny={() => {
+            pendingGrantRef.current = null;
+            setPendingGrant(null);
+            ackSubmitResult({
+              ok: false,
+              error: 'grant_denied: the viewer declined to let this artifact submit events as them',
+            });
+          }}
+        />
       )}
       <AddVersionModal
         open={showAddVersion}

@@ -14,8 +14,10 @@ import { registerExternalShareRoutes } from './routes/externalShare.ts';
 import { registerCompanionRoute } from './routes/companion.ts';
 import { registerMermaidAssetRoute } from './routes/mermaidAsset.ts';
 import { registerDevFixtureRoute } from './routes/devFixture.ts';
+import { registerMockAuthRoutes } from './routes/mockAuth.ts';
 import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
+import { registerEventRoutes } from './routes/events.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
@@ -93,6 +95,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerMermaidAssetRoute(app);
   registerThreadRoutes(app, deps);
   registerCommentRoutes(app, deps);
+  registerEventRoutes(app);
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
   registerLibraryRoute(app);
@@ -120,6 +123,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   if (process.env.NODE_ENV !== 'production') {
     registerDevFixtureRoute(app);
+    // Mock-persona selector: strictly inside BOTH gates — dev only AND mock
+    // auth only. index.ts already refuses AUTH_MODE=mock in production at
+    // boot; this repeats the check so the route can never be registered by
+    // any other composition path. Under AUTH_MODE=okta it does not exist.
+    if ((process.env.AUTH_MODE ?? '').toLowerCase() === 'mock') {
+      registerMockAuthRoutes(app);
+    }
   }
 
   // Production: serve the built SPA. Dev: Vite handles this at :5173, skip.

@@ -3,6 +3,7 @@ import type { UploadErrorCode } from '@polygonlabs/primer-api-types';
 import { sanitizeUploadedHtml } from './sanitize.ts';
 import {
   injectCompanionScript,
+  injectEventGuardShim,
   injectStoragePolyfill,
   injectThemeOwnershipMarker,
   injectViewportMeta,
@@ -43,6 +44,9 @@ export function transformHtml(
 
   injectViewportMeta(doc);
   injectStoragePolyfill(doc);
+  // LAST among the head-unshifting injectors so it lands as head's FIRST
+  // child and runs before every artifact script (see injectEventGuardShim).
+  injectEventGuardShim(doc);
   injectCompanionScript(doc);
   if (options.themeManaged) {
     injectThemeOwnershipMarker(doc);

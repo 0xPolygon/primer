@@ -16,9 +16,21 @@
 import type {
   AnchorData,
   ElementPathAnchor,
+  EventInput,
+  EventRowDTO,
   TextRangeAnchor,
 } from '@polygonlabs/primer-api-types';
-import { isElementPathAnchor, isTextRangeAnchor } from '@polygonlabs/primer-api-types';
+import {
+  EVENT_NAMESPACE_RE,
+  EVENT_TYPE_RE,
+  MAX_EVENT_NAMESPACE_LENGTH,
+  MAX_EVENT_PAYLOAD_BYTES,
+  MAX_EVENT_TYPE_LENGTH,
+  MAX_EVENTS_PER_BATCH,
+  isElementPathAnchor,
+  isEventAudience,
+  isTextRangeAnchor,
+} from '@polygonlabs/primer-api-types';
 
 export interface SerializableRect {
   x: number;
@@ -68,6 +80,27 @@ export interface MsgThemeChanged {
   type: 'theme_changed';
   theme: Theme;
 }
+/** Document-events read relay (issue #78): `artifact`-audience event rows,
+ *  forwarded VERBATIM into the iframe in coalesced batches (the initial list
+ *  fetch as one batch, a re-fetch as one batch, stream bursts coalesced).
+ *  Grouping carries NO semantics — the artifact must derive identical state
+ *  however the same rows are partitioned into dispatches (it interprets rows
+ *  by id, not by arrival grouping). The companion re-dispatches these to
+ *  artifact JS as CustomEvent('primer:events', { detail: { events } }). */
+export interface MsgEventsRelay {
+  type: 'events';
+  events: EventRowDTO[];
+}
+/** Write acknowledgment for a prior `submit_events` — `rows` carries the
+ *  created rows (server-assigned ids + stored audiences) so the artifact can
+ *  reconcile an optimistic echo with server-attributed truth. Re-dispatched
+ *  by the companion as CustomEvent('primer:submit-result'). */
+export interface MsgSubmitResult {
+  type: 'submit_result';
+  ok: boolean;
+  rows?: EventRowDTO[];
+  error?: string;
+}
 
 export type OutboundProtocolMessage =
   | MsgInit
@@ -76,7 +109,9 @@ export type OutboundProtocolMessage =
   | MsgExitPickMode
   | MsgSetFocusedAnchor
   | MsgRequestAnchorPositions
-  | MsgThemeChanged;
+  | MsgThemeChanged
+  | MsgEventsRelay
+  | MsgSubmitResult;
 
 // Iframe → Parent
 export interface MsgSelectionCaptured {
@@ -133,6 +168,18 @@ export interface MsgCompanionLog {
   message: string;
 }
 
+/** Consent-gated event submission from the artifact (issue #78): the
+ *  companion forwards CustomEvent('primer:submit-events') payloads ONLY from
+ *  within the same trusted event dispatch that carried a user gesture, and
+ *  we re-validate the whole batch here — the parent is the authed principal
+ *  and this message came, ultimately, from untrusted artifact code. The
+ *  parent POSTs the batch to /api/documents/:id/events and answers with a
+ *  `submit_result`. */
+export interface MsgSubmitEvents {
+  type: 'submit_events';
+  events: EventInput[];
+}
+
 export type InboundProtocolMessage =
   | MsgSelectionCaptured
   | MsgSelectionCleared
@@ -143,7 +190,8 @@ export type InboundProtocolMessage =
   | MsgContentMetrics
   | MsgOpenExternal
   | MsgAnchorClicked
-  | MsgCompanionLog;
+  | MsgCompanionLog
+  | MsgSubmitEvents;
 
 /** Window-level handshake messages — go via window.postMessage (not the
  *  port) because they exist for the case where the port isn't established
@@ -239,9 +287,55 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
       if (!isString(raw.message)) return null;
       return { type: 'companion_log', level: raw.level, message: raw.message };
     }
+    case 'submit_events': {
+      if (!Array.isArray(raw.events) || raw.events.length === 0 || raw.events.length > MAX_EVENTS_PER_BATCH) {
+        return null;
+      }
+      const events: EventInput[] = [];
+      for (const e of raw.events) {
+        const parsed = parseEventInput(e);
+        if (!parsed) return null; // all-or-nothing, matching the API's batch semantics
+        events.push(parsed);
+      }
+      return { type: 'submit_events', events };
+    }
     default:
       return null;
   }
+}
+
+/** Validates one untrusted event of a submit batch against the api-types
+ *  wire contract (the server re-validates; this keeps garbage from even
+ *  reaching the network). Returns a clean copy or null. */
+function parseEventInput(raw: unknown): EventInput | null {
+  if (!isObject(raw)) return null;
+  if (
+    !isString(raw.namespace) ||
+    raw.namespace.length > MAX_EVENT_NAMESPACE_LENGTH ||
+    !EVENT_NAMESPACE_RE.test(raw.namespace)
+  ) {
+    return null;
+  }
+  if (!isString(raw.type) || raw.type.length > MAX_EVENT_TYPE_LENGTH || !EVENT_TYPE_RE.test(raw.type)) {
+    return null;
+  }
+  if (!isEventAudience(raw.audience)) return null;
+  if (!('payload' in raw)) return null;
+  try {
+    const json = JSON.stringify(raw.payload);
+    if (typeof json !== 'string') return null;
+    if (json.length > MAX_EVENT_PAYLOAD_BYTES) return null;
+  } catch {
+    return null;
+  }
+  const out: EventInput = {
+    namespace: raw.namespace,
+    type: raw.type,
+    audience: raw.audience,
+    payload: raw.payload,
+  };
+  if (isString(raw.versionId)) out.versionId = raw.versionId;
+  return out;
 }
 
 export function parseWindowEnvelope(raw: unknown): WindowEnvelope | null {

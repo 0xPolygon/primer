@@ -63,7 +63,7 @@ if (authMode === 'mock' && process.env.NODE_ENV === 'production') {
 }
 if (authMode === 'mock') {
   logger.warn(
-    'AUTH_MODE=mock — every request is authenticated as mock-user-1. Do not deploy this to any shared environment.',
+    'AUTH_MODE=mock — every request is authenticated as a mock persona (default mock-user-1; pick per browser at /auth/mock). Do not deploy this to any shared environment.',
   );
 }
 

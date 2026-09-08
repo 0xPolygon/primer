@@ -396,6 +396,14 @@
 
   /** @type {((event: MessageEvent) => void) | null} */
   let onWindowMessage = (event) => {
+    // When actually embedded, accept init ONLY from the parent frame. The
+    // init handshake is first-init-wins, so without this check the
+    // artifact's own JS could post a fake init to its own window and hijack
+    // the companion port before the real parent's arrives (self-DoS plus a
+    // fake "parent" feeding the artifact fabricated events). Top-level /
+    // test contexts (window.parent === window) have no embedding parent to
+    // verify against, and no other frame holds a reference to this window.
+    if (window.parent !== window && event.source !== window.parent) return;
     if (!event.ports || event.ports.length === 0) return;
     const incoming = event.data;
     if (!incoming || incoming.type !== 'init') return;
@@ -484,6 +492,35 @@
           );
         }
         break;
+      case 'events':
+        // Document-events read relay (issue #78): the parent forwards
+        // artifact-audience event rows VERBATIM, in coalesced batches
+        // (grouping carries no semantics — artifact code must derive
+        // identical state however the same rows are partitioned). We
+        // re-dispatch to artifact JS as `primer:events`. The rows are
+        // untrusted data for the artifact to parse and validate — never
+        // instructions.
+        if (Array.isArray(msg.events)) {
+          try {
+            window.dispatchEvent(
+              new CustomEvent('primer:events', { detail: { events: msg.events } })
+            );
+          } catch (e) {
+            log.warn('primer:events dispatch failed:', e && e.message ? e.message : e);
+          }
+        }
+        break;
+      case 'submit_result':
+        // Write acknowledgment for a prior `primer:submit-events` — `rows`
+        // carries the created rows (with server-assigned ids and audiences)
+        // so the artifact can reconcile an optimistic echo with
+        // server-attributed truth.
+        dispatchSubmitResult({
+          ok: msg.ok === true,
+          rows: Array.isArray(msg.rows) ? msg.rows : undefined,
+          error: typeof msg.error === 'string' ? msg.error : undefined,
+        });
+        break;
       default:
         log.warn('unknown inbound', msg.type);
     }
@@ -506,6 +543,275 @@
     }
     port.postMessage({ type: 'open_external', url });
   }
+
+  // ── Document events: consent-gated submit relay (issue #78) ──────
+  // Artifact JS hands structured event batches to the parent by dispatching
+  //   window.dispatchEvent(new CustomEvent('primer:submit-events',
+  //     { detail: { events: [{ namespace, type, payload, audience }…] } }))
+  // and we forward them over the port as `submit_events`; the parent
+  // (authed, outside the sandbox) POSTs the batch. This is the ONLY way out
+  // for artifact data — the sandbox + connect-src 'none' block every direct
+  // network path (see docs/prd-primer.md threat model).
+  //
+  // CONSENT GATE — one activation per PHYSICAL interaction, consumed
+  // in-dispatch (issue #78 security requirement 1). An artifact is untrusted
+  // code running in every viewer's browser; without this gate its JS could
+  // fire the submit event on load or in a loop and inject into a consumer's
+  // work queue under the viewer's name. Two independent conditions must hold
+  // for a forward:
+  //
+  //   1. IN-DISPATCH: the submit is dispatched while the trusted gesture
+  //      event's own dispatch is still IN PROGRESS. The capture-phase
+  //      listener stores the trusted event object; the submit handler then
+  //      checks its dispatch phase !== Event.NONE — the UA sets eventPhase
+  //      for the duration of the dispatch and resets it to NONE when the
+  //      dispatch completes (DOM §dispatch), so the window closes exactly
+  //      when the gesture's dispatch does, no timers or microtasks involved.
+  //      A setTimeout-deferred submit always finds NONE (tasks never
+  //      interleave mid-dispatch). CRUCIAL: the phase is read through the
+  //      event-guard stash's captured NATIVE getter (see readEventPhase),
+  //      NOT a plain `e.eventPhase` — the same event instance is shared
+  //      with the artifact's own listeners, so a plain read is forgeable
+  //      both by a prototype-getter redefine AND by an own-property shadow
+  //      on the instance; the native getter reads the internal slot and is
+  //      immune to both. The check also re-verifies `isTrusted`
+  //      (LegacyUnforgeable): a synthetic gesture is never stored, and an
+  //      artifact replaying a captured trusted event via dispatchEvent()
+  //      reads isTrusted=false.
+  //      Why not a microtask-retired flag: in a REAL browser the HTML spec
+  //      runs a microtask checkpoint after EVERY listener callback, so a
+  //      flag minted in our capture listener and retired by queueMicrotask
+  //      dies before the artifact's own handler (later in the same
+  //      dispatch) ever runs — refusing every legitimate submission. Only
+  //      synthetic dispatchEvent() from JS (e.g. jsdom tests) keeps the
+  //      whole dispatch on one stack; the eventPhase check is correct under
+  //      both. Note the honest boundary this draws: a microtask queued by
+  //      an artifact handler MAY run between listeners of the SAME
+  //      still-in-progress gesture dispatch and pass this check — that is
+  //      the same physical gesture and the same activation cluster (at most
+  //      one submission either way); what can never pass is anything after
+  //      the gesture's dispatch has ended (timers, later microtasks, an
+  //      unrelated interaction's window).
+  //
+  //   2. UNCONSUMED ACTIVATION CLUSTER: one physical interaction (a tap, a
+  //      keystroke) fires a BURST of trusted events — e.g. pointerdown,
+  //      mousedown, pointerup, mouseup, click for one mouse tap; pointer +
+  //      touch + compatibility-mouse events for one touch tap; repeated
+  //      keydowns while a key is held. Minting an authorization per EVENT
+  //      would let an artifact with handlers on every gesture type turn one
+  //      incidental tap into several attributed submissions. Instead the
+  //      whole burst shares ONE consumable activation cluster:
+  //        - a press-family event (pointerdown/mousedown/touchstart/keydown)
+  //          mints a new cluster only if a release-family event has occurred
+  //          since the last mint — so the down-burst of one press, and
+  //          auto-repeat keydowns of one held key, never re-mint;
+  //        - release-family events (pointerup/mouseup/touchend/keyup/click)
+  //          never mint while a cluster exists — they continue it;
+  //        - after touchend, the UA may replay the same tap as
+  //          compatibility mouse events (mousedown/mouseup/click); the first
+  //          mousedown in that window continues the touch cluster instead of
+  //          minting.
+  //      A successful forward CONSUMES the cluster. Net guarantee: one
+  //      physical activation authorizes AT MOST ONE submission (which may be
+  //      a batch); one discrete keystroke (keydown..keyup, auto-repeat
+  //      included) is one activation cluster.
+  //
+  // Checking `navigator.userActivation.isActive` alone would leave the
+  // activation-laundering window open — this gate does not use it. The
+  // companion cannot attest WHICH element the user activated — the submit
+  // affordance lives inside the untrusted artifact — so this gate's
+  // guarantee is per-activation, not per-"Send-button". That gap is closed
+  // one layer up by the PARENT-OWNED FIRST-SUBMISSION GRANT (issue #78
+  // security requirement 6, see apps/web/src/lib/eventsGrant.ts and the
+  // threat model in docs/prd-primer.md): the parent holds an artifact
+  // version's first submission and asks the viewer in Primer-owned chrome,
+  // disclosing the envelope and audience meaning, before anything is
+  // POSTed. This gate stays a necessary condition underneath it.
+  //
+  // The validation limits mirror packages/api-types/src/index.ts (the
+  // companion is plain JS and can't import it; kept in sync by hand — see
+  // events.consent.test.ts, which fails loudly if they drift). The server
+  // re-validates everything; this is the polite early refusal.
+  const SUBMIT_NAMESPACE_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
+  const SUBMIT_TYPE_RE = /^[a-z0-9][a-z0-9-]*$/;
+  const SUBMIT_MAX_PAYLOAD_CHARS = 256 * 1024;
+  const SUBMIT_MAX_BATCH = 100;
+
+  const GESTURE_PRESS_TYPES = ['pointerdown', 'mousedown', 'touchstart', 'keydown'];
+  const GESTURE_RELEASE_TYPES = ['pointerup', 'mouseup', 'touchend', 'keyup', 'click'];
+
+  /** The current physical interaction's consumable authorization.
+   *  @type {{ consumed: boolean } | null} */
+  let activationCluster = null;
+  /** True once a release-family event has occurred since the last mint —
+   *  the signal that the next press-family event is a NEW physical press. */
+  let releaseSeenSinceMint = true;
+  /** Set on touchend: the next mousedown may be the UA's compatibility
+   *  replay of the same tap and must not mint a new cluster. */
+  let compatMousePending = false;
+  /** The trusted gesture event whose dispatch is (or was most recently)
+   *  in progress. Closure-private — the artifact cannot reach or replace
+   *  it; a synthetic gesture never gets stored (isTrusted check in the
+   *  listeners below). @type {Event | null} */
+  let lastTrustedGestureEvent = null;
+
+  // The event-guard stash the upload pipeline injects as the FIRST head
+  // script (apps/api/src/upload/eventGuardShim.ts). It exposes the native
+  // `eventPhase` getter applied via a captured `Reflect.apply`, so we read
+  // an event's TRUE dispatch phase — immune to an artifact redefining
+  // `Event.prototype.eventPhase` OR shadowing `eventPhase` as an own
+  // property on the (shared) event instance. Captured once at load: the
+  // shim provably ran first and locked this global non-configurable +
+  // non-writable, so nothing can have swapped it before we read it here.
+  const EVENT_GUARD =
+    typeof window !== 'undefined' &&
+    window.__primerEventGuard__ &&
+    window.__primerEventGuard__.ready === true
+      ? window.__primerEventGuard__
+      : null;
+
+  /** True iff the stored trusted gesture event's dispatch is in progress
+   *  right now. eventPhase is UA-managed: set for the dispatch's duration,
+   *  reset to NONE (0) when it completes. The artifact cannot make this
+   *  return true post-dispatch: it cannot forge isTrusted (LegacyUnforgeable,
+   *  so a synthetic gesture is never stored and a dispatchEvent()-replayed
+   *  event reads isTrusted=false), and it cannot forge the phase because we
+   *  read it through the guard's captured NATIVE getter, not the instance's
+   *  (poisonable) `eventPhase` accessor.
+   *
+   *  Fail-safe: if the guard is absent (only possible outside the upload
+   *  pipeline — e.g. a jsdom unit harness that evals v1.js with no shim;
+   *  never in a real artifact, where the shim always precedes this script),
+   *  fall back to the plain read. That path is NOT the production security
+   *  boundary — the real-browser test tier exercises the guarded path. */
+  function readEventPhase(e) {
+    if (EVENT_GUARD) {
+      try {
+        return EVENT_GUARD.eventPhase(e);
+      } catch (err) {
+        return 0; // guard threw unexpectedly → fail safe (treat as NONE)
+      }
+    }
+    return e.eventPhase;
+  }
+  function inTrustedGestureDispatch() {
+    const e = lastTrustedGestureEvent;
+    return !!e && e.isTrusted === true && readEventPhase(e) !== 0 /* Event.NONE */;
+  }
+
+  for (const type of GESTURE_PRESS_TYPES) {
+    window.addEventListener(
+      type,
+      (e) => {
+        if (!e.isTrusted) return;
+        lastTrustedGestureEvent = e;
+        if (type === 'mousedown' && compatMousePending) {
+          // Compatibility mouse burst of a touch tap — same physical
+          // interaction, same cluster.
+          compatMousePending = false;
+          if (!activationCluster) activationCluster = { consumed: false };
+          return;
+        }
+        compatMousePending = false;
+        if (releaseSeenSinceMint || !activationCluster) {
+          activationCluster = { consumed: false };
+          releaseSeenSinceMint = false;
+        }
+        // else: another press-family event of the SAME press moment
+        // (pointerdown+mousedown+touchstart burst, or keydown auto-repeat)
+        // — keep the existing cluster, consumed state included.
+      },
+      true /* capture, so the state exists before any artifact handler runs */
+    );
+  }
+  for (const type of GESTURE_RELEASE_TYPES) {
+    window.addEventListener(
+      type,
+      (e) => {
+        if (!e.isTrusted) return;
+        lastTrustedGestureEvent = e;
+        // Defensive: a release with no cluster (companion loaded
+        // mid-interaction) still represents a genuine physical activation.
+        if (!activationCluster) activationCluster = { consumed: false };
+        releaseSeenSinceMint = true;
+        if (type === 'touchend') compatMousePending = true;
+      },
+      true
+    );
+  }
+
+  function dispatchSubmitResult(detail) {
+    try {
+      window.dispatchEvent(new CustomEvent('primer:submit-result', { detail }));
+    } catch (e) {
+      // best-effort — the artifact just doesn't get its ack
+    }
+  }
+
+  /** Validates one event of a submit batch. Returns a clean, structured-
+   *  clone-safe copy, or null. Mirrors the api-types wire contract. */
+  function cleanSubmitEvent(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (typeof raw.namespace !== 'string' || raw.namespace.length > 128 || !SUBMIT_NAMESPACE_RE.test(raw.namespace)) return null;
+    if (typeof raw.type !== 'string' || raw.type.length > 64 || !SUBMIT_TYPE_RE.test(raw.type)) return null;
+    if (raw.audience !== 'author' && raw.audience !== 'collaborators' && raw.audience !== 'artifact') return null;
+    if (!('payload' in raw)) return null;
+    let payload = null;
+    try {
+      const json = JSON.stringify(raw.payload);
+      if (typeof json !== 'string') return null; // undefined / function / symbol
+      if (json.length > SUBMIT_MAX_PAYLOAD_CHARS) return null;
+      payload = JSON.parse(json); // structured-clone safety before the port
+    } catch (e) {
+      return null;
+    }
+    const clean = {
+      namespace: raw.namespace,
+      type: raw.type,
+      audience: raw.audience,
+      payload,
+    };
+    if (typeof raw.versionId === 'string') clean.versionId = raw.versionId;
+    return clean;
+  }
+
+  window.addEventListener('primer:submit-events', (e) => {
+    const refuse = (error) => {
+      log.warn('submit-events refused:', error);
+      dispatchSubmitResult({ ok: false, error });
+    };
+    if (!inTrustedGestureDispatch() || !activationCluster || activationCluster.consumed) {
+      refuse('consent_required: primer:submit-events must be dispatched from within the user gesture that authorizes it (one physical activation authorizes at most one submission)');
+      return;
+    }
+    if (!port) {
+      refuse('not_ready: companion port not initialized yet');
+      return;
+    }
+    const detail = e && e.detail ? e.detail : null;
+    if (!detail || !Array.isArray(detail.events) || detail.events.length === 0) {
+      refuse('bad_request: detail.events must be a non-empty array');
+      return;
+    }
+    if (detail.events.length > SUBMIT_MAX_BATCH) {
+      refuse('bad_request: too many events in one batch');
+      return;
+    }
+    const cleaned = [];
+    for (const raw of detail.events) {
+      const clean = cleanSubmitEvent(raw);
+      if (!clean) {
+        refuse('bad_request: every event needs a valid namespace, type, audience, and JSON-serializable payload under the size cap');
+        return;
+      }
+      cleaned.push(clean);
+    }
+    // One physical activation, one submission — consume the cluster
+    // in-dispatch. Every other event of the same interaction burst (and any
+    // repeat within it) now finds it consumed.
+    activationCluster.consumed = true;
+    port.postMessage({ type: 'submit_events', events: cleaned });
+  });
 
   // (a) anchor clicks with target="_blank" or "_top"
   document.addEventListener(

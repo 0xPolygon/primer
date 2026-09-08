@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   bigint,
+  bigserial,
   uniqueIndex,
   primaryKey,
   index,
@@ -81,6 +82,48 @@ export const comments = pgTable(
     byThreadAlive: index('comments_thread_id_alive_idx')
       .on(t.threadId)
       .where(sql`${t.deletedAt} IS NULL`),
+  }),
+);
+
+// Structured document events (issue #78): an append-only, access-controlled
+// stream of typed JSON payloads on a document — a machine channel PARALLEL to
+// threads/comments (which stay human-only). The bright line: a column exists
+// here iff the server enforces behavior on it (id → ordering, authorId →
+// attribution, audience → read scope, namespace/type → validation and
+// filtering); `payload` is opaque and Primer never interprets it. Rows are
+// immutable in v1 (no update/delete API) and retained forever — the stream is
+// the durable record.
+export const events = pgTable(
+  'events',
+  {
+    // The ordering key: a positive integer (bigserial), deliberately NOT a
+    // uuid — list and stream deliver ascending id, and consumers dedupe by
+    // it. Assignment order is not commit order; see routes/events.ts.
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    // Optional write-time provenance: the version that was the entry point
+    // when the row was written. The stream itself is document-scoped —
+    // consumer state deliberately spans versions.
+    versionId: uuid('version_id').references(() => versions.id, { onDelete: 'set null' }),
+    authorId: text('author_id').notNull().references(() => users.id),
+    // Per-row read scope, REQUIRED on write (no default — a default would be
+    // an implicit behavior; every writer is code that can state intent).
+    audience: text('audience', { enum: ['author', 'collaborators', 'artifact'] }).notNull(),
+    // Hierarchical namespace (`padd`, `padd/telemetry`) + a single type name
+    // within it. Server-validated by shape only; meaning is consumer domain.
+    namespace: text('namespace').notNull(),
+    type: text('type').notNull(),
+    payload: jsonb('payload').notNull(),
+    // Display-only; carries no ordering guarantee (it can collide).
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Serves every list/stream read: WHERE document_id = ? AND id > ?
+    // ORDER BY id ASC. (The issue sketch says "doc+created"; the ordering
+    // section pins id as the ordering key, so the index follows the reads.)
+    byDocId: index('events_doc_id_idx').on(t.documentId, t.id),
   }),
 );
 

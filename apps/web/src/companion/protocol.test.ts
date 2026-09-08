@@ -379,3 +379,102 @@ describe('anchor guards (from @polygonlabs/primer-api-types)', () => {
     });
   });
 });
+
+describe('parseInboundMessage — submit_events (issue #78)', () => {
+  const validEvent = {
+    namespace: 'padd',
+    type: 'export',
+    payload: { verdict: 'approve' },
+    audience: 'artifact',
+  };
+
+  it('round-trips a valid batch', () => {
+    const msg = { type: 'submit_events', events: [validEvent] };
+    expect(parseInboundMessage(msg)).toEqual(msg);
+  });
+
+  it('keeps a declared versionId and drops unknown fields', () => {
+    const msg = {
+      type: 'submit_events',
+      events: [{ ...validEvent, versionId: 'abc-123', sneaky: 'dropped' }],
+    };
+    expect(parseInboundMessage(msg)).toEqual({
+      type: 'submit_events',
+      events: [{ ...validEvent, versionId: 'abc-123' }],
+    });
+  });
+
+  it('accepts nested namespaces and null payloads', () => {
+    const msg = {
+      type: 'submit_events',
+      events: [
+        { namespace: 'padd/telemetry', type: 'ping', payload: null, audience: 'author' },
+      ],
+    };
+    expect(parseInboundMessage(msg)).toEqual(msg);
+  });
+
+  it('rejects the whole batch when ANY event is invalid (all-or-nothing, matching the API)', () => {
+    expect(
+      parseInboundMessage({
+        type: 'submit_events',
+        events: [validEvent, { ...validEvent, audience: 'everyone' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects a missing audience — there is no default', () => {
+    expect(
+      parseInboundMessage({
+        type: 'submit_events',
+        events: [{ namespace: 'padd', type: 'export', payload: {} }],
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects bad namespaces and types', () => {
+    for (const bad of [
+      { ...validEvent, namespace: 'Padd' },
+      { ...validEvent, namespace: 'padd/' },
+      { ...validEvent, namespace: '' },
+      { ...validEvent, type: 'a/b' },
+      { ...validEvent, type: '' },
+    ]) {
+      expect(parseInboundMessage({ type: 'submit_events', events: [bad] })).toBeNull();
+    }
+  });
+
+  it('rejects an empty batch, a non-array, an oversized batch, and an oversized payload', () => {
+    expect(parseInboundMessage({ type: 'submit_events', events: [] })).toBeNull();
+    expect(parseInboundMessage({ type: 'submit_events', events: 'nope' })).toBeNull();
+    expect(
+      parseInboundMessage({
+        type: 'submit_events',
+        events: Array.from({ length: 101 }, () => validEvent),
+      }),
+    ).toBeNull();
+    expect(
+      parseInboundMessage({
+        type: 'submit_events',
+        events: [{ ...validEvent, payload: { big: 'x'.repeat(256 * 1024) } }],
+      }),
+    ).toBeNull();
+  });
+
+  it('rejects a payload that is absent or not JSON-serializable', () => {
+    expect(
+      parseInboundMessage({
+        type: 'submit_events',
+        events: [{ namespace: 'padd', type: 'export', audience: 'artifact' }],
+      }),
+    ).toBeNull();
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(
+      parseInboundMessage({
+        type: 'submit_events',
+        events: [{ ...validEvent, payload: circular }],
+      }),
+    ).toBeNull();
+  });
+});

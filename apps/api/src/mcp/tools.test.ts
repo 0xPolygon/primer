@@ -842,3 +842,124 @@ describe('post-#37 tools respect visibility (canRead filter)', () => {
     });
   });
 });
+
+describe('primer_send_events / primer_get_events (issue #78)', () => {
+  const asUserArg = (id: string) => ({ id, email: `${id}@x.test`, displayName: id });
+  const validEvent = {
+    namespace: 'padd',
+    type: 'reconciliation',
+    payload: { itemId: 'q1', state: 'resolved' },
+    audience: 'artifact',
+  };
+
+  it('writes an atomic batch and reads it back, audience-aware', async () => {
+    await seedUser('tools-ev-owner');
+    await seedUser('tools-ev-collab');
+    await seedUser('tools-ev-outsider');
+    const { docId } = await seedDocOwnedBy('tools-ev-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(),
+      documentId: docId,
+      userId: 'tools-ev-collab',
+      role: 'editor',
+      grantedBy: 'tools-ev-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const sent = await handlers.primer_send_events(
+        {
+          documentId: docId,
+          events: [validEvent, { ...validEvent, type: 'grant', audience: 'author' }],
+        },
+        asUserArg('tools-ev-owner'),
+      );
+      expect(sent.isError).toBeFalsy();
+      const rows = (JSON.parse(sent.content[0].text) as { events: { id: number; type: string }[] }).events;
+      expect(rows).toHaveLength(2);
+      expect(rows[1].id).toBeGreaterThan(rows[0].id);
+
+      // Collaborator read: sees the artifact row, not the owner's author row.
+      const got = await handlers.primer_get_events(
+        { documentId: docId },
+        asUserArg('tools-ev-collab'),
+      );
+      expect(got.isError).toBeFalsy();
+      const page = JSON.parse(got.content[0].text) as {
+        events: { type: string }[];
+        nextPageToken: string | null;
+      };
+      expect(page.events.map((e) => e.type)).toEqual(['reconciliation']);
+      expect(page.nextPageToken).toBeNull();
+    });
+  });
+
+  it('rejects non-collaborator writers (forbidden) and invalid batches (bad_request, nothing inserted)', async () => {
+    await seedUser('tools-ev-owner2');
+    await seedUser('tools-ev-outsider2');
+    const { docId } = await seedDocOwnedBy('tools-ev-owner2');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const asOutsider = await handlers.primer_send_events(
+        { documentId: docId, events: [validEvent] },
+        asUserArg('tools-ev-outsider2'),
+      );
+      expect(asOutsider.isError).toBe(true);
+      expect((JSON.parse(asOutsider.content[0].text) as { code: string }).code).toBe('forbidden');
+
+      const badBatch = await handlers.primer_send_events(
+        { documentId: docId, events: [validEvent, { namespace: 'padd', type: 'x', payload: {} }] },
+        asUserArg('tools-ev-owner2'),
+      );
+      expect(badBatch.isError).toBe(true);
+      expect((JSON.parse(badBatch.content[0].text) as { code: string }).code).toBe('bad_request');
+
+      const list = await handlers.primer_get_events({ documentId: docId }, asUserArg('tools-ev-owner2'));
+      expect((JSON.parse(list.content[0].text) as { events: unknown[] }).events).toHaveLength(0);
+    });
+  });
+
+  it('supports namespace subtree filter, since, and pagination on reads', async () => {
+    await seedUser('tools-ev-owner3');
+    const { docId } = await seedDocOwnedBy('tools-ev-owner3');
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      await handlers.primer_send_events(
+        {
+          documentId: docId,
+          events: [
+            { ...validEvent, namespace: 'padd', type: 'export' },
+            { ...validEvent, namespace: 'padd/telemetry', type: 'ping' },
+            { ...validEvent, namespace: 'other', type: 'export' },
+          ],
+        },
+        asUserArg('tools-ev-owner3'),
+      );
+      const subtree = await handlers.primer_get_events(
+        { documentId: docId, namespace: 'padd/*' },
+        asUserArg('tools-ev-owner3'),
+      );
+      const rows = (JSON.parse(subtree.content[0].text) as { events: { namespace: string; id: number }[] }).events;
+      expect(rows.map((r) => r.namespace)).toEqual(['padd', 'padd/telemetry']);
+
+      const since = await handlers.primer_get_events(
+        { documentId: docId, since: rows[0].id },
+        asUserArg('tools-ev-owner3'),
+      );
+      const sinceRows = (JSON.parse(since.content[0].text) as { events: { id: number }[] }).events;
+      expect(sinceRows.every((r) => r.id > rows[0].id)).toBe(true);
+
+      const paged = await handlers.primer_get_events(
+        { documentId: docId, limit: 2 },
+        asUserArg('tools-ev-owner3'),
+      );
+      const pagedBody = JSON.parse(paged.content[0].text) as { events: unknown[]; nextPageToken: string | null };
+      expect(pagedBody.events).toHaveLength(2);
+      expect(pagedBody.nextPageToken).not.toBeNull();
+      const rest = await handlers.primer_get_events(
+        { documentId: docId, pageToken: pagedBody.nextPageToken },
+        asUserArg('tools-ev-owner3'),
+      );
+      expect((JSON.parse(rest.content[0].text) as { nextPageToken: string | null }).nextPageToken).toBeNull();
+    });
+  });
+});

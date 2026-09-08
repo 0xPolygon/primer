@@ -3,7 +3,11 @@ import { and, eq, ilike, ne, notInArray, sql } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
 import { documents, documentCollaborators, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
-import type { MentionableUsersResponse, UserSearchResponse } from '@polygonlabs/primer-api-types';
+import type {
+  MentionableUsersResponse,
+  UserLookupResponse,
+  UserSearchResponse,
+} from '@polygonlabs/primer-api-types';
 import { SERVICE_USER_ID } from '../auth/admin.ts';
 
 const TYPEAHEAD_LIMIT = 20;
@@ -17,6 +21,28 @@ export function registerUserRoutes(app: Hono<{ Variables: AppVariables }>): void
       // Service accounts (Claude) can't be mentioned — they only act via API tokens.
       .where(and(ne(users.id, me.id), ne(users.id, SERVICE_USER_ID)));
     const body: MentionableUsersResponse = { users: rows };
+    return c.json(body, 200);
+  });
+
+  // User-lookup primitive (issue #78): resolve a human-entered email to the
+  // canonical server user id. Consumers name their responsible humans and
+  // classify authority by comparing those identities against the
+  // server-attributed row author on document events — that only works when
+  // both sides live in the same id space, so tooling resolves up front and
+  // refuses on an unresolvable entry rather than silently misclassifying.
+  // Case-insensitive on the email; 404 when no user matches.
+  app.get('/api/users/lookup', async (c) => {
+    const email = (c.req.query('email') ?? '').trim();
+    if (email.length === 0) {
+      return c.json({ error: 'bad_request', message: 'email query param is required' }, 400);
+    }
+    const [row] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(sql`lower(${users.email}) = ${email.toLowerCase()}`)
+      .limit(1);
+    if (!row) return c.json({ error: 'not_found' }, 404);
+    const body: UserLookupResponse = { id: row.id };
     return c.json(body, 200);
   });
 

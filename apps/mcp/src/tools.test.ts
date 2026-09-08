@@ -11,6 +11,8 @@ import { buildToolHandlers, type ToolDeps, type ToolResult } from './tools.ts';
 
 interface FakeClient {
   whoami: ReturnType<typeof vi.fn>;
+  getEvents: ReturnType<typeof vi.fn>;
+  sendEvents: ReturnType<typeof vi.fn>;
   getDocument: ReturnType<typeof vi.fn>;
   listVersions: ReturnType<typeof vi.fn>;
   getVersionThreads: ReturnType<typeof vi.fn>;
@@ -23,6 +25,8 @@ interface FakeClient {
 function makeFakeClient(): FakeClient {
   return {
     whoami: vi.fn(),
+    getEvents: vi.fn(),
+    sendEvents: vi.fn(),
     getDocument: vi.fn(),
     listVersions: vi.fn(),
     getVersionThreads: vi.fn(),
@@ -720,5 +724,77 @@ describe('primer_get_comments', () => {
     const handlers = buildToolHandlers(deps);
     const result = await handlers.primer_get_comments({ versionId: 'v1' });
     expect(parseErrorPayload(result).code).toBe('not_found');
+  });
+});
+
+// ─────────────────── Document events (issue #78) ───────────────────
+
+describe('primer_get_events', () => {
+  it('passes filters through to client.getEvents and returns the raw page JSON', async () => {
+    const { deps, client } = buildDeps();
+    const page = {
+      events: [{ id: 3, namespace: 'padd', type: 'export', audience: 'artifact', payload: {} }],
+      nextPageToken: null,
+    };
+    client!.getEvents.mockResolvedValue(page);
+    const handlers = buildToolHandlers(deps);
+    const res = await handlers.primer_get_events({
+      documentId: 'doc-1',
+      namespace: 'padd/*',
+      type: 'export',
+      since: 2,
+      limit: 10,
+    });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual(page);
+    expect(client!.getEvents).toHaveBeenCalledWith('doc-1', {
+      since: 2,
+      namespace: 'padd/*',
+      type: 'export',
+      versionId: undefined,
+      pageToken: undefined,
+      limit: 10,
+    });
+  });
+
+  it('requires documentId and surfaces API errors as typed codes', async () => {
+    const { deps, client } = buildDeps();
+    const handlers = buildToolHandlers(deps);
+    const missing = await handlers.primer_get_events({});
+    expect(missing.isError).toBe(true);
+    expect(JSON.parse(missing.content[0].text).code).toBe('bad_request');
+
+    client!.getEvents.mockRejectedValue(new PrimerApiError('not_found', 'document not found', 404));
+    const notFound = await handlers.primer_get_events({ documentId: 'nope' });
+    expect(notFound.isError).toBe(true);
+    expect(JSON.parse(notFound.content[0].text).code).toBe('not_found');
+  });
+});
+
+describe('primer_send_events', () => {
+  const batch = [
+    { namespace: 'padd', type: 'reconciliation', payload: { itemId: 'q1' }, audience: 'artifact' },
+  ];
+
+  it('passes the batch through verbatim and returns the created rows', async () => {
+    const { deps, client } = buildDeps();
+    const created = { events: [{ id: 12, ...batch[0], documentId: 'doc-1', authorId: 'svc' }] };
+    client!.sendEvents.mockResolvedValue(created);
+    const handlers = buildToolHandlers(deps);
+    const res = await handlers.primer_send_events({ documentId: 'doc-1', events: batch });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual(created);
+    expect(client!.sendEvents).toHaveBeenCalledWith('doc-1', batch);
+  });
+
+  it('rejects a missing/empty batch locally and maps server rejections', async () => {
+    const { deps, client } = buildDeps();
+    const handlers = buildToolHandlers(deps);
+    const empty = await handlers.primer_send_events({ documentId: 'doc-1', events: [] });
+    expect(empty.isError).toBe(true);
+
+    client!.sendEvents.mockRejectedValue(new PrimerApiError('forbidden', 'not a collaborator', 403));
+    const forbidden = await handlers.primer_send_events({ documentId: 'doc-1', events: batch });
+    expect(JSON.parse(forbidden.content[0].text).code).toBe('forbidden');
   });
 });
