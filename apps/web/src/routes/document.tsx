@@ -546,6 +546,16 @@ function DocumentPageInner() {
     setPendingPick(null);
   };
 
+  // Composer's recovery action when its post 409s as not_latest_version: a
+  // newer version published while it was open. Drop the draft and go to
+  // /d/:docId, which always resolves to the current latest (see
+  // currentVersion above) — never auto-navigated to on its own.
+  const goToLatestFromComposer = () => {
+    setPendingSelection(null);
+    setPendingPick(null);
+    navigate(`/d/${docId}`);
+  };
+
   const composerPending = useMemo(
     () =>
       readMostly
@@ -809,6 +819,7 @@ function DocumentPageInner() {
             collapsed={sidebarCollapsed}
             onCollapsedChange={setSidebarCollapsed}
             focusedThreadId={focusedThreadId}
+            onGoToLatest={goToLatestFromComposer}
           />
         )}
       </div>
@@ -849,6 +860,7 @@ function DocumentPageInner() {
             focusedThreadId={focusedThreadId}
             onAddCommentClick={readMostly ? undefined : togglePickMode}
             addCommentActive={readMostly ? false : pickMode}
+            onGoToLatest={goToLatestFromComposer}
           />
         </BottomSheet>
       )}

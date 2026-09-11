@@ -13,6 +13,7 @@ import { renderMentions } from './renderMentions.tsx';
 import { useMentionableUsers } from '../queries/users.ts';
 import { commentRowModels } from '../lib/commentRows.ts';
 import { useBottomSheet } from './BottomSheet.tsx';
+import { describeApiError } from '../lib/apiError.ts';
 
 interface Props {
   versionId: string;
@@ -377,6 +378,11 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
             rows={2}
             autoFocus
           />
+          {reply.isError && (
+            <p role="alert" className="mt-1 text-red-600 dark:text-red-400">
+              {describeApiError(reply.error)}
+            </p>
+          )}
           <div className="mt-1 flex justify-end gap-2">
             <button
               type="button"
@@ -384,6 +390,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
                 setReplying(false);
                 setReplyDraft('');
                 setReplyMentions([]);
+                reply.reset();
               }}
               className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
             >
