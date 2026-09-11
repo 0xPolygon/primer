@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 import type {
   AddVersionResponse,
   VersionPatchRequest,
@@ -6,8 +7,39 @@ import type {
   VersionsListResponse,
 } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
+import { becameVisible, versionsRefetchInterval } from '../lib/versionsPolling.ts';
 
+/**
+ * Keeps the version list (and therefore the version switcher) live for a
+ * reader who leaves the document open across a new publish — see
+ * lib/versionsPolling.ts for why this polls instead of reacting to a push
+ * from the server. Never changes which version is being VIEWED; that stays
+ * pinned by versionNumber in routes/document.tsx regardless of what this
+ * fetch returns.
+ */
 export function useVersionsQuery(docId: string) {
+  const qc = useQueryClient();
+  const [hidden, setHidden] = useState(typeof document !== 'undefined' && document.hidden);
+  const hiddenRef = useRef(hidden);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onVisibilityOrFocus = () => {
+      const isHiddenNow = document.hidden;
+      if (becameVisible(hiddenRef.current, isHiddenNow)) {
+        void qc.invalidateQueries({ queryKey: ['versions', docId] });
+      }
+      hiddenRef.current = isHiddenNow;
+      setHidden(isHiddenNow);
+    };
+    document.addEventListener('visibilitychange', onVisibilityOrFocus);
+    window.addEventListener('focus', onVisibilityOrFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+      window.removeEventListener('focus', onVisibilityOrFocus);
+    };
+  }, [qc, docId]);
+
   return useQuery({
     queryKey: ['versions', docId],
     queryFn: async ({ signal }): Promise<VersionsListResponse> => {
@@ -17,6 +49,8 @@ export function useVersionsQuery(docId: string) {
     },
     enabled: docId.length > 0,
     staleTime: 30_000,
+    refetchInterval: versionsRefetchInterval(hidden),
+    refetchIntervalInBackground: false,
   });
 }
 
