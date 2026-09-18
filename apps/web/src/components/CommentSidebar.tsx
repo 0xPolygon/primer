@@ -3,7 +3,7 @@ import type { AnchorData, ThreadDTO } from '@polygonlabs/primer-api-types';
 import { useThreadsQuery } from '../queries/threads.ts';
 import { ThreadCard } from './ThreadCard.tsx';
 import { NewThreadComposer } from './NewThreadComposer.tsx';
-import { hasLiveComments } from '../lib/liveComments.ts';
+import { hasAnyComments, hasLiveComments } from '../lib/liveComments.ts';
 
 interface PendingAnchor {
   anchor: AnchorData;
@@ -97,12 +97,17 @@ export function CommentSidebar({
     });
   }, [threads, positionsByAnchorId]);
 
-  const visibleThreads = sortedThreads.filter(hasLiveComments);
+  // Threads whose comments were all deleted still render (as tombstones), so
+  // a deletion is visible rather than silently erasing the thread. Counts,
+  // though, only ever reflect live feedback.
+  const visibleThreads = sortedThreads.filter(hasAnyComments);
 
   const visible = hideResolved
     ? visibleThreads.filter((t) => t.resolvedAt === null)
     : visibleThreads;
-  const activeCount = visibleThreads.filter((t) => t.resolvedAt === null).length;
+  const activeCount = visibleThreads.filter(
+    (t) => t.resolvedAt === null && hasLiveComments(t)
+  ).length;
 
   if (collapsed) {
     return (

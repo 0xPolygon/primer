@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { ThreadDTO, CommentDTO } from '@polygonlabs/primer-api-types';
-import { liveComments, hasLiveComments } from './liveComments.ts';
+import { liveComments, hasLiveComments, hasAnyComments } from './liveComments.ts';
 
 function comment(over: Partial<CommentDTO> = {}): CommentDTO {
   return {
@@ -92,5 +92,20 @@ describe('hasLiveComments', () => {
   it('is false when the comments array is empty', () => {
     const t = thread({ comments: [] });
     expect(hasLiveComments(t)).toBe(false);
+  });
+});
+
+describe('hasAnyComments', () => {
+  it('is true for a thread whose only comment is tombstoned', () => {
+    const t = thread({ comments: [comment({ deletedAt: '2026-05-20T11:00:00.000Z' })] });
+    expect(hasAnyComments(t)).toBe(true);
+  });
+
+  it('is true for a thread with live comments', () => {
+    expect(hasAnyComments(thread())).toBe(true);
+  });
+
+  it('is false when the comments array is empty', () => {
+    expect(hasAnyComments(thread({ comments: [] }))).toBe(false);
   });
 });

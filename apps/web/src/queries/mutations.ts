@@ -154,3 +154,20 @@ export function useDeleteComment(versionId: string, commentId: string) {
     },
   });
 }
+
+/** Undo a delete. Only succeeds for the author inside COMMENT_UNDO_WINDOW_MS;
+ *  the server is the authority, the UI just hides the button outside it. */
+export function useRestoreComment(versionId: string, commentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await api(`/api/comments/${commentId}/restore`, { method: 'POST' });
+      return jsonOrThrow<CommentDTO>(res);
+    },
+    onSuccess: (restored) => {
+      applyCommentToCache(qc, versionId, restored);
+      clearThreadsEtag(versionId);
+      qc.invalidateQueries({ queryKey: ['threads', versionId] });
+    },
+  });
+}
