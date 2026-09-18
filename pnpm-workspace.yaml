@@ -39,11 +39,18 @@ allowBuilds:
 # patched floor; none changes production behaviour. js-yaml is scoped per-major
 # because two consumers sit on different lines (gray-matter on 3.x, the diff
 # viewer on 4.x) and must not be force-migrated across a major.
+#
+# js-yaml floors were raised 3.15.1 -> 3.15.2 and 4.3.1 -> 4.3.2 for
+# GHSA-2883-xcg3-v3hh (maxTotalMergeKeys does not limit CPU use for empty merge
+# sources). The previous `^` ranges already admitted the patched releases, but
+# the lockfile stayed on the vulnerable versions because 3.15.2/4.3.2 were
+# inside the 14-day minimumReleaseAge gate when it was last resolved — hence
+# explicit floors, so a future re-resolve cannot silently drop back.
 overrides:
   esbuild: '^0.25.0'
   undici: '^7.29.0'
-  'js-yaml@3': '^3.15.1'   # gray-matter (api) — GHSA-52cp-r559-cp3m + !!omap quadratic CPU
-  'js-yaml@4': '^4.3.1'    # react-diff-viewer-continued (web) — same advisories, 4.x line
+  'js-yaml@3': '^3.15.2'   # gray-matter (api) — GHSA-52cp-r559-cp3m, !!omap quadratic CPU, GHSA-2883-xcg3-v3hh
+  'js-yaml@4': '^4.3.2'    # react-diff-viewer-continued (web) — same advisories, 4.x line
   linkify-it: '^5.0.2'     # markdown-it (api) — GHSA-v245-v573-v5vm mailto: scan-loop DoS
   fast-uri: '^3.1.6'       # @modelcontextprotocol/sdk>ajv (api) — host confusion + SSRF (patched 3.1.6)
   ip-address: '^10.3.1'    # @modelcontextprotocol/sdk (api) — leading-zero octet decode
