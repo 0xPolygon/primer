@@ -35,7 +35,7 @@ import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { useTheme } from '../lib/useTheme.ts';
 import { commentsFilename, formatThreadsAsMarkdown, htmlFilename } from '../lib/exportComments.ts';
-import { hasLiveComments } from '../lib/liveComments.ts';
+import { hasAnyComments, hasLiveComments } from '../lib/liveComments.ts';
 import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
@@ -175,8 +175,10 @@ function DocumentPageInner() {
   // should auto-dismiss a still-empty composer.
   const composerDirtyRef = useRef(false);
 
+  // Tombstoned threads keep their anchor registered so the "Comment deleted"
+  // card in the sidebar can still highlight the passage it referred to.
   const anchorsForCompanion = useMemo(
-    () => threads.filter(hasLiveComments).map((t) => ({ id: t.id, data: t.anchor })),
+    () => threads.filter(hasAnyComments).map((t) => ({ id: t.id, data: t.anchor })),
     [threads]
   );
 

@@ -162,12 +162,20 @@ export interface CommentDTO {
   threadId: string;
   authorId: string;
   authorDisplayName: string;
+  /** Empty string for a tombstoned comment — the server never discloses the
+   *  text of a deleted comment, even to its author. The row keeps it, so an
+   *  in-window restore brings the original text back. */
   body: string;
   createdAt: string;
   updatedAt: string | null;
   deletedAt: string | null;
   mentions: string[];
 }
+
+/** How long after deleting a comment its author may still undo the delete.
+ *  Enforced by POST /api/comments/:id/restore; the web UI shows the Undo
+ *  affordance for exactly this window so client and server agree. */
+export const COMMENT_UNDO_WINDOW_MS = 15 * 60 * 1000;
 
 export interface ThreadDTO {
   id: string;

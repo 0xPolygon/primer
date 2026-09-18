@@ -4,6 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import { logger } from '../logger.ts';
 import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
+import { COMMENT_UNDO_WINDOW_MS } from '@polygonlabs/primer-api-types';
 import { threads, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
@@ -102,6 +103,27 @@ function commentToDTO(row: CommentRow): CommentDTO {
     deletedAt: row.deletedAt?.toISOString() ?? null,
     mentions: row.mentions,
   };
+}
+
+/** Re-read one comment as a DTO. Used by the routes that mutate a single
+ *  comment (edit / delete / restore) to return the row's settled state. */
+async function loadCommentDTO(commentId: string): Promise<CommentDTO | null> {
+  const [row] = (await db
+    .select({
+      id: comments.id,
+      threadId: comments.threadId,
+      authorId: comments.authorId,
+      authorDisplayName: users.displayName,
+      body: comments.body,
+      mentions: comments.mentions,
+      createdAt: comments.createdAt,
+      updatedAt: comments.updatedAt,
+      deletedAt: comments.deletedAt,
+    })
+    .from(comments)
+    .innerJoin(users, eq(users.id, comments.authorId))
+    .where(eq(comments.id, commentId))) as CommentRow[];
+  return row ? commentToDTO(row) : null;
 }
 
 async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
@@ -343,22 +365,9 @@ export function registerCommentRoutes(
       }
     }
 
-    const [row] = (await db
-      .select({
-        id: comments.id,
-        threadId: comments.threadId,
-        authorId: comments.authorId,
-        authorDisplayName: users.displayName,
-        body: comments.body,
-        mentions: comments.mentions,
-        createdAt: comments.createdAt,
-        updatedAt: comments.updatedAt,
-        deletedAt: comments.deletedAt,
-      })
-      .from(comments)
-      .innerJoin(users, eq(users.id, comments.authorId))
-      .where(eq(comments.id, commentId))) as CommentRow[];
-    return c.json(commentToDTO(row), 200);
+    const dto = await loadCommentDTO(commentId);
+    if (!dto) return c.json({ error: 'not_found' }, 404);
+    return c.json(dto, 200);
   });
 
   app.delete('/api/comments/:commentId', async (c) => {
@@ -376,21 +385,53 @@ export function registerCommentRoutes(
     if (existing.deletedAt === null) {
       await db.update(comments).set({ deletedAt: new Date() }).where(eq(comments.id, commentId));
     }
-    const [row] = (await db
-      .select({
-        id: comments.id,
-        threadId: comments.threadId,
-        authorId: comments.authorId,
-        authorDisplayName: users.displayName,
-        body: comments.body,
-        mentions: comments.mentions,
-        createdAt: comments.createdAt,
-        updatedAt: comments.updatedAt,
-        deletedAt: comments.deletedAt,
-      })
-      .from(comments)
-      .innerJoin(users, eq(users.id, comments.authorId))
-      .where(eq(comments.id, commentId))) as CommentRow[];
-    return c.json(commentToDTO(row), 200);
+    const dto = await loadCommentDTO(commentId);
+    if (!dto) return c.json({ error: 'not_found' }, 404);
+    return c.json(dto, 200);
+  });
+
+  /**
+   * Undo a delete. Authorized exactly like DELETE — the comment's own author,
+   * and only while the doc is readable to them — but additionally time-boxed:
+   * past COMMENT_UNDO_WINDOW_MS the tombstone is permanent, so a comment can't
+   * be resurrected into a conversation that has long since moved on.
+   *
+   * Deliberately idempotent for a comment that is already live, so a
+   * double-tapped Undo is not an error.
+   */
+  app.post('/api/comments/:commentId/restore', async (c) => {
+    const commentId = c.req.param('commentId');
+
+    const ctx = await loadDocContextForComment(commentId);
+    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
+    const user = c.get('user');
+    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
+    const eff = effectiveRole(ctx, user.id, collabRole);
+    if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
+
+    const [existing] = await db.select().from(comments).where(eq(comments.id, commentId));
+    if (!existing) return c.json({ error: 'not_found' }, 404);
+    if (existing.authorId !== user.id) return c.json({ error: 'forbidden' }, 403);
+
+    if (existing.deletedAt !== null) {
+      const elapsedMs = Date.now() - existing.deletedAt.getTime();
+      if (elapsedMs > COMMENT_UNDO_WINDOW_MS) {
+        return c.json(
+          {
+            error: 'restore_window_expired',
+            message: `A deleted comment can only be restored within ${Math.round(
+              COMMENT_UNDO_WINDOW_MS / 60_000,
+            )} minutes of deletion.`,
+          },
+          409,
+        );
+      }
+      await db.update(comments).set({ deletedAt: null }).where(eq(comments.id, commentId));
+      logger.info({ commentId, userId: user.id }, 'comment delete undone');
+    }
+
+    const dto = await loadCommentDTO(commentId);
+    if (!dto) return c.json({ error: 'not_found' }, 404);
+    return c.json(dto, 200);
   });
 }

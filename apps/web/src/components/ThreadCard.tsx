@@ -6,11 +6,12 @@ import {
   useReopenThread,
   useEditComment,
   useDeleteComment,
+  useRestoreComment,
 } from '../queries/mutations.ts';
 import { MentionTextarea } from './MentionTextarea.tsx';
 import { renderMentions } from './renderMentions.tsx';
 import { useMentionableUsers } from '../queries/users.ts';
-import { liveComments } from '../lib/liveComments.ts';
+import { commentRowModels } from '../lib/commentRows.ts';
 import { useBottomSheet } from './BottomSheet.tsx';
 
 interface Props {
@@ -95,11 +96,68 @@ function ReopenIcon({ size = 13 }: { size?: number }) {
   );
 }
 
+const iconButtonBase =
+  'inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 dark:text-neutral-500 disabled:opacity-40';
+
 const iconButtonClass =
-  'inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 dark:text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300 disabled:opacity-40';
+  `${iconButtonBase} hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300`;
+
+/** Destructive sibling of iconButtonClass: set apart from the edit pencil by
+ *  `ml-2` and reddened on hover, so it no longer reads as the same control. */
+const dangerIconButtonClass =
+  `${iconButtonBase} ml-2 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400`;
 
 const footerButtonClass =
   'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-50';
+
+/**
+ * Placeholder left in place of a deleted comment.
+ *
+ * Deletions used to be filtered out of the sidebar entirely, so a comment
+ * could vanish without a trace and the document owner would never know
+ * feedback had been left. The row stays, and its author gets an Undo for as
+ * long as the server will honour one.
+ */
+function DeletedCommentRow({
+  comment,
+  isReply,
+  canUndo,
+  versionId,
+}: {
+  comment: CommentDTO;
+  isReply: boolean;
+  canUndo: boolean;
+  versionId: string;
+}) {
+  const restore = useRestoreComment(versionId, comment.id);
+
+  return (
+    <div className={isReply ? 'mt-1.5 ml-3 border-t border-dashed border-neutral-200 dark:border-neutral-800 pt-1.5' : ''}>
+      <div className="flex items-center justify-between gap-2 text-[11px] text-neutral-500">
+        <span className="truncate font-semibold text-neutral-500 dark:text-neutral-500">
+          {comment.authorDisplayName}
+        </span>
+        <span className="shrink-0 whitespace-nowrap">{relativeTime(comment.createdAt)}</span>
+      </div>
+      <div className="mt-0.5 flex items-center gap-2 leading-snug">
+        <span className="italic text-neutral-400 dark:text-neutral-500">Comment deleted</span>
+        {canUndo && (
+          <button
+            type="button"
+            onClick={() => restore.mutate()}
+            disabled={restore.isPending}
+            className="rounded px-1 py-0.5 text-[11px] font-medium text-blue-600 underline decoration-dotted hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+          >
+            Undo
+          </button>
+        )}
+        {restore.isError && (
+          <span className="text-[11px] text-red-600 dark:text-red-400">Could not restore</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function CommentRow({
   comment,
@@ -117,12 +175,13 @@ function CommentRow({
   onStartEditing?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const [editMentions, setEditMentions] = useState<string[]>(comment.mentions);
   const edit = useEditComment(versionId, comment.id);
   const del = useDeleteComment(versionId, comment.id);
   const usersQ = useMentionableUsers();
-  const canShowAuthorActions = !editing && isAuthor;
+  const canShowAuthorActions = !editing && !confirmingDelete && isAuthor;
 
   function startEditing() {
     setEditing(true);
@@ -144,12 +203,14 @@ function CommentRow({
               >
                 <PencilIcon />
               </button>
+              {/* Kept clear of the pencil on purpose: these were 4px apart and
+                  identically styled, and reviewers reaching for Edit were
+                  destroying their own comments instead. */}
               <button
                 type="button"
-                onClick={() => del.mutate()}
-                disabled={del.isPending}
+                onClick={() => setConfirmingDelete(true)}
                 aria-label="Delete comment"
-                className={iconButtonClass}
+                className={dangerIconButtonClass}
               >
                 <TrashIcon />
               </button>
@@ -163,6 +224,28 @@ function CommentRow({
           </span>
         </div>
       </div>
+      {confirmingDelete && (
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 dark:border-red-900 dark:bg-red-950/40">
+          <span className="text-[11px] text-red-800 dark:text-red-300">Delete this comment?</span>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(false)}
+              className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-0.5 text-[11px] text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={del.isPending}
+              onClick={() => del.mutate(undefined, { onSuccess: () => setConfirmingDelete(false) })}
+              className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
       {editing ? (
         <div className="mt-1">
           <MentionTextarea
@@ -217,7 +300,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
   const resolve = useResolveThread(versionId, thread.id);
   const reopen = useReopenThread(versionId, thread.id);
   const isResolved = thread.resolvedAt !== null;
-  const [first, ...replies] = liveComments(thread);
+  const [first, ...replies] = commentRowModels(thread, currentUserId, Date.now());
   const bottomSheet = useBottomSheet();
 
   // Mounting a reply composer implicitly focuses this thread, so the user
@@ -247,25 +330,43 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
         {drifted && <span title="Could not place anchor" className="not-italic">📍?</span>}
         <span className="truncate">{anchorPreview(thread)}</span>
       </div>
-      {first && (
-        <CommentRow
-          comment={first}
-          isReply={false}
-          isAuthor={first.authorId === currentUserId}
-          versionId={versionId}
-          onStartEditing={() => onHighlight(thread.id)}
-        />
+      {first &&
+        (first.mode === 'deleted' ? (
+          <DeletedCommentRow
+            comment={first.comment}
+            isReply={false}
+            canUndo={first.canUndo}
+            versionId={versionId}
+          />
+        ) : (
+          <CommentRow
+            comment={first.comment}
+            isReply={false}
+            isAuthor={first.comment.authorId === currentUserId}
+            versionId={versionId}
+            onStartEditing={() => onHighlight(thread.id)}
+          />
+        ))}
+      {replies.map((r) =>
+        r.mode === 'deleted' ? (
+          <DeletedCommentRow
+            key={r.comment.id}
+            comment={r.comment}
+            isReply
+            canUndo={r.canUndo}
+            versionId={versionId}
+          />
+        ) : (
+          <CommentRow
+            key={r.comment.id}
+            comment={r.comment}
+            isReply
+            isAuthor={r.comment.authorId === currentUserId}
+            versionId={versionId}
+            onStartEditing={() => onHighlight(thread.id)}
+          />
+        ),
       )}
-      {replies.map((r) => (
-        <CommentRow
-          key={r.id}
-          comment={r}
-          isReply
-          isAuthor={r.authorId === currentUserId}
-          versionId={versionId}
-          onStartEditing={() => onHighlight(thread.id)}
-        />
-      ))}
       {replying && (
         <div className="mt-2">
           <MentionTextarea

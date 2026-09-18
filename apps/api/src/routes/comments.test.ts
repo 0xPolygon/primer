@@ -10,6 +10,7 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
 import { documents, versions, threads, comments, users, documentCollaborators } from '../db/schema.ts';
 import type { CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
+import { COMMENT_UNDO_WINDOW_MS } from '@polygonlabs/primer-api-types';
 import { CSRF_HEADERS, asUserJson } from '../test/harness.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 
@@ -551,6 +552,137 @@ describe('comment routes under visibility + collab', () => {
         body: JSON.stringify({ body: 'hey' }),
       });
       expect(res.status).toBe(201);
+    });
+  });
+});
+
+describe('POST /api/comments/:cid/restore', () => {
+  /** Soft-delete `commentId` and backdate the tombstone by `agoMs`. */
+  async function tombstone(commentId: string, agoMs = 0) {
+    await db
+      .update(comments)
+      .set({ deletedAt: new Date(Date.now() - agoMs) })
+      .where(eq(comments.id, commentId));
+  }
+
+  it('restores an in-window tombstone by its author, body and all', async () => {
+    await withApp(async (app) => {
+      const { commentId } = await seedDocVersionThread();
+      await tombstone(commentId, 60_000);
+
+      const res = await app.request(`/api/comments/${commentId}/restore`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+      });
+      expect(res.status).toBe(200);
+      const cm = (await res.json()) as CommentDTO;
+      expect(cm.deletedAt).toBeNull();
+      expect(cm.body).toBe('first');
+
+      const row = await db.select().from(comments).where(eq(comments.id, commentId));
+      expect(row[0].deletedAt).toBeNull();
+    });
+  });
+
+  it('is idempotent on a comment that was never deleted', async () => {
+    await withApp(async (app) => {
+      const { commentId } = await seedDocVersionThread();
+      const res = await app.request(`/api/comments/${commentId}/restore`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+      });
+      expect(res.status).toBe(200);
+      const cm = (await res.json()) as CommentDTO;
+      expect(cm.deletedAt).toBeNull();
+      expect(cm.body).toBe('first');
+    });
+  });
+
+  it('refuses once the undo window has elapsed, leaving the tombstone intact', async () => {
+    await withApp(async (app) => {
+      const { commentId } = await seedDocVersionThread();
+      await tombstone(commentId, COMMENT_UNDO_WINDOW_MS + 60_000);
+
+      const res = await app.request(`/api/comments/${commentId}/restore`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+      });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error: string }).error).toBe('restore_window_expired');
+
+      const row = await db.select().from(comments).where(eq(comments.id, commentId));
+      expect(row[0].deletedAt).not.toBeNull();
+    });
+  });
+
+  it('returns 403 when someone other than the author tries to restore', async () => {
+    await withApp(async (app) => {
+      const { threadId } = await seedDocVersionThread();
+      const otherUserId = 'other-user-restore';
+      await db
+        .insert(users)
+        .values({ id: otherUserId, email: 'or@p.t', displayName: 'OtherRestore' })
+        .onConflictDoNothing();
+      const otherCommentId = uuidv7();
+      await db.insert(comments).values({
+        id: otherCommentId,
+        threadId,
+        authorId: otherUserId,
+        body: 'theirs',
+        mentions: [],
+      });
+      await tombstone(otherCommentId, 60_000);
+
+      const res = await app.request(`/api/comments/${otherCommentId}/restore`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+      });
+      expect(res.status).toBe(403);
+
+      const row = await db.select().from(comments).where(eq(comments.id, otherCommentId));
+      expect(row[0].deletedAt).not.toBeNull();
+    });
+  });
+
+  it('returns 404 for an unknown comment', async () => {
+    await withApp(async (app) => {
+      const res = await app.request(`/api/comments/${uuidv7()}/restore`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('returns 404 when the document has been soft-deleted', async () => {
+    await withApp(async (app) => {
+      const { documentId, commentId } = await seedDocVersionThread();
+      await tombstone(commentId, 60_000);
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, documentId));
+
+      const res = await app.request(`/api/comments/${commentId}/restore`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  it('puts the comment back in the version thread listing', async () => {
+    await withApp(async (app) => {
+      const { versionId, commentId } = await seedDocVersionThread();
+      await tombstone(commentId, 60_000);
+
+      await app.request(`/api/comments/${commentId}/restore`, {
+        method: 'POST',
+        headers: CSRF_HEADERS,
+      });
+
+      const listed = await app.request(`/api/versions/${versionId}/threads`);
+      const body = (await listed.json()) as { threads: ThreadDTO[] };
+      const restored = body.threads[0].comments.find((c) => c.id === commentId);
+      expect(restored?.deletedAt).toBeNull();
+      expect(restored?.body).toBe('first');
     });
   });
 });
