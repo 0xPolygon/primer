@@ -99,9 +99,10 @@ document org-visible, external sharing, folders, and token management have no
 scope, so a scoped token can never reach them; with `documents:write` it may
 make a document its user owns private. `collaborators:manage` is the one
 scope that changes who can access a document, so grant it deliberately.
-Omitting `scopes` mints an unrestricted token. OAuth access tokens
-(`primer_oat_`, used by remote MCP clients) carry no scopes yet and act
-with the user's full permissions. Minting and device approval always
+Service tokens must be scoped; omitting `scopes` on a personal token mints
+an unrestricted one. OAuth access tokens (`primer_oat_`, used by remote MCP
+clients) carry no scopes yet and act with the user's full permissions.
+Minting and device approval always
 require a browser session, whatever the token.
 
 **Collaborators and the write bar.** Only the document owner and its

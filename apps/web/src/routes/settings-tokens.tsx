@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import type { ApiTokenSummary, CreateTokenResponse } from '@polygonlabs/primer-api-types';
+import { API_TOKEN_SCOPES, API_TOKEN_SCOPE_DESCRIPTIONS } from '@polygonlabs/primer-api-types';
+import type {
+  ApiTokenScope,
+  ApiTokenSummary,
+  CreateTokenRequest,
+  CreateTokenResponse,
+} from '@polygonlabs/primer-api-types';
 import {
   useApiTokens,
   useCreateServiceToken,
@@ -25,6 +31,32 @@ function formatLastUsed(iso: string | null): string {
 
 function formatExpires(iso: string | null): string {
   return iso ? formatDateTime(iso) : 'Never';
+}
+
+function ScopeList({ scopes }: { scopes: ApiTokenSummary['scopes'] }) {
+  if (scopes === null) {
+    return (
+      <span
+        className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+        title="Can call every endpoint an API token may call"
+      >
+        Full access
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-wrap gap-1">
+      {scopes.map((s) => (
+        <span
+          key={s}
+          title={API_TOKEN_SCOPE_DESCRIPTIONS[s]}
+          className="rounded bg-neutral-100 px-2 py-0.5 font-mono text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+        >
+          {s}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 interface TokenRowProps {
@@ -56,6 +88,7 @@ function TokenRow({ token, onRevoke, revoking }: TokenRowProps) {
           <div className="font-mono text-xs text-neutral-600 dark:text-neutral-400">
             primer_pat_{token.tokenPrefix}…
           </div>
+          <ScopeList scopes={token.scopes} />
           <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-neutral-600 dark:text-neutral-400 sm:grid-cols-3">
             <div>
               <dt className="text-neutral-500 dark:text-neutral-500">Created</dt>
@@ -90,13 +123,28 @@ interface CreateTokenFormProps {
   placeholder: string;
   pending: boolean;
   error: Error | null;
-  onCreate: (name: string) => void;
+  /** Service tokens must be scoped; personal tokens may be full access. */
+  scopesRequired: boolean;
+  onCreate: (req: CreateTokenRequest) => void;
 }
 
-function CreateTokenForm({ placeholder, pending, error, onCreate }: CreateTokenFormProps) {
+function CreateTokenForm({ placeholder, pending, error, scopesRequired, onCreate }: CreateTokenFormProps) {
   const [name, setName] = useState('');
+  const [limitedChoice, setLimitedChoice] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<ApiTokenScope>>(new Set());
+  const limited = scopesRequired || limitedChoice;
   const trimmed = name.trim();
-  const valid = trimmed.length > 0 && trimmed.length <= MAX_NAME_LENGTH;
+  const nameValid = trimmed.length > 0 && trimmed.length <= MAX_NAME_LENGTH;
+  const valid = nameValid && (!limited || selected.size > 0);
+
+  function toggle(scope: ApiTokenScope) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(scope)) next.delete(scope);
+      else next.add(scope);
+      return next;
+    });
+  }
 
   return (
     <form
@@ -104,8 +152,13 @@ function CreateTokenForm({ placeholder, pending, error, onCreate }: CreateTokenF
       onSubmit={(e) => {
         e.preventDefault();
         if (!valid || pending) return;
-        onCreate(trimmed);
+        onCreate(
+          limited
+            ? { name: trimmed, scopes: API_TOKEN_SCOPES.filter((s) => selected.has(s)) }
+            : { name: trimmed },
+        );
         setName('');
+        setSelected(new Set());
       }}
     >
       <div className="flex gap-2">
@@ -125,10 +178,50 @@ function CreateTokenForm({ placeholder, pending, error, onCreate }: CreateTokenF
           {pending ? 'Creating…' : 'Create token'}
         </button>
       </div>
-      {name.length > 0 && !valid && (
+      {!scopesRequired && (
+        <label className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+          <input
+            type="checkbox"
+            checked={limitedChoice}
+            onChange={(e) => setLimitedChoice(e.target.checked)}
+          />
+          Limit this token to specific permissions
+        </label>
+      )}
+      {limited && (
+        <fieldset className="space-y-1 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
+          <legend className="px-1 text-xs text-neutral-500">
+            Permissions{scopesRequired ? ' (required)' : ''}
+          </legend>
+          {API_TOKEN_SCOPES.map((scope) => (
+            <label key={scope} className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={selected.has(scope)}
+                onChange={() => toggle(scope)}
+              />
+              <span>
+                <span className="font-mono text-xs text-neutral-900 dark:text-neutral-100">{scope}</span>
+                <span className="block text-xs text-neutral-600 dark:text-neutral-400">
+                  {API_TOKEN_SCOPE_DESCRIPTIONS[scope]}
+                </span>
+              </span>
+            </label>
+          ))}
+          <p className="pt-1 text-xs text-neutral-500">
+            Deleting documents, changing visibility, external sharing, and managing tokens are
+            never available to a limited token.
+          </p>
+        </fieldset>
+      )}
+      {name.length > 0 && !nameValid && (
         <p className="text-xs text-red-600 dark:text-red-400">
           Name must be 1–{MAX_NAME_LENGTH} characters.
         </p>
+      )}
+      {limited && selected.size === 0 && nameValid && (
+        <p className="text-xs text-neutral-500">Select at least one permission.</p>
       )}
       {error && (
         <p className="text-xs text-red-600 dark:text-red-400">
@@ -234,7 +327,8 @@ export function TokenSettingsPage() {
         placeholder="Token name, e.g. claude-slack"
         pending={create.isPending}
         error={(create.error as Error) ?? null}
-        onCreate={(name) => create.mutate(name, { onSuccess: setCreatedSecret })}
+        scopesRequired={false}
+        onCreate={(req) => create.mutate(req, { onSuccess: setCreatedSecret })}
       />
 
       {createdSecret && (
@@ -288,6 +382,8 @@ export function TokenSettingsPage() {
             <p className="text-sm text-neutral-600 dark:text-neutral-400">
               Tokens here authenticate as the Claude service user — actions performed
               with them are attributed to Claude, not to you. Visible to admins only.
+              Grant only the permissions the integration needs; tokens marked Full access
+              predate permissions and should be replaced with a limited one.
             </p>
           </header>
 
@@ -295,7 +391,8 @@ export function TokenSettingsPage() {
             placeholder="Token name, e.g. claude-slack-workspace"
             pending={serviceCreate.isPending}
             error={(serviceCreate.error as Error) ?? null}
-            onCreate={(name) => serviceCreate.mutate(name, { onSuccess: setCreatedServiceSecret })}
+            scopesRequired
+            onCreate={(req) => serviceCreate.mutate(req, { onSuccess: setCreatedServiceSecret })}
           />
 
           {createdServiceSecret && (

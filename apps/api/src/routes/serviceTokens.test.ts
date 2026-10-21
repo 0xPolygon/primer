@@ -13,6 +13,7 @@ import { db } from '../db/client.ts';
 import { apiTokens, users } from '../db/schema.ts';
 import { SERVICE_USER_ID, parseAdminEmails } from '../auth/admin.ts';
 import { asUserJson } from '../test/harness.ts';
+import { API_TOKEN_SCOPES } from '@polygonlabs/primer-api-types';
 import type { ApiTokensListResponse, CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 // mockMultiResolver synthesizes emails as `${id}@polygon.technology`.
@@ -128,7 +129,7 @@ describe('POST /api/service-tokens', () => {
       const res = await app.request('/api/service-tokens', {
         method: 'POST',
         headers: asUserJson(ADMIN_ID),
-        body: JSON.stringify({ name: 'claude-slack' }),
+        body: JSON.stringify({ name: 'claude-slack', scopes: API_TOKEN_SCOPES }),
       });
       expect(res.status).toBe(201);
       const body = (await res.json()) as CreateTokenResponse;
@@ -185,7 +186,7 @@ describe('GET /api/service-tokens', () => {
       await app.request('/api/service-tokens', {
         method: 'POST',
         headers: asUserJson(ADMIN_ID),
-        body: JSON.stringify({ name: 'service' }),
+        body: JSON.stringify({ name: 'service', scopes: API_TOKEN_SCOPES }),
       });
 
       const res = await app.request('/api/service-tokens', {
@@ -208,7 +209,7 @@ describe('DELETE /api/service-tokens/:id', () => {
       const created = await app.request('/api/service-tokens', {
         method: 'POST',
         headers: asUserJson(ADMIN_ID),
-        body: JSON.stringify({ name: 'short-lived' }),
+        body: JSON.stringify({ name: 'short-lived', scopes: API_TOKEN_SCOPES }),
       });
       const body = (await created.json()) as CreateTokenResponse;
       plaintext = body.token;

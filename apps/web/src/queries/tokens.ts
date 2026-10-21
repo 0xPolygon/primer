@@ -6,8 +6,7 @@ import type {
 } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
-async function createToken(path: string, name: string): Promise<CreateTokenResponse> {
-  const body: CreateTokenRequest = { name };
+async function createToken(path: string, body: CreateTokenRequest): Promise<CreateTokenResponse> {
   const res = await api(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -43,7 +42,7 @@ export function useApiTokens() {
 export function useCreateToken() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => createToken('/api/tokens', name),
+    mutationFn: (req: CreateTokenRequest) => createToken('/api/tokens', req),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tokens'] });
     },
@@ -78,7 +77,7 @@ export function useServiceTokens(enabled: boolean) {
 export function useCreateServiceToken() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => createToken('/api/service-tokens', name),
+    mutationFn: (req: CreateTokenRequest) => createToken('/api/service-tokens', req),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['service-tokens'] });
     },
