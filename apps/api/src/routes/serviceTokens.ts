@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import type { AppVariables } from '../app.ts';
 import type { ApiTokensListResponse } from '@polygonlabs/primer-api-types';
 import { isAdmin, SERVICE_USER_ID } from '../auth/admin.ts';
+import { sessionOnly } from '../auth/sessionOnly.ts';
 import {
   listTokensForUser,
   mintTokenForUser,
@@ -14,12 +15,14 @@ import {
  * Tokens minted here authenticate as the service user (SERVICE_USER_ID), so
  * external tools using them act as Claude rather than as any employee.
  * Non-admins get 403 on every route; 404 is reserved for unknown token ids.
+ * Every route is session-only: no API token — the service token included —
+ * can manage service tokens, even if its user is on the admin allowlist.
  */
 export function registerServiceTokenRoutes(
   app: Hono<{ Variables: AppVariables }>,
   opts: { adminEmails: string[] },
 ): void {
-  app.get('/api/service-tokens', async (c) => {
+  app.get('/api/service-tokens', sessionOnly, async (c) => {
     if (!isAdmin(c.get('user'), opts.adminEmails)) {
       return c.json({ error: 'forbidden' }, 403);
     }
@@ -27,7 +30,7 @@ export function registerServiceTokenRoutes(
     return c.json(body, 200);
   });
 
-  app.post('/api/service-tokens', async (c) => {
+  app.post('/api/service-tokens', sessionOnly, async (c) => {
     if (!isAdmin(c.get('user'), opts.adminEmails)) {
       return c.json({ error: 'forbidden' }, 403);
     }
@@ -50,7 +53,7 @@ export function registerServiceTokenRoutes(
     return c.json(result, 201);
   });
 
-  app.delete('/api/service-tokens/:id', async (c) => {
+  app.delete('/api/service-tokens/:id', sessionOnly, async (c) => {
     if (!isAdmin(c.get('user'), opts.adminEmails)) {
       return c.json({ error: 'forbidden' }, 403);
     }
