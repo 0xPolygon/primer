@@ -87,6 +87,16 @@ service account instead (`service-claude`), add your persona's email to
 `ADMIN_EMAILS` in `.env` (for `mock-user-1` that's `mock@polygon.technology`)
 and mint a service token from the admin section of the same page.
 
+**Scoped tokens.** `POST /api/tokens` and `POST /api/service-tokens` accept
+an optional `scopes` array (see `API_TOKEN_SCOPES` in
+`@polygonlabs/primer-api-types`). A scoped token can call only the REST
+routes and MCP tools its scopes grant — `apps/api/src/auth/scopes.ts` is the
+single route→scope table — and gets 403 `insufficient_scope` everywhere else.
+Deleting documents, changing visibility, external sharing, folders, and token
+management have no scope, so a scoped token can never reach them. Omitting
+`scopes` mints an unrestricted token. Minting and device approval always
+require a browser session, whatever the token.
+
 **Collaborators and the write bar.** Only the document owner and its
 collaborators may write events. To let Mock Reviewer submit on a document
 Mock User (or the service account) owns, add them as a collaborator — via

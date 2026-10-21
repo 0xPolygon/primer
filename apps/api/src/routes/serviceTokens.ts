@@ -6,7 +6,7 @@ import { sessionOnly } from '../auth/sessionOnly.ts';
 import {
   listTokensForUser,
   mintTokenForUser,
-  parseTokenName,
+  parseCreateTokenBody,
   revokeTokenForUser,
 } from './tokenSummary.ts';
 
@@ -40,12 +40,12 @@ export function registerServiceTokenRoutes(
     } catch {
       return c.json({ error: 'invalid_name' }, 400);
     }
-    const name = parseTokenName((raw as { name?: unknown } | null)?.name);
-    if (name === null) {
-      return c.json({ error: 'invalid_name' }, 400);
+    const parsed = parseCreateTokenBody(raw);
+    if (!parsed.ok) {
+      return c.json({ error: parsed.error }, 400);
     }
 
-    const result = await mintTokenForUser(SERVICE_USER_ID, name);
+    const result = await mintTokenForUser(SERVICE_USER_ID, parsed.name, parsed.scopes);
     if (result === 'token_limit') {
       return c.json({ error: 'token_limit' }, 400);
     }

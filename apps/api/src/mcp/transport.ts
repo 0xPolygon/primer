@@ -2,10 +2,11 @@ import type { Context } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import type { AppVariables } from '../app.ts';
+import { tokenScopes } from '../auth/scopes.ts';
 import {
   buildMcpToolHandlers,
   TOOL_CONFIGS,
-  TOOL_NAMES,
+  toolsForScopes,
   type ToolDeps,
 } from './tools.ts';
 
@@ -36,7 +37,8 @@ export async function handleMcpRequest(
     version: deps.serverVersion ?? '0.0.0',
   });
 
-  for (const name of TOOL_NAMES) {
+  // Scoped API tokens only see the tools their scopes grant.
+  for (const name of toolsForScopes(tokenScopes(c))) {
     const config = TOOL_CONFIGS[name];
     const handler = handlers[name];
     server.registerTool(

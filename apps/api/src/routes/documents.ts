@@ -13,6 +13,7 @@ import {
   canRead, canEdit, canManage, effectiveRole, loadCollaboratorRole,
   type Visibility,
 } from '../lib/permissions.ts';
+import { tokenScopes } from '../auth/scopes.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -156,6 +157,14 @@ export function registerDocumentRoutes(
         );
       }
       updates.visibility = payload.visibility;
+      // No token scope grants visibility changes (see auth/scopes.ts): a
+      // scoped token may edit title/description but never re-share a doc.
+      if (tokenScopes(c) !== null) {
+        return c.json(
+          { error: 'insufficient_scope', message: 'API tokens with scopes cannot change visibility.' },
+          403,
+        );
+      }
     }
 
     if (!hasTitle && !hasDescription && !hasVisibility) {

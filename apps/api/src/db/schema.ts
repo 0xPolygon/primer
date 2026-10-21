@@ -192,6 +192,7 @@ export const apiTokens = pgTable(
     name: text('name').notNull(),                  // e.g. "device: my-laptop" or a manual label
     tokenHash: text('token_hash').notNull(),       // sha-256 hex of the full secret
     tokenPrefix: text('token_prefix').notNull(),   // first 8 chars of the random part, for display
+    scopes: text('scopes').array(),                // ApiTokenScope[]; null = unrestricted (see auth/scopes.ts)
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }),   // nullable = no expiry

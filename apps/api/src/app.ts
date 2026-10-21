@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { logger as appLogger } from './logger.ts';
 import { authMiddleware } from './middleware/auth.ts';
 import { csrfMiddleware } from './auth/csrf.ts';
+import { scopeMiddleware } from './auth/scopes.ts';
 import { mockResolver, type UserResolver } from './auth/resolver.ts';
 import { registerUploadRoute } from './routes/upload.ts';
 import { registerDocumentRoutes } from './routes/documents.ts';
@@ -38,10 +39,13 @@ import { registerHealthRoutes, type DatabaseCheck } from './routes/health.ts';
 import type { Storage } from './storage/types.ts';
 import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
+import type { ApiTokenScope } from '@polygonlabs/primer-api-types';
 
 export type AppVariables = {
   user: { id: string; email: string; displayName: string };
   authMethod?: 'bearer' | 'cookie' | 'mock';
+  /** Set only for scoped API tokens; absent = unrestricted. See auth/scopes.ts. */
+  tokenScopes?: readonly ApiTokenScope[];
 };
 
 export interface AppDeps {
@@ -68,6 +72,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   const resolver = deps.userResolver ?? mockResolver;
   app.use('*', authMiddleware(resolver, issuer.length > 0 ? { issuer } : undefined));
+  app.use('*', scopeMiddleware);
   app.use('*', csrfMiddleware);
 
   app.use('*', async (c, next) => {

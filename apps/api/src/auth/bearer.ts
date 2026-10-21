@@ -2,12 +2,14 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { hashToken, TOKEN_PREFIX } from './tokens.ts';
 import type { UserResolver } from './resolver.ts';
+import { parseStoredScopes } from './scopes.ts';
 
 interface BearerLookupRow {
   id: string;
   email: string;
   display_name: string;
   token_id: string;
+  scopes: string[] | null;
 }
 
 /**
@@ -49,7 +51,7 @@ export function makeBearerResolver(): UserResolver {
 
     const tokenHash = hashToken(token);
     const rows = (await db.execute(sql`
-      SELECT u.id, u.email, u.display_name, t.id AS token_id
+      SELECT u.id, u.email, u.display_name, t.id AS token_id, t.scopes
       FROM api_tokens t
       INNER JOIN users u ON u.id = t.user_id
       WHERE t.token_hash = ${tokenHash}
@@ -63,6 +65,8 @@ export function makeBearerResolver(): UserResolver {
 
     touchTokenLastUsed(row.token_id);
     c.set('authMethod', 'bearer');
+    const scopes = parseStoredScopes(row.scopes);
+    if (scopes !== null) c.set('tokenScopes', scopes);
     return { id: row.id, email: row.email, displayName: row.display_name };
   };
 }
