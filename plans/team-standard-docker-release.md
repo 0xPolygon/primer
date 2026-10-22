@@ -337,6 +337,40 @@ Where an amendment and an earlier section disagree, the amendment wins.
   Lead edit: the README said the gate runs "the API test suite", but it runs
   the container smoke suite. It now says so, and gives the script's DB-host
   argument and the throwaway-Postgres warning.
+- **2026-10-22 — Full verification (S4 battery, evidence of record), on
+  `d884266`.** Run by the `sonnet` verification agent, then re-run by the
+  lead, except the emulated amd64 build: the lead inspected that image's
+  architecture rather than re-emulating it.
+
+  | Check | Result |
+  | --- | --- |
+  | `pnpm install --frozen-lockfile && pnpm run codegen-drift-check && pnpm typecheck && pnpm -r run build && pnpm test` | exit 0 — mcp 5 files/123 tests, web 24/269, api 71/738, 0 failed |
+  | `scripts/container-smoke.sh host.docker.internal` (arm64, production's arch) | exit 0 — `Service ready after 2s`, `Tests  7 passed (7)` |
+  | amd64 buildx build + `node -e "console.log(process.arch)"` | prints `x64`; `primer:ci-amd64` inspects as `amd64 linux` |
+  | `changeset status --since=origin/master` + ruling-1 invariants | `GATES_OK` (patch: `@primer/api`, `@primer/web`) |
+  | actionlint over `.github/workflows/` | exit 0, no output |
+  | `git status --short` after the build | empty |
+
+  Deviation: the amd64 command needs `--load` to make the image available
+  to the following `docker run` (the agent added it; the plan text omits it).
+- **2026-10-22 — Local Postgres window (President's ruling).**
+  `issue-98-postgres-1` was stopped 18:18:31Z for the baseline battery and
+  restarted 18:51:41Z, after S4's last database step (healthy on 5432).
+  `primer-deploy-test` was torn down with `down -v`. No other container was
+  touched. Throwaway probe containers (`primer-ci`, `exerciser-*`,
+  `lead-probe-ci`) were all removed.
+- **2026-10-22 — Final stage (S5).** `origin/master` is still `99c994d`, so no
+  rebase is needed. The branch carries the two plan commits, one sanctioned
+  amendments commit (`f7f4717`) and one commit per stage. #109 and #110 are
+  still open drafts, so the PR opens with the 7-case smoke fallback (Q3
+  ruling). The `/api/ready` case is re-added after the Admiral rebases onto a
+  master containing #110. The P2 relay to dry-dock#1445 belongs to the
+  Admiral/humans (amendment 8).
+  Unplanned decision (lead): the closing commits change only this plan file
+  (`git diff --stat` against `d884266` touches `plans/` alone). The battery was
+  green on that exact code tree twice — agent and lead — so it is not re-run
+  for them; doing so would mean stopping `issue-98-postgres-1` again for a
+  doc-only diff. Reversible: re-run the battery on the final head at any time.
 
 ## Research findings the plan is grounded in
 
@@ -867,23 +901,23 @@ shared pipeline will build on its own runner, and re-checks the machine gates
 the PR will face. No files change; a failure here is a plan or stage defect
 routed back to the team lead.
 
-- [ ] **Action**: In-process suite, typecheck, build and plugin-version drift check — the same gates as `ci.yml` (local Postgres per "Local test infrastructure", guard included).
+- [x] **Action**: In-process suite, typecheck, build and plugin-version drift check — the same gates as `ci.yml` (local Postgres per "Local test infrastructure", guard included).
   - **Files**: (none)
   - **Owner**: Implementation agent: verification
   - **Verify**: `pnpm install --frozen-lockfile && pnpm run codegen-drift-check && pnpm typecheck && pnpm -r run build && pnpm test` → exit 0, 0 failed
-- [ ] **Action**: Release-gate simulation (arm64, the architecture production runs) via the local script.
+- [x] **Action**: Release-gate simulation (arm64, the architecture production runs) via the local script.
   - **Files**: (none)
   - **Owner**: Implementation agent: verification
   - **Verify**: `scripts/container-smoke.sh host.docker.internal` → exit 0, `Tests  8 passed`
-- [ ] **Action**: amd64 build of the same Dockerfile (emulated locally — slow, several minutes; this is the only pre-merge check of the leg the GCP pipeline builds natively).
+- [x] **Action**: amd64 build of the same Dockerfile (emulated locally — slow, several minutes; this is the only pre-merge check of the leg the GCP pipeline builds natively).
   - **Files**: (none)
   - **Owner**: Implementation agent: verification
-  - **Verify**: `docker buildx build --platform linux/amd64 -f apps/api/Dockerfile -t primer:ci-amd64 . && docker run --rm --platform linux/amd64 primer:ci-amd64 node -e "console.log(process.arch)"` → prints `x64`
-- [ ] **Action**: Changeset gate the PR will face, and the ruling-1 invariants (no rename happened; literal image name present).
+  - **Verify**: `docker buildx build --platform linux/amd64 -f apps/api/Dockerfile -t primer:ci-amd64 --load . && docker run --rm --platform linux/amd64 primer:ci-amd64 node -e "console.log(process.arch)"` → prints `x64`
+- [x] **Action**: Changeset gate the PR will face, and the ruling-1 invariants (no rename happened; literal image name present).
   - **Files**: (none)
   - **Owner**: Implementation agent: verification
   - **Verify**: `pnpm exec changeset status --since=origin/master && test "$(node -p 'require("./apps/api/package.json").name')" = '@primer/api' && test "$(node -p 'require("./package.json").name')" = 'primer' && grep -qE '^\s+image_name: primer$' .github/workflows/docker-release-trigger.yml && echo GATES_OK` → prints `GATES_OK`
-- [ ] **Action**: Workflow lint across the whole `.github/workflows/` tree (the new trigger plus the edited `release.yml`).
+- [x] **Action**: Workflow lint across the whole `.github/workflows/` tree (the new trigger plus the edited `release.yml`).
   - **Files**: (none)
   - **Owner**: Implementation agent: verification
   - **Verify**: `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color` → exit 0
@@ -893,7 +927,7 @@ Monitoring verification stage: omitted — research found no monitored signals
 
 ## Stage S5: Team-lead review, rebase, draft PR
 
-- [ ] **Action**: Rebase `issue-104-team-standard-docker-release` onto fresh `origin/master` (after #109/#110 merge per P4a — if they have not, decide: wait, or keep the S2 fallback and note it in the PR). Re-run the S4 verify commands post-rebase.
+- [x] **Action**: Rebase `issue-104-team-standard-docker-release` onto fresh `origin/master` (after #109/#110 merge per P4a — if they have not, decide: wait, or keep the S2 fallback and note it in the PR). Re-run the S4 verify commands post-rebase.
   - **Files**: plans/team-standard-docker-release.md
   - **Owner**: Team lead
   - **Verify**: `git -C <worktree> log --oneline origin/master..HEAD` → one commit per completed stage plus the two plan commits, nothing else; `pnpm exec changeset status --since=origin/master` → exit 0
