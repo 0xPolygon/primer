@@ -4,6 +4,7 @@ import type { UserResolver } from '../auth/resolver.ts';
 
 export const PUBLIC_PATHS = new Set([
   '/api/health',
+  '/api/ready',
   '/auth/login',
   '/auth/callback',
   '/api/device/authorize',

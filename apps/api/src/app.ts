@@ -34,6 +34,7 @@ import { registerDocumentFolderRoutes } from './routes/documentFolder.ts';
 import { registerLibraryRoute } from './routes/library.ts';
 import { registerOAuthRoutes } from './auth/oauth/routes.ts';
 import { registerMcpRoute } from './mcp/routes.ts';
+import { registerHealthRoutes, type DatabaseCheck } from './routes/health.ts';
 import type { Storage } from './storage/types.ts';
 import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
@@ -52,6 +53,7 @@ export interface AppDeps {
   authStateCookieName?: string;         // NEW; defaults to 'primer_auth_state'
   authBaseUrl?: string;                 // NEW; base URL used in device verification links
   adminEmails?: string[];               // normalized allowlist; defaults to ADMIN_EMAILS env
+  checkDatabase?: DatabaseCheck;        // /api/ready probe; defaults to `select 1`
 }
 
 export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
@@ -84,7 +86,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     );
   });
 
-  app.get('/api/health', (c) => c.json({ ok: true }));
+  registerHealthRoutes(app, { checkDatabase: deps.checkDatabase });
   registerUploadRoute(app, deps);
   registerDocumentRoutes(app, deps);
   registerCollaboratorRoutes(app, deps);
