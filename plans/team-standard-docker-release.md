@@ -222,6 +222,18 @@ Where an amendment and an earlier section disagree, the amendment wins.
 
 (Dated entries appended at stage boundaries.)
 
+- **2026-10-22 — Admiral rulings on the captain's batched questions**
+  (reversible): Q1 Primer commits and the Primer PR carry the commissioning
+  session link `session_01Uhxk1ywKnhbabP9j1z5Vpr` (not the executing harness's
+  own id). Q2 no session trailer or link anywhere in the pipelines commit or PR.
+  Q3 if #110 is still unmerged at the final stage, the Primer draft PR opens
+  with the 7-case smoke fallback and says so; rebase and the `/api/ready`
+  re-add follow the Admiral's rebase. Q4 if the Dockerfile build fails under
+  `--ignore-scripts`, take Risk 2's fallback without asking and report it.
+- **2026-10-22 — Changesets fixed group:** `config.json` already carried an
+  empty `"fixed": []`; its value was replaced rather than a key added (same
+  result). No conflicts.
+
 ## Research findings the plan is grounded in
 
 All paths are `origin/master` of `0xPolygon/primer` (`99c994d`) unless noted.
@@ -585,11 +597,11 @@ The SPA ships only inside the API image. Without a `fixed` group a
 `@primer/web`-only changeset tags `@primer/web@x` (no Dockerfile → `docker-test`
 skips) and the fix never deploys.
 
-- [ ] **Action**: Add `"fixed": [["@primer/api", "@primer/web"]]` to the changesets config. Leave every other key as is (including `bumpVersionsWithWorkspaceProtocolOnly: true`, Ruling 7).
+- [x] **Action**: Add `"fixed": [["@primer/api", "@primer/web"]]` to the changesets config. Leave every other key as is (including `bumpVersionsWithWorkspaceProtocolOnly: true`, Ruling 7).
   - **Files**: .changeset/config.json
   - **Owner**: Implementation agent: backend
   - **Verify**: `pnpm exec changeset status` → exit 0 (lists pending releases; no config error)
-- [ ] **Action**: Update `.changeset/README.md`: rewrite the sentence "Primer has no such build — the Railway app installs from the repo" to state the current truth — the container image is built from the workspace at the release tag (`apps/api/Dockerfile`, frozen lockfile) and bundles `primer-api-types` from source, so in-repo installs must keep resolving workspace packages locally; and add one sentence explaining the `fixed` group (the SPA ships only inside the API image, so the two must version together).
+- [x] **Action**: Update `.changeset/README.md`: rewrite the sentence "Primer has no such build — the Railway app installs from the repo" to state the current truth — the container image is built from the workspace at the release tag (`apps/api/Dockerfile`, frozen lockfile) and bundles `primer-api-types` from source, so in-repo installs must keep resolving workspace packages locally; and add one sentence explaining the `fixed` group (the SPA ships only inside the API image, so the two must version together).
   - **Files**: .changeset/README.md
   - **Owner**: Implementation agent: backend
   - **Verify**: `grep -c -i railway .changeset/README.md` → `0`; `grep -c 'fixed' .changeset/README.md` → at least `1`
