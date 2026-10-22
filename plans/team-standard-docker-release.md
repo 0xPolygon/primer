@@ -1,7 +1,9 @@
 # Team-standard semver Docker release for Primer
 
-Status: PLAN (genesis + rulings amendment — no stage executed yet). Supersedes
-primer#108. Refs #104.
+Status: EXECUTED 2026-10-22. All stages complete; draft PR #114 (supersedes
+primer#108; Refs #104); companion draft 0xPolygon/pipelines#85. Pending:
+the /api/ready smoke case after the rebase onto #110, and the "Before the
+first release" prerequisites.
 
 ## Motivation / Executive Summary
 
@@ -931,7 +933,7 @@ Monitoring verification stage: omitted — research found no monitored signals
   - **Files**: plans/team-standard-docker-release.md
   - **Owner**: Team lead
   - **Verify**: `git -C <worktree> log --oneline origin/master..HEAD` → one commit per completed stage plus the two plan commits, nothing else; `pnpm exec changeset status --since=origin/master` → exit 0
-- [ ] **Action**: Review every stage diff against its declared file set; tick the boxes; open the **draft** PR with this plan's Motivation as the body plus the lines `Supersedes #108 · Closes #104 · Part of #103`, the Rulings as the decisions of record, and the Prerequisites (P0–P4) as a "Before the first release" checklist — including that #92 waits for P0 and P1. Relay P2 (semver warehouse) to Taylan for dry-dock#1445. Do not close #108, move labels on #104, or comment on #104 from the agent; those are the humans' calls once this PR is up.
+- [x] **Action**: Review every stage diff against its declared file set; tick the boxes; open the **draft** PR with this plan's Motivation as the body plus the lines `Supersedes #108 · Closes #104 · Part of #103`, the Rulings as the decisions of record, and the Prerequisites (P0–P4) as a "Before the first release" checklist — including that #92 waits for P0 and P1. Relay P2 (semver warehouse) to Taylan for dry-dock#1445. Do not close #108, move labels on #104, or comment on #104 from the agent; those are the humans' calls once this PR is up.
   - **Files**: plans/team-standard-docker-release.md
   - **Owner**: Team lead
   - **Verify (manual)**: `gh -R 0xPolygon/primer pr view <n> --json isDraft,body` shows `isDraft: true` and the body contains "Supersedes #108", "Closes #104" and "Before the first release".
