@@ -1,0 +1,22 @@
+# The build context is the repository root, and `pnpm install --frozen-lockfile`
+# needs every workspace package.json the lockfile lists as an importer. So
+# plugins/, packages/ and apps/mcp must NOT be ignored here.
+**/node_modules
+**/dist
+.git
+.env
+.env.*
+!.env.example
+storage
+apps/api/storage
+tmp
+.claude
+.superpowers
+.primer
+coverage
+**/.vitest-tmp
+**/.vite
+**/*.log
+.github
+docs
+plans

@@ -218,6 +218,23 @@ Where an amendment and an earlier section disagree, the amendment wins.
     no Co-Authored-By. The pipelines commit carries no issue ref and no session
     link (Ruling 2, Commit policy).
 
+12. **Unauthenticated surface of the image (found at the Dockerfile stage, probed
+    on the built image).** Under `AUTH_MODE=okta`, every non-public page
+    path, `/` included, answers 302 → `/auth/login`. `/auth/mock` answers 401
+    (the auth middleware runs before routing), not 404. The SPA is reachable
+    unauthenticated by design at `/share/<token>` (external share plane,
+    `isExternalSharePath`), served through the `index.html` fallback, and its
+    `/assets/*` are public (`isPublicSpaAsset`). So the Dockerfile boot verify
+    and smoke cases 3, 7 and 8 use `/share/smoke-probe`, 401 and `/` → 302 as
+    amended in place. The shared action's wait loop is `curl -sf` without
+    `-L`, so **any status below 400 counts as ready**. That means P0's "gets
+    a 302 and fails" was wrong: Primer's `/health-check` 302s, so the wait
+    passes vacuously. The pipelines input description now says so.
+    Probe: `/`=302, `/share/smoke-probe`=200 html with `id="root"`,
+    `/assets/index-*.js`=200 text/javascript, `/favicon.svg`=200,
+    `/companion/v1.js`=200, `/api/me`=401, `/auth/mock`=401, `/nope`=302,
+    `/api/ready`=401 (#110 absent), `/health-check`=302.
+
 ### Escape-clause and unplanned-decision log
 
 (Dated entries appended at stage boundaries.)
@@ -233,6 +250,32 @@ Where an amendment and an earlier section disagree, the amendment wins.
 - **2026-10-22 — Changesets fixed group:** `config.json` already carried an
   empty `"fixed": []`; its value was replaced rather than a key added (same
   result). No conflicts.
+- **2026-10-22 — pipelines health_path input (draft PR 0xPolygon/pipelines#85,
+  commit `6478f88`).** ESCAPE CLAUSE (agent): actionlint cannot lint a
+  composite `action.yml`. It treats the file as a workflow and exits 1 with
+  "jobs section is missing". Substitute check, by the lead: actionlint on a
+  throwaway workflow that calls `./.github/actions/docker-test` with
+  `health_path` exits 0. The same workflow with a misspelled input exits 1
+  ("input is not defined"), falsified. The `HEALTH_PATH` count is 3, not 2,
+  because the plan also requires the failure message to print the path.
+  Behavioural check (lead): ready after 1s with `/api/health`. The plan's
+  `/does-not-exist` negative passed **vacuously** (302 < 400, see amendment
+  12), so it was re-run with `/api/does-not-exist` (401), which fails after
+  30 attempts. Unplanned decision: the lead rewrote the input's description
+  from "2xx = ready" to the real semantics. Agent finding plus lead probe;
+  reversible by editing the description.
+- **2026-10-22 — Dockerfile stage.** ESCAPE CLAUSE (agent): the boot verify's
+  `GET /` → 200 cannot pass, because `/` is behind the Okta gate (302).
+  Question: how to prove the SPA is served without authentication? Options:
+  (a) accept the 302, (b) use a public SPA route, (c) another `AUTH_MODE`
+  (refused in production). Agent proposed (b); the lead confirmed `/share/*`
+  is public by design in `auth.ts` and probed it. Choice (b), with smoke
+  cases 7 and 8 corrected the same way (amendment 12). Reversible by editing
+  the verify text. The build passed with `--ignore-scripts` (Risk 2 fallback
+  unused); no `tsx@` in the image's `.pnpm` (0 entries). Lead edit: one
+  Dockerfile comment claimed nothing is written to disk at runtime, which is
+  false (filesystem storage writes to `STORAGE_ROOT`); it was reworded and
+  the image rebuilt and re-verified.
 
 ## Research findings the plan is grounded in
 
@@ -368,7 +411,7 @@ before them; the release workflow is idempotently re-runnable via
 - **P0 — pipelines `health_path` input merged.** Stage S1A opens the draft PR;
   merging it is the humans' call. Until it merges, the Primer trigger's
   `health_path: /api/health` is an unknown input (GitHub logs a warning and
-  ignores it), the action polls `/health-check`, gets a 302/404, and the `test`
+  ignores it), the action polls `/health-check`, which Primer answers with a 302 to login — and `curl -sf` counts any status below 400 as ready, so the wait passes vacuously (amendment 12) and the `test`
   job fails after 30 s — no image is published. Recovery after merge:
   `workflow_dispatch` with the tag.
 - **P1 — WIF push allowlist.** polygon-infrastructure#2462 merged and applied
@@ -625,23 +668,23 @@ git -C /Users/dcollins/apps-team-workspace/repositories/pipelines worktree add /
 Install there before any verify: `pnpm install --frozen-lockfile` (fresh
 worktrees have no `node_modules`; Husky's `prepare` wires the hooks).
 
-- [ ] **Action**: Add an input to `.github/actions/docker-test/action.yml`: `health_path` — description "Path polled for readiness after the container starts (2xx = ready). Override for services whose liveness endpoint is not `/health-check`." — `required: false`, `default: '/health-check'`. In the "Wait for service to be ready" step, add `HEALTH_PATH: ${{ inputs.health_path }}` to `env:` and change the curl to `curl -sf "http://localhost:${PORT}${HEALTH_PATH}"` (assign via `env:`, never interpolate `${{ }}` into the script — the action's existing injection-protection convention). Update the step's failure message to print the path.
+- [x] **Action**: Add an input to `.github/actions/docker-test/action.yml`: `health_path` — description "Path polled for readiness after the container starts (2xx = ready). Override for services whose liveness endpoint is not `/health-check`." — `required: false`, `default: '/health-check'`. In the "Wait for service to be ready" step, add `HEALTH_PATH: ${{ inputs.health_path }}` to `env:` and change the curl to `curl -sf "http://localhost:${PORT}${HEALTH_PATH}"` (assign via `env:`, never interpolate `${{ }}` into the script — the action's existing injection-protection convention). Update the step's failure message to print the path.
   - **Files**: pipelines:.github/actions/docker-test/action.yml
   - **Owner**: Implementation agent: ci
   - **Verify**: `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color .github/actions/docker-test/action.yml; grep -c 'HEALTH_PATH' .github/actions/docker-test/action.yml` → actionlint exit 0 and the count is `2` (env assignment + curl), run from the pipelines worktree root
-- [ ] **Action**: Document the input where the action's inputs are documented: `README.md` "### `actions/docker-test`" (one sentence: waits for `health_path`, default `/health-check`; add `# health_path: /api/health` to the YAML example beside `test_vars`) and `CLAUDE.md` "docker-release integration test gate" (replace "waits for `/health-check`" with "waits for `health_path` (default `/health-check`)").
+- [x] **Action**: Document the input where the action's inputs are documented: `README.md` "### `actions/docker-test`" (one sentence: waits for `health_path`, default `/health-check`; add `# health_path: /api/health` to the YAML example beside `test_vars`) and `CLAUDE.md` "docker-release integration test gate" (replace "waits for `/health-check`" with "waits for `health_path` (default `/health-check`)").
   - **Files**: pipelines:README.md, pipelines:CLAUDE.md
   - **Owner**: Implementation agent: ci
   - **Verify**: `grep -c 'health_path' README.md CLAUDE.md` → both files report at least `1`, run from the pipelines worktree root
-- [ ] **Action**: Run the repo's own PR gates locally (what `apps-ci-trigger.yml` and the Husky hooks enforce).
+- [x] **Action**: Run the repo's own PR gates locally (what `apps-ci-trigger.yml` and the Husky hooks enforce).
   - **Files**: pipelines:.github/actions/docker-test/action.yml, pipelines:README.md, pipelines:CLAUDE.md
   - **Owner**: Implementation agent: ci
   - **Verify**: `pnpm run lint && pnpm run typecheck && pnpm exec changeset status --since=origin/main` → exit 0 (an action-only change is outside `packages/*`, so no changeset is required), run from the pipelines worktree root
-- [ ] **Action**: Behavioural check of the new loop against a real container: with the Primer image from S1B running locally (any image answering 200 on a non-default path works), run the wait step's shell verbatim with `PORT=3000 HEALTH_PATH=/api/health`, then with `HEALTH_PATH=/does-not-exist` and confirm it fails after 30 attempts.
+- [x] **Action**: Behavioural check of the new loop against a real container: with the Primer image from S1B running locally (any image answering 200 on a non-default path works), run the wait step's shell verbatim with `PORT=3000 HEALTH_PATH=/api/health`, then with `HEALTH_PATH=/does-not-exist` and confirm it fails after 30 attempts.
   - **Files**: pipelines:.github/actions/docker-test/action.yml
   - **Owner**: Implementation agent: ci
   - **Verify (manual)**: Paste the step's `run:` block into a shell with `PORT=3000 HEALTH_PATH=/api/health IMAGE_NAME=primer` against the running `primer-ci` container → prints `Service ready after Ns`; with `HEALTH_PATH=/does-not-exist` → prints the not-ready message and exits 1.
-- [ ] **Action**: Commit on the pipelines branch (Conventional Commits, e.g. `feat(docker-test): add health_path input for services without /health-check`; commitlint enforces the format), push the branch, and open a **draft** PR. Public-surface rules for the body (Ruling 2): describe the input, its default and that existing consumers are unchanged, plus how it was verified; **no** internal incident IDs, service names, infrastructure names, dry-dock/Kargo detail, or claude.ai session links — the session-link trailer that applies to other repos is deliberately omitted here. Fill the repo's PR template ("New feature", "documentation update").
+- [x] **Action**: Commit on the pipelines branch (Conventional Commits, e.g. `feat(docker-test): add health_path input for services without /health-check`; commitlint enforces the format), push the branch, and open a **draft** PR. Public-surface rules for the body (Ruling 2): describe the input, its default and that existing consumers are unchanged, plus how it was verified; **no** internal incident IDs, service names, infrastructure names, dry-dock/Kargo detail, or claude.ai session links — the session-link trailer that applies to other repos is deliberately omitted here. Fill the repo's PR template ("New feature", "documentation update").
   - **Files**: pipelines:.github/actions/docker-test/action.yml, pipelines:README.md, pipelines:CLAUDE.md
   - **Owner**: Team lead
   - **Verify (manual)**: `gh -R 0xPolygon/pipelines pr view <n> --json isDraft,body` shows `isDraft: true`, the body mentions `health_path` and its default, and contains none of: `INC-`, `primer`, `dry-dock`, `Kargo`, `claude.ai`.
@@ -661,7 +704,7 @@ postinstall is not needed — the build verify below is what proves it). No
 `GIT_SHA`/`BUILT_AT` args (Ruling 2): the pipeline's unused-build-arg warning
 is expected and harmless.
 
-- [ ] **Action**: Write `apps/api/Dockerfile` (multi-stage, context = repo root):
+- [x] **Action**: Write `apps/api/Dockerfile` (multi-stage, context = repo root):
   - `ARG NODE_IMAGE=node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205` (as #108; re-verify the digest resolves — see verify).
   - `build` stage: `WORKDIR /src`; `RUN corepack enable` (comment: pnpm version comes from the root `packageManager` field); `COPY . .`; `RUN pnpm install --frozen-lockfile --ignore-scripts`; `RUN pnpm --filter @polygonlabs/primer-api-types --filter @primer/web --filter @primer/api run build`; `RUN pnpm --filter @primer/api deploy --prod --legacy /out/api && rm -rf /out/api/src /out/api/scripts /out/api/container-tests /out/api/*.test.* /out/api/vitest*.ts && mkdir -p /out/web && cp -r apps/web/dist /out/web/dist`.
   - `runtime` stage from the same `NODE_IMAGE`: `ENV NODE_ENV=production SERVE_STATIC=1 STATIC_ROOT=/app/web/dist PORT=3000`; `COPY --from=build --chown=root:root /out/api /app/api` and `/out/web /app/web`; `USER node`; `EXPOSE 3000`; `WORKDIR /app/api`; `CMD ["sh", "-c", "node dist/db/migrate.js && exec node dist/index.js"]`.
@@ -669,15 +712,15 @@ is expected and harmless.
   - **Files**: apps/api/Dockerfile
   - **Owner**: Implementation agent: backend
   - **Verify**: `docker buildx imagetools inspect node:24-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 >/dev/null && docker buildx build -f apps/api/Dockerfile -t primer:ci --load .` → exit 0
-- [ ] **Action**: Write the repo-root `.dockerignore` (context is the root): #108's list (`**/node_modules`, `**/dist`, `.git`, `.env`, `.env.*` but `!.env.example`, `storage`, `apps/api/storage`, `tmp`, `.claude`, `.superpowers`, `.primer`, `coverage`, `**/.vitest-tmp`, `**/.vite`, `**/*.log`) plus `.github`, `docs`, `plans`. Do **not** ignore `plugins/`, `packages/` or `apps/mcp` — `pnpm install --frozen-lockfile` needs every workspace `package.json` the lockfile's importers list. Add a comment saying so.
+- [x] **Action**: Write the repo-root `.dockerignore` (context is the root): #108's list (`**/node_modules`, `**/dist`, `.git`, `.env`, `.env.*` but `!.env.example`, `storage`, `apps/api/storage`, `tmp`, `.claude`, `.superpowers`, `.primer`, `coverage`, `**/.vitest-tmp`, `**/.vite`, `**/*.log`) plus `.github`, `docs`, `plans`. Do **not** ignore `plugins/`, `packages/` or `apps/mcp` — `pnpm install --frozen-lockfile` needs every workspace `package.json` the lockfile's importers list. Add a comment saying so.
   - **Files**: .dockerignore
   - **Owner**: Implementation agent: backend
   - **Verify**: `docker run --rm primer:ci sh -c 'test ! -e /app/api/src && test ! -e /app/api/.env && test ! -d /app/api/node_modules/.pnpm/tsx* && test -d /app/api/drizzle && test -f /app/api/dist/companion/v1.js && test -f /app/web/dist/index.html && test "$(id -u)" = 1000 && echo OK'` → prints `OK`
-- [ ] **Action**: Boot the image against the local Postgres (set up per "Local test infrastructure", guard included) with the env table from that section (`DATABASE_URL` host `host.docker.internal` on macOS, `172.17.0.1` on Linux) and confirm migrations + listening + SPA.
+- [x] **Action**: Boot the image against the local Postgres (set up per "Local test infrastructure", guard included) with the env table from that section (`DATABASE_URL` host `host.docker.internal` on macOS, `172.17.0.1` on Linux) and confirm migrations + listening + SPA.
   - **Files**: apps/api/Dockerfile
   - **Owner**: Implementation agent: backend
-  - **Verify**: `docker rm -f primer-ci >/dev/null 2>&1; docker run -d --name primer-ci -p 3000:3000 -e PORT=3000 -e DATABASE_URL=postgres://primer:primer@host.docker.internal:5432/primer -e AUTH_MODE=okta -e OKTA_ISSUER=https://okta.invalid -e OKTA_CLIENT_ID=ci -e OKTA_CLIENT_SECRET=ci -e AUTH_BASE_URL=http://localhost:3000 -e STORAGE_ROOT=/tmp/primer-storage -e LOG_LEVEL=info primer:ci && for i in $(seq 1 30); do curl -sf http://localhost:3000/api/health >/dev/null && break; sleep 1; done; curl -sf http://localhost:3000/api/health && curl -sf http://localhost:3000/ | grep -q 'id="root"' && docker logs primer-ci 2>&1 | grep -q 'Migrations applied' && echo BOOT_OK; docker rm -f primer-ci >/dev/null` → prints `{"ok":true}` then `BOOT_OK`
-- [ ] **Action**: Add the changeset for the shippable change (this stage introduces the artifact that gets released): `"@primer/api": patch`, plain-prose first line, user-facing wording, no internal incident narrative. Suggested body: "Ship Primer as a versioned container image. Every release of `@primer/api` now builds a multi-architecture image tagged with the release version; the API serves the built web app from the same image and runs pending database migrations on start."
+  - **Verify**: `docker rm -f primer-ci >/dev/null 2>&1; docker run -d --name primer-ci -p 3000:3000 -e PORT=3000 -e DATABASE_URL=postgres://primer:primer@host.docker.internal:5432/primer -e AUTH_MODE=okta -e OKTA_ISSUER=https://okta.invalid -e OKTA_CLIENT_ID=ci -e OKTA_CLIENT_SECRET=ci -e AUTH_BASE_URL=http://localhost:3000 -e STORAGE_ROOT=/tmp/primer-storage -e LOG_LEVEL=info primer:ci && for i in $(seq 1 30); do curl -sf http://localhost:3000/api/health >/dev/null && break; sleep 1; done; curl -sf http://localhost:3000/api/health && curl -sf http://localhost:3000/share/smoke-probe | grep -q 'id="root"' && docker logs primer-ci 2>&1 | grep -q 'Migrations applied' && echo BOOT_OK; docker rm -f primer-ci >/dev/null` → prints `{"ok":true}` then `BOOT_OK`
+- [x] **Action**: Add the changeset for the shippable change (this stage introduces the artifact that gets released): `"@primer/api": patch`, plain-prose first line, user-facing wording, no internal incident narrative. Suggested body: "Ship Primer as a versioned container image. Every release of `@primer/api` now builds a multi-architecture image tagged with the release version; the API serves the built web app from the same image and runs pending database migrations on start."
   - **Files**: .changeset/team-standard-container-image.md
   - **Owner**: Implementation agent: backend
   - **Verify**: `pnpm exec changeset status` → exit 0 and output lists `@primer/api` under packages to be bumped
@@ -706,12 +749,12 @@ case, report the deviation, and the team lead re-adds it at the S5 rebase.
 - [ ] **Action**: Write `apps/api/container-tests/smoke.test.ts` using global `fetch` against `process.env.TEST_BASE_URL` (throw at module load if unset — this file only ever runs in container mode). Cases, each a separate `it`:
   1. `GET /api/health` → 200, JSON `{ ok: true }` (liveness; the path the action polls via `health_path`);
   2. `GET /api/ready` → 200 `{ ok: true }` (migrations ran and the DB is reachable from inside the container; from #110);
-  3. `GET /` → 200, `text/html`, body contains `id="root"` (SPA served: `SERVE_STATIC=1`, `STATIC_ROOT` valid);
+  3. `GET /share/smoke-probe` → 200, `text/html`, body contains `id="root"` (SPA served: `SERVE_STATIC=1`, `STATIC_ROOT` valid; `/share/*` is the external share plane, public by design, and its pages fall back to `index.html` — amendment 12);
   4. parse the first `/assets/*.js` `src` from that HTML, `GET` it → 200 with a JavaScript `content-type` (Vite build present at the static root);
   5. `GET /companion/v1.js` → 200 (the build script's copy step);
   6. `GET /api/me` with no credentials → 401 (auth gate active under `AUTH_MODE=okta`, `NODE_ENV=production`);
-  7. `GET /auth/mock` → 404 (mock-auth routes are not registered in a production image);
-  8. `GET /nope` → 404 or 302 but never 500 (the SPA fallback does not mask a missing `index.html`; a 500 `SPA build missing` means `STATIC_ROOT` is wrong).
+  7. `GET /auth/mock` → 401 (the auth gate answers before routing; a production image must never answer 2xx/3xx there — amendment 12);
+  8. `GET /` (redirects not followed) → 302 with `location` starting `/auth/login` (pages are behind the Okta gate under `AUTH_MODE=okta` — amendment 12).
   Use Chai-style assertions per team standard (`expect(res.status).equal(200)`, `.property('ok', true)`), no `.to.be` chains.
   - **Files**: apps/api/container-tests/smoke.test.ts
   - **Owner**: Implementation agent: backend
