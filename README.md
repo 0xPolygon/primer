@@ -178,6 +178,23 @@ If the install **succeeds**, the gate is not active — stop and investigate bef
 - `pnpm test` — run Vitest across all workspaces.
 - `pnpm verify` — typecheck + test + `pnpm audit --audit-level=high`.
 
+## Container image and releases
+
+A release is cut by merging the Version Packages PR: that one human merge is the
+gate for the service image, the npm packages and the plugin content together.
+The resulting `@primer/api` tag makes the team's shared pipelines workflows
+build the API image from [`apps/api/Dockerfile`](apps/api/Dockerfile), boot it
+against a real Postgres (running its migrations for real), run an HTTP smoke
+suite against the running container (`apps/api/container-tests/`, selected when
+`TEST_BASE_URL` is set), and only then publish the versioned `primer` image. The trigger is
+[`.github/workflows/docker-release-trigger.yml`](.github/workflows/docker-release-trigger.yml).
+Deployment is not done here: dry-dock and Kargo promote the published image.
+
+To reproduce a release-gate failure locally, run
+`scripts/container-smoke.sh host.docker.internal` (`172.17.0.1` on Linux) with
+a throwaway Postgres already up; it mirrors the CI steps so a red gate can be
+debugged without pushing a tag.
+
 ## Out of scope here (deferred to later sub-projects)
 
 - Companion script body (sub-project 2)

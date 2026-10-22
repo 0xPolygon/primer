@@ -318,6 +318,25 @@ Where an amendment and an earlier section disagree, the amendment wins.
   - The server logs every request at info.
   - Mailgun's "env incomplete" WARN appears on each boot (expected with this
     env).
+- **2026-10-22 — Docker release trigger and docs.** The trigger follows the
+  template's shape and comments, with these deviations:
+  - no `actions/checkout` step: the template needs one only for its sibling
+    start script, and `docker-test` checks out the tag itself;
+  - a Postgres `services:` block with `POSTGRES_DB: primer` (amendment 7);
+  - `image_name: primer` literal;
+  - `health_path: /api/health` (pipelines#85).
+
+  actionlint did not flag `health_path` against pipelines `main`, which lacks
+  it: remote composite-action inputs are not checked. Until #85 merges, the
+  release run logs an unexpected-input warning and the wait polls
+  `/health-check`, the vacuous-pass case recorded in P0.
+
+  The vars-agreement check was falsified: dropping `-e LOG_LEVEL` from a copy
+  of the script gives `MISSING LOG_LEVEL`, exit 1.
+
+  Lead edit: the README said the gate runs "the API test suite", but it runs
+  the container smoke suite. It now says so, and gives the script's DB-host
+  argument and the throwaway-Postgres warning.
 
 ## Research findings the plan is grounded in
 
@@ -819,7 +838,7 @@ and adapted only where Primer differs: a Postgres service container, the boot
 env for the image, the `health_path`, and the literal image name. No shell
 logic in YAML.
 
-- [ ] **Action**: Write `.github/workflows/docker-release-trigger.yml`:
+- [x] **Action**: Write `.github/workflows/docker-release-trigger.yml`:
   - `on.push.tags: ['*@[0-9]*', '*/*@[0-9]*']` (comment as in the template: scoped tags contain `/`; non-Docker packages — `primer-mcp`, `primer-api-types`, `plugin-primer`, `web` — no-op because they have no Dockerfile; never maintain a per-package list) and `workflow_dispatch.inputs.tag` (example `@primer/api@x.y.z`).
   - top-level `permissions: { contents: read, id-token: write }` (superset of `apps-docker-release.yml`'s job permissions).
   - job `test` on `ubuntu-latest` with `services.postgres` identical to `ci.yml`'s block (`postgres:17.9`, user/password `primer`, `POSTGRES_DB: primer`, port `5432:5432`, `pg_isready` health options) and a `job.env:` block holding exactly the table from "Local test infrastructure" with `DATABASE_URL: postgres://primer:primer@172.17.0.1:5432/primer`; one step `id: docker-test` using `0xPolygon/pipelines/.github/actions/docker-test@main` with `tag: ${{ inputs.tag || '' }}`, `health_path: /api/health` (comment: Primer's liveness path; needs the pipelines `health_path` input — P0), and `test_vars: DATABASE_URL AUTH_MODE OKTA_ISSUER OKTA_CLIENT_ID OKTA_CLIENT_SECRET AUTH_BASE_URL STORAGE_ROOT LOG_LEVEL`; outputs `image_tag`, `dockerfile_path`, `checkout_ref`, `should_build` mapped from the step (`image_name` is not mapped — see next bullet). Comment why `172.17.0.1` (the app container reaches the runner-published port through the Docker bridge gateway; `localhost` inside the container is the container) and why Okta placeholders are safe (discovery is lazy; the smoke suite never triggers login).
@@ -827,15 +846,15 @@ logic in YAML.
   - **Files**: .github/workflows/docker-release-trigger.yml
   - **Owner**: Implementation agent: ci
   - **Verify**: `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest -color .github/workflows/docker-release-trigger.yml && grep -cE '^\s+image_name: primer$' .github/workflows/docker-release-trigger.yml && grep -cE '^\s+health_path: /api/health$' .github/workflows/docker-release-trigger.yml` → actionlint exit 0, then `1`, then `1`
-- [ ] **Action**: Prove the trigger's `test_vars` and `job.env` agree and match the local script: every name in `test_vars` is a key under `jobs.test.env`, and `scripts/container-smoke.sh` passes the same names with `-e`.
+- [x] **Action**: Prove the trigger's `test_vars` and `job.env` agree and match the local script: every name in `test_vars` is a key under `jobs.test.env`, and `scripts/container-smoke.sh` passes the same names with `-e`.
   - **Files**: .github/workflows/docker-release-trigger.yml
   - **Owner**: Implementation agent: ci
   - **Verify**: `for v in $(sed -n 's/.*test_vars: *//p' .github/workflows/docker-release-trigger.yml); do grep -qE "^ {6}$v:" .github/workflows/docker-release-trigger.yml && grep -q -- "-e $v" scripts/container-smoke.sh || { echo "MISSING $v"; exit 1; }; done; echo VARS_OK` → prints `VARS_OK`
-- [ ] **Action**: Rewrite the second header paragraph of `release.yml` (the one justifying "does NOT auto-merge the Version Packages PR" by Railway auto-deploying from master). New truth: merging the Version Packages PR is the release — it publishes npm packages, pushes the release tags, and the `@primer/api@X.Y.Z` tag triggers `docker-release-trigger.yml`, which tests and publishes the image Kargo then promotes manually; so the PR stays the deliberate human gate for the service image, the npm packages and the plugin content together. Nothing else in the file changes.
+- [x] **Action**: Rewrite the second header paragraph of `release.yml` (the one justifying "does NOT auto-merge the Version Packages PR" by Railway auto-deploying from master). New truth: merging the Version Packages PR is the release — it publishes npm packages, pushes the release tags, and the `@primer/api@X.Y.Z` tag triggers `docker-release-trigger.yml`, which tests and publishes the image Kargo then promotes manually; so the PR stays the deliberate human gate for the service image, the npm packages and the plugin content together. Nothing else in the file changes.
   - **Files**: .github/workflows/release.yml
   - **Owner**: Implementation agent: ci
   - **Verify**: `grep -c -i railway .github/workflows/release.yml` → `0`; `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest .github/workflows/release.yml` → exit 0
-- [ ] **Action**: Add a short "Container image and releases" section to `README.md` (why-level, no file listings): releases are cut by merging the Version Packages PR; the `@primer/api` tag builds, tests and publishes the versioned `primer` image through the team's shared pipelines workflows; deployment is dry-dock/Kargo; `scripts/container-smoke.sh` reproduces the release gate locally. Link `apps/api/Dockerfile` and `.github/workflows/docker-release-trigger.yml` by path.
+- [x] **Action**: Add a short "Container image and releases" section to `README.md` (why-level, no file listings): releases are cut by merging the Version Packages PR; the `@primer/api` tag builds, tests and publishes the versioned `primer` image through the team's shared pipelines workflows; deployment is dry-dock/Kargo; `scripts/container-smoke.sh` reproduces the release gate locally. Link `apps/api/Dockerfile` and `.github/workflows/docker-release-trigger.yml` by path.
   - **Files**: README.md
   - **Owner**: Implementation agent: ci
   - **Verify**: `grep -n 'container-smoke.sh' README.md` → one match
