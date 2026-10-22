@@ -276,6 +276,48 @@ Where an amendment and an earlier section disagree, the amendment wins.
   Dockerfile comment claimed nothing is written to disk at runtime, which is
   false (filesystem storage writes to `STORAGE_ROOT`); it was reworded and
   the image rebuilt and re-verified.
+- **2026-10-22 — Admiral ruling (President's standing order 2026-09-16: a
+  defect in a PR's own subject is fixed in that PR).** pipelines#85 extended
+  with `5638545`: the readiness wait captures `%{http_code}` and accepts only
+  a 2xx; redirects are not followed and count as not ready. The input
+  description, README and CLAUDE.md say so. Falsified under `bash -e`
+  against the real image on a side port: `/api/health` ready after 2s
+  (through connection-refused during boot), the 302 path times out with
+  `last status 302`, the 401 path with `401`, no container with `000`; all
+  exit 1. shellcheck clean. #85's body rewritten whole and states the
+  behaviour change for existing callers. P0 reworded to match.
+- **2026-10-22 — Container smoke suite and local simulation.** 7 cases (the
+  `/api/ready` fallback); in-process suite unchanged at 71 files. The agent
+  falsified the smoke suite (case `/api/me` flipped to expect 200 → `1 failed
+  | 6 passed`, reverted → `7 passed`). Lead edits after review: the script's
+  readiness poll now matches pipelines#85's 2xx-only rule (it had copied the
+  old `curl -sf`); the header no longer says the DB must be "migrated-to-empty".
+  **Independent `opus` review** (author ≠ judge): SHIP-WITH-FIXES.
+  - Should-fix #1: the `/auth/mock` → 401 case is vacuous for its stated claim.
+    The middleware 401s every unauthenticated `/auth/*` before routing, so it
+    cannot detect mock routes. Options: delete it, or rename it to what it
+    proves. Reviewer and lead agreed: keep it renamed "rejects unauthenticated
+    `/auth/*` with 401", since it exercises a distinct branch of the gate.
+    `NODE_ENV=production` in the Dockerfile is the actual guarantee.
+    Reversible by deleting the case.
+  - Nits taken: a one-line notice when `TEST_BASE_URL` flips vitest into
+    container mode (the variable is also the team's prod-smoke name); the
+    script header now says it mirrors the action as amended by pipelines#85,
+    and that it migrates the target DB; the trap is armed after the build.
+  - Nit not taken (pre-existing): `vitest.config.ts` is outside any tsconfig
+    `include`.
+  **Exerciser** (`sonnet`), against the real image: all 5 items PASS, no
+  defects. Smoke 7/7; migrations then the listening line; non-root uid 1000;
+  `/app` not writable; no devDependencies in `node_modules`; ENV and CMD as
+  planned; a second boot on the same DB migrates as a no-op and comes up
+  healthy; the unauthenticated probe matches amendment 12; ~419 MB.
+  Observations, not fixed here:
+  - `/app/api` also carries `Dockerfile`, `CHANGELOG.md`, `drizzle.config.ts`
+    and `tsconfig.json` (harmless; could join the Dockerfile's `rm -rf`).
+  - Postgres NOTICEs from `migrate.js` print as raw objects, not pino JSON.
+  - The server logs every request at info.
+  - Mailgun's "env incomplete" WARN appears on each boot (expected with this
+    env).
 
 ## Research findings the plan is grounded in
 
@@ -411,9 +453,15 @@ before them; the release workflow is idempotently re-runnable via
 - **P0 — pipelines `health_path` input merged.** Stage S1A opens the draft PR;
   merging it is the humans' call. Until it merges, the Primer trigger's
   `health_path: /api/health` is an unknown input (GitHub logs a warning and
-  ignores it), the action polls `/health-check`, which Primer answers with a 302 to login — and `curl -sf` counts any status below 400 as ready, so the wait passes vacuously (amendment 12) and the `test`
-  job fails after 30 s — no image is published. Recovery after merge:
-  `workflow_dispatch` with the tag.
+  ignores it), and the action on `main` polls `/health-check`, which Primer
+  answers with a 302 to login. The pre-#85 wait counts any status below 400
+  as ready, so it passes vacuously: the smoke suite still runs, but the
+  readiness gate itself proves nothing. pipelines#85 (Admiral ruling
+  2026-10-22, President's same-PR-fix order) both adds `health_path` and makes
+  the wait accept **only a 2xx**. After it merges, a redirecting health path
+  fails the gate, and Primer's `/api/health` (200, public) passes it. Hold
+  the first release until #85 merges; if a tag lands first, re-run via
+  `workflow_dispatch` with the tag after the merge.
 - **P1 — WIF push allowlist.** polygon-infrastructure#2462 merged and applied
   (`0xPolygon/primer` under `shared-prod-oidc-sa.github_repos`). Without it the
   `release` job fails at "Authenticate with GCP via OIDC". Known apply risk
@@ -738,15 +786,15 @@ same tests run in both modes; the deviation is recorded in the config comment.
 Assumes #110 has merged (P4a). **Fallback** if it has not: drop the `/api/ready`
 case, report the deviation, and the team lead re-adds it at the S5 rebase.
 
-- [ ] **Action**: Switch `apps/api/vitest.config.ts` on `process.env.TEST_BASE_URL`: when set, `include: ['container-tests/**/*.test.ts']`, `environment: 'node'`, no `setupFiles`, no `env.DATABASE_URL`; when unset, the existing config unchanged. Comment: why (shared `docker-test` contract, suite shape), and that the container suite lives outside `src/` so the default glob can never pick it up.
+- [x] **Action**: Switch `apps/api/vitest.config.ts` on `process.env.TEST_BASE_URL`: when set, `include: ['container-tests/**/*.test.ts']`, `environment: 'node'`, no `setupFiles`, no `env.DATABASE_URL`; when unset, the existing config unchanged. Comment: why (shared `docker-test` contract, suite shape), and that the container suite lives outside `src/` so the default glob can never pick it up.
   - **Files**: apps/api/vitest.config.ts
   - **Owner**: Implementation agent: backend
   - **Verify**: `pnpm --filter api test 2>&1 | grep -E 'Test Files'` → the same file count as before this stage (72 on `99c994d`; re-count with `git ls-files 'apps/api/src/**/*.test.ts' | grep -vc browser` at execution time) and 0 failed
-- [ ] **Action**: Add `apps/api/container-tests/` to `tsconfig.json` `include` so `pnpm typecheck` covers the smoke suite.
+- [x] **Action**: Add `apps/api/container-tests/` to `tsconfig.json` `include` so `pnpm typecheck` covers the smoke suite.
   - **Files**: apps/api/tsconfig.json
   - **Owner**: Implementation agent: backend
   - **Verify**: `pnpm --filter api typecheck` → exit 0
-- [ ] **Action**: Write `apps/api/container-tests/smoke.test.ts` using global `fetch` against `process.env.TEST_BASE_URL` (throw at module load if unset — this file only ever runs in container mode). Cases, each a separate `it`:
+- [x] **Action**: Write `apps/api/container-tests/smoke.test.ts` using global `fetch` against `process.env.TEST_BASE_URL` (throw at module load if unset — this file only ever runs in container mode). Cases, each a separate `it`:
   1. `GET /api/health` → 200, JSON `{ ok: true }` (liveness; the path the action polls via `health_path`);
   2. `GET /api/ready` → 200 `{ ok: true }` (migrations ran and the DB is reachable from inside the container; from #110);
   3. `GET /share/smoke-probe` → 200, `text/html`, body contains `id="root"` (SPA served: `SERVE_STATIC=1`, `STATIC_ROOT` valid; `/share/*` is the external share plane, public by design, and its pages fall back to `index.html` — amendment 12);
@@ -759,7 +807,7 @@ case, report the deviation, and the team lead re-adds it at the S5 rebase.
   - **Files**: apps/api/container-tests/smoke.test.ts
   - **Owner**: Implementation agent: backend
   - **Verify**: `scripts/container-smoke.sh host.docker.internal` (below) → exits 0 with `Tests  8 passed`
-- [ ] **Action**: Write `scripts/container-smoke.sh <db-host>` — the local simulation of the CI `test` job, step for step as the `docker-test` action does it: build `primer:ci` from `apps/api/Dockerfile` with the repo-root context, `docker run -d --name primer-ci -p 3000:3000 -e PORT=3000` plus the env table from "Local test infrastructure" with `DATABASE_URL` using `<db-host>` (default `host.docker.internal`; use `172.17.0.1` on Linux), poll `/api/health` 30×1s (the `health_path` the trigger passes), run `TEST_BASE_URL=http://localhost:3000 pnpm --filter api test`, and always `docker logs` + stop + rm of `primer-ci` only (trap). `set -euo pipefail`; comment header explains it mirrors `0xPolygon/pipelines/.github/actions/docker-test` so a release-gate failure can be reproduced locally, and that Postgres must already be up (`-p primer-deploy-test`, see the Local test infrastructure section — the script does not start or stop Compose itself).
+- [x] **Action**: Write `scripts/container-smoke.sh <db-host>` — the local simulation of the CI `test` job, step for step as the `docker-test` action does it: build `primer:ci` from `apps/api/Dockerfile` with the repo-root context, `docker run -d --name primer-ci -p 3000:3000 -e PORT=3000` plus the env table from "Local test infrastructure" with `DATABASE_URL` using `<db-host>` (default `host.docker.internal`; use `172.17.0.1` on Linux), poll `/api/health` 30×1s (the `health_path` the trigger passes), run `TEST_BASE_URL=http://localhost:3000 pnpm --filter api test`, and always `docker logs` + stop + rm of `primer-ci` only (trap). `set -euo pipefail`; comment header explains it mirrors `0xPolygon/pipelines/.github/actions/docker-test` so a release-gate failure can be reproduced locally, and that Postgres must already be up (`-p primer-deploy-test`, see the Local test infrastructure section — the script does not start or stop Compose itself).
   - **Files**: scripts/container-smoke.sh
   - **Owner**: Implementation agent: backend
   - **Verify**: `chmod +x scripts/container-smoke.sh && scripts/container-smoke.sh host.docker.internal` → exit 0, prints `Service ready` and the vitest summary with 0 failed
@@ -839,8 +887,8 @@ Monitoring verification stage: omitted — research found no monitored signals
 
 1. **Two repos, one release.** The first Primer release needs the pipelines
    `health_path` PR merged (P0) *and* the WIF allowlist applied (P1); until
-   both, a tag cut by merging #92 produces a red release run (test job fails
-   on `/health-check`, or release job fails on OIDC). Both are recoverable by
+   both, a tag cut by merging #92 either runs a gate whose readiness check proved
+   nothing (before P0, see P0) or a release job that fails on OIDC (before P1). Both are recoverable by
    `workflow_dispatch` with the tag, but holding #92 (Ruling 6b) avoids the
    noise.
 2. **`--ignore-scripts` + esbuild.** Primer builds with esbuild (not tsc).
