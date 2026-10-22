@@ -1,0 +1,136 @@
+name: Release image
+
+# Build and publish Primer's container image (see Dockerfile) to GCP Artifact
+# Registry (polygonlabs-docker-prod). dry-dock's Kargo warehouse for primer
+# watches the sha-* tags; promotion to production is a manual Kargo step, so a
+# merge to master publishes an image but never deploys it on its own.
+#
+# Push auth is keyless Workload Identity Federation: the GitHub OIDC token is
+# exchanged for shared-prod-oidc-sa, which holds
+# artifactregistry.createOnPushWriter on prj-polygonlabs-shared-prod. This repo
+# must be on the WIF push allowlist (github_repos under shared-prod-oidc-sa in
+# polygon-infrastructure/google-cloud/landing-zone/service_accounts.tf) or the
+# auth step fails.
+
+on:
+  push:
+    branches: [master]
+  # Manual builds publish an image from any ref. Every run publishes the
+  # short-SHA tag; the optional `tag` input adds a named tag (guarded against
+  # overwrites below).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional named tag to publish (e.g. pr-123). Leave empty to publish only the short commit SHA."
+        required: false
+        type: string
+      overwrite:
+        description: "Overwrite the named tag if it already exists in the registry."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write # mint the OIDC token for Workload Identity Federation
+
+concurrency:
+  group: release-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: europe-west2-docker.pkg.dev/prj-polygonlabs-shared-prod/polygonlabs-docker-prod/primer
+  # Shared Prod GitHub OIDC pool (prj-polygonlabs-shared-prod, project number 23849419004).
+  WIF_PROVIDER: projects/23849419004/locations/global/workloadIdentityPools/polygonlabs-shared-prod/providers/oidc-shared-prod
+  WIF_SERVICE_ACCOUNT: shared-prod-oidc-sa@prj-polygonlabs-shared-prod.iam.gserviceaccount.com
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # sha-* tags are what Kargo promotes; a manual named tag must not look
+      # like one, or it could be picked up as a release.
+      - name: Reject release-shaped manual tag
+        if: ${{ inputs.tag != '' }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if printf '%s\n' "$TAG" | grep -qE '^sha-[0-9a-f]+$'; then
+            echo "::error::'$TAG' is shaped like a Kargo-promotable sha-* tag; pick another name." >&2
+            exit 1
+          fi
+
+      # No QEMU: the Dockerfile's build stage runs on the native build platform.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Log in to Artifact Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: europe-west2-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Derive image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=sha,format=short
+            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
+
+      # Fail before building if a named tag already exists, so a manual run
+      # cannot silently replace a published image. sha-* tags are per-commit and
+      # exempt. Best-effort check-then-push; registry tag immutability is the
+      # race-free guarantee.
+      - name: Guard against tag overwrite
+        if: ${{ !inputs.overwrite }}
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          conflict=0
+          while IFS= read -r ref; do
+            [ -z "$ref" ] && continue
+            case "$ref" in *:sha-[0-9a-f]*) continue ;; esac
+            if out=$(docker buildx imagetools inspect "$ref" 2>&1); then
+              echo "::error::image tag already exists: $ref"
+              conflict=1
+            elif printf '%s' "$out" | grep -qiE 'not found|manifest unknown|404|does not exist|no such'; then
+              :
+            else
+              # Ambiguous failure (auth, network, rate limit): fail closed.
+              echo "::error::could not verify $ref, refusing to proceed: $out"
+              conflict=1
+            fi
+          done <<< "$TAGS"
+          if [ "$conflict" -ne 0 ]; then
+            echo "Refusing to overwrite. Re-run with overwrite=true to replace existing tag(s)." >&2
+            exit 1
+          fi
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          push: true
+          # dry-dock clusters default to arm64 compute; publish multi-arch.
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
