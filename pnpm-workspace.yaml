@@ -46,20 +46,40 @@ allowBuilds:
 # the lockfile stayed on the vulnerable versions because 3.15.2/4.3.2 were
 # inside the 14-day minimumReleaseAge gate when it was last resolved — hence
 # explicit floors, so a future re-resolve cannot silently drop back.
+#
+# 2026-10-22 sweep (#112): floors raised/added for advisories published since the
+# last run. Every patched version below was published on or before 2026-10-08,
+# so all clear the 14-day gate; minimumReleaseAgeExclude stays empty.
 overrides:
   esbuild: '^0.25.0'
-  undici: '^7.29.0'
+  undici: '^7.29.1'        # jsdom (dev-only) — GHSA-rfgv-xxqx-mfg5, GHSA-w293-vg96-wgc3 + 7 lower (patched 7.29.1)
   'js-yaml@3': '^3.15.2'   # gray-matter (api) — GHSA-52cp-r559-cp3m, !!omap quadratic CPU, GHSA-2883-xcg3-v3hh
   'js-yaml@4': '^4.3.2'    # react-diff-viewer-continued (web) — same advisories, 4.x line
   linkify-it: '^5.0.2'     # markdown-it (api) — GHSA-v245-v573-v5vm mailto: scan-loop DoS
-  fast-uri: '^3.1.6'       # @modelcontextprotocol/sdk>ajv (api) — host confusion + SSRF (patched 3.1.6)
-  ip-address: '^10.3.1'    # @modelcontextprotocol/sdk (api) — leading-zero octet decode
+  fast-uri: '^3.1.8'       # @modelcontextprotocol/sdk>ajv (api) — host confusion (GHSA-qw65-cvwx-89v3, GHSA-58mr-gqgx-xq4g, GHSA-hrr3-gc8f-f4qj; patched 3.1.8)
+  ip-address: '^10.7.1'    # @modelcontextprotocol/sdk>express-rate-limit (api) — parsing/spoofing advisories through 10.7.0 (patched 10.7.1)
   postcss: '^8.5.18'       # sanitize-html (api) — source-map path traversal
   nanoid: '^3.3.18'        # sanitize-html>postcss (api) — generator infinite-loop DoS
-  hono: '^4.12.34'         # @modelcontextprotocol/sdk + @hono/node-server (api) — CORS ReDoS, memo() SSR bleed, lang-mw DoS, proxy-header leak (patched 4.12.34)
+  hono: '^4.13.11'         # @modelcontextprotocol/sdk + @hono/node-server (api) — 5 moderate through 4.13.10 (patched 4.13.11)
   '@hono/node-server@1': '^1.19.15'  # @modelcontextprotocol/sdk (api) — serve-static path traversal; SDK stays on its 1.x line
   body-parser: '^2.3.0'    # @modelcontextprotocol/sdk>express (api) — DoS via invalid limit disabling the size cap (patched 2.3.0)
-  # qs '^6.16.0' (2 moderate: array-limit bypass + isBuffer DoS) is DEFERRED:
-  # 6.16.0 (published 2026-08-29) sits inside the 14-day gate until ~2026-09-12.
+  proxy-addr: '^2.0.8'     # @modelcontextprotocol/sdk>express (api) — CRITICAL GHSA-jqcg-44mw-7w3h, IP spoofing via IPv4-mapped IPv6 trust subnet
+  qs: '^6.16.0'            # @modelcontextprotocol/sdk>express>body-parser (api) — GHSA-4mjr-xmp4-gh2g, GHSA-x5fp-wj9c-mxmx (previously deferred; now clear of the gate)
+  source-map-js: '^1.2.2'  # sanitize-html>postcss (api) — GHSA-68fv-2mgg-jv7q
+  fast-copy: '^4.1.0'      # pino-pretty (api) — GHSA-jggr-w7fw-pc2j
+  vite: '^8.1.6'           # vitest>@vitest/mocker (api, mcp; dev-only) — GHSA-587h-7wmj-h5pm + 5 lower
+# DEFERRED (inside the 14-day gate; revisit on the dates shown):
+#   markdown-it 14.3.3 — GHSA-gfr2-rv44-r23c (high, quadratic link-reference
+#     rendering) and GHSA-vfgh-jcmw-g37q (low). Published 2026-10-16, clears
+#     2026-10-30. apps/api is on 14.3.2 meanwhile (fixes GHSA-r7fv-28h4-cvq7 and
+#     GHSA-253c-mchw-3w2r). Input is markdown uploaded by signed-in users only.
+#   sanitize-html 2.18.1 — GHSA-c9rx-x947-fp3h (moderate, recursion on a
+#     discarded iframe's fallback; a regression in 2.18.0). Clears 2026-10-28.
+#     2.18.0 is still kept: it fixes GHSA-cv27-6wvh-8x7j, GHSA-x3q4-9hxx-gx8m
+#     and GHSA-374f-7chj-9948 in 2.17.7.
+#   @vitest/mocker 4.1.12 — GHSA-qxg6-89mg-rqv8 and GHSA-xp26-3454-mjgp
+#     (Windows-only; dev-only test runner). Clears 2026-10-29.
+# NO FIX PUBLISHED: braces (GHSA-vfj7-8cjw-p6xm) and sprintf-js
+#   (GHSA-hp3w-g68c-fv3c), both dev-only via @changesets/cli.
 strictPeerDependencies: true
 engineStrict: true
