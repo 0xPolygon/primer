@@ -150,6 +150,78 @@ not open questions. No open decisions remain.
    `release.yml` stays bespoke (its header explains why Primer cannot use
    `apps-npm-release.yml`) with only its stale Railway paragraph rewritten.
 
+## Execution amendments (2026-10-22, captain re-verify)
+
+Recorded before the first wave, after re-verifying against `origin/master`
+`99c994d` (unchanged since planning) and pipelines `origin/main` `f59f304`.
+Where an amendment and an earlier section disagree, the amendment wins.
+
+1. **Local Postgres — President's ruling (2026-10-22), supersedes Ruling 5's
+   "report blocked" for one container only.** Port 5432 is held by
+   `issue-98-postgres-1` (another Primer worktree's Compose Postgres). The
+   **team lead** — never a stage agent — may `docker stop issue-98-postgres-1`
+   for the duration of database-using steps, runs this plan's own
+   `-p primer-deploy-test` Compose Postgres, and **must `docker start
+   issue-98-postgres-1` again when done, including on a blocker or abort**.
+   Never remove it, never touch its volume, never stop any other container.
+   Every stop and restart is reported at the boundary where it happens. Any
+   *other* 5432 listener still means BLOCKED (Ruling 5 stands for it).
+2. **Who owns the Compose Postgres.** The team lead provisions and tears down
+   `primer-deploy-test` around each database-using wave (S1B, S2, S4) and
+   restarts `issue-98-postgres-1` between waves. Stage agents never run
+   `docker compose up/down` or `docker stop/start`; their guard becomes:
+   `docker compose -p primer-deploy-test ps --status running postgres` lists
+   the service — otherwise report blocked.
+3. **Dispatch shape.** The session's cwd stays at the workspace root (a guard
+   hook blocks dispatch from below it), so `isolation: "worktree"` would isolate
+   the wrong repo. Every Primer stage is single-agent and sequential, so each
+   Primer stage agent works **directly in the execution worktree**; the one
+   parallel wave (S1A ∥ S1B) is two plain `Agent` dispatches in different repos
+   (S1A in the pipelines worktree the lead creates), so no checkout is ever
+   shared. No `Workflow` compilation, no detach step, and no push-before-wave
+   (nothing reads `origin/issue-104-…`); the branch is first pushed at S5.
+4. **S1A behavioural check moves to the team lead**, run after S1B lands (it
+   needs the Primer image). The S1A agent does the first three items.
+5. **S2 fallback is active.** #110 (`/api/ready`) and #109 are still open
+   drafts. The smoke suite omits case 2 (`/api/ready`); every
+   `Tests  8 passed` in S2/S4 reads `Tests  7 passed`. The case is re-added
+   when the branch is rebased onto a master that contains #110, and the PR
+   body says so.
+6. **In-process test file count is 71** (`git ls-files 'apps/api/src/**/*.test.ts' | grep -vc browser`
+   on `99c994d`), not 72.
+7. **S3 Postgres service.** `ci.yml`'s block uses `POSTGRES_DB: primer_test`,
+   but the image's `DATABASE_URL` targets `/primer`. The trigger's
+   `services.postgres` mirrors `ci.yml` (image, user/password, port, health
+   options) except `POSTGRES_DB: primer` and `--health-cmd "pg_isready -U primer -d primer"`.
+8. **S5 has no rebase in this session.** If `origin/master` has moved by S5, the
+   lead reports to the Admiral and waits; rebase/force-push happen in the
+   Admiral's session. The draft Primer PR is opened by the lead (mission
+   authority). P2 is relayed by the Admiral/humans, not by this session.
+9. **Review choices (verification shape).** S2 gets an independent `opus`
+   review of the vitest mode switch and the smoke suite (the one place a
+   mistake silently changes what `pnpm test` runs). After S2 lands a separate
+   `sonnet` exerciser runs `scripts/container-smoke.sh` against the real image
+   and inspects container logs and image contents against S1B — this also
+   covers S1B, so S1B gets no separate code review.
+10. **Stage-brief template.** Every stage brief carries: the plan blob hash and
+    stage id; `READ FIRST:` the stage section by heading; the declared file set
+    (no edits outside it); the stage's verify commands **quoted verbatim** from
+    this plan (as amended here); the Postgres guard of amendment 2 when the
+    stage needs a DB; no git mutation and no release/versioning commands; the
+    report contract; this escape clause verbatim — *"If any instruction in this
+    brief conflicts with what you find, stop that part and report and record
+    the conflict, with evidence. Do not ship a half-version and do not argue
+    around it."* — and: never reference plan coordinates (S2, P4, …) in code
+    comments, commit subjects or PR text without saying what they are.
+11. **Commit trailer.** Every Primer commit ends with
+    `Claude-Session: https://claude.ai/code/session_01Uhxk1ywKnhbabP9j1z5Vpr`;
+    no Co-Authored-By. The pipelines commit carries no issue ref and no session
+    link (Ruling 2, Commit policy).
+
+### Escape-clause and unplanned-decision log
+
+(Dated entries appended at stage boundaries.)
+
 ## Research findings the plan is grounded in
 
 All paths are `origin/master` of `0xPolygon/primer` (`99c994d`) unless noted.
@@ -472,6 +544,11 @@ Postgres. The vitest config hard-codes `postgres://primer:primer@localhost:5432/
 while `docker-compose.yml` defaults the password to `primer_local_dev`, so start
 Compose with the CI password **on a fresh volume**, under the plan's own
 Compose project name so nothing outside this plan is touched (Ruling 5):
+
+Run by the team lead only (Execution amendments 1–2). If the listener is
+`issue-98-postgres-1`, the lead first runs `docker stop issue-98-postgres-1`
+(President's ruling 2026-10-22) and after the wave `docker compose -p
+primer-deploy-test down -v && docker start issue-98-postgres-1`.
 
 ```bash
 # Guard: port 5432 must be free. If anything is listening, report BLOCKED —
