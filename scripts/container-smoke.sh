@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Usage: scripts/container-smoke.sh <db-host>
-#   <db-host>  host the container reaches Postgres on: host.docker.internal on
-#              Docker Desktop (macOS), 172.17.0.1 on Linux.
+#   <db-host>  host the container reaches Postgres and the GCS emulator on:
+#              host.docker.internal on Docker Desktop (macOS), 172.17.0.1 on Linux.
 #
 # Local simulation of the release gate. It mirrors the docker-test action in
 # 0xPolygon/pipelines step for step, including its 2xx-only readiness wait
 # (added in pipelines#85; older revisions of the action accepted any status
 # below 400): build primer:ci, run primer-ci, poll the health path, run the
 # tests against the container, always dump logs and remove the container. So
-# a release-gate failure reproduces locally.
+# a release-gate failure reproduces locally. Like the gate, it starts
+# fake-gcs-server (container primer-gcs, ephemeral port) and boots the image on
+# the GCS storage backend.
 #
 # Postgres must already be up with a `primer` database reachable as
 # primer:primer; the image migrates that database to this branch's schema on
 # start, so point it only at a throwaway instance. This script never starts or
-# stops Docker Compose, and it only ever removes the primer-ci container it
-# created.
+# stops Docker Compose, and it only ever removes the primer-ci and primer-gcs
+# containers it created.
 set -euo pipefail
 
 DB_HOST="${1:?usage: $0 <db-host>}"
@@ -25,6 +27,7 @@ cleanup() {
   docker logs primer-ci || true
   docker stop primer-ci >/dev/null 2>&1 || true
   docker rm primer-ci >/dev/null 2>&1 || true
+  docker rm -f primer-gcs >/dev/null 2>&1 || true
 }
 
 docker build -f "$ROOT/apps/api/Dockerfile" -t primer:ci "$ROOT"
@@ -35,6 +38,8 @@ docker rm -f primer-ci >/dev/null 2>&1 || true
 # never existed.
 trap cleanup EXIT
 
+GCS_PORT="$("$ROOT/.github/scripts/start-gcs-emulator.sh" primer-ci)"
+
 # Values are placeholders; Okta discovery is lazy and the suite never contacts it.
 export DATABASE_URL="postgres://primer:primer@${DB_HOST}:5432/primer"
 export AUTH_MODE=okta
@@ -42,7 +47,9 @@ export OKTA_ISSUER=https://okta.invalid
 export OKTA_CLIENT_ID=ci
 export OKTA_CLIENT_SECRET=ci
 export AUTH_BASE_URL=http://localhost:3000
-export STORAGE_ROOT=/tmp/primer-storage
+export STORAGE_BACKEND=gcs
+export GCS_BUCKET=primer-ci
+export STORAGE_EMULATOR_HOST="http://${DB_HOST}:${GCS_PORT}"
 export LOG_LEVEL=info
 export PORT=3000
 
@@ -54,7 +61,9 @@ docker run -d --name primer-ci -p 3000:3000 \
   -e OKTA_CLIENT_ID \
   -e OKTA_CLIENT_SECRET \
   -e AUTH_BASE_URL \
-  -e STORAGE_ROOT \
+  -e STORAGE_BACKEND \
+  -e GCS_BUCKET \
+  -e STORAGE_EMULATOR_HOST \
   -e LOG_LEVEL \
   primer:ci
 
@@ -77,4 +86,7 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 cd "$ROOT"
-TEST_BASE_URL=http://localhost:3000 pnpm --filter api test
+# The suite reaches Postgres and the emulator from the host, not the container.
+SMOKE_DATABASE_URL="postgres://primer:primer@localhost:5432/primer" \
+  SMOKE_STORAGE_EMULATOR_HOST="http://localhost:${GCS_PORT}" \
+  TEST_BASE_URL=http://localhost:3000 pnpm --filter api test
