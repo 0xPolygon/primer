@@ -14,11 +14,12 @@ name: Release
 # 0xPolygon/polygon-core-plugins.
 #
 # Unlike polygon-core-plugins, this workflow does NOT auto-merge the Version
-# Packages PR. That PR is the deliberate human release gate: the Railway
-# service auto-deploys from master at feature-merge time, so whoever merges
-# the Version Packages PR can confirm the new API is live first — guaranteeing
-# npm packages and plugin content never reach consumers ahead of the service
-# that serves them.
+# Packages PR. That PR is the deliberate human release gate: merging it is the
+# release. It publishes the npm packages, pushes the release tags, and the
+# `@primer/api@X.Y.Z` tag triggers docker-release-trigger.yml, which tests and
+# publishes the service image that Kargo then promotes manually. One human
+# merge therefore gates the service image, the npm packages and the plugin
+# content together, so none of them reaches consumers ahead of the others.
 
 on:
   push:

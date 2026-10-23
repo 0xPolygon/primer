@@ -165,4 +165,24 @@ describe('storageFromEnv', () => {
   it('rejects an unknown backend', () => {
     expect(() => storageFromEnv({ STORAGE_BACKEND: 's3' })).toThrow(/unknown STORAGE_BACKEND/);
   });
+
+  it('targets STORAGE_EMULATOR_HOST without asking the metadata server for a token', async () => {
+    const f = fakeFetch(() => new Response(null, { status: 200 }));
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(f.fetch);
+    try {
+      const { storage, description } = storageFromEnv({
+        STORAGE_BACKEND: 'gcs',
+        GCS_BUCKET: 'b',
+        STORAGE_EMULATOR_HOST: '172.17.0.1:4443',
+        GCS_API_BASE_URL: 'https://ignored.example',
+      });
+      expect(description).toEqual({ backend: 'gcs', bucket: 'b', emulator: 'http://172.17.0.1:4443' });
+      await storage.put('v1/a.html', new Uint8Array([1]));
+      expect(f.calls.map((c) => c.url)).toEqual([
+        'http://172.17.0.1:4443/upload/storage/v1/b/b/o?uploadType=media&name=v1%2Fa.html',
+      ]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

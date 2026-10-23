@@ -1,0 +1,105 @@
+name: Docker release
+
+on:
+  push:
+    tags:
+      # Match every changeset release tag — scoped tags (`@primer/api@1.2.3`)
+      # contain a `/`, which GitHub's `*` glob does not cross, hence the second
+      # pattern. The docker-test composite resolves the tagged package and skips
+      # anything without a Dockerfile, so the non-Docker packages (primer-mcp,
+      # primer-api-types, plugin-primer, web) no-op by design. Never maintain a
+      # per-package tag list here.
+      - '*@[0-9]*'
+      - '*/*@[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Full changeset tag to build (e.g. @primer/api@x.y.z)'
+        required: true
+        type: string
+
+# Superset of the job-level permissions in apps-docker-release.yml; a narrower
+# trigger makes the called workflow fail with startup_failure.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Postgres runs as a runner service container, published on the runner's
+    # port 5432. The image under test is a sibling container started by the
+    # docker-test action, so it reaches Postgres through the Docker bridge
+    # gateway (172.17.0.1) — `localhost` inside the app container is the
+    # container itself. The database is `primer` (not `primer_test` as in
+    # ci.yml) because that is what the image's DATABASE_URL targets.
+    services:
+      postgres:
+        image: postgres:17.9
+        env:
+          POSTGRES_USER: primer
+          POSTGRES_PASSWORD: primer
+          POSTGRES_DB: primer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U primer -d primer"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://primer:primer@172.17.0.1:5432/primer
+      # Production refuses AUTH_MODE=mock, so the image boots under okta.
+      AUTH_MODE: okta
+      # Okta values are placeholders: OIDC discovery is lazy and the smoke
+      # suite never triggers a login, so nothing contacts the issuer. They are
+      # set only because boot-time env validation requires them.
+      OKTA_ISSUER: https://okta.invalid
+      OKTA_CLIENT_ID: ci
+      OKTA_CLIENT_SECRET: ci
+      # http keeps session cookies non-secure so the suite can use plain HTTP.
+      AUTH_BASE_URL: http://localhost:3000
+      # Production runs on GCS, so the gate does too: the image talks to
+      # fake-gcs-server (started below, published on the runner's 4443) through
+      # the Docker bridge gateway, like Postgres. STORAGE_EMULATOR_HOST also
+      # skips the GKE metadata-server token, which does not exist here.
+      STORAGE_BACKEND: gcs
+      GCS_BUCKET: primer-ci
+      STORAGE_EMULATOR_HOST: http://172.17.0.1:4443
+      LOG_LEVEL: info
+    outputs:
+      image_tag: ${{ steps.docker-test.outputs.image_tag }}
+      dockerfile_path: ${{ steps.docker-test.outputs.dockerfile_path }}
+      checkout_ref: ${{ steps.docker-test.outputs.checkout_ref }}
+      should_build: ${{ steps.docker-test.outputs.should_build }}
+    steps:
+      # Same ref docker-test builds, so the emulator script matches the image.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - name: Start GCS emulator
+        run: .github/scripts/start-gcs-emulator.sh primer-ci 4443
+      - id: docker-test
+        uses: 0xPolygon/pipelines/.github/actions/docker-test@main
+        with:
+          tag: ${{ inputs.tag || '' }}
+          # Primer's liveness path is /api/health, not the default
+          # /health-check. This input is added by 0xPolygon/pipelines#85.
+          health_path: /api/health
+          test_vars: DATABASE_URL AUTH_MODE OKTA_ISSUER OKTA_CLIENT_ID OKTA_CLIENT_SECRET AUTH_BASE_URL STORAGE_BACKEND GCS_BUCKET STORAGE_EMULATOR_HOST LOG_LEVEL
+
+  release:
+    needs: test
+    if: needs.test.outputs.should_build == 'true'
+    uses: 0xPolygon/pipelines/.github/workflows/apps-docker-release.yml@main
+    with:
+      # Literal, not needs.test.outputs.image_name: the action derives `api`
+      # from the `@primer/api` tag, but the Artifact Registry repository and
+      # the dry-dock Kargo warehouse are named `primer`. The package is not
+      # renamed because open PRs already carry `@primer/api` changesets.
+      image_name: primer
+      image_tag: ${{ needs.test.outputs.image_tag }}
+      dockerfile_path: ${{ needs.test.outputs.dockerfile_path }}
+      checkout_ref: ${{ needs.test.outputs.checkout_ref }}
+    secrets:
+      build_params_gh_secret_keys: ${{ secrets.build_params_gh_secret_keys }}
