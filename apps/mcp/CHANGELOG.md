@@ -1,5 +1,11 @@
 # @polygonlabs/primer-mcp
 
+## 1.2.1
+
+### Patch Changes
+
+- [#116](https://github.com/0xPolygon/primer/pull/116) [`f0c5d80`](https://github.com/0xPolygon/primer/commit/f0c5d80959a3fcf78267922bf60e7a75160c5ce0) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Point the Primer plugin and the MCP install instructions at Primer's new home, `https://primer.polygon.tools`. The previous host no longer serves Primer, so the plugin's MCP connection failed until this update. After updating, reconnect and sign in again.
+
 ## 1.2.0
 
 ### Minor Changes
