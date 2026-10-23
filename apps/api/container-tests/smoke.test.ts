@@ -17,6 +17,14 @@ describe('container smoke', () => {
     expect(await res.json()).property('ok', true);
   });
 
+  // Liveness alone stays green when the database is unreachable; readiness is
+  // what proves the image's DATABASE_URL wiring works.
+  it('reports readiness at /api/ready with the database reachable', async () => {
+    const res = await get('/api/ready');
+    expect(res.status).equal(200);
+    expect(await res.json()).property('ok', true);
+  });
+
   it('serves the SPA at the public share path', async () => {
     const res = await get('/share/smoke-probe');
     expect(res.status).equal(200);
