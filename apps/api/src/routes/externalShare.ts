@@ -126,7 +126,7 @@ export function registerExternalShareRoutes(
       c.req.header('user-agent') ?? null,
     );
     // Secure flag: prefer explicit COOKIE_SECURE, else derive from AUTH_BASE_URL.
-    // Request URL cannot be used: production runs plain HTTP behind Railway's TLS
+    // Request URL cannot be used: production runs plain HTTP behind a TLS-terminating
     // proxy, so c.req.url will always show http:// even on an HTTPS deploy.
     const secure =
       process.env.COOKIE_SECURE === 'true' ||

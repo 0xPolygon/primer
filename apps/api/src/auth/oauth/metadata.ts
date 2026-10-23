@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 
 export interface OAuthMetadataOptions {
-  issuer: string; // e.g. https://primer-polygon.up.railway.app
+  issuer: string; // e.g. https://primer.polygon.tools
 }
 
 export function registerOAuthMetadataRoutes(app: Hono, opts: OAuthMetadataOptions): void {

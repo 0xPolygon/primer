@@ -1,6 +1,6 @@
 # LOCAL DEVELOPMENT ONLY.
-# Production Primer runs on Railway with a managed Postgres service whose
-# credentials are auto-generated and injected via DATABASE_URL. The defaults
+# Production Primer runs on GKE against Cloud SQL; its DATABASE_URL comes from
+# Secret Manager. The defaults
 # below exist so `pnpm db:up` just works for a developer on their laptop.
 # Override POSTGRES_PASSWORD via an environment variable if you ever expose
 # this container outside localhost.

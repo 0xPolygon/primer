@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // Walk up from this file looking for a .env. Works whether this script is
 // running from src/ (tsx dev) or apps/api/dist/db/ (compiled). Silently
-// no-ops in production where env vars are injected directly (Railway).
+// no-ops in production where env vars are injected directly.
 function findUpEnv(start: string, maxDepth = 12): string | null {
   let dir = start;
   for (let i = 0; i < maxDepth; i++) {

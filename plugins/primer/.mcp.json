@@ -2,7 +2,7 @@
   "mcpServers": {
     "primer": {
       "type": "http",
-      "url": "https://primer-polygon.up.railway.app/mcp"
+      "url": "https://primer.polygon.tools/mcp"
     }
   }
 }

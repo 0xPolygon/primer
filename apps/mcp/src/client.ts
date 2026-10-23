@@ -40,7 +40,7 @@ export class PrimerApiError extends Error {
 }
 
 export interface PrimerClientOptions {
-  /** Base URL, e.g. `http://localhost:3000` or `https://primer.up.railway.app`.
+  /** Base URL, e.g. `http://localhost:3000` or `https://primer.polygon.tools`.
    *  A trailing slash is stripped during construction. */
   baseUrl: string;
   /** `primer_pat_…` bearer token. */
