@@ -14,7 +14,7 @@ export interface MailgunConfig {
   apiKey: string;
   domain: string; // sending domain, e.g. dashboard.polygon.technology
   fromAddress: string; // e.g. primer@dashboard.polygon.technology
-  appBaseUrl: string; // e.g. https://primer-polygon.up.railway.app
+  appBaseUrl: string; // e.g. https://primer.polygon.tools
   apiBaseUrl?: string; // defaults to https://api.mailgun.net
 }
 

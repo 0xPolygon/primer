@@ -23,7 +23,7 @@ This repo ships a Claude Code plugin (`primer`) that bundles a skill + the [`@po
 
 Then in any Claude Code session: *"publish this to Primer"* triggers the device-flow login (one-time browser approval), creates the document, and returns a stable URL. Subsequent versions and reviewer comments flow through the same skill.
 
-The plugin manifest bakes in the prod `PRIMER_API_URL` (`https://primer-polygon.up.railway.app`) — nothing else to configure. For local development against `localhost:3000`, see `apps/mcp/README.md`.
+The plugin manifest bakes in the prod `PRIMER_API_URL` (`https://primer.polygon.tools`) — nothing else to configure. For local development against `localhost:3000`, see `apps/mcp/README.md`.
 
 ## Quickstart
 

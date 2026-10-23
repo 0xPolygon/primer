@@ -137,8 +137,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   // Production: serve the built SPA. Dev: Vite handles this at :5173, skip.
   if (process.env.SERVE_STATIC === '1') {
     // Default: resolve relative to this source file so the path is correct
-    // regardless of cwd (Railway runs `pnpm --filter @primer/api start` from
-    // either the repo root or the package dir depending on workspace settings).
+    // regardless of cwd (the repo root or the package dir).
     const here = dirname(fileURLToPath(import.meta.url));
     const staticRoot = process.env.STATIC_ROOT ?? resolvePath(here, '../../web/dist');
     // Brand assets are fetched from inside the sandboxed artifact iframe,

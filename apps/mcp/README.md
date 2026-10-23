@@ -21,7 +21,7 @@ The plugin bakes the prod `PRIMER_API_URL` into the MCP server registration, so 
 
 ```
 claude mcp add primer \
-  --env PRIMER_API_URL=https://primer-polygon.up.railway.app \
+  --env PRIMER_API_URL=https://primer.polygon.tools \
   -- npx -y @polygonlabs/primer-mcp@1.0.0
 ```
 
