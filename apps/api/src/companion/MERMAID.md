@@ -7,11 +7,11 @@ commit.
 
 ## Current pin
 
-- **Version:** 11.4.1
-- **File:** `mermaid-v11.4.1.js` (~2.5 MB minified, ~700 KB gzipped)
-- **Source URL:** https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js
-- **SHA-256:** `a43bc1afd446f9c4cc66ac5dd45d02e8d65e26fc5344ec0ef787f88d6ddb6f9e`
-- **Vendored:** 2026-06-22
+- **Version:** 12.3.0
+- **File:** `mermaid-v12.3.0.js` (~5.5 MB minified, ~1.6 MB gzipped)
+- **Source URL:** https://cdn.jsdelivr.net/npm/mermaid@12.3.0/dist/mermaid.min.js
+- **SHA-256:** `336df803d87a38b70a01e736e666c8f7601d2ce42f5e47c8fafe5d721074b9a3`
+- **Vendored:** 2026-11-05
 
 ## Why this specific build
 
@@ -35,7 +35,8 @@ or adding more vendored libraries on the same path.
 
 ## Bumping the version
 
-1. Pick the new version (latest stable v11.x).
+1. Pick the new version (latest stable). Since v12.0.0 the IIFE bundles ELK
+   and uses it as the default flowchart layout; v11 bundles dagre only.
 2. `curl` the new file to `mermaid-v<new-version>.js` in this directory.
 3. Record the new SHA-256 above.
 4. Update `mermaidVersion.ts` and every hard-coded reference in `v1.js`.

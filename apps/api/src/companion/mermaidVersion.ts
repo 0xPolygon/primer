@@ -5,4 +5,4 @@
 // When bumping: update this constant, the literal in v1.js, the filename in
 // `companion/`, and `MERMAID.md`. All in the same commit.
 
-export const MERMAID_VERSION = '11.4.1';
+export const MERMAID_VERSION = '12.3.0';
