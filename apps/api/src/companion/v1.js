@@ -73,7 +73,7 @@
   // Pinned bundle version is duplicated here as a string literal because the
   // companion is plain JS and can't import mermaidVersion.ts. See
   // apps/api/src/companion/mermaidVersion.ts.
-  const MERMAID_BUNDLE_VERSION = '11.4.1';
+  const MERMAID_BUNDLE_VERSION = '12.3.0';
   const MERMAID_BUNDLE_URL = '/companion/mermaid-v' + MERMAID_BUNDLE_VERSION + '.js';
 
   /** @returns {HTMLElement[]} block roots (always <pre>). */
