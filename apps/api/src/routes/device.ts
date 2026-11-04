@@ -193,11 +193,30 @@ export function registerDeviceRoutes(
     const lastPolled = toDate(row.lastPolledAt);
     const intervalMs = row.intervalSeconds * 1000;
     const tooFast = lastPolled !== null && now - lastPolled.getTime() < intervalMs;
-    await db.execute(sql`
+    // The UPDATE is conditional on a live status: a poll that read
+    // status='approved' before a racing poll's mint committed must report the
+    // consumption, not slow_down — slow_down would tell the client to keep
+    // polling a dead grant. Drizzle's driver surfaces the affected count via
+    // different keys; read whichever is present.
+    const throttleUpdate = (await db.execute(sql`
       UPDATE device_authorizations
       SET last_polled_at = now()
-      WHERE id = ${row.id}
-    `);
+      WHERE id = ${row.id} AND status IN ('pending', 'approved')
+    `)) as unknown as { count?: number; rowCount?: number };
+    let throttleAffected = 0;
+    if (throttleUpdate && typeof throttleUpdate === 'object') {
+      const obj = throttleUpdate as Record<string, unknown>;
+      if (typeof obj.count === 'number') throttleAffected = obj.count;
+      else if (typeof obj.rowCount === 'number') throttleAffected = obj.rowCount;
+    }
+    if (throttleAffected === 0) {
+      const fresh = await db.execute(sql`
+        SELECT status FROM device_authorizations WHERE id = ${row.id} LIMIT 1
+      `);
+      const freshStatus = ((fresh as unknown as { status: string }[])[0]?.status) ?? 'consumed';
+      if (freshStatus === 'denied') return c.json({ error: 'access_denied' }, 400);
+      return c.json({ error: 'invalid_grant' }, 400);
+    }
     if (tooFast) return c.json({ error: 'slow_down' }, 400);
 
     if (row.status === 'pending') {
