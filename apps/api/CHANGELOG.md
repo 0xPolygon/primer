@@ -1,5 +1,13 @@
 # @primer/api
 
+## 0.1.3
+
+### Patch Changes
+
+- [#122](https://github.com/0xPolygon/primer/pull/122) [`3badb0c`](https://github.com/0xPolygon/primer/commit/3badb0c7bfd3f6099c71687600019e747b4e1523) Thanks [@ScreamingHawk](https://github.com/ScreamingHawk)! - Clear pnpm audit: bump @modelcontextprotocol/sdk to 1.32.1 (four high advisories), @hono/node-server to the patched 2.x line, raise the body-parser and fast-uri override floors, and refresh in-range transitive pins (proxy-addr, zod, markdown-it, undici, body-parser) out of their vulnerable versions.
+
+- [#121](https://github.com/0xPolygon/primer/pull/121) [`8525424`](https://github.com/0xPolygon/primer/commit/852542420f616ce6de1f83090298143eb246defa) Thanks [@ScreamingHawk](https://github.com/ScreamingHawk)! - Fix a race where a device poll that lost the mint race could get slow_down instead of invalid_grant, telling the client to keep polling a consumed grant.
+
 ## 0.1.2
 
 ### Patch Changes
