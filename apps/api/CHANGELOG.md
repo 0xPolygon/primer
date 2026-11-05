@@ -1,5 +1,11 @@
 # @primer/api
 
+## 0.1.2
+
+### Patch Changes
+
+- [#119](https://github.com/0xPolygon/primer/pull/119) [`c86f7af`](https://github.com/0xPolygon/primer/commit/c86f7af17ed287e564e8466ddcaf74c7dad4d233) Thanks [@ScreamingHawk](https://github.com/ScreamingHawk)! - Bump the vendored mermaid bundle from 11.4.1 to 12.3.0. Since v12.0.0 ELK is bundled and is the default flowchart layout, replacing dagre's wide and flat layouts with crossing edges. Matches what mermaid.live renders with.
+
 ## 0.1.1
 
 ### Patch Changes
