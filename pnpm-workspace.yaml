@@ -12,7 +12,12 @@ minimumReleaseAge: 20160 # 14 days, in minutes
 # only for well-established packages with active security maintenance — the
 # point of the gate is to catch malicious publishes during their first two
 # weeks of life. Each entry needs a one-line justification.
-minimumReleaseAgeExclude: []
+minimumReleaseAgeExclude:
+  # body-parser 2.4.0 (published 2026-10-22, GHSA-27r3-jxmh-p828 trailing-bytes
+  # DoS fix) sits inside the 14-day gate until ~2026-11-05T11:39Z. Express-
+  # family package with active security maintenance; bypassing to clear the
+  # audit-level=high CI gate. Remove this entry once 2.4.0 ages past the gate.
+  - body-parser
 blockExoticSubdeps: true
 # Packages allowed to run postinstall/preinstall scripts.
 # Each entry is reviewed individually. NEVER approve sight-unseen.
@@ -52,13 +57,17 @@ overrides:
   'js-yaml@3': '^3.15.2'   # gray-matter (api) — GHSA-52cp-r559-cp3m, !!omap quadratic CPU, GHSA-2883-xcg3-v3hh
   'js-yaml@4': '^4.3.2'    # react-diff-viewer-continued (web) — same advisories, 4.x line
   linkify-it: '^5.0.2'     # markdown-it (api) — GHSA-v245-v573-v5vm mailto: scan-loop DoS
-  fast-uri: '^3.1.6'       # @modelcontextprotocol/sdk>ajv (api) — host confusion + SSRF (patched 3.1.6)
+  fast-uri: '^3.1.7'       # @modelcontextprotocol/sdk>ajv (api) — host confusion + SSRF (patched 3.1.6); authority injection via unvalidated port (patched 3.1.7)
   ip-address: '^10.3.1'    # @modelcontextprotocol/sdk (api) — leading-zero octet decode
   postcss: '^8.5.18'       # sanitize-html (api) — source-map path traversal
   nanoid: '^3.3.18'        # sanitize-html>postcss (api) — generator infinite-loop DoS
   hono: '^4.12.34'         # @modelcontextprotocol/sdk + @hono/node-server (api) — CORS ReDoS, memo() SSR bleed, lang-mw DoS, proxy-header leak (patched 4.12.34)
-  '@hono/node-server@1': '^1.19.15'  # @modelcontextprotocol/sdk (api) — serve-static path traversal; SDK stays on its 1.x line
-  body-parser: '^2.3.0'    # @modelcontextprotocol/sdk>express (api) — DoS via invalid limit disabling the size cap (patched 2.3.0)
+  # @modelcontextprotocol/sdk>express (api) — serveStatic double-decodes the
+  # request path (GHSA-rmxm-3fg6-px4f), no patched 1.x exists; the floor is
+  # 2.1.3. The SDK accepts ^2.0.5, so force the whole tree onto the patched
+  # 2.x line instead of keeping a vulnerable 1.x copy alive.
+  '@hono/node-server': '^2.1.3'
+  body-parser: '^2.4.0'    # @modelcontextprotocol/sdk>express (api) — DoS via invalid limit disabling the size cap (patched 2.3.0); DoS via trailing bytes after a compressed request, GHSA-27r3-jxmh-p828 (patched 2.4.0)
   # qs '^6.16.0' (2 moderate: array-limit bypass + isBuffer DoS) is DEFERRED:
   # 6.16.0 (published 2026-08-29) sits inside the 14-day gate until ~2026-09-12.
 strictPeerDependencies: true
