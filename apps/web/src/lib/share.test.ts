@@ -30,12 +30,22 @@ describe('formatSharedWith', () => {
 });
 
 describe('roleOptions', () => {
-  it('under private visibility, both roles are enabled', () => {
+  it('under private visibility, all three roles are enabled in ladder order', () => {
     const opts = roleOptions('private');
-    expect(opts).toEqual([
-      { value: 'commenter', label: 'Commenter', disabled: false },
-      { value: 'editor', label: 'Editor', disabled: false },
-    ]);
+    expect(opts.map((o) => o.value)).toEqual(['commenter', 'responder', 'editor']);
+    expect(opts.every((o) => !o.disabled)).toBe(true);
+  });
+
+  it('under org visibility, roles are listed in ladder order', () => {
+    expect(roleOptions('org').map((o) => o.value)).toEqual(['commenter', 'responder', 'editor']);
+  });
+
+  it('responder is enabled under both visibilities and carries a tooltip', () => {
+    for (const visibility of ['org', 'private'] as const) {
+      const responder = roleOptions(visibility).find((o) => o.value === 'responder');
+      expect(responder?.disabled).toBe(false);
+      expect(responder?.tooltip).toContain('respond');
+    }
   });
 
   it('under org visibility, commenter is disabled with a tooltip', () => {

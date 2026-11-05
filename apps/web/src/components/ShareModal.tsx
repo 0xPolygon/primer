@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Collaborator } from '@polygonlabs/primer-api-types';
+import type { Collaborator, CollaboratorRole } from '@polygonlabs/primer-api-types';
 import { useDocument } from '../queries/documents.ts';
 import {
   useCollaborators,
@@ -14,8 +14,6 @@ import { copyText } from '../lib/clipboardCopy.ts';
 import { internalDocUrl } from '../lib/internalDocUrl.ts';
 import { ExternalSharePanel } from './ExternalSharePanel.tsx';
 import { CopyIcon, CheckIcon } from './icons.tsx';
-
-type CollaboratorRole = 'commenter' | 'editor';
 
 interface Props {
   open: boolean;
@@ -245,7 +243,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
             </div>
             <p className="mt-2 text-xs text-neutral-500">
               {visibility === 'org'
-                ? 'Anyone at Polygon can read and comment. Only owner and editors can make changes.'
+                ? 'Anyone at Polygon can read and comment. Responders can also respond through the document. Only owner and editors can make changes.'
                 : 'Only you and the collaborators listed below can access this document.'}
             </p>
           </section>

@@ -7,8 +7,9 @@ describe('canEditDoc', () => {
     expect(canEditDoc('editor')).toBe(true);
   });
 
-  it('denies commenter and stranger', () => {
+  it('denies commenter, responder and stranger', () => {
     expect(canEditDoc('commenter')).toBe(false);
+    expect(canEditDoc('responder')).toBe(false);
     expect(canEditDoc('stranger')).toBe(false);
   });
 

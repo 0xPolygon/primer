@@ -1,3 +1,5 @@
+import type { CollaboratorRole } from '@polygonlabs/primer-api-types';
+
 export function formatSharedWith(
   collabs: Array<{ userId: string; displayName: string }>,
   meId: string,
@@ -14,7 +16,7 @@ export function formatSharedWith(
 }
 
 export interface RoleOption {
-  value: 'commenter' | 'editor';
+  value: CollaboratorRole;
   label: string;
   disabled: boolean;
   tooltip?: string;
@@ -33,6 +35,13 @@ export function roleOptions(visibility: 'org' | 'private'): RoleOption[] {
               'Commenter is only meaningful under private visibility — everyone in the org can already read and comment on public docs.',
           }
         : {}),
+    },
+    {
+      value: 'responder',
+      label: 'Responder',
+      disabled: false,
+      tooltip:
+        "Can read, comment and respond through the document's interactive features. Cannot publish versions or rename.",
     },
     { value: 'editor', label: 'Editor', disabled: false },
   ];
