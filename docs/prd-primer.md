@@ -31,7 +31,7 @@ This tool fills that gap with a deliberately narrow scope: ingest self-contained
 - No collaborative editing of the HTML itself. Artifacts are immutable per version.
 - No real-time presence, live cursors, or WebSocket sync. Comments refresh via short-interval polling.
 - No discovery beyond "my documents" and "recently viewed or commented on." No global feed, no search, no folders, no tags.
-- No public access outside Polygon. No granular per-document permissions — everything is visible to every authenticated Polygon employee.
+- No public access outside Polygon. Permissions: each document has an owner; collaborator roles are `commenter < responder < editor`; visibility is `org` or `private`. Roles change only through the collaborators API by the owner; events never grant or change permissions.
 - No mobile-optimized UI. Desktop only.
 - No API or programmatic ingestion. Upload via web UI only. (A Claude skill that publishes directly is a likely follow-up, but not in v1.)
 - No version diffing or "what changed" view. All versions are independently browsable.
@@ -304,9 +304,17 @@ the threat model:
   parent page remains the sole authed principal: it re-validates the batch
   and POSTs it; the server validates again and stamps the authenticated user
   as the row author — attribution can never be asserted from inside the
-  iframe. Writes require the caller to be a document collaborator (owner
-  included); external-share and public viewers cannot authenticate to these
-  routes at all.
+  iframe. Writes require the caller to be the document owner, an editor or a
+  responder; commenters are read + comment only. External-share and public
+  viewers cannot authenticate to these routes at all.
+
+- **Events never grant or change permissions.** The write bar is read from
+  the collaborator row, never from a payload; a page cannot widen its own or
+  any viewer's access by submitting an event, because events are written by
+  code running in every viewer's browser. The first-submission prompt
+  (`apps/web/src/lib/eventsGrant.ts`) is the viewer's consent for the page
+  to submit as them, not a permission, and cannot let anyone without the
+  role write.
 
 - **Element-level intent — RESOLVED by the first-submission grant (issue
   #78 security requirement 6).** The consent gate's guarantee is per
@@ -466,7 +474,7 @@ The six open questions originally listed here were resolved in the refinement pa
 | 3 | Comment edit window | Unlimited with "edited" indicator. | Reply, resolve, reopen |
 | 4 | Canvas elements | Comment on the canvas as a whole; no in-canvas regions. | Known anchoring limitations |
 | 5 | Comment sync model | 10s polling, foreground-only, conditional requests. | Notifications |
-| 6 | Version permissions | Uploader-only for add-version, delete, and metadata edits. | Authentication & Access |
+| 6 | Version permissions | Owner and editors add versions and edit metadata; owner alone deletes, changes visibility and manages people; responders and editors write events; permissions never change through events. | Authentication & Access |
 
 Additional gaps surfaced during refinement and resolved inline:
 

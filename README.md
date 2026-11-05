@@ -105,12 +105,14 @@ clients) carry no scopes yet and act with the user's full permissions.
 Minting and device approval always
 require a browser session, whatever the token.
 
-**Collaborators and the write bar.** Only the document owner and its
-collaborators may write events. To let Mock Reviewer submit on a document
-Mock User (or the service account) owns, add them as a collaborator — via
-the Share UI, or `POST /api/documents/:id/collaborators` with
-`{"userId":"mock-user-2","role":"editor"}` (resolve ids from emails with
-`GET /api/users/lookup?email=…`).
+**Collaborators and the write bar.** Only the document owner,
+editors and responders may write events; commenters can read and comment
+only. To let Mock Reviewer submit on a document Mock User (or the service
+account) owns, add them as a responder — via the Share UI, or
+`POST /api/documents/:id/collaborators` with
+`{"userId":"mock-user-2","role":"responder"}` (resolve ids from emails with
+`GET /api/users/lookup?email=…`). Events never grant or change permissions;
+roles change only through the collaborators API, by the document owner.
 
 **Artifact-originated submissions: where the gates sit.** When an artifact
 dispatches `primer:submit-events`, two layers run before any network call:

@@ -1,5 +1,6 @@
 import type {
   AddVersionResponse,
+  CollaboratorRole,
   DocumentDetailResponse,
   EventInput,
   EventsListResponse,
@@ -238,7 +239,7 @@ export class PrimerClient {
   }
 
   /** Adds a user as a document collaborator (owner-only operation). */
-  addCollaborator(documentId: string, userId: string, role: 'commenter' | 'editor'): Promise<void> {
+  addCollaborator(documentId: string, userId: string, role: CollaboratorRole): Promise<void> {
     return this.request<void>({
       method: 'POST',
       path: `/api/documents/${encodeURIComponent(documentId)}/collaborators`,

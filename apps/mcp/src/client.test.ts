@@ -456,9 +456,9 @@ describe('PrimerClient.getEvents / sendEvents (issue #78)', () => {
   it('addCollaborator POSTs the userId and role as JSON', async () => {
     const mockFetch = vi.fn(async () => jsonResponse({}, 201));
     const client = makeClient(mockFetch as unknown as typeof fetch);
-    await client.addCollaborator('doc-1', 'okta-sub-1', 'editor');
+    await client.addCollaborator('doc-1', 'okta-sub-1', 'responder');
     const [url, init] = firstCall(mockFetch);
     expect(url).toBe('http://localhost:3000/api/documents/doc-1/collaborators');
-    expect(JSON.parse(init.body as string)).toEqual({ userId: 'okta-sub-1', role: 'editor' });
+    expect(JSON.parse(init.body as string)).toEqual({ userId: 'okta-sub-1', role: 'responder' });
   });
 });
