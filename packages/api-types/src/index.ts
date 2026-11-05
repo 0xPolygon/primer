@@ -571,7 +571,7 @@ export function isEventAudience(v: unknown): v is EventAudience {
 }
 
 /** `namespace` is hierarchical: `/`-separated lowercase kebab segments
- *  (`padd`, `padd/telemetry`). Namespace MEANING is the consumers' domain —
+ *  (`example`, `example/telemetry`). Namespace MEANING is the consumers' domain —
  *  the server validates shape only and never infers behavior from it. */
 export const EVENT_NAMESPACE_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
 /** `type` is a single name within a namespace (`export`, `verdict`). */

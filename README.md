@@ -135,12 +135,12 @@ either side — from the artifact's own UI, or via curl:
 ```bash
 curl -s -X POST http://localhost:3000/api/documents/<docId>/events \
   -H "Authorization: Bearer $PRIMER_TOKEN" -H "content-type: application/json" \
-  -d '{"events":[{"namespace":"padd","type":"export","audience":"artifact","payload":{"hello":"relay"}}]}'
+  -d '{"events":[{"namespace":"example","type":"export","audience":"artifact","payload":{"hello":"relay"}}]}'
 ```
 
 Both browsers' artifacts receive the row live (SSE → companion relay →
 `primer:events`, no reload), and `GET
-/api/documents/<docId>/events?namespace=padd/*` shows the stored rows.
+/api/documents/<docId>/events?namespace=example/*` shows the stored rows.
 Watching the raw stream directly also works:
 `curl -N -H "Authorization: Bearer $PRIMER_TOKEN"
 http://localhost:3000/api/documents/<docId>/events/stream`.

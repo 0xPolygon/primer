@@ -4,7 +4,7 @@
 // document: a machine channel PARALLEL to comments, never touching them.
 // Comments are human discussion anchored to selections; events are machine
 // payloads an interactive artifact (or any authenticated tooling) hands back
-// to the workflow that published it. First consumer: PADD review packets.
+// to the workflow that published it.
 //
 // Write path: the artifact CANNOT call this API itself (sandbox +
 // connect-src 'none' by threat model — see docs/prd-primer.md). It

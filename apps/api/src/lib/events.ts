@@ -209,7 +209,7 @@ export function validateEventBatch(raw: unknown): BatchValidation {
     ) {
       return {
         ok: false,
-        message: `events[${i}].namespace must be /-separated lowercase kebab segments (e.g. "padd", "padd/telemetry")`,
+        message: `events[${i}].namespace must be /-separated lowercase kebab segments (e.g. "example", "example/telemetry")`,
       };
     }
     if (
@@ -362,7 +362,7 @@ export function validateEventFilters(query: {
   if (query.namespace !== undefined) {
     const base = query.namespace.endsWith('/*') ? query.namespace.slice(0, -2) : query.namespace;
     if (base.length === 0 || base.length > MAX_EVENT_NAMESPACE_LENGTH || !EVENT_NAMESPACE_RE.test(base)) {
-      return { ok: false, message: 'namespace must be exact (e.g. "padd") or a subtree glob (e.g. "padd/*")' };
+      return { ok: false, message: 'namespace must be exact (e.g. "example") or a subtree glob (e.g. "example/*")' };
     }
     filters.namespace = query.namespace;
   }
