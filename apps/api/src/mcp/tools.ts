@@ -1005,7 +1005,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const g = await gateEventAccess(documentId, user.id);
       if (g.status === 'not_found') return err('not_found', 'document not found');
       if (!g.mayWrite) {
-        return err('forbidden', 'only document collaborators (owner included) may write events');
+        return err('forbidden', 'only the document owner, editors and responders may write events');
       }
 
       const validated = validateEventBatch({ events: args.events });
@@ -1225,7 +1225,7 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_send_events: {
     description:
-      'Write structured document events as ONE atomic batch (a single event is a batch of one): all-or-nothing, array order, strictly increasing server-assigned ids; returns the created rows (their ids are your dedupe keys; assert the echoed audience). Each event needs namespace (e.g. "padd"), type (e.g. "reconciliation"), a JSON payload (≤256KB serialized), and a REQUIRED audience: "author" (you + doc owner), "collaborators", or "artifact" (also relayed into the sandboxed artifact — the injection boundary). Writer must be a document collaborator (owner included). NOTE: review verdicts and exports (e.g. PADD `padd/verdict`, `padd/export`) must come from the human\'s own authenticated principal via the artifact\'s consent-gated path — an agent session must never post them on a human\'s behalf, because server-attributed authorship is the only trust anchor.',
+      'Write structured document events as ONE atomic batch (a single event is a batch of one): all-or-nothing, array order, strictly increasing server-assigned ids; returns the created rows (their ids are your dedupe keys; assert the echoed audience). Each event needs namespace (e.g. "padd"), type (e.g. "reconciliation"), a JSON payload (≤256KB serialized), and a REQUIRED audience: "author" (you + doc owner), "collaborators", or "artifact" (also relayed into the sandboxed artifact — the injection boundary). Only the document owner, editors and responders may write events. NOTE: review verdicts and exports (e.g. PADD `padd/verdict`, `padd/export`) must come from the human\'s own authenticated principal via the artifact\'s consent-gated path — an agent session must never post them on a human\'s behalf, because server-attributed authorship is the only trust anchor.',
     inputSchema: {
       documentId: z.string(),
       events: z

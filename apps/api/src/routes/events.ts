@@ -98,8 +98,9 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     const g = await gate(documentId, user.id);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     // Tighter write principal (issue #78 security requirement 2): reading is
-    // not enough — only collaborators (owner included) may write. An org
-    // reader who is not a collaborator can see the doc, so 403 (not 404).
+    // not enough — only the owner, editors and responders may write. A
+    // commenter, or an org reader who is not a collaborator, can see the doc, so
+    // 403 (not 404).
     if (!g.mayWrite) return c.json({ error: 'forbidden' }, 403);
 
     let raw: unknown;

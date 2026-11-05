@@ -334,6 +334,20 @@ describe('MailgunNotifier.notifyCollaboratorAdded', () => {
     expect(form.html).toContain('added you as a <strong>commenter</strong>');
   });
 
+  it('renders responder role text', async () => {
+    const n = new MailgunNotifier({
+      apiKey: 'sk-test',
+      domain: 'dashboard.polygon.technology',
+      fromAddress: 'primer@dashboard.polygon.technology',
+      appBaseUrl: 'https://primer.example',
+    });
+    await n.notifyCollaboratorAdded(collabArgs({ role: 'responder' }));
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const form = parseForm(String(init.body));
+    expect(form.text).toContain('added you as a responder');
+    expect(form.html).toContain('added you as a <strong>responder</strong>');
+  });
+
   it('suppresses self-add (no HTTP request)', async () => {
     const n = new MailgunNotifier({
       apiKey: 'sk-test',

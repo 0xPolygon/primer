@@ -747,6 +747,68 @@ describe('doc access under visibility + collaborators', () => {
     });
   });
 
+  it('GET private doc as responder returns 200 with myRole responder', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.update(documents)
+        .set({ visibility: 'private' })
+        .where(eq(documents.id, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'responder',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(
+        `/api/documents/${upload.documentId}`,
+        { headers: asUser('mock-user-2') },
+      );
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { myRole?: string }).myRole).toBe('responder');
+    });
+  });
+
+  it('POST version as responder collab returns 403', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'responder',
+        grantedBy: 'mock-user-1',
+      });
+      const fd = new FormData();
+      fd.append('file', new Blob(['<html><body></body></html>'], { type: 'text/html' }), 'v.html');
+      const res = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: asUser('mock-user-2'),
+        body: fd,
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  it('PATCH title as responder returns 403', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'responder',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(`/api/documents/${upload.documentId}`, {
+        method: 'PATCH',
+        headers: { ...asUser('mock-user-2'), 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Renamed' }),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
   it('DELETE as editor collab returns 403 (manage is owner-only)', async () => {
     await withMultiUserApp(async (app) => {
       const upload = await uploadFixture(app);

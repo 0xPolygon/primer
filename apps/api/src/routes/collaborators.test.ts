@@ -211,6 +211,58 @@ describe('POST /api/documents/:docId/collaborators', () => {
     });
   });
 
+  it('owner adds responder under org: 201, notifier called with role responder', async () => {
+    await withMultiUserApp(async (app, notifier) => {
+      const upload = await uploadFixture(app);
+      const res = await app.request(
+        `/api/documents/${upload.documentId}/collaborators`,
+        {
+          method: 'POST',
+          headers: asUserJson('mock-user-1'),
+          body: JSON.stringify({ userId: 'mock-user-2', role: 'responder' }),
+        },
+      );
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as Collaborator).role).toBe('responder');
+      expect(notifier.collabCalls).toHaveLength(1);
+      expect(notifier.collabCalls[0]?.role).toBe('responder');
+    });
+  });
+
+  it('owner adds responder under private: 201', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      const res = await app.request(
+        `/api/documents/${upload.documentId}/collaborators`,
+        {
+          method: 'POST',
+          headers: asUserJson('mock-user-1'),
+          body: JSON.stringify({ userId: 'mock-user-2', role: 'responder' }),
+        },
+      );
+      expect(res.status).toBe(201);
+    });
+  });
+
+  it('invalid role value manager: 400 invalid_body naming commenter|responder|editor', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const res = await app.request(
+        `/api/documents/${upload.documentId}/collaborators`,
+        {
+          method: 'POST',
+          headers: asUserJson('mock-user-1'),
+          body: JSON.stringify({ userId: 'mock-user-2', role: 'manager' }),
+        },
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; message: string };
+      expect(body.error).toBe('invalid_body');
+      expect(body.message).toContain('commenter|responder|editor');
+    });
+  });
+
   it('collaborator_exists (409) on duplicate add', async () => {
     await withMultiUserApp(async (app) => {
       const upload = await uploadFixture(app);
@@ -303,6 +355,47 @@ describe('PATCH /api/documents/:docId/collaborators/:userId', () => {
       await db.insert(documentCollaborators).values({
         id: uuidv7(), documentId: upload.documentId, userId: 'mock-user-2',
         role: 'editor', grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(
+        `/api/documents/${upload.documentId}/collaborators/mock-user-2`,
+        {
+          method: 'PATCH',
+          headers: asUserJson('mock-user-1'),
+          body: JSON.stringify({ role: 'commenter' }),
+        },
+      );
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('invalid_role_for_visibility');
+    });
+  });
+
+  it('PATCH commenter to responder under org: 200 (the ghost-row upgrade path)', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      // A commenter row left over from a private→org visibility flip.
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(), documentId: upload.documentId, userId: 'mock-user-2',
+        role: 'commenter', grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(
+        `/api/documents/${upload.documentId}/collaborators/mock-user-2`,
+        {
+          method: 'PATCH',
+          headers: asUserJson('mock-user-1'),
+          body: JSON.stringify({ role: 'responder' }),
+        },
+      );
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as Collaborator).role).toBe('responder');
+    });
+  });
+
+  it('PATCH responder to commenter under org: 400 invalid_role_for_visibility', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(), documentId: upload.documentId, userId: 'mock-user-2',
+        role: 'responder', grantedBy: 'mock-user-1',
       });
       const res = await app.request(
         `/api/documents/${upload.documentId}/collaborators/mock-user-2`,

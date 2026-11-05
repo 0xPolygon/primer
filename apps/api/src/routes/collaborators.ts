@@ -2,11 +2,12 @@ import type { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
-import type {
-  AddCollaboratorRequest,
-  Collaborator,
-  CollaboratorsListResponse,
-  UpdateCollaboratorRequest,
+import {
+  isCollaboratorRole,
+  type AddCollaboratorRequest,
+  type Collaborator,
+  type CollaboratorsListResponse,
+  type UpdateCollaboratorRequest,
 } from '@polygonlabs/primer-api-types';
 import { documents, documentCollaborators, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
@@ -53,10 +54,6 @@ async function loadDocForManage(
     status: 'ok',
     doc: { id: row.id, title: row.title, uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
   };
-}
-
-function isRole(x: unknown): x is CollaboratorRole {
-  return x === 'commenter' || x === 'editor';
 }
 
 export function registerCollaboratorRoutes(
@@ -108,13 +105,15 @@ export function registerCollaboratorRoutes(
     } catch {
       return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
     }
-    if (typeof payload.userId !== 'string' || payload.userId.length === 0 || !isRole(payload.role)) {
-      return c.json({ error: 'invalid_body', message: 'userId (string) and role (commenter|editor) are required' }, 400);
+    if (typeof payload.userId !== 'string' || payload.userId.length === 0 || !isCollaboratorRole(payload.role)) {
+      return c.json({ error: 'invalid_body', message: 'userId (string) and role (commenter|responder|editor) are required' }, 400);
     }
     const { userId: targetUserId, role } = payload;
     if (targetUserId === gate.doc.uploaderId) {
       return c.json({ error: 'owner_not_collaborator', message: 'Owner cannot be added as their own collaborator.' }, 400);
     }
+    // Responder is allowed on org documents because it grants what org visibility
+    // does not (event-write); commenter is not because it grants nothing there.
     if (gate.doc.visibility === 'org' && role === 'commenter') {
       return c.json(
         { error: 'invalid_role_for_visibility', message: 'Commenter role is only meaningful under private visibility.' },
@@ -181,8 +180,8 @@ export function registerCollaboratorRoutes(
     } catch {
       return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
     }
-    if (!isRole(payload.role)) {
-      return c.json({ error: 'invalid_body', message: 'role (commenter|editor) is required' }, 400);
+    if (!isCollaboratorRole(payload.role)) {
+      return c.json({ error: 'invalid_body', message: 'role (commenter|responder|editor) is required' }, 400);
     }
     const { role } = payload;
     if (gate.doc.visibility === 'org' && role === 'commenter') {

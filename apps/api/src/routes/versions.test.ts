@@ -174,6 +174,26 @@ describe('PATCH /api/versions/:versionId under visibility + collab', () => {
     });
   });
 
+  it('responder collab cannot edit version note', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db.select({ id: versions.id }).from(versions).where(eq(versions.documentId, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'responder',
+        grantedBy: 'mock-user-1',
+      });
+      const res = await app.request(`/api/versions/${v.id}`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({ versionNote: 'nope' }),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
   it('commenter collab cannot edit version note', async () => {
     await withMultiUserApp(async (app) => {
       const upload = await uploadFixture(app);

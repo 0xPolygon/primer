@@ -16,6 +16,7 @@ import { db } from '../db/client.ts';
 import { documents, documentCollaborators, users, versions } from '../db/schema.ts';
 import type { Notifier } from '../notifications/notifier.ts';
 import type {
+  CollaboratorRole,
   EventRowDTO,
   EventsListResponse,
   SendEventsResponse,
@@ -60,7 +61,7 @@ async function withApp<T>(
   }
 }
 
-async function addCollaborator(docId: string, userId: string, role: 'commenter' | 'editor' = 'editor') {
+async function addCollaborator(docId: string, userId: string, role: CollaboratorRole = 'editor') {
   await db.insert(documentCollaborators).values({
     id: uuidv7(),
     documentId: docId,
@@ -262,6 +263,26 @@ describe('POST /api/documents/:id/events — batch write', () => {
     });
   });
 
+  it('responders write on both visibilities; commenters get 403 even as an org ghost row', async () => {
+    await withApp(async (app) => {
+      const { documentId } = await uploadFixture(app);
+      await addCollaborator(documentId, COLLAB, 'responder');
+      await addCollaborator(documentId, OUTSIDER, 'commenter');
+      // Org doc: the responder writes; the commenter row is a ghost (commenter
+      // is refused under org via the API) and still cannot write.
+      const orgResponder = await postEvents(app, documentId, COLLAB, [ev()]);
+      expect(orgResponder.status).toBe(201);
+      expect(orgResponder.body.events[0].authorId).toBe(COLLAB);
+      expect((await postEvents(app, documentId, OUTSIDER, [ev()])).status).toBe(403);
+      // Private doc: same split.
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+      const privateResponder = await postEvents(app, documentId, COLLAB, [ev()]);
+      expect(privateResponder.status).toBe(201);
+      expect(privateResponder.body.events[0].authorId).toBe(COLLAB);
+      expect((await postEvents(app, documentId, OUTSIDER, [ev()])).status).toBe(403);
+    });
+  });
+
   it('unauthenticated principals (incl. external-share viewers) are rejected with 401', async () => {
     // External viewers are NOT users: their primer_ext_sid session plane
     // stops at /api/share/* and never resolves on /api/documents routes.
@@ -336,6 +357,26 @@ describe('GET /api/documents/:id/events — audience scoping', () => {
       // the rows their identity may read is the empty set here.
       const outsiderList = await listAll(app, documentId, OUTSIDER);
       expect(outsiderList.events).toHaveLength(0);
+    });
+  });
+
+  it('commenter and responder both read collaborators- and artifact-audience rows, never another user\'s author rows', async () => {
+    await withApp(async (app) => {
+      const { documentId } = await uploadFixture(app);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+      // Pages render from this data, so a commenter must keep reading it even
+      // though it can no longer write events.
+      await addCollaborator(documentId, COLLAB, 'commenter');
+      await addCollaborator(documentId, OUTSIDER, 'responder');
+      await postEvents(app, documentId, OWNER, [
+        ev({ type: 'export', audience: 'artifact' }),
+        ev({ type: 'verdict', audience: 'collaborators' }),
+        ev({ type: 'grant', audience: 'author' }), // owner-private
+      ]);
+      for (const reader of [COLLAB, OUTSIDER]) {
+        const list = await listAll(app, documentId, reader);
+        expect(list.events.map((r) => r.type).sort()).toEqual(['export', 'verdict']);
+      }
     });
   });
 
@@ -637,6 +678,25 @@ describe('GET /api/documents/:id/events/stream — SSE', () => {
       const dataFrames = sse.frames.filter((f) => f.data !== undefined);
       expect(dataFrames).toHaveLength(1);
       expect((JSON.parse(dataFrames[0].data ?? '{}') as EventRowDTO).type).toBe('export');
+      await sse.close();
+    });
+  });
+
+  it('delivers a collaborators-audience row to a commenter\'s stream (commenters keep read)', async () => {
+    await withApp(async (app) => {
+      const { documentId } = await uploadFixture(app);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+      await addCollaborator(documentId, COLLAB, 'commenter');
+      await addCollaborator(documentId, OUTSIDER, 'responder');
+      const res = await app.request(`/api/documents/${documentId}/events/stream`, {
+        headers: asUser(COLLAB),
+      });
+      expect(res.status).toBe(200);
+      const sse = makeSseReader(res);
+      // A responder writes the row, so the stream also covers a non-owner writer.
+      const posted = await postEvents(app, documentId, OUTSIDER, [ev({ type: 'verdict', audience: 'collaborators' })]);
+      const frame = await sse.waitFor((f) => f.id === String(posted.body.events[0].id));
+      expect((JSON.parse(frame.data ?? '{}') as EventRowDTO).type).toBe('verdict');
       await sse.close();
     });
   });

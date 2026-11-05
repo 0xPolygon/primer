@@ -254,6 +254,45 @@ describe('collaborators × visibility — end-to-end', () => {
     });
   });
 
+  it('responder can comment on a private doc but cannot add a version', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const [v] = await db
+        .select({ id: versions.id })
+        .from(versions)
+        .where(eq(versions.documentId, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(),
+        documentId: upload.documentId,
+        userId: 'mock-user-2',
+        role: 'responder',
+        grantedBy: 'mock-user-1',
+      });
+      await db.update(documents)
+        .set({ visibility: 'private' })
+        .where(eq(documents.id, upload.documentId));
+
+      const comment = await app.request(`/api/versions/${v.id}/threads`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-2'),
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'from a responder',
+        }),
+      });
+      expect(comment.status).toBe(201);
+
+      const fd = new FormData();
+      fd.append('file', new Blob(['<html><body></body></html>'], { type: 'text/html' }), 'v.html');
+      const addVersion = await app.request(`/api/documents/${upload.documentId}/versions`, {
+        method: 'POST',
+        headers: asUser('mock-user-2'),
+        body: fd,
+      });
+      expect(addVersion.status).toBe(403);
+    });
+  });
+
   it('GET /api/documents/:id reports the viewer effective role as myRole', async () => {
     await withMultiUserApp(async (app) => {
       const upload = await uploadFixture(app);
