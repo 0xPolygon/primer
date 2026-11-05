@@ -148,8 +148,14 @@ export interface DocumentDetail extends DocumentSummary {
 
 /** The requesting viewer's effective role on a document. Mirrors
  *  EffectiveRole in apps/api/src/lib/permissions.ts: 'stranger' is a
- *  non-collaborator (readable only when visibility is 'org'). */
-export type ViewerRole = 'owner' | 'editor' | 'commenter' | 'stranger';
+ *  non-collaborator (readable only when visibility is 'org').
+ *
+ *  The ladder is commenter < responder < editor < owner; each step adds one
+ *  kind of power. A commenter reads and comments. A responder additionally
+ *  writes structured document events (so the page can act in their name) but
+ *  cannot publish versions, rename, or manage people. An editor can also
+ *  rewrite the document; only the owner manages collaborators. */
+export type ViewerRole = 'owner' | 'editor' | 'responder' | 'commenter' | 'stranger';
 
 export interface DocumentDetailResponse {
   document: DocumentDetail;
@@ -420,10 +426,21 @@ export interface CreateTokenResponse {
   summary: ApiTokenSummary;
 }
 
+/** Roles an owner can grant through the collaborators API. The single
+ *  source for every surface (API validation, web share UI, MCP client) so a
+ *  new role is added in one place rather than re-declared per consumer. */
+export const COLLABORATOR_ROLES = ['commenter', 'responder', 'editor'] as const;
+
+export type CollaboratorRole = (typeof COLLABORATOR_ROLES)[number];
+
+export function isCollaboratorRole(v: unknown): v is CollaboratorRole {
+  return COLLABORATOR_ROLES.some((r) => r === v);
+}
+
 export interface Collaborator {
   userId: string;
   displayName: string;
-  role: 'commenter' | 'editor';
+  role: CollaboratorRole;
   grantedBy: string;
   createdAt: string;
 }
@@ -434,11 +451,11 @@ export interface CollaboratorsListResponse {
 
 export interface AddCollaboratorRequest {
   userId: string;
-  role: 'commenter' | 'editor';
+  role: CollaboratorRole;
 }
 
 export interface UpdateCollaboratorRequest {
-  role: 'commenter' | 'editor';
+  role: CollaboratorRole;
 }
 
 export interface UserSearchHit {

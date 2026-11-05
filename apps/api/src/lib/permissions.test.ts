@@ -9,6 +9,7 @@ import {
   type CollaboratorRole,
   type EffectiveRole,
 } from './permissions.ts';
+import { canWriteEvents } from './events.ts';
 
 describe('effectiveRole', () => {
   const doc = { uploaderId: 'owner-1', visibility: 'org' as Visibility };
@@ -23,6 +24,10 @@ describe('effectiveRole', () => {
   it('returns "commenter" when user is commenter collab and not owner', () => {
     expect(effectiveRole(doc, 'someone-else', 'commenter')).toBe('commenter');
   });
+  it('returns "responder" when user is responder collab and not owner', () => {
+    expect(effectiveRole(doc, 'someone-else', 'responder')).toBe('responder');
+    expect(effectiveRole(doc, 'owner-1', 'responder')).toBe('owner'); // owner beats collab
+  });
   it('returns "stranger" when no collab row and not owner', () => {
     expect(effectiveRole(doc, 'someone-else', null)).toBe('stranger');
   });
@@ -30,13 +35,14 @@ describe('effectiveRole', () => {
 
 describe('canRead', () => {
   it('everyone reads under org visibility', () => {
-    for (const r of ['owner', 'editor', 'commenter', 'stranger'] as EffectiveRole[]) {
+    for (const r of ['owner', 'editor', 'responder', 'commenter', 'stranger'] as EffectiveRole[]) {
       expect(canRead('org', r)).toBe(true);
     }
   });
   it('only owner + collabs read under private visibility', () => {
     expect(canRead('private', 'owner')).toBe(true);
     expect(canRead('private', 'editor')).toBe(true);
+    expect(canRead('private', 'responder')).toBe(true);
     expect(canRead('private', 'commenter')).toBe(true);
     expect(canRead('private', 'stranger')).toBe(false);
   });
@@ -44,22 +50,24 @@ describe('canRead', () => {
 
 describe('canComment', () => {
   it('everyone comments under org visibility', () => {
-    for (const r of ['owner', 'editor', 'commenter', 'stranger'] as EffectiveRole[]) {
+    for (const r of ['owner', 'editor', 'responder', 'commenter', 'stranger'] as EffectiveRole[]) {
       expect(canComment('org', r)).toBe(true);
     }
   });
   it('only owner + collabs comment under private visibility', () => {
     expect(canComment('private', 'owner')).toBe(true);
     expect(canComment('private', 'editor')).toBe(true);
+    expect(canComment('private', 'responder')).toBe(true);
     expect(canComment('private', 'commenter')).toBe(true);
     expect(canComment('private', 'stranger')).toBe(false);
   });
 });
 
 describe('canEdit', () => {
-  it('owner and editor can edit; commenter and stranger cannot', () => {
+  it('owner and editor can edit; responder, commenter and stranger cannot', () => {
     expect(canEdit('owner')).toBe(true);
     expect(canEdit('editor')).toBe(true);
+    expect(canEdit('responder')).toBe(false);
     expect(canEdit('commenter')).toBe(false);
     expect(canEdit('stranger')).toBe(false);
   });
@@ -69,8 +77,21 @@ describe('canManage', () => {
   it('only owner can manage', () => {
     expect(canManage('owner')).toBe(true);
     expect(canManage('editor')).toBe(false);
+    expect(canManage('responder')).toBe(false);
     expect(canManage('commenter')).toBe(false);
     expect(canManage('stranger')).toBe(false);
+  });
+});
+
+describe('canWriteEvents', () => {
+  it('owner, editor and responder may write events', () => {
+    expect(canWriteEvents('owner')).toBe(true);
+    expect(canWriteEvents('editor')).toBe(true);
+    expect(canWriteEvents('responder')).toBe(true);
+  });
+  it('commenter and stranger may not write events', () => {
+    expect(canWriteEvents('commenter')).toBe(false);
+    expect(canWriteEvents('stranger')).toBe(false);
   });
 });
 
@@ -119,6 +140,21 @@ describe('loadCollaboratorRole', () => {
     });
     const role = await loadCollaboratorRole(docId, 'perm-editor');
     expect(role).toBe('editor');
+  });
+
+  it('round-trips a stored responder role', async () => {
+    await seedUser('perm-owner');
+    await seedUser('perm-responder');
+    const docId = await seedDoc('perm-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(),
+      documentId: docId,
+      userId: 'perm-responder',
+      role: 'responder',
+      grantedBy: 'perm-owner',
+    });
+    const role = await loadCollaboratorRole(docId, 'perm-responder');
+    expect(role).toBe('responder');
   });
 });
 

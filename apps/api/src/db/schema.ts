@@ -153,7 +153,7 @@ export const documentCollaborators = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    role: text('role', { enum: ['commenter', 'editor'] }).notNull(),
+    role: text('role', { enum: ['commenter', 'responder', 'editor'] }).notNull(),
     grantedBy: text('granted_by').notNull().references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
