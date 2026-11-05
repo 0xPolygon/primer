@@ -1,5 +1,11 @@
 # @polygonlabs/primer-mcp
 
+## 1.2.2
+
+### Patch Changes
+
+- [#122](https://github.com/0xPolygon/primer/pull/122) [`3badb0c`](https://github.com/0xPolygon/primer/commit/3badb0c7bfd3f6099c71687600019e747b4e1523) Thanks [@ScreamingHawk](https://github.com/ScreamingHawk)! - Clear pnpm audit: bump @modelcontextprotocol/sdk to 1.32.1 (four high advisories), @hono/node-server to the patched 2.x line, raise the body-parser and fast-uri override floors, and refresh in-range transitive pins (proxy-addr, zod, markdown-it, undici, body-parser) out of their vulnerable versions.
+
 ## 1.2.1
 
 ### Patch Changes
