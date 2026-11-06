@@ -1,15 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { versionsRefetchInterval, becameVisible, VERSIONS_POLL_INTERVAL_MS } from './versionsPolling.ts';
-
-describe('versionsRefetchInterval', () => {
-  it('polls at the fixed interval while visible', () => {
-    expect(versionsRefetchInterval(false)).toBe(VERSIONS_POLL_INTERVAL_MS);
-  });
-
-  it('backs off entirely while hidden', () => {
-    expect(versionsRefetchInterval(true)).toBe(false);
-  });
-});
+import { becameVisible } from './versionsPolling.ts';
 
 describe('becameVisible', () => {
   it('is true on the hidden → visible transition', () => {

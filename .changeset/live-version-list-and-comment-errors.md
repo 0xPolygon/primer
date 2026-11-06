@@ -10,4 +10,6 @@ version" button. Separately, the version switcher now keeps itself current
 while you have a document open: it refreshes automatically when the tab
 regains focus and every 30 seconds while visible, so a newly published
 version shows up without needing a manual page refresh. The version you're
-currently viewing never changes on its own.
+currently viewing never changes on its own: when a newer version is published
+while you have the document open, a notice offers to switch to it, and a
+comment you're writing stays open with its text.

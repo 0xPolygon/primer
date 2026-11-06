@@ -17,12 +17,6 @@
  */
 export const VERSIONS_POLL_INTERVAL_MS = 30_000;
 
-/** react-query's `refetchInterval` for the given tab-visibility state: poll
- *  while visible, back off (no wasted requests) while hidden. */
-export function versionsRefetchInterval(hidden: boolean): number | false {
-  return hidden ? false : VERSIONS_POLL_INTERVAL_MS;
-}
-
 /** True exactly when a visibility/focus event marks the tab BECOMING visible
  *  again — the moment to refresh immediately instead of waiting for the next
  *  poll tick. */

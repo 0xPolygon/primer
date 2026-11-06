@@ -94,7 +94,7 @@ export function NewThreadComposer({
         >
           <p>
             {errorIsNonLatestVersion
-              ? 'Comments can only be added on the latest version. Someone published a newer version while this was open.'
+              ? 'Comments can only be added on the latest version. Someone published a newer version while this was open. Switching discards this draft, so copy it first if you want to keep it.'
               : error}
           </p>
           {errorIsNonLatestVersion && onGoToLatest && (
