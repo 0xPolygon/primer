@@ -135,6 +135,8 @@ describe('responder role — acceptance', () => {
       expect(listRes.status).toBe(200);
       const list = (await listRes.json()) as CollaboratorsListResponse;
       expect(list.collaborators.find((r) => r.userId === USER_B)).toHaveProperty('role', 'commenter');
+      // The responder row round-trips through the list with its role intact.
+      expect(list.collaborators.find((r) => r.userId === USER_C)).toHaveProperty('role', 'responder');
 
       // The leftover commenter row grants no event write; the responder may write.
       expect((await postEvents(app, documentId, USER_B, [ev()])).status).toBe(403);
@@ -172,6 +174,10 @@ describe('responder role — acceptance', () => {
       const { documentId, versionId } = await uploadFixture(app);
       expect(await setVisibility(app, documentId, 'private')).toBe(200);
       expect(await addCollaborator(app, documentId, USER_C, 'responder')).toBe(201);
+      const listRes = await app.request(`/api/documents/${documentId}/collaborators`, { headers: asUser(OWNER) });
+      expect(listRes.status).toBe(200);
+      const list = (await listRes.json()) as CollaboratorsListResponse;
+      expect(list.collaborators.find((r) => r.userId === USER_C)).toHaveProperty('role', 'responder');
 
       // Read, and the detail reports the role.
       const detailRes = await readDocument(app, documentId, USER_C);
