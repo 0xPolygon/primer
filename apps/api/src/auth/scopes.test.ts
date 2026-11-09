@@ -11,7 +11,7 @@ import { PUBLIC_PATHS } from '../middleware/auth.ts';
 import { db } from '../db/client.ts';
 import { apiTokens, users } from '../db/schema.ts';
 import { SERVICE_USER_ID } from './admin.ts';
-import { asUserJson } from '../test/harness.ts';
+import { asUser, asUserJson } from '../test/harness.ts';
 import { NOT_GRANTABLE, ROUTE_SCOPES, findScopedRoute, parseRequestedScopes } from './scopes.ts';
 import { TOOL_NAMES, toolsForScopes } from '../mcp/tools.ts';
 import type { ApiTokenScope, CreateTokenResponse } from '@polygonlabs/primer-api-types';
@@ -221,7 +221,7 @@ describe('enforcing scopes', () => {
 
       const denied: [string, string, unknown?][] = [
         ['GET', `/api/documents/${docId}`], // lacks documents:read
-        ['PATCH', `/api/documents/${docId}`, { visibility: 'private' }],
+        ['PATCH', `/api/documents/${docId}`, { visibility: 'org' }], // only narrowing is grantable
         ['DELETE', `/api/documents/${docId}`],
         ['POST', `/api/documents/${docId}/external-share`, {}],
         ['PUT', `/api/documents/${docId}/folder`, { folderId: null }],
@@ -282,6 +282,123 @@ describe('enforcing scopes', () => {
 
       const unrestricted = await mintServiceToken(app);
       expect(await mcpToolsList(app, unrestricted.token)).toEqual([...TOOL_NAMES].sort());
+    });
+  });
+});
+
+async function uploadAs(app: App, userId: string): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', new Blob(['<html><body><p>hi</p></body></html>'], { type: 'text/html' }), 'a.html');
+  fd.append('title', 'Human upload');
+  const res = await app.request('/api/upload', { method: 'POST', headers: asUser(userId), body: fd });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { documentId: string }).documentId;
+}
+
+async function addCollaborator(app: App, ownerId: string, docId: string, userId: string, role: string): Promise<void> {
+  const res = await app.request(`/api/documents/${docId}/collaborators`, {
+    method: 'POST',
+    headers: asUserJson(ownerId),
+    body: JSON.stringify({ userId, role }),
+  });
+  expect(res.status).toBe(201);
+}
+
+async function setVisibility(app: App, token: string, docId: string, visibility: string): Promise<Response> {
+  return app.request(`/api/documents/${docId}`, {
+    method: 'PATCH',
+    headers: bearer(token),
+    body: JSON.stringify({ visibility }),
+  });
+}
+
+async function sendEvents(app: App, token: string, docId: string): Promise<Response> {
+  return app.request(`/api/documents/${docId}/events`, {
+    method: 'POST',
+    headers: bearer(token),
+    body: JSON.stringify({ events: [{ namespace: 'padd', type: 'export', payload: {}, audience: 'artifact' }] }),
+  });
+}
+
+/** Calls an MCP tool; returns the JSON-RPC result (or error) as text. */
+async function mcpCall(app: App, token: string, name: string, args: Record<string, unknown>): Promise<string> {
+  const res = await app.request('/mcp', {
+    method: 'POST',
+    headers: { ...bearer(token), accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: args } }),
+  });
+  expect(res.status).toBe(200);
+  return (await res.text()).split('\n').filter((l) => l.startsWith('data: ')).pop()!;
+}
+
+describe('visibility with a scoped token', () => {
+  it('may narrow a document it can manage to private, but never widen it to org', async () => {
+    await withApp(async (app) => {
+      const { token } = await mintServiceToken(app, ['documents:read', 'documents:write']);
+      const docId = (await upload(app, token)).documentId!;
+
+      const narrow = await setVisibility(app, token, docId, 'private');
+      expect(narrow.status).toBe(200);
+      expect(((await narrow.json()) as { visibility: string }).visibility).toBe('private');
+      // An org member who isn't a collaborator can no longer see it.
+      const asHuman = await app.request(`/api/documents/${docId}`, { headers: asUser(HUMAN_ID) });
+      expect(asHuman.status).toBe(404);
+
+      const widen = await setVisibility(app, token, docId, 'org');
+      expect(widen.status).toBe(403);
+      expect(((await widen.json()) as { error: string }).error).toBe('insufficient_scope');
+      const after = await app.request(`/api/documents/${docId}`, { headers: bearer(token) });
+      expect(((await after.json()) as { document: { visibility: string } }).document.visibility).toBe('private');
+    });
+  });
+
+  it('still needs the user to manage the document', async () => {
+    await withApp(async (app) => {
+      const docId = await uploadAs(app, HUMAN_ID);
+      await addCollaborator(app, HUMAN_ID, docId, SERVICE_USER_ID, 'editor');
+      const { token } = await mintServiceToken(app, ['documents:write']);
+
+      const res = await setVisibility(app, token, docId, 'private');
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { error: string }).error).toBe('forbidden');
+    });
+  });
+});
+
+describe('a scope only narrows the document role', () => {
+  it('denies events:write to a user who is only an org reader', async () => {
+    await withApp(async (app) => {
+      const docId = await uploadAs(app, HUMAN_ID);
+      const { token } = await mintServiceToken(app, ['documents:read', 'events:write']);
+
+      const rest = await sendEvents(app, token, docId);
+      expect(rest.status).toBe(403);
+      expect(((await rest.json()) as { error: string }).error).toBe('forbidden');
+
+      const mcp = await mcpCall(app, token, 'primer_send_events', {
+        documentId: docId,
+        events: [{ namespace: 'padd', type: 'export', payload: {}, audience: 'artifact' }],
+      });
+      expect(mcp).toContain('forbidden');
+      expect(mcp).not.toContain('"inserted"');
+    });
+  });
+
+  it('denies an editor whose token lacks events:write', async () => {
+    await withApp(async (app) => {
+      const docId = await uploadAs(app, HUMAN_ID);
+      await addCollaborator(app, HUMAN_ID, docId, SERVICE_USER_ID, 'editor');
+      const { token } = await mintServiceToken(app, ['documents:read', 'documents:write']);
+
+      const rest = await sendEvents(app, token, docId);
+      expect(rest.status).toBe(403);
+      expect(((await rest.json()) as { error: string }).error).toBe('insufficient_scope');
+
+      expect(await mcpToolsList(app, token)).not.toContain('primer_send_events');
+
+      // The same editor with the scope gets through: the role allowed it all along.
+      const scoped = await mintServiceToken(app, ['events:write']);
+      expect((await sendEvents(app, scoped.token, docId)).status).toBe(201);
     });
   });
 });

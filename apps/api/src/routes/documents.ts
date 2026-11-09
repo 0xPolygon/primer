@@ -157,11 +157,12 @@ export function registerDocumentRoutes(
         );
       }
       updates.visibility = payload.visibility;
-      // No token scope grants visibility changes (see auth/scopes.ts): a
-      // scoped token may edit title/description but never re-share a doc.
-      if (tokenScopes(c) !== null) {
+      // A scoped token may narrow a doc to private (so a client can create
+      // then restrict it) but never widen one to org: no scope grants
+      // re-sharing (see auth/scopes.ts). canManage below still applies.
+      if (tokenScopes(c) !== null && payload.visibility !== 'private') {
         return c.json(
-          { error: 'insufficient_scope', message: 'API tokens with scopes cannot change visibility.' },
+          { error: 'insufficient_scope', message: 'API tokens with scopes can only make documents private.' },
           403,
         );
       }

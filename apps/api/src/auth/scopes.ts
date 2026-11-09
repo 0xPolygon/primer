@@ -35,8 +35,9 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
 
   { method: 'POST', path: '/api/upload', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/versions', scope: 'documents:write' },
-  // Title/description only: a scoped token changing `visibility` is refused
-  // in the handler (routes/documents.ts).
+  // Title/description, and visibility only towards private: a scoped token
+  // asking for `visibility: 'org'` is refused in the handler
+  // (routes/documents.ts).
   { method: 'PATCH', path: '/api/documents/:docId', scope: 'documents:write' },
   { method: 'PATCH', path: '/api/versions/:versionId', scope: 'documents:write' },
 
