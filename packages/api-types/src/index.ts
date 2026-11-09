@@ -357,9 +357,11 @@ export interface DeviceApproveResponse {
 /**
  * Permissions an API token can be limited to. A token minted with `scopes`
  * may call only the routes and MCP tools those scopes grant; everything else
- * answers 403 `insufficient_scope`. Some operations have no scope at all and
- * are never reachable with a scoped token: deleting or restoring documents,
- * changing visibility, external sharing, folders, and token management.
+ * answers 403 `insufficient_scope`. A scope only narrows what the user's
+ * role on a document already allows; it never grants access the role doesn't
+ * have. Some operations have no scope at all and are never reachable with a
+ * scoped token: deleting or restoring documents, making a document
+ * org-visible, external sharing, folders, and token management.
  */
 export const API_TOKEN_SCOPES = [
   'documents:read',
@@ -374,10 +376,12 @@ export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
 
 export const API_TOKEN_SCOPE_DESCRIPTIONS: Record<ApiTokenScope, string> = {
   'documents:read': 'Read documents, versions, content, comments, and events',
-  'documents:write': 'Create documents, upload versions, and edit titles, descriptions, and version notes',
-  'comments:write': 'Create, edit, resolve, and delete comments',
-  'events:write': 'Write structured document events',
-  'collaborators:manage': 'List, add, change, and remove collaborators on documents the token owns',
+  'documents:write':
+    'Create documents, upload versions, edit titles, descriptions, and version notes, and make documents private, where your role on the document allows it',
+  'comments:write': 'Create, edit, resolve, and delete comments where your role on the document allows it',
+  'events:write': 'Write structured document events where your role on the document allows it',
+  'collaborators:manage':
+    'Change who can access documents you own: list, add, change, and remove collaborators',
   'users:read': 'Look up and search users',
 };
 

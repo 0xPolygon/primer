@@ -92,9 +92,16 @@ an optional `scopes` array (see `API_TOKEN_SCOPES` in
 `@polygonlabs/primer-api-types`). A scoped token can call only the REST
 routes and MCP tools its scopes grant — `apps/api/src/auth/scopes.ts` is the
 single route→scope table — and gets 403 `insufficient_scope` everywhere else.
-Deleting documents, changing visibility, external sharing, folders, and token
-management have no scope, so a scoped token can never reach them. Omitting
-`scopes` mints an unrestricted token. Minting and device approval always
+A scope only narrows what the user's document role already allows; it never
+grants access the role doesn't have (an org reader's token with
+`events:write` still gets 403 `forbidden`). Deleting documents, making a
+document org-visible, external sharing, folders, and token management have no
+scope, so a scoped token can never reach them; with `documents:write` it may
+make a document its user owns private. `collaborators:manage` is the one
+scope that changes who can access a document, so grant it deliberately.
+Omitting `scopes` mints an unrestricted token. OAuth access tokens
+(`primer_oat_`, used by remote MCP clients) carry no scopes yet and act
+with the user's full permissions. Minting and device approval always
 require a browser session, whatever the token.
 
 **Collaborators and the write bar.** Only the document owner and its
