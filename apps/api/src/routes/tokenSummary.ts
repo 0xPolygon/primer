@@ -3,7 +3,8 @@ import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
 import { apiTokens } from '../db/schema.ts';
 import { generateToken } from '../auth/tokens.ts';
-import type { ApiTokenSummary, CreateTokenResponse } from '@polygonlabs/primer-api-types';
+import type { ApiTokenScope, ApiTokenSummary, CreateTokenResponse } from '@polygonlabs/primer-api-types';
+import { parseRequestedScopes, parseStoredScopes } from '../auth/scopes.ts';
 
 export const MAX_ACTIVE_TOKENS_PER_USER = 25;
 export const MAX_TOKEN_NAME_LENGTH = 100;
@@ -12,6 +13,7 @@ export interface TokenRow {
   id: string;
   name: string;
   tokenPrefix: string;
+  scopes: string[] | null;
   createdAt: Date | string;
   lastUsedAt: Date | string | null;
   expiresAt: Date | string | null;
@@ -35,6 +37,7 @@ export function toSummary(row: TokenRow): ApiTokenSummary {
     id: row.id,
     name: row.name,
     tokenPrefix: row.tokenPrefix,
+    scopes: parseStoredScopes(row.scopes),
     createdAt: toIso(row.createdAt),
     lastUsedAt: toIsoNullable(row.lastUsedAt),
     expiresAt: toIsoNullable(row.expiresAt),
@@ -47,6 +50,7 @@ export async function listTokensForUser(userId: string): Promise<ApiTokenSummary
     SELECT id,
            name,
            token_prefix AS "tokenPrefix",
+           scopes,
            created_at AS "createdAt",
            last_used_at AS "lastUsedAt",
            expires_at AS "expiresAt",
@@ -67,13 +71,30 @@ export function parseTokenName(raw: unknown): string | null {
 }
 
 /**
- * Mints a never-expiring API token for `userId`. Returns 'token_limit' when
+ * Validates a create-token request body ({ name, scopes? }). Returns the
+ * error code to answer 400 with, or the parsed values.
+ */
+export function parseCreateTokenBody(
+  raw: unknown,
+): { ok: true; name: string; scopes: ApiTokenScope[] | null } | { ok: false; error: 'invalid_name' | 'invalid_scopes' } {
+  const body = (raw ?? null) as { name?: unknown; scopes?: unknown } | null;
+  const name = parseTokenName(body?.name);
+  if (name === null) return { ok: false, error: 'invalid_name' };
+  const scopes = parseRequestedScopes(body?.scopes);
+  if (!scopes.ok) return { ok: false, error: 'invalid_scopes' };
+  return { ok: true, name, scopes: scopes.scopes };
+}
+
+/**
+ * Mints a never-expiring API token for `userId`, limited to `scopes`
+ * (null = unrestricted). Returns 'token_limit' when
  * the user is at the active-token cap. The plaintext token in the result is
  * shown to the caller exactly once and never stored.
  */
 export async function mintTokenForUser(
   userId: string,
   name: string,
+  scopes: ApiTokenScope[] | null,
 ): Promise<CreateTokenResponse | 'token_limit'> {
   const countRows = (await db.execute(sql`
     SELECT count(*)::int AS count
@@ -93,6 +114,7 @@ export async function mintTokenForUser(
     name,
     tokenHash: minted.tokenHash,
     tokenPrefix: minted.tokenPrefix,
+    scopes,
     createdAt,
     expiresAt: null, // never expires; revoke-only lifecycle
   });
@@ -104,6 +126,7 @@ export async function mintTokenForUser(
       id,
       name,
       tokenPrefix: minted.tokenPrefix,
+      scopes,
       createdAt,
       lastUsedAt: null,
       expiresAt: null,

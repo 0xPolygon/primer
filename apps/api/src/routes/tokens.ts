@@ -4,7 +4,7 @@ import type { ApiTokensListResponse } from '@polygonlabs/primer-api-types';
 import {
   listTokensForUser,
   mintTokenForUser,
-  parseTokenName,
+  parseCreateTokenBody,
   revokeTokenForUser,
 } from './tokenSummary.ts';
 import { sessionOnly } from '../auth/sessionOnly.ts';
@@ -27,12 +27,12 @@ export function registerTokenRoutes(app: Hono<{ Variables: AppVariables }>): voi
     } catch {
       return c.json({ error: 'invalid_name' }, 400);
     }
-    const name = parseTokenName((raw as { name?: unknown } | null)?.name);
-    if (name === null) {
-      return c.json({ error: 'invalid_name' }, 400);
+    const parsed = parseCreateTokenBody(raw);
+    if (!parsed.ok) {
+      return c.json({ error: parsed.error }, 400);
     }
 
-    const result = await mintTokenForUser(user.id, name);
+    const result = await mintTokenForUser(user.id, parsed.name, parsed.scopes);
     if (result === 'token_limit') {
       return c.json({ error: 'token_limit' }, 400);
     }

@@ -13,6 +13,7 @@ import {
   canRead, canEdit, canManage, effectiveRole, loadCollaboratorRole,
   type Visibility,
 } from '../lib/permissions.ts';
+import { tokenScopes } from '../auth/scopes.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -156,6 +157,15 @@ export function registerDocumentRoutes(
         );
       }
       updates.visibility = payload.visibility;
+      // A scoped token may narrow a doc to private (so a client can create
+      // then restrict it) but never widen one to org: no scope grants
+      // re-sharing (see auth/scopes.ts). canManage below still applies.
+      if (tokenScopes(c) !== null && payload.visibility !== 'private') {
+        return c.json(
+          { error: 'insufficient_scope', message: 'API tokens with scopes can only make documents private.' },
+          403,
+        );
+      }
     }
 
     if (!hasTitle && !hasDescription && !hasVisibility) {

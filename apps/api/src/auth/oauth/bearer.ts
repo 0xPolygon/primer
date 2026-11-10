@@ -43,6 +43,8 @@ export function makeOAuthBearerResolver(): UserResolver {
     if (!row) return null;
 
     c.set('authMethod', 'bearer');
+    // OAuth tokens carry no scopes yet, so `tokenScopes` stays unset and the
+    // scope checks in auth/scopes.ts don't apply to them.
     return { id: row.id, email: row.email, displayName: row.display_name };
   };
 }

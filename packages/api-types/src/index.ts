@@ -354,10 +354,47 @@ export interface DeviceApproveResponse {
   createdAt: string;
 }
 
+/**
+ * Permissions an API token can be limited to. A token minted with `scopes`
+ * may call only the routes and MCP tools those scopes grant; everything else
+ * answers 403 `insufficient_scope`. A scope only narrows what the user's
+ * role on a document already allows; it never grants access the role doesn't
+ * have. Some operations have no scope at all and are never reachable with a
+ * scoped token: deleting or restoring documents, making a document
+ * org-visible, external sharing, folders, and token management.
+ */
+export const API_TOKEN_SCOPES = [
+  'documents:read',
+  'documents:write',
+  'comments:write',
+  'events:write',
+  'collaborators:manage',
+  'users:read',
+] as const;
+
+export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
+
+export const API_TOKEN_SCOPE_DESCRIPTIONS: Record<ApiTokenScope, string> = {
+  'documents:read': 'Read documents, versions, content, comments, and events',
+  'documents:write':
+    'Create documents, upload versions, edit titles, descriptions, and version notes, and make documents private, where your role on the document allows it',
+  'comments:write': 'Create, edit, resolve, and delete comments where your role on the document allows it',
+  'events:write': 'Write structured document events where your role on the document allows it',
+  'collaborators:manage':
+    'Change who can access documents you own: list, add, change, and remove collaborators',
+  'users:read': 'Look up and search users',
+};
+
+export function isApiTokenScope(value: unknown): value is ApiTokenScope {
+  return typeof value === 'string' && (API_TOKEN_SCOPES as readonly string[]).includes(value);
+}
+
 export interface ApiTokenSummary {
   id: string;
   name: string;
   tokenPrefix: string;
+  /** null = unrestricted (every route an API token may call). */
+  scopes: ApiTokenScope[] | null;
   createdAt: string;
   lastUsedAt: string | null;
   expiresAt: string | null;
@@ -370,6 +407,8 @@ export interface ApiTokensListResponse {
 
 export interface CreateTokenRequest {
   name: string;
+  /** Omit for an unrestricted token. Must be non-empty when present. */
+  scopes?: ApiTokenScope[];
 }
 
 /**

@@ -126,6 +126,7 @@ describe('GET /api/tokens', () => {
             'id',
             'name',
             'tokenPrefix',
+            'scopes',
             'createdAt',
             'lastUsedAt',
             'expiresAt',
@@ -298,7 +299,7 @@ describe('POST /api/tokens', () => {
       // Summary carries no secret material.
       const keys = Object.keys(body.summary).sort();
       expect(keys).toEqual(
-        ['id', 'name', 'tokenPrefix', 'createdAt', 'lastUsedAt', 'expiresAt', 'revokedAt'].sort()
+        ['id', 'name', 'tokenPrefix', 'scopes', 'createdAt', 'lastUsedAt', 'expiresAt', 'revokedAt'].sort()
       );
       expect((body.summary as unknown as Record<string, unknown>).tokenHash).toBeUndefined();
 

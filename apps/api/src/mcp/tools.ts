@@ -9,7 +9,7 @@ import { markdownToHtml } from '../upload/markdown.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
 import { logger } from '../logger.ts';
-import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary } from '@polygonlabs/primer-api-types';
+import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope } from '@polygonlabs/primer-api-types';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 import {
   canRead, canEdit, effectiveRole, loadCollaboratorRole, type Visibility,
@@ -139,6 +139,38 @@ function parseScope(raw: unknown): ListScope {
   return raw === 'mine' ? 'mine' : 'all';
 }
 export type ToolName = (typeof TOOL_NAMES)[number];
+
+/**
+ * Scope a scoped API token needs for each tool (null = any token). Mirrors
+ * ROUTE_SCOPES in auth/scopes.ts for the equivalent REST routes; tools a
+ * token lacks the scope for are not registered for its request, so they
+ * neither list nor call.
+ */
+export const TOOL_SCOPES: Record<ToolName, ApiTokenScope | null> = {
+  primer_whoami: null,
+  primer_resolve_url: 'documents:read',
+  primer_get_document: 'documents:read',
+  primer_get_version_content: 'documents:read',
+  primer_list_versions: 'documents:read',
+  primer_get_comments: 'documents:read',
+  primer_list_documents: 'documents:read',
+  primer_find_document: 'documents:read',
+  primer_get_document_comments: 'documents:read',
+  primer_get_all_comments: 'documents:read',
+  primer_get_events: 'documents:read',
+  primer_create_document: 'documents:write',
+  primer_add_version: 'documents:write',
+  primer_send_events: 'events:write',
+};
+
+/** Tools available to a request with the given token scopes (null = all). */
+export function toolsForScopes(scopes: readonly ApiTokenScope[] | null): ToolName[] {
+  if (scopes === null) return [...TOOL_NAMES];
+  return TOOL_NAMES.filter((name) => {
+    const needed = TOOL_SCOPES[name];
+    return needed === null || scopes.includes(needed);
+  });
+}
 
 export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandler> {
   return {
