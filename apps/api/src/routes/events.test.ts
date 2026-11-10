@@ -589,11 +589,116 @@ function makeSseReader(res: Response) {
       }
     },
     frames,
+    /** Reads until the server ends the stream; false if it is still open at the deadline. */
+    async waitForEnd(timeoutMs = 3000): Promise<boolean> {
+      const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), timeoutMs));
+      for (;;) {
+        const next = await Promise.race([reader.read(), timeout]);
+        if (next === 'timeout') return false;
+        if (next.done) return true;
+        buffer += decoder.decode(next.value, { stream: true });
+        drainBuffer();
+      }
+    },
     async close(): Promise<void> {
       await reader.cancel();
     },
   };
 }
+
+describe('GET /api/documents/:id/events/stream — access is re-checked while the stream is open', () => {
+  // The stream checks access once at connect; without a re-check a reader
+  // whose access was taken away kept receiving rows for as long as the
+  // connection lived (keepalives hold it open indefinitely).
+  it('a collaborator removed from a private doc stops receiving rows and their stream closes; others keep receiving', async () => {
+    await withApp(async (app) => {
+      const { documentId } = await uploadFixture(app);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+      await addCollaborator(documentId, COLLAB, 'commenter');
+      await addCollaborator(documentId, OUTSIDER, 'commenter');
+
+      const removedRes = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(OUTSIDER) });
+      const keptRes = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(COLLAB) });
+      expect(removedRes.status).toBe(200);
+      expect(keptRes.status).toBe(200);
+      const removed = makeSseReader(removedRes);
+      const kept = makeSseReader(keptRes);
+
+      const del = await app.request(`/api/documents/${documentId}/collaborators/${OUTSIDER}`, {
+        method: 'DELETE',
+        headers: asUser(OWNER),
+      });
+      expect(del.status).toBe(204);
+      const list = await app.request(`/api/documents/${documentId}/events`, { headers: asUser(OUTSIDER) });
+      expect(list.status).toBe(404);
+
+      const posted = await postEvents(app, documentId, OWNER, [ev({ type: 'after-removal', audience: 'collaborators' })]);
+      expect(posted.status).toBe(201);
+      const rowId = String(posted.body.events[0].id);
+
+      // The unchanged collaborator still gets the live row.
+      await kept.waitFor((f) => f.id === rowId);
+      await kept.close();
+
+      // The removed one never sees it, and the server ends their stream.
+      expect(await removed.waitForEnd()).toBe(true);
+      expect(removed.frames.map((f) => f.id)).not.toContain(rowId);
+    });
+  });
+
+  it('closes an open stream once the document is deleted', async () => {
+    const prev = process.env.EVENTS_SSE_KEEPALIVE_MS;
+    process.env.EVENTS_SSE_KEEPALIVE_MS = '50';
+    try {
+      await withApp(async (app) => {
+        const { documentId } = await uploadFixture(app);
+        await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
+        await addCollaborator(documentId, COLLAB, 'commenter');
+        const res = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(COLLAB) });
+        expect(res.status).toBe(200);
+        const sse = makeSseReader(res);
+
+        const del = await app.request(`/api/documents/${documentId}`, { method: 'DELETE', headers: asUser(OWNER) });
+        expect(del.status).toBeLessThan(300);
+
+        // No row can be written to a deleted document, so the stream must
+        // notice on its own (it re-checks on its keepalive tick).
+        expect(await sse.waitForEnd()).toBe(true);
+      });
+    } finally {
+      if (prev === undefined) delete process.env.EVENTS_SSE_KEEPALIVE_MS;
+      else process.env.EVENTS_SSE_KEEPALIVE_MS = prev;
+    }
+  });
+
+  it('a collaborator removed from an org doc keeps the stream but stops receiving collaborators-audience rows', async () => {
+    await withApp(async (app) => {
+      const { documentId } = await uploadFixture(app);
+      await addCollaborator(documentId, COLLAB, 'responder');
+      await addCollaborator(documentId, OUTSIDER, 'responder');
+      const removedRes = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(OUTSIDER) });
+      const keptRes = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(COLLAB) });
+      const removed = makeSseReader(removedRes);
+      const kept = makeSseReader(keptRes);
+
+      const del = await app.request(`/api/documents/${documentId}/collaborators/${OUTSIDER}`, {
+        method: 'DELETE',
+        headers: asUser(OWNER),
+      });
+      expect(del.status).toBe(204);
+
+      const posted = await postEvents(app, documentId, OWNER, [ev({ type: 'org-after-removal', audience: 'collaborators' })]);
+      const rowId = String(posted.body.events[0].id);
+      await kept.waitFor((f) => f.id === rowId);
+      await kept.close();
+
+      // Still an org reader, so the stream stays open, but the row is not theirs to read.
+      expect(await removed.waitForEnd(1000)).toBe(false);
+      expect(removed.frames.map((f) => f.id)).not.toContain(rowId);
+      await removed.close();
+    });
+  });
+});
 
 describe('GET /api/documents/:id/events/stream — SSE', () => {
   it('delivers live rows with SSE id: equal to the row id', async () => {

@@ -231,12 +231,18 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       resumeFrom = resumeFrom === null ? n : Math.max(resumeFrom, n);
     }
 
-    const identity = g.identity;
+    // Access is re-checked while the stream is open (see `recheck` below),
+    // so this connect-time identity is only the starting point.
+    let identity = g.identity;
     const filters = filterParsed.filters;
     const keepaliveMs = Number(process.env.EVENTS_SSE_KEEPALIVE_MS ?? 25_000);
 
     return streamSSE(c, async (stream) => {
       let closed = false;
+      let releaseHold: () => void = () => {};
+      const held = new Promise<void>((resolve) => {
+        releaseHold = resolve;
+      });
       // Ids already written to THIS connection. A set (rather than a
       // highest-id watermark) so a LIVE row whose id is lower than one
       // already sent — a late-committing concurrent writer, exactly the
@@ -248,6 +254,36 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       // that causes just re-delivers rows the consumer dedupes).
       const sent = new Set<number>();
 
+      // Ends this connection from the server side: stop the keepalive, drop
+      // the subscription, release the hold below, and close the response so
+      // the client sees the stream end.
+      const shutdown = async (): Promise<void> => {
+        if (closed) return;
+        closed = true;
+        clearInterval(keepalive);
+        unsubscribe();
+        releaseHold();
+        await stream.close();
+      };
+
+      // Re-runs the same access gate the connection passed at connect time.
+      // A stream lives as long as its connection, and keepalives hold that
+      // open indefinitely, so a reader whose access was taken away (removed
+      // collaborator, deleted document, a private doc they can no longer
+      // read) would otherwise keep receiving rows. On failure the stream is
+      // closed; on success the fresh identity replaces the old one, so an org
+      // reader who lost their collaborator row stops receiving rows that only
+      // collaborators may read.
+      const recheck = async (): Promise<boolean> => {
+        const fresh = await gate(documentId, user.id);
+        if (fresh.status === 'not_found') {
+          await shutdown();
+          return false;
+        }
+        identity = fresh.identity;
+        return true;
+      };
+
       const sendRow = async (row: EventRowDTO): Promise<void> => {
         if (closed) return;
         if (!eventMatchesFilters(row, filters)) return;
@@ -255,6 +291,14 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         if (sent.has(row.id)) return;
         sent.add(row.id);
         await stream.writeSSE({ id: String(row.id), data: JSON.stringify(row) });
+      };
+
+      // Every live row re-checks access first (one query per row), so a row
+      // written after the reader lost access is never sent to them.
+      const sendLive = async (row: EventRowDTO): Promise<void> => {
+        if (closed) return;
+        if (!(await recheck())) return;
+        await sendRow(row);
       };
 
       // Live rows may arrive while the backlog query runs; queue them and
@@ -266,19 +310,25 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
           pending.push(row);
           return;
         }
-        void sendRow(row);
+        void sendLive(row);
       });
 
       const keepalive = setInterval(() => {
         if (closed) return;
-        // SSE comment line — invisible to EventSource, resets idle timers.
-        void stream.write(`: keepalive\n\n`);
+        // The tick doubles as the access re-check, so a stream whose reader
+        // lost access is closed even when no rows are being written (none
+        // can be, for a deleted document).
+        void recheck().then((ok) => {
+          // SSE comment line — invisible to EventSource, resets idle timers.
+          if (ok && !closed) void stream.write(`: keepalive\n\n`);
+        });
       }, keepaliveMs);
 
       stream.onAbort(() => {
         closed = true;
         clearInterval(keepalive);
         unsubscribe();
+        releaseHold();
       });
 
       // Backlog replay when resuming (Last-Event-ID / ?since). Paginate to
@@ -299,10 +349,11 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         }
       }
       backlogDone = true;
-      for (const row of pending.splice(0)) await sendRow(row);
+      for (const row of pending.splice(0)) await sendLive(row);
 
-      // Hold the stream open until the client goes away.
-      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      // Hold the stream open until the client goes away or a re-check
+      // closes it.
+      await held;
     });
   });
 }
