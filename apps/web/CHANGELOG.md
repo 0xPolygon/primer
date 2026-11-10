@@ -1,5 +1,24 @@
 # @primer/web
 
+## 0.2.0
+
+### Minor Changes
+
+- [#101](https://github.com/0xPolygon/primer/pull/101) [`ed2d99b`](https://github.com/0xPolygon/primer/commit/ed2d99bef01897a9a156a6f63bf6c5cb3d466d3f) Thanks [@taylanpince](https://github.com/taylanpince)! - Pick permissions when creating an API token, and require them for the
+  Claude service account.
+
+  `/settings/tokens` now shows each token's permissions ("Full access" for
+  unrestricted tokens) and lets you limit a new personal token to specific
+  permissions. Service-account tokens must be limited: the form requires at
+  least one permission, and `POST /api/service-tokens` without `scopes` is
+  rejected with 400 `scopes_required`. Existing service tokens keep working
+  and show as Full access until replaced.
+
+### Patch Changes
+
+- Updated dependencies [[`b2c513b`](https://github.com/0xPolygon/primer/commit/b2c513b044ca8a01cabc809087c5ffaab4e2fc59)]:
+  - @polygonlabs/primer-api-types@0.4.0
+
 ## 0.1.3
 
 ## 0.1.2

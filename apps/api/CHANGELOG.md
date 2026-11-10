@@ -1,5 +1,60 @@
 # @primer/api
 
+## 0.2.0
+
+### Minor Changes
+
+- [#100](https://github.com/0xPolygon/primer/pull/100) [`b2c513b`](https://github.com/0xPolygon/primer/commit/b2c513b044ca8a01cabc809087c5ffaab4e2fc59) Thanks [@taylanpince](https://github.com/taylanpince)! - API tokens can now be limited to specific permissions.
+
+  `POST /api/tokens` and `POST /api/service-tokens` accept an optional
+  `scopes` array: `documents:read`, `documents:write`, `comments:write`,
+  `events:write`, `collaborators:manage`, `users:read` (exported as
+  `API_TOKEN_SCOPES`, with `ApiTokenScope` and `isApiTokenScope`). A scoped
+  token can call only the REST routes and MCP tools its scopes grant and gets
+  403 `insufficient_scope` everywhere else — default deny, driven by one
+  route→scope table. A scope only narrows what the user's role on a document
+  already allows; it never grants more. Deleting or restoring documents, making
+  a document org-visible, external sharing, folders, and token management have
+  no scope at all, so a scoped token can never reach them; `documents:write`
+  does allow making a document the user owns private. Over MCP, tools a token
+  lacks the scope for are not registered for its request.
+
+  Scopes apply to personal and service tokens only: OAuth access tokens
+  (`primer_oat_`) are not scoped yet and keep the user's full permissions.
+
+  Omitting `scopes` mints an unrestricted token, and existing tokens stay
+  unrestricted, so nothing changes for current clients. `ApiTokenSummary`
+  gains `scopes` (`null` = unrestricted). Invalid scopes are rejected with 400
+  `invalid_scopes`. Adds a nullable `api_tokens.scopes` column (migration
+  0014).
+
+- [#101](https://github.com/0xPolygon/primer/pull/101) [`ed2d99b`](https://github.com/0xPolygon/primer/commit/ed2d99bef01897a9a156a6f63bf6c5cb3d466d3f) Thanks [@taylanpince](https://github.com/taylanpince)! - Pick permissions when creating an API token, and require them for the
+  Claude service account.
+
+  `/settings/tokens` now shows each token's permissions ("Full access" for
+  unrestricted tokens) and lets you limit a new personal token to specific
+  permissions. Service-account tokens must be limited: the form requires at
+  least one permission, and `POST /api/service-tokens` without `scopes` is
+  rejected with 400 `scopes_required`. Existing service tokens keep working
+  and show as Full access until replaced.
+
+### Patch Changes
+
+- [#99](https://github.com/0xPolygon/primer/pull/99) [`1b375bd`](https://github.com/0xPolygon/primer/commit/1b375bd3cc2aa964ba733e81e4235342cb8efe57) Thanks [@taylanpince](https://github.com/taylanpince)! - Credential-management routes now require a signed-in browser session and
+  refuse API-token (bearer) auth with 403 `session_required`:
+  `POST /api/tokens`, all of `/api/service-tokens`, `POST /api/device/approve`,
+  `POST /api/device/deny`, and `GET /api/admin/stats`.
+
+  Before this, any bearer — including the Claude service token — could mint a
+  never-expiring sibling token and read its plaintext back, or approve a device
+  login started by someone else and hand them a 90-day token. Agents hold
+  bearers whose requests can be steered by untrusted content, so neither path
+  may be reachable with one. Listing and revoking your own tokens stays
+  bearer-callable; the local MCP server's `primer_logout` relies on revoke.
+
+- Updated dependencies [[`b2c513b`](https://github.com/0xPolygon/primer/commit/b2c513b044ca8a01cabc809087c5ffaab4e2fc59)]:
+  - @polygonlabs/primer-api-types@0.4.0
+
 ## 0.1.3
 
 ### Patch Changes
