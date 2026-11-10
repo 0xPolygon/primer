@@ -17,6 +17,8 @@ import {
  * Non-admins get 403 on every route; 404 is reserved for unknown token ids.
  * Every route is session-only: no API token — the service token included —
  * can manage service tokens, even if its user is on the admin allowlist.
+ * Service tokens must be minted with explicit scopes: one shared identity
+ * acting for many people should only ever hold the permissions it needs.
  */
 export function registerServiceTokenRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -43,6 +45,9 @@ export function registerServiceTokenRoutes(
     const parsed = parseCreateTokenBody(raw);
     if (!parsed.ok) {
       return c.json({ error: parsed.error }, 400);
+    }
+    if (parsed.scopes === null) {
+      return c.json({ error: 'scopes_required' }, 400);
     }
 
     const result = await mintTokenForUser(SERVICE_USER_ID, parsed.name, parsed.scopes);

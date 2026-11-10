@@ -44,7 +44,12 @@ async function mint(
   const res = await app.request(path, {
     method: 'POST',
     headers: asUserJson(ADMIN_ID),
-    body: JSON.stringify({ name: 'session-only-test' }),
+    // Service tokens must be scoped; the personal token stays unrestricted.
+    body: JSON.stringify(
+      path === '/api/service-tokens'
+        ? { name: 'session-only-test', scopes: ['documents:read'] }
+        : { name: 'session-only-test' },
+    ),
   });
   expect(res.status).toBe(201);
   return (await res.json()) as CreateTokenResponse;
@@ -69,7 +74,10 @@ describe('session-only routes', () => {
   it.each([
     ['personal token of an admin', '/api/tokens'],
     ['service token', '/api/service-tokens'],
-  ] as const)('%s gets 403 session_required on every credential-management route', async (_label, mintPath) => {
+  ] as const)('%s gets 403 on every credential-management route', async (_label, mintPath) => {
+    // An unrestricted token is stopped by sessionOnly; a scoped one already
+    // by the scope check, since none of these routes has a scope.
+    const expectedError = mintPath === '/api/tokens' ? 'session_required' : 'insufficient_scope';
     await withApp(async (app) => {
       const { token, summary } = await mint(app, mintPath);
       const routes: [string, string, unknown?][] = [
@@ -88,7 +96,7 @@ describe('session-only routes', () => {
           body: body === undefined ? undefined : JSON.stringify(body),
         });
         expect({ method, path, status: res.status }).toEqual({ method, path, status: 403 });
-        expect(((await res.json()) as { error: string }).error).toBe('session_required');
+        expect(((await res.json()) as { error: string }).error).toBe(expectedError);
       }
 
       // Nothing was minted by the rejected calls.

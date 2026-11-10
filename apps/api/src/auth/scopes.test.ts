@@ -39,11 +39,22 @@ async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
   }
 }
 
-async function mintServiceToken(app: App, scopes?: ApiTokenScope[]): Promise<CreateTokenResponse> {
+async function mintServiceToken(app: App, scopes: ApiTokenScope[]): Promise<CreateTokenResponse> {
   const res = await app.request('/api/service-tokens', {
     method: 'POST',
     headers: asUserJson(ADMIN_ID),
-    body: JSON.stringify(scopes === undefined ? { name: 'scoped' } : { name: 'scoped', scopes }),
+    body: JSON.stringify({ name: 'scoped', scopes }),
+  });
+  expect(res.status).toBe(201);
+  return (await res.json()) as CreateTokenResponse;
+}
+
+/** Personal tokens may still be unrestricted (scopes omitted). */
+async function mintUnrestrictedToken(app: App): Promise<CreateTokenResponse> {
+  const res = await app.request('/api/tokens', {
+    method: 'POST',
+    headers: asUserJson(ADMIN_ID),
+    body: JSON.stringify({ name: 'unrestricted' }),
   });
   expect(res.status).toBe(201);
   return (await res.json()) as CreateTokenResponse;
@@ -168,8 +179,16 @@ describe('minting scoped tokens', () => {
       const { summary } = await mintServiceToken(app, ['users:read', 'documents:read']);
       expect(summary.scopes).toEqual(['documents:read', 'users:read']);
 
-      const unrestricted = await mintServiceToken(app);
+      const unrestricted = await mintUnrestrictedToken(app);
       expect(unrestricted.summary.scopes).toBeNull();
+
+      const unscopedService = await app.request('/api/service-tokens', {
+        method: 'POST',
+        headers: asUserJson(ADMIN_ID),
+        body: JSON.stringify({ name: 'no-scopes' }),
+      });
+      expect(unscopedService.status).toBe(400);
+      expect(((await unscopedService.json()) as { error: string }).error).toBe('scopes_required');
 
       const list = await app.request('/api/service-tokens', { headers: asUserJson(ADMIN_ID) });
       const { tokens } = (await list.json()) as { tokens: { id: string; scopes: unknown }[] };
@@ -243,7 +262,7 @@ describe('enforcing scopes', () => {
 
   it('leaves unrestricted tokens and browser sessions as they were', async () => {
     await withApp(async (app) => {
-      const { token } = await mintServiceToken(app);
+      const { token } = await mintUnrestrictedToken(app);
       const up = await upload(app, token);
       expect(up.status).toBe(200);
       const share = await app.request(`/api/documents/${up.documentId}/external-share`, {
@@ -280,7 +299,7 @@ describe('enforcing scopes', () => {
       const text = await res.text();
       expect(text).not.toContain('documentId');
 
-      const unrestricted = await mintServiceToken(app);
+      const unrestricted = await mintUnrestrictedToken(app);
       expect(await mcpToolsList(app, unrestricted.token)).toEqual([...TOOL_NAMES].sort());
     });
   });

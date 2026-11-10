@@ -13,6 +13,7 @@ import { apiTokens, comments, documents, users } from '../db/schema.ts';
 import { SERVICE_USER_ID } from '../auth/admin.ts';
 import { asUserJson } from './harness.ts';
 import { uploadFixture } from '../routes/upload.testlib.ts';
+import { API_TOKEN_SCOPES } from '@polygonlabs/primer-api-types';
 import type { CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 /**
@@ -110,7 +111,7 @@ async function mintServiceToken(app: ReturnType<typeof createApp>): Promise<Crea
   const res = await app.request('/api/service-tokens', {
     method: 'POST',
     headers: asUserJson(ADMIN_ID),
-    body: JSON.stringify({ name: 'e2e-flow' }),
+    body: JSON.stringify({ name: 'e2e-flow', scopes: API_TOKEN_SCOPES }),
   });
   expect(res.status).toBe(201);
   return (await res.json()) as CreateTokenResponse;
