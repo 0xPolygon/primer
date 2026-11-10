@@ -93,8 +93,9 @@ an optional `scopes` array (see `API_TOKEN_SCOPES` in
 routes and MCP tools its scopes grant — `apps/api/src/auth/scopes.ts` is the
 single route→scope table — and gets 403 `insufficient_scope` everywhere else.
 A scope only narrows what the user's document role already allows; it never
-grants access the role doesn't have (an org reader's token with
-`events:write` still gets 403 `forbidden`). Deleting documents, making a
+grants access the role doesn't have (a commenter's or an org reader's token with
+`events:write` still gets 403 `forbidden`: writing events needs the owner,
+editor or responder role). Deleting documents, making a
 document org-visible, external sharing, folders, and token management have no
 scope, so a scoped token can never reach them; with `documents:write` it may
 make a document its user owns private. `collaborators:manage` is the one

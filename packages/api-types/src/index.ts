@@ -385,7 +385,8 @@ export const API_TOKEN_SCOPE_DESCRIPTIONS: Record<ApiTokenScope, string> = {
   'documents:write':
     'Create documents, upload versions, edit titles, descriptions, and version notes, and make documents private, where your role on the document allows it',
   'comments:write': 'Create, edit, resolve, and delete comments where your role on the document allows it',
-  'events:write': 'Write structured document events where your role on the document allows it',
+  'events:write':
+    'Write structured document events where your role on the document allows it (the owner, an editor or a responder)',
   'collaborators:manage':
     'Change who can access documents you own: list, add, change, and remove collaborators',
   'users:read': 'Look up and search users',

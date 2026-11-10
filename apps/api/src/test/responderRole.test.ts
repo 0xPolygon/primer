@@ -21,10 +21,13 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
+import { composeResolvers, makeBearerResolver } from '../auth/bearer.ts';
 import { db } from '../db/client.ts';
 import { users } from '../db/schema.ts';
 import type {
+  ApiTokenScope,
   CollaboratorsListResponse,
+  CreateTokenResponse,
   DocumentDetailResponse,
   EventsListResponse,
   SendEventsResponse,
@@ -257,5 +260,79 @@ describe('responder role — acceptance', () => {
       expect(bRead.ids).toContain(collaboratorsRowId);
       expect(bRead.ids).toContain(artifactRowId);
     });
+  });
+  it('scope ∧ role: an API token scope only narrows what the document role allows', async () => {
+    // Token scopes are checked before the handler; the handler's role check
+    // still runs. So `events:write` on a commenter's token is refused by the
+    // role, and a responder needs both the role and the scope.
+    const root = await mkdtemp(join(tmpdir(), 'primer-responder-scopes-'));
+    try {
+      const app = createApp({
+        storage: new FilesystemStorage(root),
+        notifier: new NoopNotifier(),
+        userResolver: composeResolvers(makeBearerResolver(), mockMultiResolver),
+      });
+      await db
+        .insert(users)
+        .values([
+          { id: OWNER, email: 'one@p.t', displayName: 'User One' },
+          { id: USER_B, email: 'two@p.t', displayName: 'User Two' },
+          { id: USER_C, email: 'three@p.t', displayName: 'User Three' },
+        ])
+        .onConflictDoNothing();
+
+      const mint = async (userId: string, scopes: ApiTokenScope[]): Promise<string> => {
+        const res = await app.request('/api/tokens', {
+          method: 'POST',
+          headers: asUserJson(userId),
+          body: JSON.stringify({ name: `responder-scope-${userId}`, scopes }),
+        });
+        expect(res.status).toBe(201);
+        return ((await res.json()) as CreateTokenResponse).token;
+      };
+      const bearerPost = async (token: string, docId: string): Promise<Response> =>
+        await app.request(`/api/documents/${docId}/events`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ events: [ev()] }),
+        });
+
+      const { documentId } = await uploadFixture(app);
+      expect(await setVisibility(app, documentId, 'private')).toBe(200);
+      expect(await addCollaborator(app, documentId, USER_B, 'commenter')).toBe(201);
+      expect(await addCollaborator(app, documentId, USER_C, 'responder')).toBe(201);
+
+      // The owner writes a collaborators-audience row for the read check below.
+      const ownerRow = await postEvents(app, documentId, OWNER, [ev()]);
+      expect(ownerRow.status).toBe(201);
+      const ownerRowId = (ownerRow.body as SendEventsResponse).events[0]?.id;
+
+      // Commenter's token holds events:write, but the role still refuses.
+      const commenterWriteToken = await mint(USER_B, ['documents:read', 'events:write']);
+      const commenterWrite = await bearerPost(commenterWriteToken, documentId);
+      expect(commenterWrite.status).toBe(403);
+      expect(((await commenterWrite.json()) as { error: string }).error).toBe('forbidden');
+
+      // Responder with the same scopes may write.
+      const responderWriteToken = await mint(USER_C, ['documents:read', 'events:write']);
+      expect((await bearerPost(responderWriteToken, documentId)).status).toBe(201);
+
+      // Responder without events:write is stopped by the scope.
+      const responderReadToken = await mint(USER_C, ['documents:read']);
+      const scoped = await bearerPost(responderReadToken, documentId);
+      expect(scoped.status).toBe(403);
+      expect(((await scoped.json()) as { error: string }).error).toBe('insufficient_scope');
+
+      // A commenter's read-only token still reads collaborators-audience rows.
+      const commenterReadToken = await mint(USER_B, ['documents:read']);
+      const readRes = await app.request(`/api/documents/${documentId}/events`, {
+        headers: { authorization: `Bearer ${commenterReadToken}` },
+      });
+      expect(readRes.status).toBe(200);
+      const read = (await readRes.json()) as EventsListResponse;
+      expect(read.events.map((r) => r.id)).toContain(ownerRowId);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
