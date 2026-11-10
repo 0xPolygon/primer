@@ -26,6 +26,9 @@ import { uploadFixture } from './upload.testlib.ts';
 const gateControl = vi.hoisted(() => ({
   failFor: new Set<string>(),
   calls: new Map<string, number>(),
+  // Per user: call number -> ms to hold an already-computed result before
+  // returning it, to model a slow check that started before a change.
+  holds: new Map<string, Map<number, number>>(),
 }));
 
 vi.mock('../lib/events.ts', async (importOriginal) => {
@@ -33,9 +36,13 @@ vi.mock('../lib/events.ts', async (importOriginal) => {
   return {
     ...actual,
     gateEventAccess: async (documentId: string, userId: string) => {
-      gateControl.calls.set(userId, (gateControl.calls.get(userId) ?? 0) + 1);
+      const n = (gateControl.calls.get(userId) ?? 0) + 1;
+      gateControl.calls.set(userId, n);
       if (gateControl.failFor.has(userId)) throw new Error('simulated database failure');
-      return actual.gateEventAccess(documentId, userId);
+      const result = await actual.gateEventAccess(documentId, userId);
+      const hold = gateControl.holds.get(userId)?.get(n) ?? 0;
+      if (hold > 0) await new Promise((resolve) => setTimeout(resolve, hold));
+      return result;
     },
   };
 });
@@ -141,6 +148,7 @@ const onUnhandled = (reason: unknown): void => {
 beforeEach(() => {
   gateControl.failFor.clear();
   gateControl.calls.clear();
+  gateControl.holds.clear();
   unhandled.length = 0;
   process.on('unhandledRejection', onUnhandled);
 });
@@ -223,3 +231,86 @@ describe('event stream re-check: bounded cost and publish order', () => {
   });
 });
 
+describe('event stream re-check: a slow check never re-grants access mid-batch', () => {
+  it('a keepalive check that started before a removal cannot let a later row through', async () => {
+    const prev = process.env.EVENTS_SSE_KEEPALIVE_MS;
+    process.env.EVENTS_SSE_KEEPALIVE_MS = '40';
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    try {
+      await withApp(async (app) => {
+        // Org doc; the reader is a responder.
+        const { documentId } = await uploadFixture(app);
+        const add = await app.request(`/api/documents/${documentId}/collaborators`, {
+          method: 'POST',
+          headers: asUserJson(OWNER),
+          body: JSON.stringify({ userId: READER, role: 'responder' }),
+        });
+        expect(add.status).toBe(201);
+        // Reader's gate calls: #1 connect, #2 the first keepalive check
+        // (computed while still a collaborator, then held), #3 the reader's
+        // own POST (held, so the removal lands while it is in flight).
+        gateControl.holds.set(READER, new Map([[2, 1900], [3, 500]]));
+
+        // Open the stream but do not read yet: writes back up behind the
+        // stalled reader, so a send pass blocks part-way through a batch.
+        const res = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(READER) });
+        expect(res.status).toBe(200);
+        const stream = readStream(res);
+        await sleep(70);
+
+        const ev = (audience: string, payload: Record<string, number>) => ({
+          namespace: 'example',
+          type: 'probe',
+          payload,
+          audience,
+        });
+        // The reader's own write: [collaborators X, author A, collaborators L].
+        const readerPost = app.request(`/api/documents/${documentId}/events`, {
+          method: 'POST',
+          headers: asUserJson(READER),
+          body: JSON.stringify({
+            events: [ev('collaborators', { x: 1 }), ev('author', { a: 1 }), ev('collaborators', { l: 1 })],
+          }),
+        });
+        await sleep(150);
+        await ownerPosts(app, documentId, 1); // fills the stalled stream while still a collaborator
+        await sleep(100);
+        const del = await app.request(`/api/documents/${documentId}/collaborators/${READER}`, {
+          method: 'DELETE',
+          headers: asUser(OWNER),
+        });
+        expect(del.status).toBe(204);
+
+        const posted = await readerPost;
+        expect(posted.status).toBe(201);
+        const [, , leakId] = ((await posted.json()) as SendEventsResponse).events.map((r) => r.id);
+
+        // Let the held pre-removal keepalive check return mid-pass, then read.
+        await sleep(1700);
+        await stream.waitForEnd(1500);
+        await stream.close();
+        // L is a collaborators row published after the removal: an org reader
+        // without a collaborator row must not receive it.
+        expect(stream.ids).not.toContain(leakId);
+      });
+    } finally {
+      if (prev === undefined) delete process.env.EVENTS_SSE_KEEPALIVE_MS;
+      else process.env.EVENTS_SSE_KEEPALIVE_MS = prev;
+    }
+  }, 15000);
+
+  it('one multi-row POST costs one access check per open stream', async () => {
+    await withApp(async (app) => {
+      const documentId = await privateDocWithReader(app);
+      const res = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(READER) });
+      const stream = readStream(res);
+      const afterConnect = gateControl.calls.get(READER) ?? 0;
+
+      const ids = await ownerPosts(app, documentId, 10);
+      expect(await stream.waitForIds(ids)).toBe('done');
+      await stream.close();
+
+      expect((gateControl.calls.get(READER) ?? 0) - afterConnect).toBe(1);
+    });
+  });
+});

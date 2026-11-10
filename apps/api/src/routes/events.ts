@@ -63,6 +63,7 @@ import {
   validateEventBatch,
   validateEventFilters,
   validateVersionFilter,
+  type EventReadIdentity,
 } from '../lib/events.ts';
 
 // Coarse request-body cap so an authenticated collaborator cannot make the
@@ -231,9 +232,11 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       resumeFrom = resumeFrom === null ? n : Math.max(resumeFrom, n);
     }
 
-    // Access is re-checked while the stream is open (see `recheck` below),
-    // so this connect-time identity is only the starting point.
-    let identity = g.identity;
+    // The connect-time identity serves only the resume backlog. Live rows are
+    // judged by the identity a fresh re-check returns for their own batch
+    // (see `recheck` and `drain` below), never by a shared mutable value a
+    // slower, older check could overwrite.
+    const connectIdentity = g.identity;
     const filters = filterParsed.filters;
     const keepaliveMs = Number(process.env.EVENTS_SSE_KEEPALIVE_MS ?? 25_000);
 
@@ -284,24 +287,25 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       // reader who lost their collaborator row stops receiving rows that only
       // collaborators may read. Fails CLOSED: if the check itself errors (a
       // database failover, say), the stream is shut down rather than left
-      // open on the old identity, and nothing is re-thrown.
-      const recheck = async (): Promise<boolean> => {
+      // open, and nothing is re-thrown. Returns the fresh identity rather than
+      // storing it: checks can finish out of order, so each caller uses only
+      // the answer to the check it started.
+      const recheck = async (): Promise<EventReadIdentity | null> => {
         let fresh: Awaited<ReturnType<typeof gate>>;
         try {
           fresh = await gate(documentId, user.id);
         } catch {
           await shutdown();
-          return false;
+          return null;
         }
         if (fresh.status === 'not_found') {
           await shutdown();
-          return false;
+          return null;
         }
-        identity = fresh.identity;
-        return true;
+        return fresh.identity;
       };
 
-      const sendRow = async (row: EventRowDTO): Promise<void> => {
+      const sendRow = async (row: EventRowDTO, identity: EventReadIdentity): Promise<void> => {
         if (closed) return;
         if (!eventMatchesFilters(row, filters)) return;
         if (!identityMayReadEvent(row, identity)) return;
@@ -316,7 +320,10 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       // vouch for a row published after a removal — and then sends them in
       // publish order. A burst of N rows therefore costs at most two checks
       // per open stream rather than N (a writer controls the burst size), and
-      // rows are never reordered by checks finishing out of order.
+      // rows are never reordered by checks finishing out of order. The batch
+      // is judged by the identity its own check returned, so a slower check
+      // that started earlier (the keepalive's, say) can never re-grant
+      // access part-way through a batch.
       const liveQueue: EventRowDTO[] = [];
       let draining = false;
       const drain = async (): Promise<void> => {
@@ -325,8 +332,9 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         try {
           while (!closed && liveQueue.length > 0) {
             const batch = liveQueue.splice(0);
-            if (!(await recheck())) return;
-            for (const row of batch) await sendRow(row);
+            const batchIdentity = await recheck();
+            if (batchIdentity === null) return;
+            for (const row of batch) await sendRow(row, batchIdentity);
           }
         } catch {
           await shutdown();
@@ -334,10 +342,15 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
           draining = false;
         }
       };
+      // The drain starts on a microtask: a POST publishes all its rows in one
+      // synchronous loop, so the whole POST lands in one batch and costs one
+      // check per open stream.
       const enqueueLive = (row: EventRowDTO): void => {
         if (closed) return;
         liveQueue.push(row);
-        void drain();
+        queueMicrotask(() => {
+          void drain();
+        });
       };
 
       // Live rows may arrive while the backlog query runs; hold them and
@@ -361,7 +374,9 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         if (closed || draining || tickChecking) return;
         tickChecking = true;
         try {
-          if (!(await recheck())) return;
+          // The tick only needs ok / not-ok: it never hands its answer to
+          // row delivery.
+          if ((await recheck()) === null) return;
           // SSE comment line — invisible to EventSource, resets idle timers.
           if (!closed) await stream.write(`: keepalive\n\n`);
         } catch {
@@ -388,12 +403,12 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         for (;;) {
           const page = await listEvents({
             documentId,
-            identity,
+            identity: connectIdentity,
             filters,
             afterId,
             limit: DEFAULT_EVENTS_PAGE_SIZE,
           });
-          for (const row of page.rows) await sendRow(row);
+          for (const row of page.rows) await sendRow(row, connectIdentity);
           if (page.nextPageToken === null) break;
           afterId = page.rows[page.rows.length - 1].id;
         }
