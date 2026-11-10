@@ -7,9 +7,10 @@ import {
   buildEngagement,
   buildOperational,
 } from '../services/adminStats.ts';
+import { sessionOnly } from '../auth/sessionOnly.ts';
 
 export function registerAdminRoute(app: Hono<{ Variables: AppVariables }>): void {
-  app.get('/api/admin/stats', async (c) => {
+  app.get('/api/admin/stats', sessionOnly, async (c) => {
     const [totals, adoption, engagement, operational] = await Promise.all([
       buildTotals(),
       buildAdoption(),

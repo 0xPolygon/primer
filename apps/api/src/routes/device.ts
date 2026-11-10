@@ -5,6 +5,7 @@ import type { AppVariables } from '../app.ts';
 import { db } from '../db/client.ts';
 import { apiTokens, deviceAuthorizations } from '../db/schema.ts';
 import { generateDeviceCode, generateToken, generateUserCode, hashToken } from '../auth/tokens.ts';
+import { sessionOnly } from '../auth/sessionOnly.ts';
 
 const AUTH_TTL_SECONDS = 600;
 const DEFAULT_INTERVAL_SECONDS = 5;
@@ -287,7 +288,7 @@ export function registerDeviceRoutes(
     return c.json({ error: 'invalid_grant' }, 400);
   });
 
-  app.post('/api/device/approve', async (c) => {
+  app.post('/api/device/approve', sessionOnly, async (c) => {
     let body: { userCode?: unknown } = {};
     try {
       const raw = await c.req.json();
@@ -326,7 +327,7 @@ export function registerDeviceRoutes(
     );
   });
 
-  app.post('/api/device/deny', async (c) => {
+  app.post('/api/device/deny', sessionOnly, async (c) => {
     let body: { userCode?: unknown } = {};
     try {
       const raw = await c.req.json();

@@ -7,6 +7,7 @@ import {
   parseTokenName,
   revokeTokenForUser,
 } from './tokenSummary.ts';
+import { sessionOnly } from '../auth/sessionOnly.ts';
 
 export function registerTokenRoutes(app: Hono<{ Variables: AppVariables }>): void {
   app.get('/api/tokens', async (c) => {
@@ -15,7 +16,10 @@ export function registerTokenRoutes(app: Hono<{ Variables: AppVariables }>): voi
     return c.json(body, 200);
   });
 
-  app.post('/api/tokens', async (c) => {
+  // Minting is session-only: a bearer must not be able to mint a sibling
+  // credential and read its plaintext back. Listing and revoking stay
+  // bearer-callable (the local MCP server's logout revokes its own token).
+  app.post('/api/tokens', sessionOnly, async (c) => {
     const user = c.get('user');
     let raw: unknown;
     try {
