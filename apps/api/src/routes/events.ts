@@ -254,16 +254,25 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       // that causes just re-delivers rows the consumer dedupes).
       const sent = new Set<number>();
 
+      let keepalive: ReturnType<typeof setInterval> | undefined;
+      let unsubscribe: () => void = () => {};
+
       // Ends this connection from the server side: stop the keepalive, drop
       // the subscription, release the hold below, and close the response so
-      // the client sees the stream end.
+      // the client sees the stream end. Never throws: it runs on error paths
+      // inside detached chains, where an escaping rejection would be
+      // unhandled — and an unhandled rejection exits the process.
       const shutdown = async (): Promise<void> => {
         if (closed) return;
         closed = true;
         clearInterval(keepalive);
         unsubscribe();
         releaseHold();
-        await stream.close();
+        try {
+          await stream.close();
+        } catch {
+          // The client is already gone; nothing left to close.
+        }
       };
 
       // Re-runs the same access gate the connection passed at connect time.
@@ -273,9 +282,17 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       // read) would otherwise keep receiving rows. On failure the stream is
       // closed; on success the fresh identity replaces the old one, so an org
       // reader who lost their collaborator row stops receiving rows that only
-      // collaborators may read.
+      // collaborators may read. Fails CLOSED: if the check itself errors (a
+      // database failover, say), the stream is shut down rather than left
+      // open on the old identity, and nothing is re-thrown.
       const recheck = async (): Promise<boolean> => {
-        const fresh = await gate(documentId, user.id);
+        let fresh: Awaited<ReturnType<typeof gate>>;
+        try {
+          fresh = await gate(documentId, user.id);
+        } catch {
+          await shutdown();
+          return false;
+        }
         if (fresh.status === 'not_found') {
           await shutdown();
           return false;
@@ -293,35 +310,68 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         await stream.writeSSE({ id: String(row.id), data: JSON.stringify(row) });
       };
 
-      // Every live row re-checks access first (one query per row), so a row
-      // written after the reader lost access is never sent to them.
-      const sendLive = async (row: EventRowDTO): Promise<void> => {
+      // Live rows go through one queue per connection, drained by a single
+      // loop. Each pass takes every row queued so far, runs ONE fresh access
+      // check — started after all of those rows arrived, so a check can never
+      // vouch for a row published after a removal — and then sends them in
+      // publish order. A burst of N rows therefore costs at most two checks
+      // per open stream rather than N (a writer controls the burst size), and
+      // rows are never reordered by checks finishing out of order.
+      const liveQueue: EventRowDTO[] = [];
+      let draining = false;
+      const drain = async (): Promise<void> => {
+        if (draining) return;
+        draining = true;
+        try {
+          while (!closed && liveQueue.length > 0) {
+            const batch = liveQueue.splice(0);
+            if (!(await recheck())) return;
+            for (const row of batch) await sendRow(row);
+          }
+        } catch {
+          await shutdown();
+        } finally {
+          draining = false;
+        }
+      };
+      const enqueueLive = (row: EventRowDTO): void => {
         if (closed) return;
-        if (!(await recheck())) return;
-        await sendRow(row);
+        liveQueue.push(row);
+        void drain();
       };
 
-      // Live rows may arrive while the backlog query runs; queue them and
-      // flush after the backlog (sendRow's id guard dedupes the overlap).
+      // Live rows may arrive while the backlog query runs; hold them and
+      // queue them after the backlog (sendRow's id guard dedupes the overlap).
       let backlogDone = false;
       const pending: EventRowDTO[] = [];
-      const unsubscribe = subscribeDocEvents(documentId, (row) => {
+      unsubscribe = subscribeDocEvents(documentId, (row) => {
         if (!backlogDone) {
           pending.push(row);
           return;
         }
-        void sendLive(row);
+        enqueueLive(row);
       });
 
-      const keepalive = setInterval(() => {
-        if (closed) return;
-        // The tick doubles as the access re-check, so a stream whose reader
-        // lost access is closed even when no rows are being written (none
-        // can be, for a deleted document).
-        void recheck().then((ok) => {
+      // The tick doubles as the access re-check, so a stream whose reader
+      // lost access is closed even when no rows are being written (none can
+      // be, for a deleted document). It skips while a drain pass is already
+      // checking, and never overlaps itself.
+      let tickChecking = false;
+      const tick = async (): Promise<void> => {
+        if (closed || draining || tickChecking) return;
+        tickChecking = true;
+        try {
+          if (!(await recheck())) return;
           // SSE comment line — invisible to EventSource, resets idle timers.
-          if (ok && !closed) void stream.write(`: keepalive\n\n`);
-        });
+          if (!closed) await stream.write(`: keepalive\n\n`);
+        } catch {
+          await shutdown();
+        } finally {
+          tickChecking = false;
+        }
+      };
+      keepalive = setInterval(() => {
+        void tick();
       }, keepaliveMs);
 
       stream.onAbort(() => {
@@ -349,7 +399,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         }
       }
       backlogDone = true;
-      for (const row of pending.splice(0)) await sendLive(row);
+      for (const row of pending.splice(0)) enqueueLive(row);
 
       // Hold the stream open until the client goes away or a re-check
       // closes it.
