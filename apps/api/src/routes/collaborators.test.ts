@@ -263,6 +263,33 @@ describe('POST /api/documents/:docId/collaborators', () => {
     });
   });
 
+  it('PATCH with invalid role value manager: 400 invalid_body naming commenter|responder|editor, row unchanged', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      const add = await app.request(`/api/documents/${upload.documentId}/collaborators`, {
+        method: 'POST',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ userId: 'mock-user-2', role: 'responder' }),
+      });
+      expect(add.status).toBe(201);
+      const res = await app.request(`/api/documents/${upload.documentId}/collaborators/mock-user-2`, {
+        method: 'PATCH',
+        headers: asUserJson('mock-user-1'),
+        body: JSON.stringify({ role: 'manager' }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; message: string };
+      expect(body.error).toBe('invalid_body');
+      expect(body.message).toContain('commenter|responder|editor');
+      // The stored role is untouched.
+      const list = await app.request(`/api/documents/${upload.documentId}/collaborators`, {
+        headers: asUser('mock-user-1'),
+      });
+      const rows = ((await list.json()) as { collaborators: { userId: string; role: string }[] }).collaborators;
+      expect(rows.find((r) => r.userId === 'mock-user-2')).toHaveProperty('role', 'responder');
+    });
+  });
+
   it('collaborator_exists (409) on duplicate add', async () => {
     await withMultiUserApp(async (app) => {
       const upload = await uploadFixture(app);
