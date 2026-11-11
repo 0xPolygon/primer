@@ -1,5 +1,11 @@
 # @polygonlabs/primer-mcp
 
+## 1.3.0
+
+### Minor Changes
+
+- [#125](https://github.com/0xPolygon/primer/pull/125) [`535a4cb`](https://github.com/0xPolygon/primer/commit/535a4cba7f6a458042b19dd7b3c7084703e8c09a) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - `PrimerClient.addCollaborator` accepts the `responder` role (its `role` parameter is now the shared `CollaboratorRole`), and the tool descriptions say who may write events.
+
 ## 1.2.2
 
 ### Patch Changes

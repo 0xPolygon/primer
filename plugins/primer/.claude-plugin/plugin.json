@@ -1,6 +1,6 @@
 {
   "name": "primer",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "description": "Publish HTML/Markdown artifacts to Primer from Claude Web, Desktop, or Code. Browser-based OAuth login, create/version documents, pull reviewer comments.",
   "author": {
     "name": "Polygon"
