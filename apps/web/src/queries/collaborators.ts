@@ -1,12 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   Collaborator,
+  CollaboratorRole,
   CollaboratorsListResponse,
   UserSearchResponse,
 } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
-
-type CollaboratorRole = 'commenter' | 'editor';
 
 export function useCollaborators(docId: string) {
   return useQuery({

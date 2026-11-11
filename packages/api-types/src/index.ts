@@ -148,8 +148,14 @@ export interface DocumentDetail extends DocumentSummary {
 
 /** The requesting viewer's effective role on a document. Mirrors
  *  EffectiveRole in apps/api/src/lib/permissions.ts: 'stranger' is a
- *  non-collaborator (readable only when visibility is 'org'). */
-export type ViewerRole = 'owner' | 'editor' | 'commenter' | 'stranger';
+ *  non-collaborator (readable only when visibility is 'org').
+ *
+ *  The ladder is commenter < responder < editor < owner; each step adds one
+ *  kind of power. A commenter reads and comments. A responder additionally
+ *  writes structured document events (so the page can act in their name) but
+ *  cannot publish versions, rename, or manage people. An editor can also
+ *  rewrite the document; only the owner manages collaborators. */
+export type ViewerRole = 'owner' | 'editor' | 'responder' | 'commenter' | 'stranger';
 
 export interface DocumentDetailResponse {
   document: DocumentDetail;
@@ -379,7 +385,8 @@ export const API_TOKEN_SCOPE_DESCRIPTIONS: Record<ApiTokenScope, string> = {
   'documents:write':
     'Create documents, upload versions, edit titles, descriptions, and version notes, and make documents private, where your role on the document allows it',
   'comments:write': 'Create, edit, resolve, and delete comments where your role on the document allows it',
-  'events:write': 'Write structured document events where your role on the document allows it',
+  'events:write':
+    'Write structured document events where your role on the document allows it (the owner, an editor or a responder)',
   'collaborators:manage':
     'Change who can access documents you own: list, add, change, and remove collaborators',
   'users:read': 'Look up and search users',
@@ -420,10 +427,21 @@ export interface CreateTokenResponse {
   summary: ApiTokenSummary;
 }
 
+/** Roles an owner can grant through the collaborators API. The single
+ *  source for every surface (API validation, web share UI, MCP client) so a
+ *  new role is added in one place rather than re-declared per consumer. */
+export const COLLABORATOR_ROLES = ['commenter', 'responder', 'editor'] as const;
+
+export type CollaboratorRole = (typeof COLLABORATOR_ROLES)[number];
+
+export function isCollaboratorRole(v: unknown): v is CollaboratorRole {
+  return COLLABORATOR_ROLES.some((r) => r === v);
+}
+
 export interface Collaborator {
   userId: string;
   displayName: string;
-  role: 'commenter' | 'editor';
+  role: CollaboratorRole;
   grantedBy: string;
   createdAt: string;
 }
@@ -434,11 +452,11 @@ export interface CollaboratorsListResponse {
 
 export interface AddCollaboratorRequest {
   userId: string;
-  role: 'commenter' | 'editor';
+  role: CollaboratorRole;
 }
 
 export interface UpdateCollaboratorRequest {
-  role: 'commenter' | 'editor';
+  role: CollaboratorRole;
 }
 
 export interface UserSearchHit {
@@ -554,7 +572,7 @@ export function isEventAudience(v: unknown): v is EventAudience {
 }
 
 /** `namespace` is hierarchical: `/`-separated lowercase kebab segments
- *  (`padd`, `padd/telemetry`). Namespace MEANING is the consumers' domain —
+ *  (`example`, `example/telemetry`). Namespace MEANING is the consumers' domain —
  *  the server validates shape only and never infers behavior from it. */
 export const EVENT_NAMESPACE_RE = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
 /** `type` is a single name within a namespace (`export`, `verdict`). */

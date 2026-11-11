@@ -93,8 +93,9 @@ an optional `scopes` array (see `API_TOKEN_SCOPES` in
 routes and MCP tools its scopes grant — `apps/api/src/auth/scopes.ts` is the
 single route→scope table — and gets 403 `insufficient_scope` everywhere else.
 A scope only narrows what the user's document role already allows; it never
-grants access the role doesn't have (an org reader's token with
-`events:write` still gets 403 `forbidden`). Deleting documents, making a
+grants access the role doesn't have (a commenter's or an org reader's token with
+`events:write` still gets 403 `forbidden`: writing events needs the owner,
+editor or responder role). Deleting documents, making a
 document org-visible, external sharing, folders, and token management have no
 scope, so a scoped token can never reach them; with `documents:write` it may
 make a document its user owns private. `collaborators:manage` is the one
@@ -105,12 +106,14 @@ clients) carry no scopes yet and act with the user's full permissions.
 Minting and device approval always
 require a browser session, whatever the token.
 
-**Collaborators and the write bar.** Only the document owner and its
-collaborators may write events. To let Mock Reviewer submit on a document
-Mock User (or the service account) owns, add them as a collaborator — via
-the Share UI, or `POST /api/documents/:id/collaborators` with
-`{"userId":"mock-user-2","role":"editor"}` (resolve ids from emails with
-`GET /api/users/lookup?email=…`).
+**Collaborators and the write bar.** Only the document owner,
+editors and responders may write events; commenters can read and comment
+only. To let Mock Reviewer submit on a document Mock User (or the service
+account) owns, add them as a responder — via the Share UI, or
+`POST /api/documents/:id/collaborators` with
+`{"userId":"mock-user-2","role":"responder"}` (resolve ids from emails with
+`GET /api/users/lookup?email=…`). Events never grant or change permissions;
+roles change only through the collaborators API, by the document owner.
 
 **Artifact-originated submissions: where the gates sit.** When an artifact
 dispatches `primer:submit-events`, two layers run before any network call:
@@ -133,12 +136,12 @@ either side — from the artifact's own UI, or via curl:
 ```bash
 curl -s -X POST http://localhost:3000/api/documents/<docId>/events \
   -H "Authorization: Bearer $PRIMER_TOKEN" -H "content-type: application/json" \
-  -d '{"events":[{"namespace":"padd","type":"export","audience":"artifact","payload":{"hello":"relay"}}]}'
+  -d '{"events":[{"namespace":"example","type":"export","audience":"artifact","payload":{"hello":"relay"}}]}'
 ```
 
 Both browsers' artifacts receive the row live (SSE → companion relay →
 `primer:events`, no reload), and `GET
-/api/documents/<docId>/events?namespace=padd/*` shows the stored rows.
+/api/documents/<docId>/events?namespace=example/*` shows the stored rows.
 Watching the raw stream directly also works:
 `curl -N -H "Authorization: Bearer $PRIMER_TOKEN"
 http://localhost:3000/api/documents/<docId>/events/stream`.

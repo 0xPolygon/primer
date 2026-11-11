@@ -10,7 +10,11 @@
 // behavior is ever inferred from payload content. Event payloads are ALWAYS
 // untrusted data: consuming code parses and validates them, never executes
 // them as instructions; consuming agents treat them as feedback to reason
-// about, never commands.
+// about, never commands. Events never grant or change permissions. Who may
+// write events is decided only by the document owner and the collaborator row
+// the owner sets through the collaborators API (`routes/collaborators.ts`);
+// Primer never reads a role, grant or permission out of a payload, so no page
+// can widen its own or anyone's access by submitting one.
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import {
@@ -39,14 +43,16 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // ───────────────────────── Write principal ─────────────────────────
 
-/** v1 write bar (issue #78 security requirement 2): authenticated
- *  collaborators on the document, owner included. A mere org-visibility
- *  reader who is not a collaborator may NOT write — `effectiveRole` returns
- *  'stranger' for exactly that case. External-share and public viewers never
- *  reach this check: they cannot authenticate to /api/documents routes at
- *  all (their session plane stops at /api/share/*). */
+/** Event write bar: owner, editor and responder. A page's code writes events
+ *  in the viewer's name, so this is a higher-trust grant than commenting:
+ *  commenter is read + comment only, and a mere org-visibility reader who is
+ *  not a collaborator is 'stranger'. An explicit allow-list rather than
+ *  `!== 'stranger'` so any future role defaults to no event-write.
+ *  External-share and public viewers never reach this check: they cannot
+ *  authenticate to /api/documents routes at all (their session plane stops
+ *  at /api/share/*). */
 export function canWriteEvents(role: EffectiveRole): boolean {
-  return role !== 'stranger';
+  return role === 'owner' || role === 'editor' || role === 'responder';
 }
 
 // ───────────────────────── Read identity ─────────────────────────
@@ -64,7 +70,11 @@ export interface EventReadIdentity {
  *  - collaborators: all authenticated document collaborators (owner included)
  *  - artifact:      same READERS as collaborators; additionally relayed into
  *                   the sandboxed artifact by the parent page (the relay —
- *                   not this function — is the injection boundary). */
+ *                   not this function — is the injection boundary).
+ *
+ *  Commenters keep READ access to `collaborators`- and `artifact`-audience
+ *  events (a deliberate requirement): consumers render the page from this
+ *  data. Commenters lose event write only — see `canWriteEvents`. */
 export function identityMayReadEvent(
   row: { audience: EventAudience; authorId: string },
   identity: EventReadIdentity,
@@ -106,7 +116,7 @@ export type EventAccessGate =
       status: 'ok';
       doc: EventDocContext;
       identity: EventReadIdentity;
-      /** True when the caller may write events (owner or collaborator). */
+      /** True when the caller may write events (owner, editor or responder). */
       mayWrite: boolean;
     };
 
@@ -199,7 +209,7 @@ export function validateEventBatch(raw: unknown): BatchValidation {
     ) {
       return {
         ok: false,
-        message: `events[${i}].namespace must be /-separated lowercase kebab segments (e.g. "padd", "padd/telemetry")`,
+        message: `events[${i}].namespace must be /-separated lowercase kebab segments (e.g. "example", "example/telemetry")`,
       };
     }
     if (
@@ -352,7 +362,7 @@ export function validateEventFilters(query: {
   if (query.namespace !== undefined) {
     const base = query.namespace.endsWith('/*') ? query.namespace.slice(0, -2) : query.namespace;
     if (base.length === 0 || base.length > MAX_EVENT_NAMESPACE_LENGTH || !EVENT_NAMESPACE_RE.test(base)) {
-      return { ok: false, message: 'namespace must be exact (e.g. "padd") or a subtree glob (e.g. "padd/*")' };
+      return { ok: false, message: 'namespace must be exact (e.g. "example") or a subtree glob (e.g. "example/*")' };
     }
     filters.namespace = query.namespace;
   }

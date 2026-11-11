@@ -4,7 +4,7 @@
 // document: a machine channel PARALLEL to comments, never touching them.
 // Comments are human discussion anchored to selections; events are machine
 // payloads an interactive artifact (or any authenticated tooling) hands back
-// to the workflow that published it. First consumer: PADD review packets.
+// to the workflow that published it.
 //
 // Write path: the artifact CANNOT call this API itself (sandbox +
 // connect-src 'none' by threat model — see docs/prd-primer.md). It
@@ -63,6 +63,7 @@ import {
   validateEventBatch,
   validateEventFilters,
   validateVersionFilter,
+  type EventReadIdentity,
 } from '../lib/events.ts';
 
 // Coarse request-body cap so an authenticated collaborator cannot make the
@@ -98,8 +99,9 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     const g = await gate(documentId, user.id);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     // Tighter write principal (issue #78 security requirement 2): reading is
-    // not enough — only collaborators (owner included) may write. An org
-    // reader who is not a collaborator can see the doc, so 403 (not 404).
+    // not enough — only the owner, editors and responders may write. A
+    // commenter, or an org reader who is not a collaborator, can see the doc, so
+    // 403 (not 404).
     if (!g.mayWrite) return c.json({ error: 'forbidden' }, 403);
 
     let raw: unknown;
@@ -230,12 +232,20 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       resumeFrom = resumeFrom === null ? n : Math.max(resumeFrom, n);
     }
 
-    const identity = g.identity;
+    // The connect-time identity serves only the resume backlog. Live rows are
+    // judged by the identity a fresh re-check returns for their own batch
+    // (see `recheck` and `drain` below), never by a shared mutable value a
+    // slower, older check could overwrite.
+    const connectIdentity = g.identity;
     const filters = filterParsed.filters;
     const keepaliveMs = Number(process.env.EVENTS_SSE_KEEPALIVE_MS ?? 25_000);
 
     return streamSSE(c, async (stream) => {
       let closed = false;
+      let releaseHold: () => void = () => {};
+      const held = new Promise<void>((resolve) => {
+        releaseHold = resolve;
+      });
       // Ids already written to THIS connection. A set (rather than a
       // highest-id watermark) so a LIVE row whose id is lower than one
       // already sent — a late-committing concurrent writer, exactly the
@@ -247,7 +257,55 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
       // that causes just re-delivers rows the consumer dedupes).
       const sent = new Set<number>();
 
-      const sendRow = async (row: EventRowDTO): Promise<void> => {
+      let keepalive: ReturnType<typeof setInterval> | undefined;
+      let unsubscribe: () => void = () => {};
+
+      // Ends this connection from the server side: stop the keepalive, drop
+      // the subscription, release the hold below, and close the response so
+      // the client sees the stream end. Never throws: it runs on error paths
+      // inside detached chains, where an escaping rejection would be
+      // unhandled — and an unhandled rejection exits the process.
+      const shutdown = async (): Promise<void> => {
+        if (closed) return;
+        closed = true;
+        clearInterval(keepalive);
+        unsubscribe();
+        releaseHold();
+        try {
+          await stream.close();
+        } catch {
+          // The client is already gone; nothing left to close.
+        }
+      };
+
+      // Re-runs the same access gate the connection passed at connect time.
+      // A stream lives as long as its connection, and keepalives hold that
+      // open indefinitely, so a reader whose access was taken away (removed
+      // collaborator, deleted document, a private doc they can no longer
+      // read) would otherwise keep receiving rows. On failure the stream is
+      // closed; on success the fresh identity replaces the old one, so an org
+      // reader who lost their collaborator row stops receiving rows that only
+      // collaborators may read. Fails CLOSED: if the check itself errors (a
+      // database failover, say), the stream is shut down rather than left
+      // open, and nothing is re-thrown. Returns the fresh identity rather than
+      // storing it: checks can finish out of order, so each caller uses only
+      // the answer to the check it started.
+      const recheck = async (): Promise<EventReadIdentity | null> => {
+        let fresh: Awaited<ReturnType<typeof gate>>;
+        try {
+          fresh = await gate(documentId, user.id);
+        } catch {
+          await shutdown();
+          return null;
+        }
+        if (fresh.status === 'not_found') {
+          await shutdown();
+          return null;
+        }
+        return fresh.identity;
+      };
+
+      const sendRow = async (row: EventRowDTO, identity: EventReadIdentity): Promise<void> => {
         if (closed) return;
         if (!eventMatchesFilters(row, filters)) return;
         if (!identityMayReadEvent(row, identity)) return;
@@ -256,28 +314,86 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         await stream.writeSSE({ id: String(row.id), data: JSON.stringify(row) });
       };
 
-      // Live rows may arrive while the backlog query runs; queue them and
-      // flush after the backlog (sendRow's id guard dedupes the overlap).
+      // Live rows go through one queue per connection, drained by a single
+      // loop. Each pass takes every row queued so far, runs ONE fresh access
+      // check — started after all of those rows arrived, so a check can never
+      // vouch for a row published after a removal — and then sends them in
+      // publish order. A burst of N rows therefore costs at most two checks
+      // per open stream rather than N (a writer controls the burst size), and
+      // rows are never reordered by checks finishing out of order. The batch
+      // is judged by the identity its own check returned, so a slower check
+      // that started earlier (the keepalive's, say) can never re-grant
+      // access part-way through a batch.
+      const liveQueue: EventRowDTO[] = [];
+      let draining = false;
+      const drain = async (): Promise<void> => {
+        if (draining) return;
+        draining = true;
+        try {
+          while (!closed && liveQueue.length > 0) {
+            const batch = liveQueue.splice(0);
+            const batchIdentity = await recheck();
+            if (batchIdentity === null) return;
+            for (const row of batch) await sendRow(row, batchIdentity);
+          }
+        } catch {
+          await shutdown();
+        } finally {
+          draining = false;
+        }
+      };
+      // The drain starts on a microtask: a POST publishes all its rows in one
+      // synchronous loop, so the whole POST lands in one batch and costs one
+      // check per open stream.
+      const enqueueLive = (row: EventRowDTO): void => {
+        if (closed) return;
+        liveQueue.push(row);
+        queueMicrotask(() => {
+          void drain();
+        });
+      };
+
+      // Live rows may arrive while the backlog query runs; hold them and
+      // queue them after the backlog (sendRow's id guard dedupes the overlap).
       let backlogDone = false;
       const pending: EventRowDTO[] = [];
-      const unsubscribe = subscribeDocEvents(documentId, (row) => {
+      unsubscribe = subscribeDocEvents(documentId, (row) => {
         if (!backlogDone) {
           pending.push(row);
           return;
         }
-        void sendRow(row);
+        enqueueLive(row);
       });
 
-      const keepalive = setInterval(() => {
-        if (closed) return;
-        // SSE comment line — invisible to EventSource, resets idle timers.
-        void stream.write(`: keepalive\n\n`);
+      // The tick doubles as the access re-check, so a stream whose reader
+      // lost access is closed even when no rows are being written (none can
+      // be, for a deleted document). It skips while a drain pass is already
+      // checking, and never overlaps itself.
+      let tickChecking = false;
+      const tick = async (): Promise<void> => {
+        if (closed || draining || tickChecking) return;
+        tickChecking = true;
+        try {
+          // The tick only needs ok / not-ok: it never hands its answer to
+          // row delivery.
+          if ((await recheck()) === null) return;
+          // SSE comment line — invisible to EventSource, resets idle timers.
+          if (!closed) await stream.write(`: keepalive\n\n`);
+        } catch {
+          await shutdown();
+        } finally {
+          tickChecking = false;
+        }
+      };
+      keepalive = setInterval(() => {
+        void tick();
       }, keepaliveMs);
 
       stream.onAbort(() => {
         closed = true;
         clearInterval(keepalive);
         unsubscribe();
+        releaseHold();
       });
 
       // Backlog replay when resuming (Last-Event-ID / ?since). Paginate to
@@ -287,21 +403,22 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
         for (;;) {
           const page = await listEvents({
             documentId,
-            identity,
+            identity: connectIdentity,
             filters,
             afterId,
             limit: DEFAULT_EVENTS_PAGE_SIZE,
           });
-          for (const row of page.rows) await sendRow(row);
+          for (const row of page.rows) await sendRow(row, connectIdentity);
           if (page.nextPageToken === null) break;
           afterId = page.rows[page.rows.length - 1].id;
         }
       }
       backlogDone = true;
-      for (const row of pending.splice(0)) await sendRow(row);
+      for (const row of pending.splice(0)) enqueueLive(row);
 
-      // Hold the stream open until the client goes away.
-      await new Promise<void>((resolve) => stream.onAbort(resolve));
+      // Hold the stream open until the client goes away or a re-check
+      // closes it.
+      await held;
     });
   });
 }

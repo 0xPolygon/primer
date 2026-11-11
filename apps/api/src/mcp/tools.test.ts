@@ -392,6 +392,46 @@ describe('MCP tools respect visibility + collab', () => {
   });
 });
 
+describe('MCP tools: responder role', () => {
+  it('primer_get_document on private doc as responder returns ok', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-responder');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, docId));
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-responder',
+      role: 'responder', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_get_document(
+        { documentId: docId },
+        { id: 'tools-responder', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBeFalsy();
+    });
+  });
+
+  it('primer_add_version as responder collab returns forbidden', async () => {
+    await seedUser('tools-owner');
+    await seedUser('tools-responder');
+    const { docId } = await seedDocOwnedBy('tools-owner');
+    await db.insert(documentCollaborators).values({
+      id: uuidv7(), documentId: docId, userId: 'tools-responder',
+      role: 'responder', grantedBy: 'tools-owner',
+    });
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const res = await handlers.primer_add_version(
+        { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
+        { id: 'tools-responder', email: 'x', displayName: 'x' },
+      );
+      expect(res.isError).toBe(true);
+      expect(JSON.parse(res.content[0].text).code).toBe('forbidden');
+    });
+  });
+});
+
 describe('primer_list_documents', () => {
   const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
 
@@ -890,6 +930,44 @@ describe('primer_send_events / primer_get_events (issue #78)', () => {
       };
       expect(page.events.map((e) => e.type)).toEqual(['reconciliation']);
       expect(page.nextPageToken).toBeNull();
+    });
+  });
+
+  it('responders write events; commenters cannot write but still read collaborators-audience rows', async () => {
+    await seedUser('tools-ev-owner4');
+    await seedUser('tools-ev-responder');
+    await seedUser('tools-ev-commenter');
+    const { docId } = await seedDocOwnedBy('tools-ev-owner4');
+    await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, docId));
+    await db.insert(documentCollaborators).values([
+      { id: uuidv7(), documentId: docId, userId: 'tools-ev-responder', role: 'responder', grantedBy: 'tools-ev-owner4' },
+      { id: uuidv7(), documentId: docId, userId: 'tools-ev-commenter', role: 'commenter', grantedBy: 'tools-ev-owner4' },
+    ]);
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const asResponder = await handlers.primer_send_events(
+        { documentId: docId, events: [validEvent] },
+        asUserArg('tools-ev-responder'),
+      );
+      expect(asResponder.isError).toBeFalsy();
+
+      const asCommenter = await handlers.primer_send_events(
+        { documentId: docId, events: [validEvent] },
+        asUserArg('tools-ev-commenter'),
+      );
+      expect(asCommenter.isError).toBe(true);
+      expect((JSON.parse(asCommenter.content[0].text) as { code: string }).code).toBe('forbidden');
+
+      // Pages render from collaborators-audience rows, so the commenter keeps read.
+      const ownerRow = await handlers.primer_send_events(
+        { documentId: docId, events: [{ ...validEvent, type: 'verdict', audience: 'collaborators' }] },
+        asUserArg('tools-ev-owner4'),
+      );
+      expect(ownerRow.isError).toBeFalsy();
+      const got = await handlers.primer_get_events({ documentId: docId }, asUserArg('tools-ev-commenter'));
+      expect(got.isError).toBeFalsy();
+      const types = (JSON.parse(got.content[0].text) as { events: { type: string }[] }).events.map((e) => e.type);
+      expect(types).toContain('verdict');
     });
   });
 

@@ -1,6 +1,11 @@
+import type { CollaboratorRole } from '@polygonlabs/primer-api-types';
+
+// Re-exported so existing importers (notifier, collaborators routes) keep
+// one import site while the union itself lives in api-types.
+export type { CollaboratorRole } from '@polygonlabs/primer-api-types';
+
 export type Visibility = 'org' | 'private';
-export type CollaboratorRole = 'commenter' | 'editor';
-export type EffectiveRole = 'owner' | 'editor' | 'commenter' | 'stranger';
+export type EffectiveRole = 'owner' | 'editor' | 'responder' | 'commenter' | 'stranger';
 
 export function effectiveRole(
   doc: { uploaderId: string; visibility: Visibility },
@@ -9,6 +14,7 @@ export function effectiveRole(
 ): EffectiveRole {
   if (doc.uploaderId === userId) return 'owner';
   if (collabRole === 'editor') return 'editor';
+  if (collabRole === 'responder') return 'responder';
   if (collabRole === 'commenter') return 'commenter';
   return 'stranger';
 }
@@ -24,6 +30,7 @@ export function canComment(visibility: Visibility, role: EffectiveRole): boolean
 }
 
 export function canEdit(role: EffectiveRole): boolean {
+  // Responder is deliberately excluded: it exists so event-write can be granted without publish/rename rights.
   return role === 'owner' || role === 'editor';
 }
 

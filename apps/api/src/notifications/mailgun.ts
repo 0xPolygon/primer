@@ -1,4 +1,5 @@
 import { inArray } from 'drizzle-orm';
+import type { CollaboratorRole } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
 import { users } from '../db/schema.ts';
 import { logger } from '../logger.ts';
@@ -121,7 +122,7 @@ function renderCollabSubject(docTitle: string): string {
 
 function renderCollabText(
   actorName: string,
-  role: 'commenter' | 'editor',
+  role: CollaboratorRole,
   docTitle: string,
   url: string,
 ): string {
@@ -137,7 +138,7 @@ function renderCollabText(
 
 function renderCollabHtml(
   actorName: string,
-  role: 'commenter' | 'editor',
+  role: CollaboratorRole,
   docTitle: string,
   url: string,
 ): string {

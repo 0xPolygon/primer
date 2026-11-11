@@ -159,3 +159,33 @@ describe('disclosure envelope', () => {
     expect(JSON.stringify(envelope)).not.toContain('never-disclosed');
   });
 });
+
+describe('decideSubmission — viewers who cannot write events', () => {
+  // A commenter (or an org reader with no collaborator row) can see the page
+  // but the server refuses their event writes. Asking for consent first and
+  // then failing with a bare "forbidden" is a dead end, so the role check
+  // comes before every other step.
+  it('refuses before prompting when the viewer cannot write events', () => {
+    expect(
+      decideSubmission({ events: [ev('author')], granted: null, promptOpen: false, mayWrite: false }),
+    ).toBe('refuse_role');
+  });
+
+  it('refuses even when a grant exists or a prompt is already open', () => {
+    expect(
+      decideSubmission({ events: [ev('author')], granted: 'artifact', promptOpen: false, mayWrite: false }),
+    ).toBe('refuse_role');
+    expect(
+      decideSubmission({ events: [ev('author')], granted: null, promptOpen: true, mayWrite: false }),
+    ).toBe('refuse_role');
+  });
+
+  it('keeps the normal path for viewers who can write, and when the role is not known yet', () => {
+    expect(
+      decideSubmission({ events: [ev('author')], granted: null, promptOpen: false, mayWrite: true }),
+    ).toBe('prompt');
+    expect(
+      decideSubmission({ events: [ev('author')], granted: 'artifact', promptOpen: false, mayWrite: undefined }),
+    ).toBe('forward');
+  });
+});

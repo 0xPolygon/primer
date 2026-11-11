@@ -34,6 +34,7 @@ Two collaborator roles, matching the wording of #29:
 
 - **`commenter`** — read + comment on the doc.
 - **`editor`** — read + comment + write (edit title/description, add versions, edit version notes).
+- **`responder`** (added later, in #124) — read + comment + write document events, but none of editor's write powers (no versions, title/description or version notes). Allowed under both visibilities; commenters do not write events.
 
 The document's **owner** is always full-access (read/comment/write plus the permission-management surface). Owner is not a row in the collaborators table — it's derived from `documents.uploaderId`.
 
@@ -83,7 +84,7 @@ document_collaborators
 ├─ id             UUID  PK
 ├─ document_id    UUID  FK → documents.id, ON DELETE CASCADE
 ├─ user_id        UUID  FK → users.id,     ON DELETE CASCADE
-├─ role           TEXT  NOT NULL, CHECK (role IN ('commenter', 'editor'))
+├─ role           TEXT  NOT NULL  -- no CHECK constraint; allowed values are enforced in code (COLLABORATOR_ROLES)
 ├─ granted_by     UUID  FK → users.id  -- audit trail; who added them
 ├─ created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 ├─ UNIQUE (document_id, user_id)

@@ -168,7 +168,13 @@ export function decideSubmission(args: {
   events: EventInput[];
   granted: EventAudience | null;
   promptOpen: boolean;
-}): 'forward' | 'prompt' | 'refuse_pending' {
+  /** Whether the viewer's role lets them write events. `false` refuses up
+   *  front: asking a viewer to consent to a submission the server will
+   *  refuse anyway is a dead end. `undefined` (role not loaded yet) keeps the
+   *  normal path; the server still decides. */
+  mayWrite?: boolean;
+}): 'forward' | 'prompt' | 'refuse_pending' | 'refuse_role' {
+  if (args.mayWrite === false) return 'refuse_role';
   if (args.promptOpen) return 'refuse_pending';
   const required = requiredTier(args.events);
   if (args.granted !== null && AUDIENCE_RANK[args.granted] >= AUDIENCE_RANK[required]) {

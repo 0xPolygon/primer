@@ -39,7 +39,7 @@ import { hasAnyComments, hasLiveComments } from '../lib/liveComments.ts';
 import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
-import { canEditDoc } from '../lib/docCapabilities.ts';
+import { canEditDoc, canSubmitEventsDoc } from '../lib/docCapabilities.ts';
 import { extractCanonicalDocId } from '../lib/docIdParam.ts';
 import {
   computePillPosition,
@@ -356,8 +356,19 @@ function DocumentPageInner() {
             events: stamped,
             granted: eventsGrantStore.load(scope),
             promptOpen: pendingGrantRef.current !== null,
+            // Unknown until the document detail loads; then the server's
+            // write bar (owner, editor, responder) decides up front.
+            mayWrite: docQuery.data ? canSubmitEventsDoc(docQuery.data.myRole) : undefined,
           });
-          if (decision === 'refuse_pending') {
+          if (decision === 'refuse_role') {
+            // The viewer can see this page but their role does not let it
+            // submit in their name: say so instead of prompting for consent
+            // that would end in a bare "forbidden".
+            ackSubmitResult({
+              ok: false,
+              error: "forbidden: You can view this document but can't respond to it.",
+            });
+          } else if (decision === 'refuse_pending') {
             // Exactly one submission may be held per prompt: nothing
             // queue-jumps or piggybacks on the viewer's grant click.
             ackSubmitResult({
@@ -401,7 +412,7 @@ function DocumentPageInner() {
           break;
       }
     },
-    [readMostly, currentVersionId, docId, me.data?.id, ackSubmitResult, postSubmission]
+    [readMostly, currentVersionId, docId, me.data?.id, docQuery.data, ackSubmitResult, postSubmission]
   );
 
   function openFullScreen() {

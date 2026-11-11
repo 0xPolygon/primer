@@ -111,7 +111,7 @@ export const events = pgTable(
     // Per-row read scope, REQUIRED on write (no default — a default would be
     // an implicit behavior; every writer is code that can state intent).
     audience: text('audience', { enum: ['author', 'collaborators', 'artifact'] }).notNull(),
-    // Hierarchical namespace (`padd`, `padd/telemetry`) + a single type name
+    // Hierarchical namespace (`example`, `example/telemetry`) + a single type name
     // within it. Server-validated by shape only; meaning is consumer domain.
     namespace: text('namespace').notNull(),
     type: text('type').notNull(),
@@ -153,7 +153,7 @@ export const documentCollaborators = pgTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    role: text('role', { enum: ['commenter', 'editor'] }).notNull(),
+    role: text('role', { enum: ['commenter', 'responder', 'editor'] }).notNull(),
     grantedBy: text('granted_by').notNull().references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
