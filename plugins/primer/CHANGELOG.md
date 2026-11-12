@@ -1,5 +1,11 @@
 # @polygonlabs/plugin-primer
 
+## 2.2.4
+
+### Patch Changes
+
+- [#125](https://github.com/0xPolygon/primer/pull/125) [`535a4cb`](https://github.com/0xPolygon/primer/commit/535a4cba7f6a458042b19dd7b3c7084703e8c09a) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Documents the `responder` role, who may write events, and that events never grant or change permissions, in the skill reference.
+
 ## 2.2.3
 
 ### Patch Changes

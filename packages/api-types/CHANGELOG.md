@@ -1,5 +1,13 @@
 # @polygonlabs/primer-api-types
 
+## 0.5.0
+
+### Minor Changes
+
+- [#125](https://github.com/0xPolygon/primer/pull/125) [`535a4cb`](https://github.com/0xPolygon/primer/commit/535a4cba7f6a458042b19dd7b3c7084703e8c09a) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Adds `responder` to `CollaboratorRole` and `ViewerRole`, and exports `COLLABORATOR_ROLES` / `isCollaboratorRole`.
+
+  The `events:write` scope description now names the roles that may write events: the owner, an editor or a responder.
+
 ## 0.4.0
 
 ### Minor Changes
