@@ -13,3 +13,5 @@ version shows up without needing a manual page refresh. The version you're
 currently viewing never changes on its own: when a newer version is published
 while you have the document open, a notice offers to switch to it, and a
 comment you're writing stays open with its text.
+
+Publishing a new version from the document page now lands you on that new version, instead of the previous one with a "newer version" notice about your own upload.

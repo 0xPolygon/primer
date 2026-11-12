@@ -71,10 +71,18 @@ export function useAddVersion(docId: string) {
       }
       return res.json();
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['versions', docId] });
-      qc.invalidateQueries({ queryKey: ['document', docId] });
-      qc.invalidateQueries({ queryKey: ['library'] });
+    onSuccess: async () => {
+      void qc.invalidateQueries({ queryKey: ['document', docId] });
+      void qc.invalidateQueries({ queryKey: ['library'] });
+      // Callers navigate to /d/:docId as soon as this resolves, and that page
+      // latches whatever "latest" the cached version list holds on its first
+      // render (lib/viewedVersion.ts). So wait for the list to include the
+      // new version first, as switchToLatest does; otherwise the publisher
+      // lands on the old version and is told a "newer version" (their own)
+      // was published. refetchQueries rather than invalidateQueries so a
+      // cached list nobody is watching right now (publishing from the
+      // library) is refreshed too, not just marked stale.
+      await qc.refetchQueries({ queryKey: ['versions', docId], exact: true });
     },
   });
 }
