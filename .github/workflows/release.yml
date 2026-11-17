@@ -1,89 +1,40 @@
 name: Release
 
-# Primer deliberately does NOT call the shared 0xPolygon/pipelines
-# apps-npm-release.yml. That workflow invokes changesets/action with no
-# `version:` input, so it runs a bare `changeset version`, which stops at
-# package.json. This repo is also a Claude Code plugin marketplace, and the
-# version that reaches plugin users lives in
-# plugins/*/.claude-plugin/plugin.json — Claude Code reads that file to decide
-# whether a client's cached copy is stale, so a changesets bump that stops at
-# package.json ships to nobody. Overriding `version:` (→ `pnpm run ci:version`,
-# which runs `changeset version` and then mirrors each package version into its
-# plugin.json) is the only hook changesets/action offers for that, and the
-# shared workflow doesn't expose it. Pattern ported from
-# 0xPolygon/polygon-core-plugins.
+# Calls the shared 0xPolygon/pipelines release workflow with `version_script`
+# on. This repo is also a Claude Code plugin marketplace: the version plugin
+# users receive lives in plugins/*/.claude-plugin/plugin.json, and Claude Code
+# compares that file to decide whether a client's cached copy is stale. A bare
+# `changeset version` stops at package.json and would ship the new version to
+# nobody, so the shared workflow runs the root `ci:version` script instead
+# (`changeset version`, then mirror each package version into its plugin.json).
+# Keep `ci:version` running `changeset version` itself: the shared workflow
+# only substitutes the script for that command.
 #
-# Unlike polygon-core-plugins, this workflow does NOT auto-merge the Version
-# Packages PR. That PR is the deliberate human release gate: merging it is the
-# release. It publishes the npm packages, pushes the release tags, and the
+# The Version Packages PR is the deliberate human release gate: merging it is
+# the release. It publishes the npm packages, pushes the release tags, and the
 # `@primer/api@X.Y.Z` tag triggers docker-release-trigger.yml, which tests and
 # publishes the service image that Kargo then promotes manually. One human
 # merge therefore gates the service image, the npm packages and the plugin
 # content together, so none of them reaches consumers ahead of the others.
+#
+# The file name is fixed: the npm trusted-publisher configs for the published
+# packages name this workflow file.
 
 on:
   push:
     branches: [master]
 
-# Serialize runs: the Version Packages merge push retriggers this workflow
-# (that retriggered run is the one that publishes); queue it rather than
-# racing or cancelling.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
 permissions:
   contents: write
   pull-requests: write
-  id-token: write # required for npm OIDC trusted publishing
+  id-token: write
+  attestations: write # build provenance attestations in the called release workflow
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
-        id: app-token
-        with:
-          app-id: ${{ secrets.CHANGESET_RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.CHANGESET_RELEASE_BOT_APP_PRIVATE_KEY }}
-
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 1
-          token: ${{ steps.app-token.outputs.token }}
-
-      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: .nvmrc
-          check-latest: true
-          cache: pnpm
-          registry-url: 'https://registry.npmjs.org'
-          # No node-auth-token — npm auth handled by OIDC trusted publishing.
-
-      # --no-frozen-lockfile because `changeset version` updates package.json
-      # but not the lockfile, so the lockfile is structurally stale at the
-      # release-PR merge commit. --config.link-workspace-packages=true keeps
-      # intra-repo ranges resolving against the local workspace regardless of
-      # what is (or isn't yet) on npm.
-      - run: pnpm install --no-frozen-lockfile --config.link-workspace-packages=true
-
-      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
-        with:
-          title: 'changesets: Release / Deploy'
-          commit: 'release: version packages'
-          # github-api mode signs the version-bump commit with GitHub's GPG
-          # key, satisfying signed-commit requirements. git-cli (the default)
-          # produces unsigned commits.
-          commitMode: github-api
-          # ci:version = `changeset version` + mirror versions into each
-          # plugin's .claude-plugin/plugin.json (see header comment).
-          version: pnpm run ci:version
-          publish: pnpm exec changeset publish
-          createGithubReleases: true
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-          # No NPM_TOKEN — using OIDC trusted publishing. changesets/action
-          # only writes an auth token to .npmrc when NPM_TOKEN is set; leaving
-          # it unset lets npm use OIDC automatically.
+    uses: 0xPolygon/pipelines/.github/workflows/apps-npm-release.yml@main
+    with:
+      version_script: true
+    secrets:
+      CHANGESET_RELEASE_BOT_APP_ID: ${{ secrets.CHANGESET_RELEASE_BOT_APP_ID }}
+      CHANGESET_RELEASE_BOT_APP_PRIVATE_KEY: ${{ secrets.CHANGESET_RELEASE_BOT_APP_PRIVATE_KEY }}
