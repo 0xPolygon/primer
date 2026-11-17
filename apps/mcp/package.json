@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/primer-mcp",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "MCP server + device-flow login for Primer — lets Claude Code (or any MCP-capable agent) publish HTML/Markdown artifacts and pull reviewer comments.",
   "type": "module",
   "bin": {

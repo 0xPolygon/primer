@@ -1,5 +1,12 @@
 # @primer/api
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [[`d653b18`](https://github.com/0xPolygon/primer/commit/d653b185f5f6cd7ebca107d30a55d9b314ec2502)]:
+  - @polygonlabs/primer-api-types@0.5.1
+
 ## 0.3.0
 
 ### Minor Changes

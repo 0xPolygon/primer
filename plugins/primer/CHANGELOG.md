@@ -1,5 +1,11 @@
 # @polygonlabs/plugin-primer
 
+## 2.2.5
+
+### Patch Changes
+
+- [#128](https://github.com/0xPolygon/primer/pull/128) [`d653b18`](https://github.com/0xPolygon/primer/commit/d653b185f5f6cd7ebca107d30a55d9b314ec2502) Thanks [@taylanpince](https://github.com/taylanpince)! - Relicenses under `MIT OR Apache-2.0`: the package now ships `LICENSE-MIT` and `LICENSE-APACHE` in place of the MIT-only `LICENSE`.
+
 ## 2.2.4
 
 ### Patch Changes
