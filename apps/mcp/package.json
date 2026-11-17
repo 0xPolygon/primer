@@ -10,7 +10,8 @@
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE-APACHE",
+    "LICENSE-MIT"
   ],
   "publishConfig": {
     "access": "public"
@@ -24,7 +25,7 @@
   "bugs": {
     "url": "https://github.com/0xPolygon/primer/issues"
   },
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "keywords": [
     "mcp",
     "modelcontextprotocol",

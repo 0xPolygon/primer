@@ -3,5 +3,5 @@
   "version": "2.2.4",
   "private": true,
   "description": "Changesets versioning shell for the primer plugin — see .claude-plugin/plugin.json for the plugin manifest.",
-  "license": "MIT"
+  "license": "MIT OR Apache-2.0"
 }
