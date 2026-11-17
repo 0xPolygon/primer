@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/plugin-primer",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "private": true,
   "description": "Changesets versioning shell for the primer plugin — see .claude-plugin/plugin.json for the plugin manifest.",
   "license": "MIT OR Apache-2.0"
