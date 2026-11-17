@@ -7,11 +7,15 @@ import type {
 } from '@polygonlabs/primer-api-types';
 import { clearThreadsEtag, type ThreadsQueryShape } from './threads.ts';
 import { api } from '../lib/fetch.ts';
+import { parseApiError } from '../lib/apiError.ts';
 
+// Throws an ApiError carrying the server's own { error, message } on
+// failure, instead of a generic Error wrapping raw (often JSON) response
+// text — callers need the real message to show the user, and the parsed
+// `code` to special-case not_latest_version. See lib/apiError.ts.
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status} ${text}`);
+    throw await parseApiError(res);
   }
   return (await res.json()) as T;
 }

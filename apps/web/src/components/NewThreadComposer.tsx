@@ -16,6 +16,15 @@ interface Props {
    *  because of a text selection in the iframe, grabbing focus would kill
    *  the selection's Cmd+C. Explicit flows (pick mode) opt in. */
   autoFocus?: boolean;
+  /** Set by the caller when the last submit attempt failed. The draft body
+   *  is left intact (below) so retrying doesn't lose what was typed. */
+  error?: string | null;
+  /** True when `error` is the "not_latest_version" guard — a newer version
+   *  published while this composer was open. Shows a "Switch to latest"
+   *  action instead of just the error text, since retrying as-is will
+   *  always fail again. */
+  errorIsNonLatestVersion?: boolean;
+  onGoToLatest?: () => void;
 }
 
 function anchorPreview(a: AnchorData): string {
@@ -36,6 +45,9 @@ export function NewThreadComposer({
   onCancel,
   onDirtyChange,
   autoFocus = false,
+  error = null,
+  errorIsNonLatestVersion = false,
+  onGoToLatest,
 }: Props) {
   const [body, setBody] = useState('');
   const [mentions, setMentions] = useState<string[]>([]);
@@ -75,6 +87,27 @@ export function NewThreadComposer({
         rows={3}
         autoFocus={autoFocus}
       />
+      {error && (
+        <div
+          role="alert"
+          className="mt-2 rounded border border-red-300 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400"
+        >
+          <p>
+            {errorIsNonLatestVersion
+              ? 'Comments can only be added on the latest version. Someone published a newer version while this was open. Switching discards this draft, so copy it first if you want to keep it.'
+              : error}
+          </p>
+          {errorIsNonLatestVersion && onGoToLatest && (
+            <button
+              type="button"
+              onClick={onGoToLatest}
+              className="mt-1 rounded border border-red-400 px-1.5 py-0.5 text-red-800 hover:bg-red-100 dark:border-red-600 dark:text-red-300 dark:hover:bg-red-900/30"
+            >
+              Switch to latest version
+            </button>
+          )}
+        </div>
+      )}
       <div className="mt-2 flex justify-end gap-2">
         <button
           type="button"

@@ -6,7 +6,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Navigate, Link, useParams, useNavigate } from 'react-router-dom';
+import { Navigate, Link, useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import type {
   InboundProtocolMessage,
   OutboundProtocolMessage,
@@ -33,6 +34,12 @@ import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { ShareModal } from '../components/ShareModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
+import {
+  composerPendingFrom,
+  nextLatch,
+  resolveViewedVersion,
+  type VersionLatch,
+} from '../lib/viewedVersion.ts';
 import { useTheme } from '../lib/useTheme.ts';
 import { commentsFilename, formatThreadsAsMarkdown, htmlFilename } from '../lib/exportComments.ts';
 import { hasAnyComments, hasLiveComments } from '../lib/liveComments.ts';
@@ -104,30 +111,37 @@ function DocumentPageInner() {
   const navigate = useNavigate();
   const docQuery = useDocument(docId ?? '');
   const versionsQuery = useVersionsQuery(docId ?? '');
+  const queryClient = useQueryClient();
   const versions = versionsQuery.data?.versions ?? [];
 
   useDocumentTitle(docQuery.data?.document.title);
 
   const requestedNumber = versionNumberParam ? Number(versionNumberParam) : undefined;
-  const latestVersion = versions[0];
-  const latestNumber = latestVersion?.versionNumber;
+  const latestNumber = versions[0]?.versionNumber;
 
-  const pinnedVersion = useMemo(() => {
-    if (requestedNumber === undefined) return undefined;
-    return versions.find((v) => v.versionNumber === requestedNumber);
-  }, [versions, requestedNumber]);
-
-  // The version we're actually viewing: pinned if requested+found, else latest.
-  const currentVersion = pinnedVersion ?? latestVersion;
+  // The version we're viewing — and the one new threads/replies post to.
+  // On /d/:docId this is latched to the latest as of this navigation, so a
+  // version-list refresh never swaps it; see lib/viewedVersion.ts. The latch
+  // is "state derived from the previous render", updated during render.
+  const location = useLocation();
+  const [latch, setLatch] = useState<VersionLatch | null>(null);
+  const latchNow = nextLatch({ prev: latch, locationKey: location.key, requestedNumber, versions });
+  if (latchNow !== latch) setLatch(latchNow);
+  const currentVersion = resolveViewedVersion({ versions, requestedNumber, latch: latchNow });
   const currentVersionId = currentVersion?.id ?? '';
   const currentVersionNumber = currentVersion?.versionNumber ?? 1;
   const isViewingLatest =
-    !requestedNumber || (latestNumber !== undefined && requestedNumber === latestNumber);
+    currentVersion === undefined ||
+    latestNumber === undefined ||
+    currentVersion.versionNumber === latestNumber;
   const readMostly = !isViewingLatest;
+  // True when this navigation started on the latest version and a newer one
+  // was published since (vs. deliberately opening an older /v/:n).
+  const newerPublishedWhileOpen = requestedNumber === undefined && readMostly;
 
   // Handle "version not found" — requested a number that doesn't exist.
   const versionNotFound =
-    requestedNumber !== undefined && versionsQuery.isSuccess && !pinnedVersion;
+    requestedNumber !== undefined && versionsQuery.isSuccess && !currentVersion;
 
   const threadsQuery = useThreadsQuery(currentVersionId);
   const threads = threadsQuery.data?.data.threads ?? [];
@@ -546,17 +560,31 @@ function DocumentPageInner() {
     setPendingPick(null);
   };
 
+  // "Switch to latest" — from the composer after a not_latest_version 409,
+  // and from the newer-version notice. The pending anchor belongs to the
+  // version being left, so it (and any draft) can't carry over.
+  const switchToLatest = async () => {
+    setPendingSelection(null);
+    setPendingPick(null);
+    // Refresh the list first: /d/:docId latches whatever "latest" is when it
+    // renders, so navigating on a stale list would land on the same version
+    // and the button would do nothing.
+    await queryClient.refetchQueries({ queryKey: ['versions', docId], exact: true });
+    navigate(`/d/${docId}`);
+  };
+
   const composerPending = useMemo(
-    () =>
-      readMostly
-        ? null
-        : pendingSelection
-          ? { anchor: pendingSelection.anchor as AnchorData, origin: 'selection' as const }
-          : pendingPick
-            ? { anchor: pendingPick.anchor as AnchorData, origin: 'pick' as const }
-            : null,
-    [readMostly, pendingSelection, pendingPick],
+    () => composerPendingFrom<AnchorData>({ pendingSelection, pendingPick }),
+    [pendingSelection, pendingPick],
   );
+
+  // The composer is no longer hidden when the viewed version stops being
+  // latest (composerPendingFrom), so drop a pending anchor when the user
+  // navigates to a different version — it belongs to the one being left.
+  useEffect(() => {
+    setPendingSelection(null);
+    setPendingPick(null);
+  }, [currentVersionId]);
 
   // Mobile sheet automation. No-op on desktop because the sheet isn't rendered.
   // Placed after composerPending so it can appear in the dependency array.
@@ -764,12 +792,21 @@ function DocumentPageInner() {
       {readMostly && (
         <div className="flex items-center justify-between border-b border-yellow-200 bg-yellow-50 px-4 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
           <span>
-            You're viewing v{currentVersionNumber} of "{document.title}". This version is
-            read-only. Switch to v{latestNumber} (latest) to add new comments.
+            {newerPublishedWhileOpen ? (
+              <>
+                A newer version (v{latestNumber}) of "{document.title}" was published. You're
+                still viewing v{currentVersionNumber}; switch to the latest to add new comments.
+              </>
+            ) : (
+              <>
+                You're viewing v{currentVersionNumber} of "{document.title}". This version is
+                read-only. Switch to v{latestNumber} (latest) to add new comments.
+              </>
+            )}
           </span>
           <button
             type="button"
-            onClick={() => navigate(`/d/${docId}`)}
+            onClick={() => void switchToLatest()}
             className="rounded border border-amber-700 px-2 py-0.5 text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/30"
           >
             Switch to latest
@@ -809,6 +846,7 @@ function DocumentPageInner() {
             collapsed={sidebarCollapsed}
             onCollapsedChange={setSidebarCollapsed}
             focusedThreadId={focusedThreadId}
+            onGoToLatest={() => void switchToLatest()}
           />
         )}
       </div>
@@ -849,6 +887,7 @@ function DocumentPageInner() {
             focusedThreadId={focusedThreadId}
             onAddCommentClick={readMostly ? undefined : togglePickMode}
             addCommentActive={readMostly ? false : pickMode}
+            onGoToLatest={() => void switchToLatest()}
           />
         </BottomSheet>
       )}

@@ -4,6 +4,7 @@ import { useThreadsQuery } from '../queries/threads.ts';
 import { ThreadCard } from './ThreadCard.tsx';
 import { NewThreadComposer } from './NewThreadComposer.tsx';
 import { hasAnyComments, hasLiveComments } from '../lib/liveComments.ts';
+import { describeApiError, isNonLatestVersionError } from '../lib/apiError.ts';
 
 interface PendingAnchor {
   anchor: AnchorData;
@@ -32,6 +33,9 @@ interface Props {
   onAddCommentClick?: () => void;
   /** True while the parent is in pick mode — used to dim/disable the button. */
   addCommentActive?: boolean;
+  /** Called when the composer's post failed because this version is no
+   *  longer the latest (409 not_latest_version) and the user asks to switch. */
+  onGoToLatest?: () => void;
 }
 
 const COLLAPSED_KEY = 'primer.sidebar.collapsed';
@@ -50,6 +54,7 @@ export function CommentSidebar({
   focusedThreadId = null,
   onAddCommentClick,
   addCommentActive = false,
+  onGoToLatest,
 }: Props) {
   const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -67,6 +72,13 @@ export function CommentSidebar({
 
   const [hideResolved, setHideResolved] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [composerError, setComposerError] = useState<unknown>(null);
+
+  // A new pending anchor (fresh selection/pick) starts with a clean composer
+  // — don't carry a stale error from a previous, unrelated attempt.
+  useEffect(() => {
+    setComposerError(null);
+  }, [pending]);
 
   // localStorage write only fires in uncontrolled mode; controlled callers
   // are responsible for their own persistence.
@@ -199,10 +211,16 @@ export function CommentSidebar({
           submitting={submitting}
           onCancel={onCancelPending}
           onDirtyChange={onComposerDirtyChange}
+          error={composerError === null ? null : describeApiError(composerError)}
+          errorIsNonLatestVersion={isNonLatestVersionError(composerError)}
+          onGoToLatest={onGoToLatest}
           onSubmit={async (body, mentions) => {
             setSubmitting(true);
+            setComposerError(null);
             try {
               await onSubmitPending(body, mentions);
+            } catch (err) {
+              setComposerError(err);
             } finally {
               setSubmitting(false);
             }
