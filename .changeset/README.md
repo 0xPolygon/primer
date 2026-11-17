@@ -5,21 +5,17 @@ This repo versions and publishes its packages with
 a workspace package needs a changeset (`pnpm exec changeset add`, or
 `--empty` for non-shippable changes inside a package).
 
-One deliberate deviation from the team template
-(`apps-team-ts-template/.changeset/config.json`):
-`bumpVersionsWithWorkspaceProtocolOnly` is `true` here, not `false`. The
-template rewrites `workspace:^` to real semver at Version Packages time so
-Docker builds at release tags can install the npm-published versions. Primer's
-container image is built from the workspace at the release tag
-(`apps/api/Dockerfile`, frozen lockfile) and bundles `primer-api-types` from
-source, so in-repo installs must keep resolving workspace packages locally. Its
-private apps (`@primer/api`, `@primer/web`) have runtime `workspace:^` deps on
-`@polygonlabs/primer-api-types`. Rewriting those to semver would make in-repo
-installs resolve api-types from npm, where the 14-day `minimumReleaseAge`
-gate in `pnpm-workspace.yaml` blocks freshly published versions. Keeping the
-workspace protocol keeps every in-repo install local; `pnpm publish` still
-converts `workspace:` ranges to real semver in published tarballs, and no
-published package carries a workspace range in runtime `dependencies` anyway.
+`bumpVersionsWithWorkspaceProtocolOnly` is `false`, matching the team template
+(`apps-team-ts-template/.changeset/config.json`). Sibling dependencies stay
+`workspace:^` in source: `changeset version` skips `workspace:` ranges either
+way, and pnpm rewrites them to real semver only when it packs each package at
+publish time. So in-repo installs keep resolving workspace packages locally,
+which matters here because the container image is built from the workspace at
+the release tag (`apps/api/Dockerfile`, frozen lockfile) and bundles
+`primer-api-types` from source, and the 14-day `minimumReleaseAge` gate in
+`pnpm-workspace.yaml` would block a freshly published api-types if an install
+resolved it from npm. `false` is what keeps semver `peerDependencies` ranges on
+siblings bumped, which a `workspace:` range cannot always express.
 
 `@primer/api` and `@primer/web` are a `fixed` group so they always version
 together: the SPA ships only inside the API image, so a web-only changeset
