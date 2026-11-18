@@ -12,12 +12,7 @@ minimumReleaseAge: 20160 # 14 days, in minutes
 # only for well-established packages with active security maintenance — the
 # point of the gate is to catch malicious publishes during their first two
 # weeks of life. Each entry needs a one-line justification.
-minimumReleaseAgeExclude:
-  # body-parser 2.4.0 (published 2026-10-22, GHSA-27r3-jxmh-p828 trailing-bytes
-  # DoS fix) sits inside the 14-day gate until ~2026-11-05T11:39Z. Express-
-  # family package with active security maintenance; bypassing to clear the
-  # audit-level=high CI gate. Remove this entry once 2.4.0 ages past the gate.
-  - body-parser
+minimumReleaseAgeExclude: []
 blockExoticSubdeps: true
 # Packages allowed to run postinstall/preinstall scripts.
 # Each entry is reviewed individually. NEVER approve sight-unseen.
@@ -61,14 +56,27 @@ overrides:
   ip-address: '^10.3.1'    # @modelcontextprotocol/sdk (api) — leading-zero octet decode
   postcss: '^8.5.18'       # sanitize-html (api) — source-map path traversal
   nanoid: '^3.3.18'        # sanitize-html>postcss (api) — generator infinite-loop DoS
-  hono: '^4.12.34'         # @modelcontextprotocol/sdk + @hono/node-server (api) — CORS ReDoS, memo() SSR bleed, lang-mw DoS, proxy-header leak (patched 4.12.34)
+  hono: '^4.13.16'         # @modelcontextprotocol/sdk + @hono/node-server (api) — CORS ReDoS, memo() SSR bleed, lang-mw DoS, proxy-header leak (patched 4.12.34); mount() middleware bypass, RegExpRouter wildcard-middleware skip, csrf() text/ping gap, form-validator multipart skip, css-helper HTML injection (patched 4.13.16)
   # @modelcontextprotocol/sdk>express (api) — serveStatic double-decodes the
   # request path (GHSA-rmxm-3fg6-px4f), no patched 1.x exists; the floor is
   # 2.1.3. The SDK accepts ^2.0.5, so force the whole tree onto the patched
-  # 2.x line instead of keeping a vulnerable 1.x copy alive.
-  '@hono/node-server': '^2.1.3'
+  # 2.x line instead of keeping a vulnerable 1.x copy alive. The floor is now
+  # 2.1.6: ECONNRESET during a WebSocket upgrade crashes the process
+  # (GHSA-qv5m-9pm6-hqp3), and a backslash in the path is treated as a
+  # separator, bypassing path-based rules at a reverse proxy (GHSA-jpvv-r467-5p4w).
+  '@hono/node-server': '^2.1.6'
   body-parser: '^2.4.0'    # @modelcontextprotocol/sdk>express (api) — DoS via invalid limit disabling the size cap (patched 2.3.0); DoS via trailing bytes after a compressed request, GHSA-27r3-jxmh-p828 (patched 2.4.0)
-  # qs '^6.16.0' (2 moderate: array-limit bypass + isBuffer DoS) is DEFERRED:
-  # 6.16.0 (published 2026-08-29) sits inside the 14-day gate until ~2026-09-12.
 strictPeerDependencies: true
 engineStrict: true
+# Advisories `pnpm audit` should not report. Each entry needs a justification
+# and a condition for removing it.
+auditConfig:
+  ignoreGhsas:
+    # picomatch ReDoS through single-branch repeated extglobs (high). Every
+    # release (<=4.0.7) is affected and none is patched yet, so no override can
+    # fix it. picomatch is dev-only (vite, vitest, changesets via micromatch,
+    # tinyglobby, fdir) and only matches glob patterns written in this
+    # repository, never user input; `pnpm audit --prod` does not include it.
+    # Remove this entry and raise the floor once a patched release ages past
+    # the release-age gate.
+    - GHSA-fc5q-39xc-vjpf
