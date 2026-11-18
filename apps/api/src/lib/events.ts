@@ -357,7 +357,19 @@ interface EventInsert {
 // events last.
 const EVENT_ORDER_LOCK_KEY = 7_201_948_211;
 
-async function insertEventsLocked(tx: Tx, rows: EventInsert[]): Promise<EventRowDTO[]> {
+/** Documents written to, with their owners: who to wake after commit. */
+type Touched = { documentId: string; ownerId: string }[];
+
+async function insertEventsLocked(
+  tx: Tx,
+  rows: EventInsert[],
+): Promise<{ rows: EventRowDTO[]; touched: Touched }> {
+  // Read before taking the lock, so the lock still covers only the inserts.
+  const docIds = [...new Set(rows.map((r) => r.documentId))];
+  const touched = (await tx.execute(sql`
+    SELECT id AS "documentId", uploader_id AS "ownerId" FROM documents
+    WHERE id IN (${sql.join(docIds.map((id) => sql`${id}::uuid`), sql`, `)})
+  `)) as unknown as Touched;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_ORDER_LOCK_KEY})`);
   const out: EventRowDTO[] = [];
   for (const r of rows) {
@@ -369,7 +381,7 @@ async function insertEventsLocked(tx: Tx, rows: EventInsert[]): Promise<EventRow
     `)) as unknown as EventDbRow[];
     out.push(rowToDTO(row));
   }
-  return out;
+  return { rows: out, touched: [...touched] };
 }
 
 /** Inserts a validated batch in ONE transaction, in array order: strictly
@@ -381,7 +393,7 @@ export async function insertEventBatch(
   authorId: string,
   batch: ValidatedEvent[],
 ): Promise<EventRowDTO[]> {
-  const rows = await db.transaction((tx) =>
+  const { rows, touched } = await db.transaction((tx) =>
     insertEventsLocked(
       tx,
       batch.map((ev) => ({
@@ -395,7 +407,7 @@ export async function insertEventBatch(
       })),
     ),
   );
-  notifyEventsCommitted();
+  notifyEventsCommitted(touched);
   return rows;
 }
 
@@ -423,14 +435,15 @@ export type EmitLifecycle = <T extends PrimerEventType>(event: LifecycleEvent<T>
 export async function transactionWithEvents<T>(
   fn: (tx: Tx, emit: EmitLifecycle) => Promise<T>,
 ): Promise<T> {
-  let emitted: LifecycleEvent[] = [];
+  let touched: Touched = [];
   const result = await db.transaction(async (tx) => {
-    emitted = [];
+    const emitted: LifecycleEvent[] = [];
+    touched = [];
     const value = await fn(tx, (event) => {
       emitted.push(event as LifecycleEvent);
     });
     if (emitted.length > 0) {
-      await insertEventsLocked(
+      ({ touched } = await insertEventsLocked(
         tx,
         emitted.map((e) => ({
           documentId: e.documentId,
@@ -441,11 +454,11 @@ export async function transactionWithEvents<T>(
           type: e.type,
           payloadJson: JSON.stringify(e.payload),
         })),
-      );
+      ));
     }
     return value;
   });
-  if (emitted.length > 0) notifyEventsCommitted();
+  notifyEventsCommitted(touched);
   return result;
 }
 
@@ -654,20 +667,46 @@ export async function latestEventId(): Promise<number> {
 // ids follow commit order that read is complete — a reader can never be
 // handed a higher id before a lower one is visible. Fine for the current
 // single-node deployment; swap for Postgres LISTEN/NOTIFY if the API ever
-// scales out horizontally.
+// scales out horizontally. Wakes are targeted: a commit wakes only the
+// streams of the documents it wrote to and the owner-scoped streams of
+// those documents' owners, so one busy document never makes every open
+// stream re-query.
 
-const wakeListeners = new Set<() => void>();
+type Wake = () => void;
+const wakesByDoc = new Map<string, Set<Wake>>();
+const wakesByOwner = new Map<string, Set<Wake>>();
 
-export function subscribeEventWakes(listener: () => void): () => void {
-  wakeListeners.add(listener);
+function addTo(map: Map<string, Set<Wake>>, key: string, wake: Wake): () => void {
+  let set = map.get(key);
+  if (!set) {
+    set = new Set();
+    map.set(key, set);
+  }
+  set.add(wake);
   return () => {
-    wakeListeners.delete(listener);
+    const current = map.get(key);
+    if (!current) return;
+    current.delete(wake);
+    if (current.size === 0) map.delete(key);
   };
 }
 
+/** Wake on commits that write to `documentId`. */
+export function subscribeDocWakes(documentId: string, wake: Wake): () => void {
+  return addTo(wakesByDoc, documentId, wake);
+}
+
+/** Wake on commits that write to any document `ownerId` owns. */
+export function subscribeOwnerWakes(ownerId: string, wake: Wake): () => void {
+  return addTo(wakesByOwner, ownerId, wake);
+}
+
 /** Called after a transaction that wrote events commits. */
-export function notifyEventsCommitted(): void {
-  for (const listener of wakeListeners) listener();
+export function notifyEventsCommitted(touched: Touched): void {
+  for (const { documentId, ownerId } of touched) {
+    for (const wake of wakesByDoc.get(documentId) ?? []) wake();
+    for (const wake of wakesByOwner.get(ownerId) ?? []) wake();
+  }
 }
 
 // ───────────────────────── Working status ─────────────────────────

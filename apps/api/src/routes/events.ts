@@ -66,7 +66,8 @@ import {
   listOwnedEvents,
   parseSince,
   setDocumentStatus,
-  subscribeEventWakes,
+  subscribeDocWakes,
+  subscribeOwnerWakes,
   validateEventBatch,
   validateEventFilters,
   validateVersionFilter,
@@ -225,7 +226,8 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     // every later read runs a fresh check of its own, so each read is judged
     // only by the answer to the check it started, never by an older one
     // finishing late.
-    return runEventStream(c, parsed.resumeFrom, reader(g.identity), async () => {
+    const subscribe = (wake: () => void) => subscribeDocWakes(documentId, wake);
+    return runEventStream(c, parsed.resumeFrom, subscribe, reader(g.identity), async () => {
       const fresh = await gate(documentId, user.id);
       return fresh.status === 'not_found' ? null : reader(fresh.identity);
     });
@@ -245,7 +247,8 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     const { filters } = parsed;
     const reader = (afterId: number) =>
       listOwnedEvents({ userId: user.id, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
-    return runEventStream(c, parsed.resumeFrom, reader, async () => reader);
+    const subscribe = (wake: () => void) => subscribeOwnerWakes(user.id, wake);
+    return runEventStream(c, parsed.resumeFrom, subscribe, reader, async () => reader);
   });
 
   // ── Working status ─────────────────────────────────────────────────
@@ -314,7 +317,7 @@ type PageReader = (afterId: number) => Promise<ListEventsPage>;
 type OpenReader = () => Promise<PageReader | null>;
 
 /** The shared SSE loop. It keeps one cursor — the last id sent — and on every
- *  wake-up (any committed event write) reads `id > cursor` to exhaustion.
+ *  wake-up (a committed event write in the stream's scope) reads `id > cursor` to exhaustion.
  *  Because ids follow commit order, that read is complete: a row can never
  *  be skipped by arriving below the cursor, so the cursor, the SSE `id:` and
  *  the client's Last-Event-ID are all safe resume points. Wake-ups that land
@@ -322,6 +325,7 @@ type OpenReader = () => Promise<PageReader | null>;
 function runEventStream(
   c: Context<{ Variables: AppVariables }>,
   resumeFrom: number | null,
+  subscribe: (wake: () => void) => () => void,
   firstReader: PageReader,
   open: OpenReader,
 ): Response | Promise<Response> {
@@ -398,7 +402,7 @@ function runEventStream(
 
     // Subscribe before fixing the start point so no commit falls between.
     // A wake before the start point is fixed is covered by the first pass.
-    unsubscribe = subscribeEventWakes(() => {
+    unsubscribe = subscribe(() => {
       if (!closed && started) void pump();
     });
     try {
