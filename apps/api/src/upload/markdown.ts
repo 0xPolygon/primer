@@ -20,8 +20,25 @@ const md = new MarkdownIt({
   typographer: false, // no smart-quote rewriting
 }).use(taskLists, { label: false });
 
+// SECURITY: gray-matter selects its parse engine from the language token after
+// the opening front-matter fence (`---js`, `---json`, …). Its built-in
+// `javascript` engine runs `eval()` on the block, so an uploaded `.md` that
+// opens with `---js` would execute arbitrary JavaScript with the API process's
+// privileges at upload time — remote code execution reachable by any
+// authenticated uploader. gray-matter's advertised `eval: false` option is not
+// implemented (4.0.3), so we replace the JS engine with a parser that returns
+// no data. Only the safe built-in engines (`yaml`, `json`) remain; any other
+// language is unregistered and throws. Normal `---` / `---yaml` front-matter
+// and `---json` keep working. Do not remove this override without a replacement
+// that keeps `eval` out of the upload path.
+const FRONTMATTER_ENGINES = {
+  javascript: {
+    parse: () => ({}),
+  },
+};
+
 export function markdownToHtml(input: string): MarkdownConversionResult {
-  const parsed = matter(input);
+  const parsed = matter(input, { engines: FRONTMATTER_ENGINES });
   const body = parsed.content.trim();
   const bodyIsEmpty = body.length === 0;
 
