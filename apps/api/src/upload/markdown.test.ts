@@ -88,4 +88,43 @@ describe('markdownToHtml', () => {
     const r = markdownToHtml('Hello.');
     expect(r.bodyIsEmpty).toBe(false);
   });
+
+  it('does not execute a `---js` frontmatter block (gray-matter JS engine disabled)', () => {
+    const marker = `__primer_rce_marker_${Date.now()}`;
+    const malicious = [
+      '---js',
+      `(globalThis.${marker} = "executed", { title: "owned" })`,
+      '---',
+      '# Body',
+    ].join('\n');
+
+    const r = markdownToHtml(malicious);
+
+    expect((globalThis as Record<string, unknown>)[marker]).toBeUndefined();
+    delete (globalThis as Record<string, unknown>)[marker];
+    // The block is inert data, not a title, and the body still renders.
+    expect(r.frontmatterTitle).toBeNull();
+    expect(r.html).toContain('<h1>Body</h1>');
+  });
+
+  it('does not execute a `---javascript` frontmatter block', () => {
+    const marker = `__primer_rce_marker_js_${Date.now()}`;
+    const malicious = [
+      '---javascript',
+      `(globalThis.${marker} = "executed", {})`,
+      '---',
+      '# Body',
+    ].join('\n');
+
+    markdownToHtml(malicious);
+
+    expect((globalThis as Record<string, unknown>)[marker]).toBeUndefined();
+    delete (globalThis as Record<string, unknown>)[marker];
+  });
+
+  it('still parses `---json` frontmatter', () => {
+    const r = markdownToHtml('---json\n{"title":"From JSON"}\n---\n\n# Body\n');
+    expect(r.frontmatterTitle).toBe('From JSON');
+    expect(r.html).toContain('<h1>Body</h1>');
+  });
 });
