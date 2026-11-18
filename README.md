@@ -9,8 +9,7 @@ agent publish it), share the link, and reviewers comment directly on the text.
 New versions keep the same URL, and the agent can pull the comments back in to
 write the next one.
 
-Polygon builds Primer and runs it for its own teams at
-[primer.polygon.tools](https://primer.polygon.tools). The code is open source
+Polygon builds Primer and runs it for its own teams. The code is open source
 under MIT or Apache-2.0, and you can run your own instance.
 
 ## Contents
