@@ -12,6 +12,21 @@ import { defineConfig, configDefaults } from 'vitest/config';
 // can never pick it up.
 const containerMode = Boolean(process.env.TEST_BASE_URL);
 
+// The same variable `pnpm db:migrate:test` reads, so tests run against the
+// database that was just migrated. The fallback matches docker-compose.yml's
+// default credentials, so `pnpm db:up` is all a fresh clone needs. The setup
+// file truncates tables before every test, so refuse anything that isn't a
+// `_test` database rather than risk wiping a dev database.
+function testDatabaseUrl(): string {
+  const url =
+    process.env.DATABASE_URL_TEST ?? 'postgres://primer:primer_local_dev@localhost:5432/primer_test';
+  const dbName = new URL(url).pathname.replace(/^\//, '');
+  if (!dbName.endsWith('_test')) {
+    throw new Error(`DATABASE_URL_TEST must name a *_test database; got "${dbName}"`);
+  }
+  return url;
+}
+
 // TEST_BASE_URL is also the team's prod-smoke variable, so a value left in a
 // shell would otherwise silently swap the 71-file suite for the smoke suite.
 if (containerMode) {
@@ -44,7 +59,7 @@ export default defineConfig(
           // before any test file is loaded, so this guarantees no test ever talks to
           // the dev database.
           env: {
-            DATABASE_URL: 'postgres://primer:primer@localhost:5432/primer_test',
+            DATABASE_URL: testDatabaseUrl(),
           },
           // Test files share the primer_test DB. The truncate-between-tests setup
           // can't isolate concurrent files. Serialize file execution to keep

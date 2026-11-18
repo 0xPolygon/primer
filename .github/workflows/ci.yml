@@ -20,8 +20,12 @@ jobs:
     name: typecheck · build · test
     runs-on: ubuntu-latest
 
-    # API tests talk to a real Postgres (see apps/api/vitest.config.ts, which
-    # points DATABASE_URL at primer_test on localhost:5432). Matches the
+    # Job-wide so the migrate step and the API tests (apps/api/vitest.config.ts
+    # reads it) use the same database.
+    env:
+      DATABASE_URL_TEST: postgres://primer:primer@localhost:5432/primer_test
+
+    # API tests talk to a real Postgres at DATABASE_URL_TEST. Matches the
     # postgres:17.9 image used in docker-compose.yml for local dev.
     services:
       postgres:
@@ -66,8 +70,6 @@ jobs:
 
       - name: Migrate test database
         run: pnpm db:migrate:test
-        env:
-          DATABASE_URL_TEST: postgres://primer:primer@localhost:5432/primer_test
 
       - name: Typecheck
         run: pnpm typecheck
