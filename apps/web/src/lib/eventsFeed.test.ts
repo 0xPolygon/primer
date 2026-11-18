@@ -59,12 +59,18 @@ function makeHarness(initialRows: EventRowDTO[], pageSize = 2) {
   }
 
   const batches: EventRowDTO[][] = [];
+  const docChanges: EventRowDTO[] = [];
+  let resyncs = 0;
   // Immediate-flush timers keep the tests deterministic; coalescing is
   // exercised by pushing several rows before the queued flush runs.
   const timers: (() => void)[] = [];
   const feed = createEventsFeed({
     documentId: 'doc-1',
     onBatch: (rows) => batches.push(rows),
+    onDocChange: (r) => docChanges.push(r),
+    onResync: () => {
+      resyncs += 1;
+    },
     fetchImpl,
     eventSourceFactory: (url) => new FakeEventSource(url),
     setTimeoutImpl: (fn) => {
@@ -78,6 +84,8 @@ function makeHarness(initialRows: EventRowDTO[], pageSize = 2) {
     state,
     feed,
     batches,
+    docChanges,
+    resyncs: () => resyncs,
     sources,
     flushTimers(): void {
       const pending = timers.splice(0);
@@ -170,6 +178,18 @@ describe('createEventsFeed', () => {
     h.state.rows.push(row(25)); // late-committing lower id
     await h.feed.refresh();
     expect(h.batches.flat().map((r) => r.id)).toEqual([30, 25]);
+  });
+
+  it("hands Primer's lifecycle rows to onDocChange, never to the artifact, and resyncs after a refresh", async () => {
+    const h = makeHarness([]);
+    await h.feed.start();
+    h.sources[0].emit(row(5, { namespace: 'primer', type: 'comment.created', audience: 'readers' }));
+    h.flushTimers();
+    expect(h.docChanges.map((r) => r.id)).toEqual([5]);
+    expect(h.batches.flat()).toEqual([]);
+    expect(h.resyncs()).toBe(0);
+    await h.feed.refresh();
+    expect(h.resyncs()).toBe(1);
   });
 
   it('stop() closes the stream and drops pending flushes', async () => {

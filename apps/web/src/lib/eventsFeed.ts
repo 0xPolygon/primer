@@ -30,7 +30,7 @@
  * DI-friendly by construction (fetch, EventSource, and timers injected) so
  * the whole engine is testable without a browser.
  */
-import type { EventRowDTO, EventsListResponse } from '@polygonlabs/primer-api-types';
+import { PRIMER_EVENT_NAMESPACE, type EventRowDTO, type EventsListResponse } from '@polygonlabs/primer-api-types';
 
 /** Minimal slice of EventSource this engine needs. */
 export interface EventSourceLike {
@@ -44,6 +44,13 @@ export interface EventsFeedOptions {
   documentId: string;
   /** Receives coalesced batches of `artifact`-audience rows, ascending id. */
   onBatch: (rows: EventRowDTO[]) => void;
+  /** Receives Primer's own lifecycle rows (namespace `primer`: comments,
+   *  threads, versions, working status) as the stream delivers them. They
+   *  are page notifications and are never relayed into the artifact. */
+  onDocChange?: (row: EventRowDTO) => void;
+  /** Called after every re-hydrate (reconnect, visibility regain): anything
+   *  the page shows may have changed while the stream was down. */
+  onResync?: () => void;
   /** Same-origin fetch (cookie-authed); inject `api` from lib/fetch.ts. */
   fetchImpl: (url: string) => Promise<Response>;
   /** EventSource factory; inject `(url) => new EventSource(url)`. */
@@ -85,6 +92,8 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
   const {
     documentId,
     onBatch,
+    onDocChange,
+    onResync,
     fetchImpl,
     eventSourceFactory,
     coalesceMs = DEFAULT_COALESCE_MS,
@@ -165,6 +174,7 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
     } catch {
       // Best-effort: the stream (or the next refresh) will catch us up.
     }
+    if (!stopped) onResync?.();
   }
 
   function subscribe(): void {
@@ -181,6 +191,7 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
         return;
       }
       if (typeof row?.id !== 'number') return;
+      if (row.namespace === PRIMER_EVENT_NAMESPACE) onDocChange?.(row);
       pending.push(row);
       scheduleFlush();
     };
