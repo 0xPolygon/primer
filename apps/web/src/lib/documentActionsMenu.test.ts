@@ -4,11 +4,12 @@ import { buildMenuItems, type MenuItemId } from './documentActionsMenu.ts';
 const ids = (items: { id: MenuItemId }[]) => items.map((i) => i.id);
 
 describe('buildMenuItems', () => {
-  it('shows HTML actions, separator, then comment actions for a non-uploader', () => {
+  it('shows document actions, separator, then comment actions for a non-uploader', () => {
     const items = buildMenuItems({ isUploader: false });
     expect(ids(items)).toEqual([
       'open-fullscreen',
       'download-html',
+      'notebooklm',
       'separator',
       'copy',
       'download',
@@ -20,6 +21,7 @@ describe('buildMenuItems', () => {
     expect(ids(items)).toEqual([
       'open-fullscreen',
       'download-html',
+      'notebooklm',
       'separator',
       'copy',
       'download',
@@ -36,7 +38,7 @@ describe('buildMenuItems', () => {
 
   it('does not mark non-destructive items as destructive', () => {
     const items = buildMenuItems({ isUploader: true });
-    for (const id of ['open-fullscreen', 'download-html', 'copy', 'download'] as const) {
+    for (const id of ['open-fullscreen', 'download-html', 'notebooklm', 'copy', 'download'] as const) {
       expect(items.find((i) => i.id === id)?.destructive).toBeFalsy();
     }
   });

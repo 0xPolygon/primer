@@ -101,3 +101,14 @@ export function htmlFilename(doc: DocInfo, version: VersionInfo): string {
     .slice(0, 60);
   return `${slug || 'document'}-v${version.versionNumber}.html`;
 }
+
+/** Filename for the NotebookLM Markdown source. Same slug rule as
+ *  commentsFilename and htmlFilename. */
+export function markdownFilename(doc: DocInfo, version: VersionInfo): string {
+  const slug = doc.title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60);
+  return `${slug || 'document'}-v${version.versionNumber}.md`;
+}

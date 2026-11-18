@@ -51,3 +51,51 @@ export async function copyText(
     return adapter.writeWithFallback(text) ? 'fallback' : 'failed';
   }
 }
+
+export interface DeferredCopyAdapter {
+  /** Writes text that isn't ready yet. Must be called synchronously inside
+   *  the user's click so the browser ties the write to that gesture. Absent
+   *  where ClipboardItem isn't supported. */
+  writeDeferred?: (text: Promise<string>) => Promise<void>;
+  copyNow: (text: string) => Promise<CopyResult>;
+}
+
+function defaultWriteDeferred(): DeferredCopyAdapter['writeDeferred'] {
+  if (
+    typeof navigator === 'undefined' ||
+    typeof ClipboardItem === 'undefined' ||
+    !navigator.clipboard?.write
+  ) {
+    return undefined;
+  }
+  return (text) =>
+    navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })),
+      }),
+    ]);
+}
+
+/** Copy text that is still being fetched or built when the user clicks.
+ *  Safari only allows clipboard writes inside the click's activation and
+ *  Chrome only while the page is focused, so a plain copy after an `await`
+ *  fails in one or the other. Handing the browser a pending ClipboardItem
+ *  during the click works in both; where that's unsupported or refused,
+ *  fall back to copying once the text resolves. Rejects if `text` does. */
+export async function copyDeferredText(
+  text: Promise<string>,
+  adapter: DeferredCopyAdapter = {
+    writeDeferred: defaultWriteDeferred(),
+    copyNow: (t) => copyText(t),
+  },
+): Promise<CopyResult> {
+  if (adapter.writeDeferred) {
+    try {
+      await adapter.writeDeferred(text);
+      return 'api';
+    } catch {
+      // Fall through: rethrows below if the text itself failed.
+    }
+  }
+  return adapter.copyNow(await text);
+}

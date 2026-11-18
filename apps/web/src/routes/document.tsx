@@ -32,6 +32,7 @@ import { HeaderActions, type ActionFeedback } from '../components/HeaderActions.
 import { PrivateLockIcon } from '../components/PrivateLockIcon.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { ShareModal } from '../components/ShareModal.tsx';
+import { NotebookLmModal } from '../components/NotebookLmModal.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import {
@@ -41,11 +42,18 @@ import {
   type VersionLatch,
 } from '../lib/viewedVersion.ts';
 import { useTheme } from '../lib/useTheme.ts';
-import { commentsFilename, formatThreadsAsMarkdown, htmlFilename } from '../lib/exportComments.ts';
+import {
+  commentsFilename,
+  formatThreadsAsMarkdown,
+  htmlFilename,
+  markdownFilename,
+} from '../lib/exportComments.ts';
+import { buildNotebookLmSource, countLiveComments } from '../lib/notebookLm.ts';
+import { internalDocUrl } from '../lib/internalDocUrl.ts';
 import { hasAnyComments, hasLiveComments } from '../lib/liveComments.ts';
 import { BottomSheet, type SnapPoint } from '../components/BottomSheet.tsx';
 import { useMediaQuery } from '../lib/useMediaQuery.ts';
-import { copyText } from '../lib/clipboardCopy.ts';
+import { copyDeferredText, copyText, type CopyResult } from '../lib/clipboardCopy.ts';
 import { canEditDoc, canSubmitEventsDoc } from '../lib/docCapabilities.ts';
 import { extractCanonicalDocId } from '../lib/docIdParam.ts';
 import {
@@ -92,6 +100,16 @@ interface PendingSelection {
 interface PendingPick {
   anchor: ElementPathAnchor;
   clientRect: SerializableRect;
+}
+
+/** Everything the NotebookLM modal needs, captured when it opens so the
+ *  source stays pinned to the version and comments the user clicked on. */
+interface NotebookLmSession {
+  html: Promise<string>;
+  initialCopy: Promise<CopyResult>;
+  commentCount: number;
+  buildSource: (html: string, includeComments: boolean) => string;
+  filename: string;
 }
 
 export function DocumentPage() {
@@ -152,6 +170,7 @@ function DocumentPageInner() {
 
   const [showAddVersion, setShowAddVersion] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [notebookLm, setNotebookLm] = useState<NotebookLmSession | null>(null);
 
   const COLLAPSED_KEY = 'primer.sidebar.collapsed';
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
@@ -464,6 +483,39 @@ function DocumentPageInner() {
     }
   }
 
+  // Runs synchronously inside the menu click: the clipboard write has to
+  // start during the gesture even though the text is still being fetched.
+  function sendToNotebookLm() {
+    if (!docQuery.data || !currentVersionId || !docId) return;
+    const { title, description } = docQuery.data.document;
+    const versionNumber = currentVersionNumber;
+    const url = internalDocUrl(window.location.origin, docId, versionNumber);
+    const threadsAtOpen = threads;
+    const buildSource = (html: string, includeComments: boolean) =>
+      buildNotebookLmSource({
+        title,
+        description,
+        url,
+        versionNumber,
+        html,
+        threads: includeComments ? threadsAtOpen : [],
+      });
+    const html = fetch(`/api/versions/${currentVersionId}/content`, {
+      credentials: 'same-origin',
+    }).then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.text();
+    });
+    const initialCopy = copyDeferredText(html.then((h) => buildSource(h, true)));
+    setNotebookLm({
+      html,
+      initialCopy,
+      commentCount: countLiveComments(threadsAtOpen),
+      buildSource,
+      filename: markdownFilename({ title }, { versionNumber }),
+    });
+  }
+
   function exportComments() {
     if (!docQuery.data) return;
     const md = formatThreadsAsMarkdown(
@@ -672,6 +724,7 @@ function DocumentPageInner() {
     onShare: () => setShowShare(true),
     onOpenFullScreen: openFullScreen,
     onDownloadHtml: downloadHtml,
+    onSendToNotebookLm: sendToNotebookLm,
     onCopyComments: copyComments,
     onExportComments: exportComments,
     onDelete: async () => {
@@ -953,6 +1006,7 @@ function DocumentPageInner() {
           onClose={() => setShowShare(false)}
         />
       )}
+      {notebookLm && <NotebookLmModal {...notebookLm} onClose={() => setNotebookLm(null)} />}
     </div>
   );
 }

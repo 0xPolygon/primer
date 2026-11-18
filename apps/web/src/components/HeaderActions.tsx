@@ -24,6 +24,9 @@ interface Props {
   onOpenFullScreen: () => void;
   /** Resolves to feedback to surface next to the menu; null = silent success. */
   onDownloadHtml: () => Promise<ActionFeedback | null>;
+  /** Called synchronously inside the menu click: it starts a clipboard
+   * write, which browsers only allow during the user's gesture. */
+  onSendToNotebookLm: () => void;
   onCopyComments: () => Promise<ActionFeedback>;
   onExportComments: () => void;
   onDelete: () => Promise<void>;
@@ -42,6 +45,7 @@ export function HeaderActions({
   onShare,
   onOpenFullScreen,
   onDownloadHtml,
+  onSendToNotebookLm,
   onCopyComments,
   onExportComments,
   onDelete,
@@ -106,6 +110,10 @@ export function HeaderActions({
         .catch(() =>
           showFeedback({ kind: 'error', message: 'Download failed. Try again.' }),
         );
+    },
+    notebooklm: () => {
+      setMenuState('closed');
+      onSendToNotebookLm();
     },
     copy: () => {
       setMenuState('closed');
