@@ -45,7 +45,7 @@ symmetric algorithms are rejected.
 
 Claims:
 
-- `sub` (required): the stable user id. People are keyed by it.
+- `sub` (required): the stable user id. People are keyed by it. The Primer user id is `proxy:<sub>`, so a token can never collide with (or overwrite) the built-in service user or users from another auth mode.
 - `email` (optional): shown to collaborators and matched against `ADMIN_EMAILS`.
   Defaults to `<sub>@proxy.invalid`.
 - `name` (optional): display name. Defaults to `sub`.

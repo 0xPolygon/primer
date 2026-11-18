@@ -41,10 +41,22 @@ function decodeState(raw: string): StateCookiePayload | null {
   }
 }
 
-function sanitizeReturnTo(input: string | undefined): string {
+// Only same-origin relative paths are accepted: a leading single `/`, no
+// backslashes or control characters (browsers treat `/\evil.com` like
+// `//evil.com`), and the parsed URL must stay on our origin.
+export function sanitizeReturnTo(input: string | undefined): string {
   if (!input) return '/';
   if (!input.startsWith('/') || input.startsWith('//')) return '/';
-  return input;
+  // eslint-disable-next-line no-control-regex
+  if (/[\\\u0000-\u001f\u007f]/.test(input)) return '/';
+  try {
+    const base = 'http://primer.invalid';
+    const url = new URL(input, base);
+    if (url.origin !== base) return '/';
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
 }
 
 function cookieOpts(maxAge: number, secure: boolean) {

@@ -6,6 +6,8 @@ import { createApp } from '../app.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { db } from '../db/client.ts';
+import { SERVICE_USER_ID } from './admin.ts';
+import { sanitizeReturnTo } from '../routes/auth.ts';
 import { apiTokens, users } from '../db/schema.ts';
 import { composeResolvers, makeBearerResolver } from './bearer.ts';
 import { makeProxyResolver } from './proxy.ts';
@@ -49,8 +51,31 @@ describe('AUTH_MODE=proxy', () => {
     const token = await sign({ sub: 'person-1', email: 'ada@example.com', name: 'Ada' });
     const res = await makeApp().request('/api/me', { headers: { [HEADER]: token } });
     expect(res.status).toBe(200);
-    const [row] = await db.select().from(users).where(eq(users.id, 'person-1'));
+    const [row] = await db.select().from(users).where(eq(users.id, 'proxy:person-1'));
     expect(row).toMatchObject({ email: 'ada@example.com', displayName: 'Ada' });
+  });
+
+  it('a sub equal to the service user id is a distinct proxy user and leaves the service user untouched', async () => {
+    await db.insert(users).values({ id: SERVICE_USER_ID, email: 'svc@example.com', displayName: 'Service' });
+    const token = await sign({ sub: SERVICE_USER_ID, email: 'evil@example.com', name: 'Evil' });
+    const res = await makeApp().request('/api/me', { headers: { [HEADER]: token } });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { id: string }).id).toBe(`proxy:${SERVICE_USER_ID}`);
+    const [svc] = await db.select().from(users).where(eq(users.id, SERVICE_USER_ID));
+    expect(svc).toMatchObject({ email: 'svc@example.com', displayName: 'Service' });
+  });
+
+  it('/auth/login return_to only follows same-origin paths', async () => {
+    for (const bad of ['/\\evil.com', '//evil.com', 'javascript:alert(1)', 'https://evil.com']) {
+      expect(sanitizeReturnTo(bad)).toBe('/');
+    }
+    expect(sanitizeReturnTo('/d/1?x=2#c')).toBe('/d/1?x=2#c');
+    const token = await sign({ sub: 'person-3' });
+    const res = await makeApp().request('/auth/login?return_to=' + encodeURIComponent('/\\evil.com'), {
+      headers: { [HEADER]: token },
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/');
   });
 
   it('rejects a wrong audience, wrong issuer, expired token and bad signature', async () => {

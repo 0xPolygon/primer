@@ -12,7 +12,7 @@ import type { UserResolver } from './resolver.ts';
  * only verifies that token (signature, issuer, audience, expiry); it never
  * trusts a bare "X-Forwarded-User" style header.
  *
- * Claims: `sub` (required; becomes the Primer user id), `email` and `name`
+ * Claims: `sub` (required; the Primer user id is `proxy:<sub>`), `email` and `name`
  * (optional; default to `<sub>@proxy.invalid` and `sub`).
  */
 export interface ProxyAuthOptions {
@@ -44,6 +44,9 @@ function algorithmsFor(key: KeyObject): string[] {
       throw new Error(`PROXY_AUTH_PUBLIC_KEY: unsupported key type ${String(key.asymmetricKeyType)}`);
   }
 }
+
+/** Primer user ids for proxy identities are `proxy:<sub>`. */
+export const PROXY_USER_PREFIX = 'proxy:';
 
 /** Verifies the identity JWT and returns its `sub`/`email`/`name`, or null. */
 export function makeProxyVerifier(opts: ProxyAuthOptions) {
@@ -95,18 +98,21 @@ export function makeProxyResolver(opts: ProxyAuthOptions): UserResolver {
     if (!token) return null;
     const claims = await verify(token);
     if (!claims) return null;
+    // Namespaced so a token can never name (and overwrite) a seeded service
+    // user or a user created by another auth mode.
+    const id = `${PROXY_USER_PREFIX}${claims.sub}`;
     const fingerprint = `${claims.email}\0${claims.name}`;
-    if (seen.get(claims.sub) !== fingerprint) {
+    if (seen.get(id) !== fingerprint) {
       await db.execute(sql`
         INSERT INTO users (id, email, display_name)
-        VALUES (${claims.sub}, ${claims.email}, ${claims.name})
+        VALUES (${id}, ${claims.email}, ${claims.name})
         ON CONFLICT (id)
         DO UPDATE SET email = EXCLUDED.email, display_name = EXCLUDED.display_name
       `);
-      seen.set(claims.sub, fingerprint);
+      seen.set(id, fingerprint);
     }
     c.set('authMethod', 'cookie');
-    return { id: claims.sub, email: claims.email, displayName: claims.name };
+    return { id, email: claims.email, displayName: claims.name };
   };
 }
 
