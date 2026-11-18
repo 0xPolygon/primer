@@ -7,6 +7,7 @@ import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@polygonlabs/pri
 import { COMMENT_UNDO_WINDOW_MS } from '@polygonlabs/primer-api-types';
 import { threads, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
+import { transactionWithEvents, type LifecycleEvent } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import {
   type Visibility,
@@ -15,6 +16,17 @@ import {
   canComment,
   loadCollaboratorRole,
 } from '../lib/permissions.ts';
+
+/** `primer.thread.updated`: a comment in the thread was edited, deleted or
+ *  restored. */
+function threadUpdated(documentId: string, threadId: string, by: string): LifecycleEvent<'thread.updated'> {
+  return {
+    documentId,
+    actorId: by,
+    type: 'thread.updated',
+    payload: { document_id: documentId, thread_id: threadId, by },
+  };
+}
 
 async function loadDocContextForThread(
   threadId: string,
@@ -248,7 +260,7 @@ export function registerCommentRoutes(
       .map((r) => r.author_id)
       .filter((id) => id !== user.id && !mentionSet.has(id));
 
-    await db.transaction(async (tx) => {
+    await transactionWithEvents(async (tx, emit) => {
       await tx.insert(comments).values({
         id: commentId,
         threadId,
@@ -261,6 +273,19 @@ export function registerCommentRoutes(
         .update(threads)
         .set({ resolvedAt: null, resolvedBy: null })
         .where(eq(threads.id, threadId));
+      emit({
+        documentId: threadCtx.doc_id,
+        versionId: threadCtx.version_id,
+        actorId: user.id,
+        type: 'comment.created',
+        payload: {
+          document_id: threadCtx.doc_id,
+          version_id: threadCtx.version_id,
+          thread_id: threadId,
+          comment_id: commentId,
+          author_id: user.id,
+        },
+      });
     });
 
     void deps.notifier
@@ -328,10 +353,13 @@ export function registerCommentRoutes(
     const newlyAdded = cleanedMentions.filter((id) => !previous.has(id));
 
     const updatedAt = new Date();
-    await db
-      .update(comments)
-      .set({ body: validation.body, mentions: cleanedMentions, updatedAt })
-      .where(eq(comments.id, commentId));
+    await transactionWithEvents(async (tx, emit) => {
+      await tx
+        .update(comments)
+        .set({ body: validation.body, mentions: cleanedMentions, updatedAt })
+        .where(eq(comments.id, commentId));
+      emit(threadUpdated(ctx.docId, existing.threadId, user.id));
+    });
 
     if (newlyAdded.length > 0) {
       const [editCtx] = (await db.execute(sql`
@@ -383,7 +411,10 @@ export function registerCommentRoutes(
     if (!existing) return c.json({ error: 'not_found' }, 404);
     if (existing.authorId !== user.id) return c.json({ error: 'forbidden' }, 403);
     if (existing.deletedAt === null) {
-      await db.update(comments).set({ deletedAt: new Date() }).where(eq(comments.id, commentId));
+      await transactionWithEvents(async (tx, emit) => {
+        await tx.update(comments).set({ deletedAt: new Date() }).where(eq(comments.id, commentId));
+        emit(threadUpdated(ctx.docId, existing.threadId, user.id));
+      });
     }
     const dto = await loadCommentDTO(commentId);
     if (!dto) return c.json({ error: 'not_found' }, 404);
@@ -426,7 +457,10 @@ export function registerCommentRoutes(
           409,
         );
       }
-      await db.update(comments).set({ deletedAt: null }).where(eq(comments.id, commentId));
+      await transactionWithEvents(async (tx, emit) => {
+        await tx.update(comments).set({ deletedAt: null }).where(eq(comments.id, commentId));
+        emit(threadUpdated(ctx.docId, existing.threadId, user.id));
+      });
       logger.info({ commentId, userId: user.id }, 'comment delete undone');
     }
 
