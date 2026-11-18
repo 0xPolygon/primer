@@ -53,7 +53,10 @@ export function sanitizeReturnTo(input: string | undefined): string {
     const base = 'http://primer.invalid';
     const url = new URL(input, base);
     if (url.origin !== base) return '/';
-    return `${url.pathname}${url.search}${url.hash}`;
+    const out = `${url.pathname}${url.search}${url.hash}`;
+    // Normalization can turn `/.//evil.com` into a protocol-relative `//evil.com`.
+    if (out.startsWith('//') || out.startsWith('/\\')) return '/';
+    return out;
   } catch {
     return '/';
   }

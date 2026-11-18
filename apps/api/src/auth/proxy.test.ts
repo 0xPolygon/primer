@@ -66,7 +66,7 @@ describe('AUTH_MODE=proxy', () => {
   });
 
   it('/auth/login return_to only follows same-origin paths', async () => {
-    for (const bad of ['/\\evil.com', '//evil.com', 'javascript:alert(1)', 'https://evil.com']) {
+    for (const bad of ['/\\evil.com', '//evil.com', 'javascript:alert(1)', 'https://evil.com', '/.//evil.com', '/%2e//evil.com']) {
       expect(sanitizeReturnTo(bad)).toBe('/');
     }
     expect(sanitizeReturnTo('/d/1?x=2#c')).toBe('/d/1?x=2#c');
