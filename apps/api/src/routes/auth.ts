@@ -5,6 +5,7 @@ import { makeDisabledOktaAdapter, type OktaAdapter } from '../auth/okta.ts';
 import { logger } from '../logger.ts';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
+import { proxyUnauthorizedPage } from '../auth/proxy.ts';
 import { createSession, deleteSession } from '../auth/session.ts';
 
 const STATE_COOKIE_MAX_AGE_SEC = 10 * 60;            // 10 minutes
@@ -65,6 +66,13 @@ export function registerAuthRoutes(
     (process.env.AUTH_BASE_URL ?? '').startsWith('https://');
 
   app.get('/auth/login', async (c) => {
+    if (deps.proxyAuth) {
+      // Identity comes from the proxy on every request; there is nothing to
+      // sign in to here. Signed in already -> carry on; otherwise explain.
+      const user = deps.userResolver ? await deps.userResolver(c) : null;
+      if (user) return c.redirect(sanitizeReturnTo(c.req.query('return_to')), 302);
+      return proxyUnauthorizedPage(c);
+    }
     try {
       const { url, state, nonce, codeVerifier } = await adapter.buildAuthorizationUrl();
       const returnTo = sanitizeReturnTo(c.req.query('return_to'));
