@@ -10,4 +10,4 @@ permissions:
 
 jobs:
   check:
-    uses: 0xPolygon/pipelines/.github/workflows/apps-changeset-check.yml@main
+    uses: 0xPolygon/pipelines/.github/workflows/apps-changeset-check.yml@04f6373c6a0197562386116d2c1b0f4139be18e7 # main @ 2026-11-17

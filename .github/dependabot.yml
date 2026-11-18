@@ -1,0 +1,23 @@
+# Dependabot security updates are enabled in the repo settings; this file
+# scopes what Dependabot opens on its own.
+version: 2
+updates:
+  # Keeps SHA-pinned actions (including the 0xPolygon/pipelines reusable
+  # workflows) current. The cooldown matches pnpm's 14-day minimumReleaseAge.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Security updates only: a limit of 0 suppresses routine version-bump PRs
+  # without affecting security PRs.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
