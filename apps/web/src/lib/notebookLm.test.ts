@@ -98,6 +98,11 @@ describe('htmlToSourceMarkdown', () => {
     expect(htmlToSourceMarkdown(html)).toBe('| a\\|b | c |\n| --- | --- |\n| d | |');
   });
 
+  it('escapes backslashes in cells so a "\\|" stays inside its cell', () => {
+    const html = '<table><tr><td>C:\\dir\\|x</td><td>y</td></tr></table>';
+    expect(htmlToSourceMarkdown(html)).toBe('| C:\\\\dir\\\\\\|x | y |\n| --- | --- |');
+  });
+
   it('fences preformatted code and keeps its indentation', () => {
     const html = '<pre><code>fn main() {\n    run();\n}</code></pre>';
     expect(htmlToSourceMarkdown(html)).toBe('```\nfn main() {\n    run();\n}\n```');

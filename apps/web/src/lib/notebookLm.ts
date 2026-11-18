@@ -149,7 +149,8 @@ function tableToMarkdown(table: Element): string {
     .map((tr) =>
       Array.from(tr.children)
         .filter((c) => c.tagName === 'TD' || c.tagName === 'TH')
-        .map((c) => inlineText(c).replace(/\|/g, '\\|')),
+        // Escape backslashes first so a literal "\|" can't cancel the pipe escape.
+        .map((c) => inlineText(c).replace(/\\/g, '\\\\').replace(/\|/g, '\\|')),
     )
     .filter((cells) => cells.length > 0);
   if (grid.length === 0) return '';
