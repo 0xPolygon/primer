@@ -68,3 +68,15 @@ overrides:
   body-parser: '^2.4.0'    # @modelcontextprotocol/sdk>express (api) — DoS via invalid limit disabling the size cap (patched 2.3.0); DoS via trailing bytes after a compressed request, GHSA-27r3-jxmh-p828 (patched 2.4.0)
 strictPeerDependencies: true
 engineStrict: true
+# Advisories `pnpm audit` should not report. Each entry needs a justification
+# and a condition for removing it.
+auditConfig:
+  ignoreGhsas:
+    # picomatch ReDoS through single-branch repeated extglobs (high). Every
+    # release (<=4.0.7) is affected and none is patched yet, so no override can
+    # fix it. picomatch is dev-only (vite, vitest, changesets via micromatch,
+    # tinyglobby, fdir) and only matches glob patterns written in this
+    # repository, never user input; `pnpm audit --prod` does not include it.
+    # Remove this entry and raise the floor once a patched release ages past
+    # the release-age gate.
+    - GHSA-fc5q-39xc-vjpf
