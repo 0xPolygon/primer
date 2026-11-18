@@ -73,28 +73,6 @@ export interface EventReadIdentity {
   isCollaborator: boolean;
 }
 
-/** Per-row read scope (issue #78, Audience table):
- *  - author:        the row's author + the document owner
- *  - collaborators: all authenticated document collaborators (owner included)
- *  - artifact:      same READERS as collaborators; additionally relayed into
- *                   the sandboxed artifact by the parent page (the relay —
- *                   not this function — is the injection boundary).
- *
- *  Commenters keep READ access to `collaborators`- and `artifact`-audience
- *  events (a deliberate requirement): consumers render the page from this
- *  data. Commenters lose event write only — see `canWriteEvents`. */
-export function identityMayReadEvent(
-  row: { audience: StoredEventAudience; authorId: string },
-  identity: EventReadIdentity,
-): boolean {
-  // Primer's own lifecycle rows: everyone who passed the read gate.
-  if (row.audience === 'readers') return true;
-  if (row.audience === 'author') {
-    return identity.isOwner || row.authorId === identity.userId;
-  }
-  return identity.isOwner || identity.isCollaborator;
-}
-
 // ───────────────────────── Access gate ─────────────────────────
 // Shared by the REST routes and the MCP tool bridge so both surfaces apply
 // identical access rules.
@@ -498,24 +476,6 @@ export function validateEventFilters(query: {
   return { ok: true, filters };
 }
 
-/** In-memory mirror of the SQL filter — used by the SSE fanout so live rows
- *  and backlog rows pass the same test. */
-export function eventMatchesFilters(
-  row: { namespace: string; type: string },
-  filters: EventFilters,
-): boolean {
-  if (filters.namespace !== undefined) {
-    if (filters.namespace.endsWith('/*')) {
-      const prefix = filters.namespace.slice(0, -2);
-      if (row.namespace !== prefix && !row.namespace.startsWith(`${prefix}/`)) return false;
-    } else if (row.namespace !== filters.namespace) {
-      return false;
-    }
-  }
-  if (filters.type !== undefined && row.type !== filters.type) return false;
-  return true;
-}
-
 // ───────────────────────── since / page tokens ─────────────────────────
 
 /** `since` is a complete resume point: ids follow commit order (see
@@ -592,7 +552,15 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
   if (versionId !== undefined) conditions.push(sql`version_id = ${versionId}`);
 
   // Audience scope: exactly the rows this identity may read (issue #78
-  // security requirement 4). Mirrors identityMayReadEvent above.
+  // security requirement 4):
+  //  - readers:       everyone who passed the read gate (Primer's own rows)
+  //  - author:        the row's author + the document owner
+  //  - collaborators: all document collaborators (owner included)
+  //  - artifact:      same readers as collaborators; additionally relayed
+  //                   into the sandboxed artifact by the parent page (the
+  //                   relay is the injection boundary).
+  // Commenters keep READ access to collaborators- and artifact-audience rows
+  // (consumers render the page from them); they lose event write only.
   const tierReadable = identity.isOwner || identity.isCollaborator;
   conditions.push(sql`(
     audience = 'readers'

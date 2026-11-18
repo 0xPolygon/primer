@@ -153,7 +153,7 @@ Write structured document events as ONE atomic batch (a single event is a batch 
 
 Tell readers you are working on a document.
 
-- **Input:** `{ documentId: string, state: "working" | "idle" }`.
+- **Input:** `{ document_id: string, state: "working" | "idle" }`.
 - **Effect:** readers see "<your name> is revising…" on the document page. `working` lapses after 10 minutes unless you call it again; set `idle` when you publish or stop.
 - **Output:** `{ statuses: [{ by, displayName, state, expiresAt }] }`: everyone working on the document now.
 - **Who:** the document owner, editors and responders.

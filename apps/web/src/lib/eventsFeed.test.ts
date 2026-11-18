@@ -138,58 +138,37 @@ describe('createEventsFeed', () => {
     expect(h.sources[0].url).toContain('/events/stream?since=9');
   });
 
-  it('re-hydrates in FULL on reconnect: a late-committing lower id is delivered', async () => {
+  it('on reconnect re-reads everything after the highest id seen and relays what was missed', async () => {
     const h = makeHarness([row(20), row(21)]);
     await h.feed.start();
     const src = h.sources[0];
-
-    // Connection drops; while offline, a LOWER id (assigned earlier,
-    // committed later) becomes visible — exactly the Pin 6 case.
     src.onerror?.({});
-    h.state.rows.push(row(15));
+    h.state.rows.push(row(22)); // committed while disconnected
     src.onopen?.({});
     await new Promise((r) => setTimeout(r, 0)); // let refresh()'s fetches settle
-
-    const delivered = h.batches.flat().map((r) => r.id);
-    expect(delivered).toContain(15);
-    // The reconnect re-fetch was FULL — no since param (any bounded window
-    // could silently skip a row that committed far below the frontier).
+    expect(h.batches.flat().map((r) => r.id)).toEqual([20, 21, 22]);
     const reconnectCalls = h.state.listCalls.slice(1); // [0] is the initial hydrate
-    expect(reconnectCalls.length).toBeGreaterThan(0);
-    for (const u of reconnectCalls) expect(u).not.toContain('since=');
+    expect(reconnectCalls[0]).toContain('since=21');
   });
 
-  it('delivers a row committed ARBITRARILY far below the frontier during a disconnect (no bounded window)', async () => {
-    const h = makeHarness([row(500), row(501)]);
-    await h.feed.start();
-    const src = h.sources[0];
-    src.onerror?.({});
-    // While disconnected, a transaction that drew id 3 long ago finally
-    // commits — 497 ids below the frontier, beyond any plausible window.
-    h.state.rows.push(row(3));
-    src.onopen?.({});
-    await new Promise((r) => setTimeout(r, 0));
-    expect(h.batches.flat().map((r) => r.id)).toContain(3);
-  });
-
-  it('refresh() (visibility regain) re-hydrates in full without a connection error', async () => {
+  it('refresh() (visibility regain) re-reads without a connection error', async () => {
     const h = makeHarness([row(30)]);
     await h.feed.start();
-    h.state.rows.push(row(25)); // late-committing lower id
+    h.state.rows.push(row(31));
     await h.feed.refresh();
-    expect(h.batches.flat().map((r) => r.id)).toEqual([30, 25]);
+    expect(h.batches.flat().map((r) => r.id)).toEqual([30, 31]);
   });
 
-  it("hands Primer's lifecycle rows to onDocChange, never to the artifact, and resyncs after a refresh", async () => {
+  it("hands Primer's lifecycle rows to onDocChange, never to the artifact, and resyncs at start and after a refresh", async () => {
     const h = makeHarness([]);
     await h.feed.start();
     h.sources[0].emit(row(5, { namespace: 'primer', type: 'comment.created', audience: 'readers' }));
     h.flushTimers();
     expect(h.docChanges.map((r) => r.id)).toEqual([5]);
     expect(h.batches.flat()).toEqual([]);
-    expect(h.resyncs()).toBe(0);
+    expect(h.resyncs()).toBe(1); // once at start: the page's first fetches may be stale
     await h.feed.refresh();
-    expect(h.resyncs()).toBe(1);
+    expect(h.resyncs()).toBe(2);
   });
 
   it('stop() closes the stream and drops pending flushes', async () => {

@@ -1042,8 +1042,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
 
     // Same rules as POST /api/documents/:id/status (routes/events.ts).
     primer_set_status: async (args, user) => {
-      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
-      if (!documentId) return err('bad_request', '`documentId` is required.');
+      const documentId = typeof args.document_id === 'string' ? args.document_id : '';
+      if (!documentId) return err('bad_request', '`document_id` is required.');
       if (args.state !== 'working' && args.state !== 'idle') {
         return err('bad_request', '`state` must be "working" or "idle".');
       }
@@ -1280,7 +1280,7 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
     description:
       'Tell the people reading a document that you are working on it (state "working") or done (state "idle"). Readers see "<your name> is revising…" on the page while it is fresh. A working status expires after 10 minutes, so call it again to refresh during long work, and set idle when you publish or stop. Only the document owner, editors and responders may set it. Returns { statuses }: everyone working on the document now.',
     inputSchema: {
-      documentId: z.string(),
+      document_id: z.string(),
       state: z.enum(['working', 'idle']),
     },
   },
