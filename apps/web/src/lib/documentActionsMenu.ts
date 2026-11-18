@@ -2,6 +2,7 @@ export type MenuItemId =
   | 'share'
   | 'open-fullscreen'
   | 'download-html'
+  | 'notebooklm'
   | 'copy'
   | 'download'
   | 'separator'
@@ -30,6 +31,7 @@ export function buildMenuItems({ isUploader, includeShare = false }: MenuInput):
   items.push(
     { id: 'open-fullscreen', label: 'Open full screen' },
     { id: 'download-html', label: 'Download HTML' },
+    { id: 'notebooklm', label: 'Send to NotebookLM…' },
     { id: 'separator' },
     { id: 'copy', label: 'Copy comments as Markdown' },
     { id: 'download', label: 'Download comments as Markdown' },

@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { ThreadDTO, CommentDTO } from '@polygonlabs/primer-api-types';
-import { commentsFilename, formatThreadsAsMarkdown, htmlFilename } from './exportComments.ts';
+import {
+  commentsFilename,
+  formatThreadsAsMarkdown,
+  htmlFilename,
+  markdownFilename,
+} from './exportComments.ts';
 
 const NOW = new Date('2026-05-21T12:00:00Z');
 
@@ -210,5 +215,17 @@ describe('htmlFilename', () => {
     const htmlSlug = html.replace(/-v4\.html$/, '');
     const mdSlug = md.replace(/-v4-comments\.md$/, '');
     expect(htmlSlug).toBe(mdSlug);
+  });
+});
+
+describe('markdownFilename', () => {
+  it('uses the shared slug rule with a -v{n}.md suffix', () => {
+    expect(markdownFilename({ title: "Carol's Notes (draft)" }, { versionNumber: 4 })).toBe(
+      'carol-s-notes-draft-v4.md',
+    );
+  });
+
+  it('falls back to "document" for an empty slug', () => {
+    expect(markdownFilename({ title: '!!!' }, { versionNumber: 1 })).toBe('document-v1.md');
   });
 });

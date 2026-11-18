@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { copyText, type CopyAdapter } from './clipboardCopy.ts';
+import {
+  copyDeferredText,
+  copyText,
+  type CopyAdapter,
+  type DeferredCopyAdapter,
+} from './clipboardCopy.ts';
 
 function makeAdapter(overrides: Partial<CopyAdapter> = {}): CopyAdapter {
   return {
@@ -36,5 +41,57 @@ describe('copyText', () => {
     const writeWithFallback = vi.fn().mockReturnValue(true);
     await copyText('hello', makeAdapter({ writeWithApi, writeWithFallback }));
     expect(writeWithFallback).not.toHaveBeenCalled();
+  });
+});
+
+describe('copyDeferredText', () => {
+  function makeDeferred(overrides: Partial<DeferredCopyAdapter> = {}): DeferredCopyAdapter {
+    return {
+      writeDeferred: overrides.writeDeferred,
+      copyNow: overrides.copyNow ?? vi.fn().mockResolvedValue('api'),
+    };
+  }
+
+  it('hands the pending text to the clipboard before it resolves', () => {
+    const writeDeferred = vi.fn().mockResolvedValue(undefined);
+    const pending = new Promise<string>(() => {});
+    void copyDeferredText(pending, makeDeferred({ writeDeferred }));
+    // Called synchronously, i.e. still inside the user's click.
+    expect(writeDeferred).toHaveBeenCalledWith(pending);
+  });
+
+  it('returns api without copying again when the deferred write succeeds', async () => {
+    const writeDeferred = vi.fn().mockResolvedValue(undefined);
+    const copyNow = vi.fn();
+    const result = await copyDeferredText(
+      Promise.resolve('hello'),
+      makeDeferred({ writeDeferred, copyNow }),
+    );
+    expect(result).toBe('api');
+    expect(copyNow).not.toHaveBeenCalled();
+  });
+
+  it('copies the resolved text when the deferred write is refused', async () => {
+    const writeDeferred = vi.fn().mockRejectedValue(new Error('NotAllowedError'));
+    const copyNow = vi.fn().mockResolvedValue('fallback');
+    const result = await copyDeferredText(
+      Promise.resolve('hello'),
+      makeDeferred({ writeDeferred, copyNow }),
+    );
+    expect(result).toBe('fallback');
+    expect(copyNow).toHaveBeenCalledWith('hello');
+  });
+
+  it('copies the resolved text where deferred writes are unsupported', async () => {
+    const copyNow = vi.fn().mockResolvedValue('api');
+    await copyDeferredText(Promise.resolve('hello'), makeDeferred({ copyNow }));
+    expect(copyNow).toHaveBeenCalledWith('hello');
+  });
+
+  it('rejects when the text itself fails to load', async () => {
+    const writeDeferred = (t: Promise<string>) => t.then(() => undefined);
+    await expect(
+      copyDeferredText(Promise.reject(new Error('HTTP 500')), makeDeferred({ writeDeferred })),
+    ).rejects.toThrow('HTTP 500');
   });
 });
