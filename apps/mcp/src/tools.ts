@@ -655,7 +655,7 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
   },
   primer_add_version: {
     description:
-      'Upload a new version of an existing Primer document. Pass baseVersionNumber (the version you read) so a newer version published meanwhile is never overwritten: the call is then refused with a fix. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access.',
+      'Upload a new version of an existing Primer document. Pass baseVersionNumber (the version you read) so a newer version published meanwhile is never overwritten: the call is then refused with a fix. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access. Returns { versionId, versionNumber, url, reconciliation? }; a Markdown or text version of a live document is merged into it, and reconciliation says what became of each changed group (applied, suggested, conflict). When nothing was applied (as an agent in suggest mode, every change becomes a suggestion for a person to decide), no version is made: the result is { url, reconciliation } with no versionId or versionNumber.',
     inputSchema: {
       documentId: z.string(),
       content: z.string().optional(),

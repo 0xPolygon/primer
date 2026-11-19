@@ -550,10 +550,12 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         baseVersionNumber: base as number | undefined,
       });
       if (!result.ok) return refusalErr(result.refusal);
+      const url = `${deps.apiBaseUrl}/d/${documentId}`;
+      if (result.versionId === undefined) return ok({ url, reconciliation: result.reconciliation });
       return ok({
         versionId: result.versionId,
         versionNumber: result.versionNumber,
-        url: `${deps.apiBaseUrl}/d/${documentId}`,
+        url,
         ...(result.reconciliation ? { reconciliation: result.reconciliation } : {}),
       });
     },
@@ -1136,7 +1138,7 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_add_version: {
     description:
-      'Upload a new version of an existing Primer document. Pass baseVersionNumber (the version you read) so a newer version published meanwhile is never overwritten: the call is then refused with code "stale_base" and a fix.',
+      'Upload a new version of an existing Primer document. Pass baseVersionNumber (the version you read) so a newer version published meanwhile is never overwritten: the call is then refused with code "stale_base" and a fix. Returns { versionId, versionNumber, url, reconciliation? }; a Markdown or text version of a live document is merged into it, and reconciliation says what became of each changed group (applied, suggested, conflict). When nothing was applied (as an agent in suggest mode, every change becomes a suggestion for a person to decide), no version is made: the result is { url, reconciliation } with no versionId or versionNumber.',
     inputSchema: {
       documentId: z.string(),
       content: z.string(),

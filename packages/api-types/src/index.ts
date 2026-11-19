@@ -412,14 +412,14 @@ export interface VersionPatchRequest {
   versionNote: string | null;
 }
 
-export interface AddVersionResponse {
-  versionId: string;
-  versionNumber: number;
-  url: string;
-  /** A new version of a live document is merged into it: what happened to
-   *  each changed group (applied, suggested, conflict). */
-  reconciliation?: Reconciliation;
-}
+/** A new version of a live document is merged into it, and `reconciliation`
+ *  says what happened to each changed group (applied, suggested, conflict).
+ *  When nothing was applied (an agent in suggest mode gets every change as a
+ *  suggestion), no version is made: `versionId` and `versionNumber` are
+ *  absent and the suggestions are in `reconciliation`. */
+export type AddVersionResponse =
+  | { versionId: string; versionNumber: number; url: string; reconciliation?: Reconciliation }
+  | { versionId?: never; versionNumber?: never; url: string; reconciliation: Reconciliation };
 
 /** Why the server refused a write, with a ready fix the caller (often an
  *  agent) can follow. Codes grow per feature; branch on `code`, never on
