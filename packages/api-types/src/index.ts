@@ -166,6 +166,59 @@ export function anchorLabel(anchor: ThreadAnchor): string {
   }
 }
 
+// ───────────────────── Widget SVG attribute values ─────────────────────
+// One positive grammar per attribute, used by the server's output check
+// (apps/api/src/widgets/serialize.ts) and the browser's check before a widget
+// enters the page (apps/web/src/live/WidgetView.tsx). A value either matches
+// its attribute's grammar or the widget is refused: no denylist of CSS
+// functions to keep up to date.
+
+const REFERENCE = /^(?:none|url\(#[A-Za-z0-9_-]+\))$/;
+const PAINT = /^(?:none|transparent|currentColor|#[0-9a-fA-F]{3,8}|url\(#[A-Za-z0-9_-]+\))$/;
+const NUMBER = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+const TRANSFORM_FN = /\s*(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^()]*)\)\s*,?/y;
+
+/** Longest value a grammar attribute (references, paint, transform) takes,
+ *  and any attribute at all: checked before any matching. */
+const MAX_GRAMMAR_VALUE = 256;
+const MAX_VALUE = 100_000;
+
+/** A transform list, read left to right in one pass: each function name,
+ *  `(`, numbers separated by whitespace or a comma, `)`. */
+function isTransform(value: string): boolean {
+  const v = value.trim();
+  let at = 0;
+  while (at < v.length) {
+    TRANSFORM_FN.lastIndex = at;
+    const m = TRANSFORM_FN.exec(v);
+    if (!m) return false;
+    const args = m[2]!.trim();
+    if (args !== '' && !args.split(/[\s,]+/).every((n) => NUMBER.test(n))) return false;
+    at = TRANSFORM_FN.lastIndex;
+  }
+  return true;
+}
+
+const WIDGET_VALUE_GRAMMAR: Record<string, (value: string) => boolean> = {
+  ...Object.fromEntries(['mask', 'clip-path', 'filter', 'marker-start', 'marker-mid', 'marker-end'].map((name) => [name, (v: string) => REFERENCE.test(v.trim())])),
+  ...Object.fromEntries(['fill', 'stroke', 'stop-color'].map((name) => [name, (v: string) => PAINT.test(v.trim())])),
+  transform: isTransform,
+};
+
+/**
+ * Whether a widget SVG attribute value is allowed: references only as
+ * `url(#id)` where an attribute takes one, paint as a colour, `none`,
+ * `currentColor` or `url(#id)`, transforms as numbers only; any other
+ * attribute holds no `(`, backslash or character reference at all. Every
+ * check is linear in the value, and lengths are capped before it.
+ */
+export function isWidgetAttributeValue(name: string, value: string): boolean {
+  if (value.length > MAX_VALUE) return false;
+  const grammar = WIDGET_VALUE_GRAMMAR[name];
+  if (grammar) return value.length <= MAX_GRAMMAR_VALUE && grammar(value);
+  return !/[(\\]|&#/.test(value);
+}
+
 /** Validates any thread anchor, legacy or live. */
 export function isValidAnchor(v: unknown): v is ThreadAnchor {
   return isTextRangeAnchor(v) || isElementPathAnchor(v) || isLiveAnchor(v);
@@ -493,7 +546,10 @@ export type RefusalCode =
   /** The suggestion was already accepted, rejected or withdrawn. */
   | 'suggestion_closed'
   /** Choices: the choice is decided, so it takes no more votes or proposals. */
-  | 'choice_decided';
+  | 'choice_decided'
+  /** A widget draft has errors, or a publish names a preview that is not the
+   *  current draft's. */
+  | 'widget_invalid';
 
 export interface Refusal {
   code: RefusalCode;
@@ -1850,4 +1906,97 @@ export interface PromoteConversationResponse {
   versionId?: string;
   /** Added to an existing document: what the edit did (it may be a suggestion). */
   reconciliation?: Reconciliation;
+}
+
+// ───────────────────── Widgets ─────────────────────
+// An agent-drawn SVG diagram or chart in a live document (a `widget` block).
+// The agent drafts a module, sees PNG previews, then publishes exactly that
+// preview; a draft with errors never replaces the live publish.
+
+/** One problem in a widget module: its line (0 = the rendered output or the
+ *  rows), what is wrong, and what to do. */
+export interface WidgetError {
+  line: number;
+  message: string;
+  fix: string;
+}
+
+/** A row a widget draws from; `id` is its stable identity (a mark's
+ *  `data-row`), so comments stay on their row when rows re-sort. */
+export type WidgetRowInput = Record<string, unknown> & { id: string | number };
+
+/** POST /api/documents/:docId/widgets/draft. Without `widgetId` a new widget
+ *  block is placed after `afterBlockId` (or at the end of the tab). */
+export interface WidgetDraftRequest {
+  widgetId?: string;
+  tabId?: string;
+  afterBlockId?: string;
+  source: string;
+  /** Inline rows, or `collection`: the shared records of that collection
+   *  (each row's `id` is its record id), redrawn when they change. */
+  rows?: WidgetRowInput[];
+  collection?: string;
+}
+
+/** A label whose words people edited, at publish: their edit is `carried`
+ *  (the agent left that label unchanged) or `kept` over the agent's different
+ *  new words (to replace it anyway, edit the label itself). Labels people
+ *  never edited take the agent's words and are not listed. */
+export interface WidgetLabelOutcome {
+  textId: string;
+  status: 'carried' | 'kept';
+  text: string;
+  agentText: string;
+}
+
+export interface WidgetDraftResponse {
+  widgetId: string;
+  blockId: string;
+  /** Pass it to publish: the publish happens only if the draft still renders
+   *  exactly this preview. */
+  previewHash: string;
+  /** Base64 PNGs of the draft as people will see it once published. */
+  png: { light: string; dark: string };
+  /** Tags and attributes the allowlist dropped from the output. */
+  warnings: string[];
+  labels: WidgetLabelOutcome[];
+}
+
+/** POST /api/widgets/:widgetId/publish */
+export interface WidgetPublishRequest {
+  previewHash: string;
+}
+
+export interface WidgetPublishResponse {
+  widgetId: string;
+  blockId: string;
+  publishedHash: string;
+  docVersion: number;
+  labels: WidgetLabelOutcome[];
+}
+
+export interface WidgetLabelDTO {
+  textId: string;
+  target: Target;
+  text: string;
+  version: string | null;
+}
+
+/** GET /api/widgets/:widgetId */
+export interface WidgetDTO {
+  id: string;
+  documentId: string;
+  blockId: string;
+  /** The live publish (null before the first publish). */
+  source: string | null;
+  rows: WidgetRowInput[] | null;
+  /** The records collection the live widget draws from, if bound. */
+  collection: string | null;
+  publishedHash: string | null;
+  /** Each label as people see it now (their edits included). Edit one with
+   *  primer_apply_ops: `update` its `target` with `expectVersion: version`
+   *  and the new words as `block`. Agents get `text` fenced as untrusted. */
+  labels: WidgetLabelDTO[];
+  draft: { source: string; rows: WidgetRowInput[] | null; collection: string | null; errors: WidgetError[] | null } | null;
+  updatedAt: string;
 }

@@ -183,6 +183,13 @@
       "when": 1795126129084,
       "tag": "0025_certain_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795126217945,
+      "tag": "0026_widgets",
+      "breakpoints": true
     }
   ]
 }

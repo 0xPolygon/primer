@@ -222,10 +222,11 @@ async function prepareOp(raw: unknown): Promise<Prepared | { error: string; fix:
     const t = op[name];
     if (!isTarget(t)) return { error: `\`${name}\` must be a target { tabId, blockId }.`, fix: 'Use the target of a block from primer_get_doc.' };
     if (t.pid && name === 'target' && op.op === 'update') return { tabId: t.tabId, blockId: t.blockId, pid: t.pid };
+    if (t.textId && name === 'target' && op.op === 'update') return { tabId: t.tabId, blockId: t.blockId, textId: t.textId };
     if (t.pid || t.textId || t.embedId) {
       return {
-        error: 'Page text is edited only with `update` (plain text); embeds and widget labels are not editable by ops yet.',
-        fix: 'Send { op: "update", target: { tabId, blockId, pid }, expectVersion, block: "the new text" }.',
+        error: 'Page text and widget labels are edited only with `update` (plain text); embeds are not editable by ops yet.',
+        fix: 'Send { op: "update", target: { tabId, blockId, pid } or { tabId, blockId, textId }, expectVersion, block: "the new text" }.',
       };
     }
     return { tabId: t.tabId, blockId: t.blockId };
@@ -265,6 +266,13 @@ async function prepareOp(raw: unknown): Promise<Prepared | { error: string; fix:
           return { error: 'Page text takes `block` as a plain-text string (up to 10,000 characters).', fix: 'Send the element\'s new text as a string.' };
         }
         return { op: 'pageText', target: t, expectVersion: op.expectVersion as string, text: op.block };
+      }
+      if (t.textId) {
+        // A widget label is one line of plain text (widgets/labels.ts).
+        if (typeof op.block !== 'string' || op.block.length > 500) {
+          return { error: 'A widget label takes `block` as one line of plain text (up to 500 characters).', fix: 'Send the label\'s new words as a string.' };
+        }
+        return { op: 'pageText', target: t, expectVersion: op.expectVersion as string, text: op.block.replace(/\s+/g, ' ').trim() };
       }
       const converted = await convert(op.block as BlockInput);
       if ('error' in converted) return converted;
