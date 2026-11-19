@@ -1148,7 +1148,9 @@ describe('collaborator tools (#98)', () => {
       const h = buildMcpToolHandlers(deps);
       const args = { documentId: docId, userId: 'tools-c-guest', role: 'editor' };
       expect((await h.primer_add_collaborator(args, person('tools-c-owner'))).isError).toBeFalsy();
-      expect(parse(await h.primer_add_collaborator(args, person('tools-c-owner'))).code).toBe('collaborator_exists');
+      const dup = parse(await h.primer_add_collaborator(args, person('tools-c-owner')));
+      expect(dup.code).toBe('collaborator_exists');
+      expect(dup.fix).toMatch(/nothing to do/);
       expect(spy.calls).toHaveLength(1);
     });
   });

@@ -9,7 +9,7 @@ import { actorName, actorNameOf } from '../lib/actors.ts';
 import { loadThreads } from '../lib/threadList.ts';
 import { documents, versions, threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { replyToThread } from '../routes/comments.ts';
-import { addCollaborator, listCollaborators, lookupUserByEmail, type CollaboratorFailure } from '../routes/collaborators.ts';
+import { addCollaborator, listCollaborators, lookupUserByEmail } from '../routes/collaborators.ts';
 import { resolveThread } from '../routes/threads.ts';
 import { createLiveThread, reanchorThread } from '../lib/liveThreads.ts';
 import { getDigest } from '../live/catchup.ts';
@@ -79,12 +79,6 @@ function err(code: PrimerErrorCode, message: string): ToolResult {
 function refusalErr(refusal: Refusal): ToolResult {
   const { code, message, fix } = refusal;
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message, fix }) }] };
-}
-
-/** A collaborator refusal as a tool error: the REST error code, message and fix. */
-function collaboratorErr(f: CollaboratorFailure): ToolResult {
-  const { error: code, message, fix } = f;
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message: message ?? code, fix }) }] };
 }
 
 /** The target document of a tool call: `documentId`, or a Primer `url`. */
@@ -1062,14 +1056,14 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         return err('bad_request', 'role must be commenter, responder or editor');
       }
       const out = await addCollaborator(user, doc.id, { userId, email, role: args.role }, deps.notifier);
-      return out.ok ? ok(out.value) : collaboratorErr(out);
+      return out.ok ? ok(out.value) : refusalErr({ code: out.error, message: out.message ?? out.error, fix: out.fix });
     },
 
     primer_list_collaborators: async (args, user) => {
       const doc = documentIdArg(args);
       if ('error' in doc) return doc.error;
       const out = await listCollaborators(user, doc.id);
-      return out.ok ? ok({ collaborators: out.value }) : collaboratorErr(out);
+      return out.ok ? ok({ collaborators: out.value }) : refusalErr({ code: out.error, message: out.message ?? out.error, fix: out.fix });
     },
     primer_create_thread: async (args, user) => {
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
