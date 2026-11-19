@@ -212,4 +212,44 @@ describe('applyOps', () => {
     expect(out).toMatchObject({ ok: false, status: 400, errors: [{ index: 0, refusal: { code: 'invalid_op' } }] });
     expect(await markdownOf(id, agent)).toEqual(['Alpha']);
   });
+
+  it('pending blocks are filled in place section by section', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('title', 'Report')]);
+    const outline = await ops(id, agent, {
+      ops: [
+        {
+          op: 'add',
+          at: main('title'),
+          position: 'after',
+          blocks: [
+            { json: { type: 'pending', props: { intent: 'Summary of findings' } } },
+            { json: { type: 'pending', props: { intent: 'Next steps' } } },
+          ],
+        },
+      ],
+    });
+    const [summary, next] = outline.outcomes[0]!.blocks!;
+    expect([summary!.type, next!.type]).toEqual(['pending', 'pending']);
+
+    let v = await versions(id, agent);
+    const first = await ops(id, agent, {
+      ops: [{ op: 'update', target: summary!.target, block: '## Summary', expectVersion: v[summary!.target.blockId] }],
+    });
+    expect(first.outcomes[0]!.blocks![0]).toMatchObject({ target: summary!.target, type: 'heading' });
+    // The other section still waits.
+    const mid = await getLiveDoc(id, agent, { format: 'json' });
+    expect(mid.ok && mid.value.blocks.map((b) => b.type)).toEqual(['paragraph', 'heading', 'pending']);
+
+    v = await versions(id, agent);
+    await ops(id, agent, { ops: [{ op: 'update', target: next!.target, block: 'Ship it next week.', expectVersion: v[next!.target.blockId] }] });
+    const done = await getLiveDoc(id, agent, { format: 'markdown' });
+    if (!done.ok) throw new Error();
+    expect(done.value.blocks.map((b) => [b.target.blockId, b.markdown])).toEqual([
+      ['title', 'Report'],
+      [summary!.target.blockId, '## Summary'],
+      [next!.target.blockId, 'Ship it next week.'],
+    ]);
+  });
 });
