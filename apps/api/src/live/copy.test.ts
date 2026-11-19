@@ -145,6 +145,20 @@ describe('branches', () => {
       expect(again[0]!.conflict).toBe(true);
     });
   });
+  it('a moved block is proposed as one move that keeps the branch order', async () => {
+    await withStorage(async (storage) => {
+      const { parent, branch } = await branched(storage);
+      const agent = await makeAgent();
+      const bv = await versions(branch, agent);
+      await ops(branch, agent, { ops: [{ op: 'move', target: main('c'), at: main('a'), position: 'before', expectVersion: bv.c }] });
+
+      await propose(storage, branch);
+      const open = await openSuggestions(parent);
+      expect(open.flatMap((s) => s.edits.map((e) => [e.kind, e.target.blockId]))).toEqual([['move', 'c']]);
+      await decideSuggestion(open[0]!.id, owner, 'accept');
+      expect((await markdownOf(parent, agent)).slice(0, 3)).toEqual(['Gamma', 'Alpha', 'Beta']);
+    });
+  });
 });
 
 describe('forks', () => {

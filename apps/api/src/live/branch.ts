@@ -104,7 +104,7 @@ export async function proposeBranch(storage: Storage, actor: AuthUser, branchId:
 /**
  * Branch ids → the parent's: threads copied from the parent's own threads,
  * files copied from the parent's own files. Files the branch added are
- * copied into the parent now, so a suggestion's links resolve there. Every
+ * copied into the parent once, so a suggestion's links resolve there. Every
  * lookup is scoped by document (the ids come from editable content).
  */
 async function idsToParent(storage: Storage, branchId: string, parentId: string): Promise<Map<string, string>> {
@@ -118,8 +118,12 @@ async function idsToParent(storage: Storage, branchId: string, parentId: string)
   const used = await withLiveDocument(branchId, (doc) => referencedFiles(doc, branchId));
   if (used.length === 0) return ids;
   const fileRows = (await db.execute(sql`
-    SELECT f.id, f.storage_key AS "storageKey", f.content_type AS "contentType", f.size_bytes AS "sizeBytes", f.uploaded_by AS "uploadedBy", p.id AS "parentFile"
-      FROM doc_files f LEFT JOIN doc_files p ON p.id = f.copied_from AND p.document_id = ${parentId}
+    SELECT f.id, f.storage_key AS "storageKey", f.content_type AS "contentType", f.size_bytes AS "sizeBytes", f.uploaded_by AS "uploadedBy",
+           COALESCE(p.id, q.id) AS "parentFile"
+      FROM doc_files f
+      LEFT JOIN doc_files p ON p.id = f.copied_from AND p.document_id = ${parentId}
+      -- A file the branch added and an earlier proposal already copied over.
+      LEFT JOIN LATERAL (SELECT id FROM doc_files WHERE copied_from = f.id AND document_id = ${parentId} LIMIT 1) q ON true
      WHERE f.document_id = ${branchId} AND f.id IN (${sql.join(used.map((id) => sql`${id}`), sql`, `)})
   `)) as unknown as { id: string; storageKey: string; contentType: string; sizeBytes: number; uploadedBy: string; parentFile: string | null }[];
   for (const f of fileRows) {
@@ -175,19 +179,54 @@ function tree(root: PmNode): Tree {
   return { index, order, siblings };
 }
 
-/** A block's parent and its nearest previous sibling among `common`: where
- *  it sits, ignoring blocks only one side has. */
-function relPlace(t: Tree, id: string, common: (id: string) => boolean): string {
-  const parentId = t.index.get(id)!.place.parentId ?? '';
-  const sibs = t.siblings.get(parentId)!;
-  const before = sibs.slice(0, sibs.indexOf(id)).filter(common);
-  return `${parentId}|${before.at(-1) ?? ''}`;
+/**
+ * The blocks `other` moved relative to `base`: those under another parent,
+ * and, among siblings both still have under the same parent, those outside
+ * the longest run kept in base order (so moving one block marks only it,
+ * not its new neighbours).
+ */
+function movedBlocks(base: Tree, other: Tree): Set<string> {
+  const moved = new Set<string>();
+  for (const [parentKey, sibs] of other.siblings) {
+    const kept: string[] = [];
+    for (const id of sibs) {
+      const b = base.index.get(id);
+      if (!b) continue;
+      if ((b.place.parentId ?? '') !== parentKey) moved.add(id);
+      else kept.push(id);
+    }
+    const baseOrder = base.siblings.get(parentKey) ?? [];
+    const rank = kept.map((id) => baseOrder.indexOf(id));
+    const stay = new Set(longestIncreasing(rank).map((i) => kept[i]!));
+    for (const id of kept) if (!stay.has(id)) moved.add(id);
+  }
+  return moved;
+}
+
+/** Indexes of a longest strictly increasing subsequence of `xs`. */
+function longestIncreasing(xs: number[]): number[] {
+  const tails: number[] = [];
+  const prev: number[] = new Array(xs.length).fill(-1);
+  xs.forEach((x, i) => {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xs[tails[mid]!]! < x) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0) prev[i] = tails[lo - 1]!;
+    tails[lo] = i;
+  });
+  const out: number[] = [];
+  for (let i = tails.at(-1) ?? -1; i >= 0; i = prev[i]!) out.unshift(i);
+  return out;
 }
 
 function tabEdits(tabId: string, baseRoot: PmNode, branchRoot: PmNode): PlannedEdit[] {
   const base = tree(baseRoot);
   const branch = tree(branchRoot);
-  const inBoth = (id: string) => base.index.has(id) && branch.index.has(id);
+  const movedOnBranch = movedBlocks(base, branch);
   const edits: PlannedEdit[] = [];
   let run: { nodes: PmNode[]; place: BlockPlace } | null = null;
 
@@ -207,7 +246,7 @@ function tabEdits(tabId: string, baseRoot: PmNode, branchRoot: PmNode): PlannedE
       continue;
     }
     const changed = contentVersion(r.node) !== contentVersion(b.node);
-    const moved = relPlace(branch, id, inBoth) !== relPlace(base, id, inBoth);
+    const moved = movedOnBranch.has(id);
     if (changed || moved) edits.push(updateEdit(tabId, id, b.node, r.node, r.place, base, changed, moved));
   }
   for (const id of base.order) {
@@ -249,12 +288,7 @@ function updateEdit(
       }
       const content = changed && contentVersion(branchNode) !== contentVersion(at.node);
       const parentChanged = contentVersion(at.node) !== contentVersion(baseNode);
-      let parentMoved = false;
-      if (moved) {
-        const now = tree(tr.doc);
-        const common = (x: string) => base.index.has(x) && now.index.has(x);
-        parentMoved = relPlace(now, id, common) !== relPlace(base, id, common);
-      }
+      const parentMoved = moved && movedBlocks(base, tree(tr.doc)).has(id);
       if (!ctx.suggesting && ((content && parentChanged) || (moved && parentMoved))) {
         return bothChanged(target, content && parentChanged ? 'was edited' : 'was moved');
       }
