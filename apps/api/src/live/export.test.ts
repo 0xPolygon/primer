@@ -55,8 +55,10 @@ function changedLines(input: string, output: string): [number, number] | null {
 describe('export', () => {
   it('untouched round trip is byte-identical', async () => {
     for (const name of readdirSync(fixtures).filter((f) => f.endsWith('.md'))) {
-      const source = fixture(name);
-      expect(await exportMarkdown(buildLiveDoc(await importMarkdown(source), 'markdown', 'doc-1'), 'doc-1'), name).toBe(source);
+      // Every sample as written, and with Windows line endings.
+      for (const source of [fixture(name), fixture(name).replace(/\n/g, '\r\n')]) {
+        expect(await exportMarkdown(buildLiveDoc(await importMarkdown(source), 'markdown', 'doc-1'), 'doc-1'), name).toBe(source);
+      }
     }
   });
 
