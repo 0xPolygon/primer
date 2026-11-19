@@ -9,6 +9,9 @@ import { NoopNotifier } from '../notifications/notifier.ts';
 import { artifactCsp } from '../lib/pagePolicy.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
 import { readsRecords } from './page.ts';
+import { recordsApi } from './store.ts';
+import { flushDataChanged } from './changed.ts';
+import { MOCK_USER } from '../auth/resolver.ts';
 
 const POLL = `<!doctype html><html><head><meta charset="utf-8"><meta name="primer-records" content="read"><title>Poll</title></head>
 <body><button id="a">A</button><img src="https://evil.example/x.png"></body></html>`;
@@ -49,5 +52,25 @@ describe('record-reading pages', () => {
     expect(readsRecords('<head><meta content="read" name="primer-records"></head>')).toBe(true);
     expect(readsRecords('<head><meta name="primer-records" content="write"></head>')).toBe(false);
     expect(readsRecords('<head></head><body><meta name="primer-records" content="read"></body>')).toBe(false);
+  });
+
+  it('records are never tied to page versions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-page-'));
+    try {
+      const app = createApp({ storage: new FilesystemStorage(root), notifier: new NoopNotifier() });
+      const poll = await publish(app, POLL);
+      const api = recordsApi(MOCK_USER, poll.documentId);
+      await api.set({ collection: 'votes', scope: 'shared', recordId: 'a', data: { option: 'tacos' } });
+      // A new version of the page leaves the records as they were.
+      const fd = new FormData();
+      fd.append('file', new Blob([POLL.replace('Poll', 'Poll v2')], { type: 'text/html' }), 'p.html');
+      const v2 = await app.request(`/api/documents/${poll.documentId}/versions`, { method: 'POST', headers: CSRF_HEADERS, body: fd });
+      expect(v2.status).toBeLessThan(300);
+      const after = await api.list({ collection: 'votes', scope: 'shared' });
+      expect(after.ok && after.value.records.map((r) => [r.recordId, r.data, r.version])).toEqual([['a', { option: 'tacos' }, 1]]);
+      await flushDataChanged();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
