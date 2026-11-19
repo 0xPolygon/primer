@@ -116,4 +116,24 @@ describe('orphaned threads', () => {
     await deleteBlock(id, 'p1');
     expect((await sync(id)).orphaned).toBe(true);
   });
+
+  it("a thread id from another document planted in a mark never touches that thread", async () => {
+    const a = await setup();
+    const b = await setup();
+    await deleteBlock(b.id, 'p1');
+    await withLiveDoc(b.id, (doc) => syncOrphans(b.id, doc));
+    expect((await loadThread(b.thread.id))!.orphaned).toBe(true);
+
+    // A client of document A writes a comment mark carrying B's thread id.
+    const schema = serverEditor().editor.pmSchema;
+    const planted = schema.text('copy', [schema.marks.comment!.create({ threadId: b.thread.id, orphan: false })]);
+    await applyPlan(a.id, SYSTEM_ORIGIN, {
+      onConflict: 'refuse',
+      edits: [{ target: main('p2'), inverse: false, build: (tr, at) => void tr.insert(at!.pos + 2, planted) }],
+    });
+    await withLiveDoc(a.id, (doc) => syncOrphans(a.id, doc));
+    expect((await loadThread(b.thread.id))!.orphaned).toBe(true);
+    expect(await orphanEvents(b.id)).toEqual([true]);
+    expect(await orphanEvents(a.id)).toEqual([]);
+  });
 });
