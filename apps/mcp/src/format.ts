@@ -46,7 +46,7 @@ export function formatComments(
 function renderThread(thread: ThreadDTO): string {
   const quote = anchorQuote(thread.anchor);
   const badge = thread.resolvedAt === null ? '[open]' : '[resolved]';
-  const placement = thread.contextChanged ? ' (context changed)' : '';
+  const placement = thread.orphaned ? ' (text removed)' : thread.contextChanged ? ' (context changed)' : '';
   const commentLines = thread.comments.map(renderComment);
   return [`> ${quote}`, `${badge} thread ${thread.id}${placement}`, ...commentLines, ''].join('\n');
 }
@@ -76,12 +76,14 @@ export function commentRecords(threads: ThreadsListResponse) {
 }
 
 function anchorText(anchor: ThreadDTO['anchor']): string {
+  if (anchor.type === 'prose') return anchor.quote;
   if (isTextRangeAnchor(anchor)) return anchor.selectorText;
   if (isElementPathAnchor(anchor)) return anchor.innerText ?? '';
   return '';
 }
 
 function anchorQuote(anchor: ThreadDTO['anchor']): string {
+  if (anchor.type === 'prose') return anchor.quote;
   if (isTextRangeAnchor(anchor)) return anchor.selectorText;
   if (isElementPathAnchor(anchor)) {
     // Element-path anchors don't carry the quoted text — they were captured by

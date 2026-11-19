@@ -33,6 +33,7 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/documents/:docId/versions', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/content', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/threads', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/threads', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/events', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
@@ -59,6 +60,10 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'PATCH', path: '/api/comments/:commentId', scope: 'comments:write' },
   { method: 'DELETE', path: '/api/comments/:commentId', scope: 'comments:write' },
   { method: 'POST', path: '/api/comments/:commentId/restore', scope: 'comments:write' },
+  { method: 'POST', path: '/api/documents/:docId/threads', scope: 'comments:write' },
+  { method: 'POST', path: '/api/threads/:threadId/reanchor', scope: 'comments:write' },
+  { method: 'POST', path: '/api/comments/:commentId/reactions/:emoji', scope: 'comments:write' },
+  { method: 'DELETE', path: '/api/comments/:commentId/reactions/:emoji', scope: 'comments:write' },
 
   { method: 'POST', path: '/api/documents/:documentId/events', scope: 'events:write' },
   { method: 'POST', path: '/api/documents/:documentId/status', scope: 'events:write' },

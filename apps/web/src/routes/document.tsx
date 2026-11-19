@@ -22,6 +22,7 @@ import type {
   EventRowDTO,
   TextRangeAnchor,
   ElementPathAnchor,
+  ThreadAnchor,
   VersionsListResponse,
 } from '@polygonlabs/primer-api-types';
 import { useDocument, useDeleteDocument, useEditDocument } from '../queries/documents.ts';
@@ -257,7 +258,7 @@ function DocumentPageInner() {
     () =>
       threads
         .filter((t) => hasAnyComments(t) && !t.contextChanged)
-        .map((t) => ({ id: t.id, data: t.anchor })),
+        .flatMap((t) => (isVersionAnchor(t.anchor) ? [{ id: t.id, data: t.anchor }] : [])),
     [threads]
   );
 
@@ -1175,4 +1176,10 @@ function DocumentPageInner() {
     </div>
     </DraftReporterContext.Provider>
   );
+}
+
+/** Anchors the companion places in a version's HTML (live anchors are marks
+ *  in the live document instead). */
+function isVersionAnchor(anchor: ThreadAnchor): anchor is AnchorData {
+  return anchor.type === 'text-range' || anchor.type === 'element-path';
 }

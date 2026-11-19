@@ -206,7 +206,8 @@ export class MailgunNotifier implements Notifier {
     const actor = rows.find((u) => u.id === args.actorUserId);
     const actorName = actor?.displayName ?? 'Someone';
 
-    const url = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}/v/${args.version.versionNumber}#thread-${args.thread.id}`;
+    const base = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}`;
+    const url = `${args.version ? `${base}/v/${args.version.versionNumber}` : base}#thread-${args.thread.id}`;
     const excerpt = truncate(args.comment.body, BODY_EXCERPT_LIMIT);
     const subject = renderSubject(actorName, args.doc.title);
 
