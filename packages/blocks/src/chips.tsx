@@ -1,3 +1,5 @@
+/** @jsxRuntime automatic */
+/** @jsxImportSource react */
 import { createReactInlineContentSpec } from '@blocknote/react';
 
 /**
