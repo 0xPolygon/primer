@@ -1,6 +1,6 @@
 # Primer collaboration surface: spec (decided 2026-11-19)
 
-The owner and the maintainer (Taylan) agreed on this direction for upstream 0xPolygon/primer. The goal is the best surface for humans and AI agents to brainstorm, write and design together. Everything the owner listed ships, built in order. Simple and maintainable beats clever. Each concern has one way, with no fallbacks or dual paths. Speed and simplicity come first, without giving up the safety rules below.
+This is the proposed direction for Primer's collaboration surface, for the maintainers to review. The goal is the best surface for humans and AI agents to brainstorm, write and design together. Everything below ships, built in order. Simple and maintainable beats clever. Each concern has one way, with no fallbacks or dual paths. Speed and simplicity come first, without giving up the safety rules below.
 
 ## Document model
 - A document has an original file (kept as uploaded) and a live block document. Formats differ only in how they import and which parts people can edit. Comments, presence, suggestions, agents, history and attribution are identical for every format.
@@ -104,11 +104,11 @@ The owner and the maintainer (Taylan) agreed on this direction for upstream 0xPo
 - Records are not tied to page versions. An append-only change log gives audit and undo.
 - Records written by viewers are fenced as untrusted when agents read them.
 - Caps per document (records, bytes).
-- Data-table blocks and charts bind to a collection or to a named warehouse query (AidenHQ side), and refresh live.
+- Data-table blocks and charts bind to a collection or to a named warehouse query (supplied by an external integration, for example an agent fleet such as AidenHQ), and refresh live.
 
 ## Collaboration features (all ship)
 - Choice blocks, with a decision register (option chosen, rationale, evidence, open questions).
-- Catch-up view ("since you last looked"), plus a digest pushed to Slack or Telegram through AidenHQ.
+- Catch-up view ("since you last looked"), plus a digest an external integration can push to Slack or Telegram.
 - Task blocks that become tracked tasks.
 - Private drafts and branches, proposed back as one change set.
 - Fuzzy re-anchoring.
@@ -141,7 +141,7 @@ The owner and the maintainer (Taylan) agreed on this direction for upstream 0xPo
   - Text from viewers or data is treated as data, never as instructions.
 - **Tests:** minimal and end to end. Prove behaviour, not counts.
 
-## Fidelity and BlockNote-native authoring (owner, 2026-11-19)
+## Fidelity and BlockNote-native authoring
 
 1. **Keep as much of BlockNote's functionality as possible.** BlockNote's schema is the canonical model for editable docs. Use its stock blocks, UI, comments, collaboration, and import/export. Write a custom piece only where BlockNote has nothing, and build custom blocks through its custom block API.
 2. **Keep as much of the original content and format as possible.**

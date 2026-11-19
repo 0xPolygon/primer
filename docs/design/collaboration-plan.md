@@ -19,7 +19,7 @@
 - Parsing and rendering: parse5 (already present), markdown-it (already present; stays the one Markdown parser).
 - Later milestones: `@handlewithcare/prosemirror-suggest-changes@0.1.8` (M5), `fast-diff@1.3.0` (M4), and for M8 `quickjs-emscripten`, `acorn` + `acorn-jsx` (one parser; Primer generates the JSX→`h()` code itself) and `@resvg/resvg-js`.
 
-**Spec:** [`collaboration.md`](collaboration.md). The plan also folds in the coordinator's rulings: Markdown fidelity, BlockNote-first, output equal to input, the agent skill, the `xl-ai` ideas, the BlockNote survey, and an independent Codex review of an earlier draft (not in the repo), all adopted. Executors read the spec, this plan, and Primer's `CLAUDE.md`. Primer has no `AGENTS.md`, and `docs/` has no contributor guide beyond `docs/development/events-loop.md`. Conventions below come from the code and CI.
+**Spec:** [`collaboration.md`](collaboration.md). The plan also folds in these design decisions: Markdown fidelity, BlockNote-first, output equal to input, the agent skill, the `xl-ai` ideas, the BlockNote survey, and an independent Codex review of an earlier draft (not in the repo), all adopted. Executors read the spec, this plan, and Primer's `CLAUDE.md`. Primer has no `AGENTS.md`, and `docs/` has no contributor guide beyond `docs/development/events-loop.md`. Conventions below come from the code and CI.
 
 Base branch: `live-events`, which is PR #143 with #142 merged into it. PR #141 (`proxy-auth`) is independent; see Contract C1.
 
@@ -250,7 +250,7 @@ M10 is split into five PRs because the repo's `CLAUDE.md` sizes work as one sess
 
 ## Ambiguities resolved (simplest option chosen)
 
-1. **Comment anchors (a spec deviation, by coordinator ruling).** BlockNote's `comment` mark is the anchor of record.
+1. **Comment anchors (a spec deviation, decided during planning).** BlockNote's `comment` mark is the anchor of record.
    - The client sends the selection as Yjs relative positions. The server writes the mark through the pipeline, so people and agents share one path.
    - When the mark is gone from reachable content, the thread is orphaned and keeps its quote.
 2. **Ops batch semantics.** A malformed op rejects the whole batch, with per-op errors. A valid op whose target is stale becomes a `conflict`, or a suggestion if `onConflict:'suggest'`. The other ops still apply.
@@ -259,9 +259,9 @@ M10 is split into five PRs because the repo's `CLAUDE.md` sizes work as one sess
 5. **Threads on checkpoints.** Live threads belong to the live document. A checkpoint view shows `threads.json` from its bundle, read-only.
 6. **OAuth MCP clients are agents** (`agent_oauth_*`, via the person).
 7. **Localisation** covers BlockNote's editor and Primer's own chrome strings (M10d).
-8. **Warehouse queries** arrive as records collections `query:<name>`, written by AidenHQ over MCP.
+8. **Warehouse queries** arrive as records collections `query:<name>`, written over MCP by an external integration (for example an agent fleet such as AidenHQ).
 9. **Agent mode** defaults to `auto`: an agent edits documents it owns and suggests everywhere else.
-10. **No headless browser** (a deviation from survey ruling 8). Widget previews use QuickJS plus resvg, with bounded work. Static pages, shares and email use the bundle's `static.html`. PDF is the browser's print.
+10. **No headless browser** (a deviation from survey decision 8). Widget previews use QuickJS plus resvg, with bounded work. Static pages, shares and email use the bundle's `static.html`. PDF is the browser's print.
 11. **Suggestion storage is decided once,** by the spike that is M5's first task.
     - The primary design: suggest-changes marks in the Y.Doc, with metadata rows in Postgres.
     - If the spike fails, M5 ships stored proposals instead and nothing else changes: both produce `suggestionId`s in C7.
@@ -1004,7 +1004,7 @@ Comments on page text use the M3 path unchanged (the overlay editor carries Bloc
 
 Ships: agent-authored SVG/JSX diagrams and charts as `widget` blocks: validated, rendered server-side to SVG with a PNG preview for the agent (draft → publish, last good publish live), labels editable in place, parts and data points commentable, the visual-vocabulary skill.
 
-Decision (runtime; a deviation from survey ruling 8): no headless browser. Widget code runs in QuickJS (WASM, 50 ms CPU, 16 MB) on the server; the output tree is serialized through an SVG allowlist; PNG previews come from `@resvg/resvg-js` (MPL-2.0). Static rendering elsewhere is the bundle's `static.html` (C11) and PDF is the browser's print.
+Decision (runtime; a deviation from survey decision 8): no headless browser. Widget code runs in QuickJS (WASM, 50 ms CPU, 16 MB) on the server; the output tree is serialized through an SVG allowlist; PNG previews come from `@resvg/resvg-js` (MPL-2.0). Static rendering elsewhere is the bundle's `static.html` (C11) and PDF is the browser's print.
 
 ### Task M8.1: Module format and validator
 
@@ -1094,7 +1094,7 @@ Ships: per-document records (Claude Artifacts storage) for agents (MCP) and page
 
 ### Task M9.5 (PR M9b): Data-table block, live charts, records in bundles (needs M2b, M8, M9)
 
-**Files:** Create `packages/blocks/src/dataTable.tsx`, `apps/web/src/live/DataTableView.tsx` + test; Modify `apps/api/src/widgets/store.ts`. `dataTable` block props `{ collection, columns: string (JSON [{key,label,type:'text'|'number'|'date'|'select'}]), scope }`: renders and edits rows through the records routes, refreshes on `data.changed`. Widgets with `collection` re-render server-side on `data.changed` (debounced 2 s) and publish the new SVG if valid. Checkpoint bundles gain `records.json` (shared records at capture); external shares and checkpoint views answer page reads from it, read-only (live data frozen at publish). AidenHQ warehouse queries arrive as collection `query:<name>` written over MCP (no Primer-side query engine). Tests: `external share reads the frozen snapshot`; `editing a cell writes a record and other viewers refresh`; `chart re-renders when its collection changes`. Commit `feat: live data tables and charts`.
+**Files:** Create `packages/blocks/src/dataTable.tsx`, `apps/web/src/live/DataTableView.tsx` + test; Modify `apps/api/src/widgets/store.ts`. `dataTable` block props `{ collection, columns: string (JSON [{key,label,type:'text'|'number'|'date'|'select'}]), scope }`: renders and edits rows through the records routes, refreshes on `data.changed`. Widgets with `collection` re-render server-side on `data.changed` (debounced 2 s) and publish the new SVG if valid. Checkpoint bundles gain `records.json` (shared records at capture); external shares and checkpoint views answer page reads from it, read-only (live data frozen at publish). Warehouse queries from an external integration arrive as collection `query:<name>` written over MCP (no Primer-side query engine). Tests: `external share reads the frozen snapshot`; `editing a cell writes a record and other viewers refresh`; `chart re-renders when its collection changes`. Commit `feat: live data tables and charts`.
 
 **M9 verification:** CI green. Changeset: api/web minor, api-types minor (scopes), mcp + plugin minor.
 
@@ -1118,7 +1118,7 @@ Each is one session-sized upstream PR, scheduled in the waves table: **M10e** in
 
 **Task M10a.2: Task blocks become tracked tasks.**
 - **Block.** `task` props: `{ title; assigneeId; due; status: 'open'|'done' }`.
-- **Table.** `doc_tasks (id uuid pk, document_id fk cascade, block_id text unique per doc, title, assignee_id null, due_date date null, status, created_by, created_at, updated_at)`. It is a rebuildable index: the persistence hook keeps it in sync from block props, `rebuildTaskIndex(documentId)` recreates it from the Y.Doc, and it is never written any other way. The hook emits `task.created` and `task.updated`. AidenHQ consumes these; Primer runs no task system of its own.
+- **Table.** `doc_tasks (id uuid pk, document_id fk cascade, block_id text unique per doc, title, assignee_id null, due_date date null, status, created_by, created_at, updated_at)`. It is a rebuildable index: the persistence hook keeps it in sync from block props, `rebuildTaskIndex(documentId)` recreates it from the Y.Doc, and it is never written any other way. The hook emits `task.created` and `task.updated`. External integrations consume these; Primer runs no task system of its own.
 - **Interfaces.** MCP `primer_list_tasks {documentId? , assigneeId?}`. `GET /api/tasks?assignee=me`.
 - **Tests:**
   - `adding a task block creates a tracked task and emits task.created`
@@ -1141,7 +1141,7 @@ Each is one session-sized upstream PR, scheduled in the waves table: **M10e** in
 **Task M10b.1: Catch-up view and digest.**
 - **Schema.** `document_views.last_doc_version bigint null`, set when a viewer opens a live document.
 - **Catch-up.** "Since you last looked" = `getLiveDoc({ since: last_doc_version })`, plus threads and comments created after `viewed_at`, plus decided suggestions. It renders as a dismissible panel that highlights the changed blocks.
-- **Digest.** `GET /api/me/digest?since=ISO` and MCP `primer_get_digest` return the same data across the caller's library. AidenHQ pushes it to Slack or Telegram. Primer sends nothing itself.
+- **Digest.** `GET /api/me/digest?since=ISO` and MCP `primer_get_digest` return the same data across the caller's library. An external integration pushes it to Slack or Telegram. Primer sends nothing itself.
 - **Test:** `catch-up lists only changes after my last view`.
 - **Commit:** `feat: catch-up since you last looked`.
 
@@ -1234,7 +1234,7 @@ Each is one session-sized upstream PR, scheduled in the waves table: **M10e** in
 ## Self-review notes
 
 - **Spec coverage.** Every spec section maps to a task.
-  - Interface-only, because they live on the AidenHQ side: the Slack/Telegram digest push (M10b.1) and warehouse queries (M9.5).
+  - Interface-only, because they live in an external integration: the Slack/Telegram digest push (M10b.1) and warehouse queries (M9.5).
   - Not planned, because the spec says "later": whiteboards and CSV, image and PDF uploads.
 - **Codex review.** Every point is adopted:
   - one pipeline (C4) and one address (C3);
