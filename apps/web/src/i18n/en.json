@@ -539,6 +539,8 @@
   "records.tooMany": "At most {max} record calls may be in flight.",
   "records.timeout": "The call took longer than {seconds} s.",
   "liveEditor.comments": "Comments",
+  "liveEditor.suggestions": "Suggestions",
+  "liveEditor.suggestionsCount": "Suggestions ({count})",
   "liveEditor.showComments": "Show comments",
   "liveEditor.filterOpen": "Open",
   "liveEditor.filterResolved": "Resolved",
@@ -548,5 +550,15 @@
   "deleteCommented.keep": "Keep text",
   "deleteCommented.confirm": "Delete anyway",
   "threads.notDeleted": "Threads are resolved, not deleted.",
-  "request.failed": "Request failed ({status})."
+  "request.failed": "Request failed ({status}).",
+  "suggestions.acceptFailed": "Could not accept ({status}).",
+  "suggestions.rejectFailed": "Could not reject ({status}).",
+  "suggestions.none": "No open suggestions.",
+  "suggestions.changedSince": "Changed since",
+  "suggestions.reject": "Reject",
+  "suggestions.accept": "Accept",
+  "suggestions.kindReplace": "Change",
+  "suggestions.kindInsert": "Add",
+  "suggestions.kindDelete": "Delete",
+  "suggestions.kindMove": "Move"
 }

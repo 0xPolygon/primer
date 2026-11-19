@@ -539,6 +539,8 @@
   "records.tooMany": "Höchstens {max} Datensatzaufrufe dürfen gleichzeitig laufen.",
   "records.timeout": "Der Aufruf dauerte länger als {seconds} s.",
   "liveEditor.comments": "Kommentare",
+  "liveEditor.suggestions": "Vorschläge",
+  "liveEditor.suggestionsCount": "Vorschläge ({count})",
   "liveEditor.showComments": "Kommentare anzeigen",
   "liveEditor.filterOpen": "Offen",
   "liveEditor.filterResolved": "Erledigt",
@@ -548,5 +550,15 @@
   "deleteCommented.keep": "Text behalten",
   "deleteCommented.confirm": "Trotzdem löschen",
   "threads.notDeleted": "Threads werden erledigt, nicht gelöscht.",
-  "request.failed": "Anfrage fehlgeschlagen ({status})."
+  "suggestions.acceptFailed": "Annehmen fehlgeschlagen ({status}).",
+  "suggestions.rejectFailed": "Ablehnen fehlgeschlagen ({status}).",
+  "request.failed": "Anfrage fehlgeschlagen ({status}).",
+  "suggestions.none": "Keine offenen Vorschläge.",
+  "suggestions.changedSince": "Seitdem geändert",
+  "suggestions.reject": "Ablehnen",
+  "suggestions.accept": "Annehmen",
+  "suggestions.kindReplace": "Änderung",
+  "suggestions.kindInsert": "Hinzufügen",
+  "suggestions.kindDelete": "Löschen",
+  "suggestions.kindMove": "Verschieben"
 }

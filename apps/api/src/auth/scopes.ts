@@ -41,6 +41,7 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/documents/:docId/agents', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/runs', scope: 'documents:read' },
   { method: 'GET', path: '/api/runs', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/suggestions', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read' },
@@ -61,6 +62,8 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/runs/:runId/finish', scope: 'documents:write' },
   { method: 'POST', path: '/api/runs/:runId/cancel', scope: 'documents:write' },
   { method: 'POST', path: '/api/runs/:runId/undo', scope: 'documents:write' },
+  // An agent withdraws its own suggestions; deciding them is for people.
+  { method: 'POST', path: '/api/suggestions/:id/withdraw', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write' },
   { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write' },
@@ -138,6 +141,8 @@ export const NOT_GRANTABLE: readonly { method: Method; path: string; reason: str
   { method: 'GET', path: '/api/admin/stats', reason: 'admin (session-only)' },
   { method: 'POST', path: '/auth/logout', reason: 'browser session' },
   { method: 'POST', path: '/api/runs/:runId/approve', reason: 'a person approves an agent\'s plan; agents never do' },
+  { method: 'POST', path: '/api/suggestions/:id/accept', reason: 'a person decides a suggestion; agents never do' },
+  { method: 'POST', path: '/api/suggestions/:id/reject', reason: 'a person decides a suggestion; agents never do' },
 ];
 
 function compile(path: string): RegExp {

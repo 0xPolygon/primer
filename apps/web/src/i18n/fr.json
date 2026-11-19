@@ -539,6 +539,8 @@
   "records.tooMany": "Au plus {max} appels d’enregistrements peuvent être en cours.",
   "records.timeout": "L’appel a pris plus de {seconds} s.",
   "liveEditor.comments": "Commentaires",
+  "liveEditor.suggestions": "Suggestions",
+  "liveEditor.suggestionsCount": "Suggestions ({count})",
   "liveEditor.showComments": "Afficher les commentaires",
   "liveEditor.filterOpen": "Ouverts",
   "liveEditor.filterResolved": "Résolus",
@@ -548,5 +550,15 @@
   "deleteCommented.keep": "Garder le texte",
   "deleteCommented.confirm": "Supprimer quand même",
   "threads.notDeleted": "Les fils se résolvent, ils ne se suppriment pas.",
-  "request.failed": "La requête a échoué ({status})."
+  "request.failed": "La requête a échoué ({status}).",
+  "suggestions.acceptFailed": "Impossible d’accepter ({status}).",
+  "suggestions.rejectFailed": "Impossible de refuser ({status}).",
+  "suggestions.none": "Aucune suggestion ouverte.",
+  "suggestions.changedSince": "Modifié depuis",
+  "suggestions.reject": "Refuser",
+  "suggestions.accept": "Accepter",
+  "suggestions.kindReplace": "Modification",
+  "suggestions.kindInsert": "Ajout",
+  "suggestions.kindDelete": "Suppression",
+  "suggestions.kindMove": "Déplacement"
 }

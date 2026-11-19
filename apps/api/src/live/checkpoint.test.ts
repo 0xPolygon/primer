@@ -148,8 +148,8 @@ describe('checkpoints', () => {
         versions: { id: string; versionNumber: number; bundled?: boolean }[];
       };
       const byNumber = new Map(list.versions.map((v) => [v.versionNumber, v]));
-      expect(byNumber.get(legacy.versionNumber)!.bundled).toBe(false);
-      expect(byNumber.get(live.versionNumber)!.bundled).toBe(true);
+      expect(byNumber.get(legacy.versionNumber!)!.bundled).toBe(false);
+      expect(byNumber.get(live.versionNumber!)!.bundled).toBe(true);
       // The old version has no Y.Doc to preview, but its HTML still renders.
       expect((await app.request(`/api/versions/${legacy.versionId}/ydoc`)).status).toBe(404);
       const html = await app.request(`/api/versions/${legacy.versionId}/content`);

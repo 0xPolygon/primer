@@ -539,6 +539,8 @@
   "records.tooMany": "Como máximo {max} llamadas de registros pueden estar en curso.",
   "records.timeout": "La llamada tardó más de {seconds} s.",
   "liveEditor.comments": "Comentarios",
+  "liveEditor.suggestions": "Sugerencias",
+  "liveEditor.suggestionsCount": "Sugerencias ({count})",
   "liveEditor.showComments": "Mostrar comentarios",
   "liveEditor.filterOpen": "Abiertos",
   "liveEditor.filterResolved": "Resueltos",
@@ -548,5 +550,15 @@
   "deleteCommented.keep": "Conservar texto",
   "deleteCommented.confirm": "Eliminar de todos modos",
   "threads.notDeleted": "Los hilos se resuelven, no se eliminan.",
-  "request.failed": "La solicitud falló ({status})."
+  "request.failed": "La solicitud falló ({status}).",
+  "suggestions.acceptFailed": "No se pudo aceptar ({status}).",
+  "suggestions.rejectFailed": "No se pudo rechazar ({status}).",
+  "suggestions.none": "No hay sugerencias abiertas.",
+  "suggestions.changedSince": "Cambiado desde entonces",
+  "suggestions.reject": "Rechazar",
+  "suggestions.accept": "Aceptar",
+  "suggestions.kindReplace": "Cambio",
+  "suggestions.kindInsert": "Añadir",
+  "suggestions.kindDelete": "Eliminar",
+  "suggestions.kindMove": "Mover"
 }

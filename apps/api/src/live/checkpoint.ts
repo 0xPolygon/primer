@@ -6,6 +6,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
+import { effectiveAgentMode } from '../lib/permissions.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -59,9 +60,11 @@ export async function writeCheckpoint(
   actor: AuthUser,
   note: string | null,
   captured: CapturedState,
+  /** A republish: the uploaded file, kept with the version. */
+  original?: { versionId: string; originalKey: string; sourceFormat: 'markdown' | 'text' },
 ): Promise<CheckpointResponse> {
   const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
-  const versionId = uuidv7();
+  const versionId = original?.versionId ?? uuidv7();
   const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
   const marked = markedThreads(captured.state);
   try {
@@ -80,6 +83,7 @@ export async function writeCheckpoint(
         versionNote: note,
         bundleKey: bundle.bundleKey,
         docVersion: captured.docVersion,
+        ...(original ? { originalKey: original.originalKey, sourceFormat: original.sourceFormat } : {}),
       });
       // Open threads stay listed on the checkpoint: anchored where their
       // comment mark is in the captured content, orphaned elsewhere.
@@ -121,7 +125,12 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
-    await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    // The tab list is no block edit, so it can't be suggested: an agent that
+    // only suggests (the pipeline turns its edits below into suggestions)
+    // leaves it as it is.
+    if ((await effectiveAgentMode(checkpoint.documentId, actor.id)) === 'edit') {
+      await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    }
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {

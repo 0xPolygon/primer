@@ -17,19 +17,24 @@
 // detached Y.Doc and stored as the document's first update, together with the
 // document, checkpoint 1 and its render bundle. A legacy document that gets a
 // Markdown or text version becomes live the same way; its open threads are
-// re-anchored by quote, and those whose quote isn't found are orphaned. A live
-// document is edited in place, so publishing onto one is refused until
-// republish merges arrive. HTML stays on the version path until pages land.
+// re-anchored by quote, and those whose quote isn't found are orphaned. A
+// Markdown or text version of a live document is merged three ways into it
+// (live/merge.ts) and checkpointed, unless the merge applied nothing (e.g. an
+// agent in suggest mode, whose changes all become suggestions): then no
+// version is made and the result carries only the reconciliation. HTML stays on the version path until pages
+// land.
 import * as Y from 'yjs';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import type { PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
+import type { PublishFormat, Reconciliation, Refusal } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { docUpdates, documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { deleteBundle, quoteOf, renderBundle } from '../live/bundle.ts';
 import { ensureSigningKey } from '../live/signing.ts';
+import { captureState, writeCheckpoint } from '../live/checkpoint.ts';
 import { anchorThreads, buildLiveDoc, importMarkdown, importText, type ImportResult } from '../live/import.ts';
+import { mergeRepublish } from '../live/merge.ts';
 import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { MAX_BYTES, MAX_DESCRIPTION, MAX_TITLE } from '../upload/validate.ts';
@@ -54,9 +59,12 @@ export interface PublishInput {
   baseVersionNumber?: number;
 }
 
-export type PublishResult =
-  | { ok: true; documentId: string; versionId: string; versionNumber: number }
-  | { ok: false; status: 400 | 403 | 404 | 409; refusal: Refusal };
+export type Published = { ok: true; documentId: string; versionId: string; versionNumber: number; reconciliation?: Reconciliation };
+/** A republish onto a live document that applied nothing (an agent in suggest
+ *  mode, or no change): no new version, only what became of each group. */
+export type Suggested = { ok: true; documentId: string; versionId?: never; versionNumber?: never; reconciliation: Reconciliation };
+export type Refused = { ok: false; status: 400 | 403 | 404 | 409; refusal: Refusal };
+export type PublishResult = Published | Suggested | Refused;
 
 /** `details.error` keeps the REST error code clients already branch on. */
 function refuse(
@@ -65,7 +73,7 @@ function refuse(
   message: string,
   fix: string,
   restError: string = code,
-): PublishResult {
+): Refused {
   return { ok: false, status, refusal: { code, message, fix, details: { error: restError } } };
 }
 
@@ -77,6 +85,9 @@ class StaleBase extends Error {
 
 class Republish extends Error {}
 
+/** A new document always gets version 1. */
+export function publishDocument(storage: Storage, input: PublishInput & { documentId?: undefined }): Promise<Published | Refused>;
+export function publishDocument(storage: Storage, input: PublishInput): Promise<PublishResult>;
 export async function publishDocument(storage: Storage, input: PublishInput): Promise<PublishResult> {
   const { actor, documentId: existingId } = input;
 
@@ -113,8 +124,14 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
     if (!canEdit(eff)) {
       return refuse(403, 'forbidden', 'Only the document owner or an editor can add versions.', 'Ask the owner for editor access, or leave a comment instead.');
     }
-    if (doc.format !== null) return republishRefusal();
     title = doc.title;
+    if (doc.format !== null) {
+      const versionNote = input.versionNote?.trim() || null;
+      if (versionNote !== null && versionNote.length > MAX_VERSION_NOTE) {
+        return refuse(400, 'bad_request', `versionNote must be ≤${MAX_VERSION_NOTE} chars.`, 'Shorten the version note.', 'invalid_body');
+      }
+      return republishLive(storage, input, doc.format, versionNote);
+    }
   }
 
   const versionNote = input.versionNote?.trim() || null;
@@ -199,7 +216,7 @@ async function lockForVersion(tx: Tx, documentId: string, base: number | undefin
   return latest;
 }
 
-function refusalFor(err: unknown, base: number | undefined): PublishResult {
+function refusalFor(err: unknown, base: number | undefined): Refused {
   if (err instanceof StaleBase) {
     return refuse(
       409,
@@ -208,17 +225,71 @@ function refusalFor(err: unknown, base: number | undefined): PublishResult {
       `Read version ${err.latest}, merge your changes into it, and publish again with baseVersionNumber ${err.latest}.`,
     );
   }
-  if (err instanceof Republish) return republishRefusal();
+  if (err instanceof Republish) return formatRefusal('html', 'markdown');
   throw err;
 }
 
-function republishRefusal(): PublishResult {
+function formatRefusal(format: PublishFormat, live: string): Refused {
   return refuse(
-    409,
-    'republish_unsupported',
-    'This document is live: it is edited in place, not republished.',
-    'Edit with primer_apply_ops; republish arrives with suggestions.',
+    400,
+    'bad_request',
+    `This live document is ${live}; a ${format} version can't be merged into it.`,
+    `Publish the document as ${live}, or edit it with primer_apply_ops.`,
   );
+}
+
+/**
+ * A new Markdown or text version of a live document: merged three ways into
+ * the live blocks (live/merge.ts), so people's edits and comments stay and
+ * groups both sides changed become suggestions; then checkpointed as the new
+ * version, with the uploaded file kept as its original. When nothing was
+ * applied (an agent in suggest mode gets every change as a suggestion), the
+ * live document is unchanged, so no original is stored and no checkpoint
+ * written: an agent's suggestions never become the published version.
+ */
+async function republishLive(
+  storage: Storage,
+  input: PublishInput,
+  live: string,
+  versionNote: string | null,
+): Promise<PublishResult> {
+  const documentId = input.documentId!;
+  if (input.format !== live) return formatRefusal(input.format, live);
+  if (input.baseVersionNumber !== undefined) {
+    const [row] = (await db.execute(sql`
+      SELECT COALESCE(MAX(version_number), 0)::int AS latest FROM versions WHERE document_id = ${documentId}
+    `)) as unknown as { latest: number }[];
+    if ((row?.latest ?? 0) !== input.baseVersionNumber) return refusalFor(new StaleBase(row?.latest ?? 0), input.baseVersionNumber);
+  }
+  const source = new TextDecoder('utf-8').decode(input.content);
+  let imported: ImportResult;
+  try {
+    imported = live === 'markdown' ? await importMarkdown(source) : importText(source);
+  } catch (err) {
+    return refuse(400, 'bad_request', `Import failed: ${(err as Error).message}`, 'Fix the content and publish again.', 'parse_failed');
+  }
+  if (imported.blocks.length === 0) {
+    return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
+  }
+
+  const reconciliation = await mergeRepublish(documentId, input.actor, imported);
+  if (!reconciliation.outcomes.some((o) => o.status === 'applied')) return { ok: true, documentId, reconciliation };
+  await db.update(documents).set({ metadata: imported.metadata }).where(eq(documents.id, documentId));
+  const versionId = uuidv7();
+  const originalKey = `v1/${versionId}.orig`;
+  await storage.put(originalKey, input.content);
+  try {
+    const captured = await captureState(documentId, input.actor);
+    const checkpoint = await writeCheckpoint(storage, documentId, input.actor, versionNote, captured, {
+      versionId,
+      originalKey,
+      sourceFormat: live as 'markdown' | 'text',
+    });
+    return { ok: true, documentId, versionId: checkpoint.versionId, versionNumber: checkpoint.versionNumber, reconciliation };
+  } catch (err) {
+    await storage.delete(originalKey).catch(() => undefined);
+    throw err;
+  }
 }
 
 /**
@@ -231,7 +302,7 @@ async function publishLive(
   storage: Storage,
   input: PublishInput,
   doc: { title: string; description: string | null; versionNote: string | null },
-): Promise<PublishResult> {
+): Promise<Published | Refused> {
   const format = input.format as 'markdown' | 'text';
   const source = new TextDecoder('utf-8').decode(input.content);
   let imported: ImportResult;

@@ -2,14 +2,14 @@ import type { Hono, Context } from 'hono';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type { UploadResponse } from '@polygonlabs/primer-api-types';
 import { validateUpload } from '../upload/validate.ts';
-import { publishDocument, type PublishResult } from '../lib/publish.ts';
+import { publishDocument, type Published, type Refused } from '../lib/publish.ts';
 import { logger } from '../logger.ts';
 
 /** A publish refusal as a REST response: the legacy `error` code clients
  *  branch on, plus the structured `refusal` with its fix. */
 export function refusalResponse(
   c: Context<{ Variables: AppVariables }>,
-  result: Extract<PublishResult, { ok: false }>,
+  result: Refused,
 ) {
   const { refusal } = result;
   const error = typeof refusal.details?.error === 'string' ? refusal.details.error : refusal.code;
@@ -45,7 +45,7 @@ export function registerUploadRoute(
       return c.json({ error: validated.error, message: validated.message }, 400);
     }
 
-    let result: PublishResult;
+    let result: Published | Refused;
     try {
       result = await publishDocument(deps.storage, {
         actor: c.get('user'),

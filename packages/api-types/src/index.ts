@@ -255,6 +255,8 @@ export interface DocumentDetail extends DocumentSummary {
   /** Set for live documents (edited in place, with checkpoints); null for
    *  legacy documents, which are version-only HTML. */
   format: DocumentFormat | null;
+  /** Who may write on a live document as an agent (owner setting). */
+  agentMode?: AgentMode;
 }
 
 /** The requesting viewer's effective role on a document. Mirrors
@@ -405,17 +407,22 @@ export interface VersionsListResponse {
 export interface DocumentPatchRequest {
   title?: string;
   description?: string | null;
+  /** Owner only (a person, in a session). */
+  agentMode?: AgentMode;
 }
 
 export interface VersionPatchRequest {
   versionNote: string | null;
 }
 
-export interface AddVersionResponse {
-  versionId: string;
-  versionNumber: number;
-  url: string;
-}
+/** A new version of a live document is merged into it, and `reconciliation`
+ *  says what happened to each changed group (applied, suggested, conflict).
+ *  When nothing was applied (an agent in suggest mode gets every change as a
+ *  suggestion), no version is made: `versionId` and `versionNumber` are
+ *  absent and the suggestions are in `reconciliation`. */
+export type AddVersionResponse =
+  | { versionId: string; versionNumber: number; url: string; reconciliation?: Reconciliation }
+  | { versionId?: never; versionNumber?: never; url: string; reconciliation: Reconciliation };
 
 /** Why the server refused a write, with a ready fix the caller (often an
  *  agent) can follow. Codes grow per feature; branch on `code`, never on
@@ -468,7 +475,9 @@ export type RefusalCode =
   | 'plan_changed'
   /** An agent with an active run on the document wrote without its runId;
    *  `details.runIds` lists the active runs. */
-  | 'run_required';
+  | 'run_required'
+  /** The suggestion was already accepted, rejected or withdrawn. */
+  | 'suggestion_closed';
 
 export interface Refusal {
   code: RefusalCode;
@@ -585,8 +594,8 @@ export interface ApplyOpsRequest {
   ops: LiveOp[];
   /** The agent run these edits belong to (undo, status, cancel). */
   runId?: string;
-  /** `suggest` turns a stale op into a suggestion once suggestions exist (M5);
-   *  until then it is a conflict either way. */
+  /** `suggest` turns a stale op into a suggestion (status `suggested`)
+   *  instead of a conflict. */
   onConflict?: 'refuse' | 'suggest';
   /** Allow removing text that open comment threads are on. */
   allowCommentedDelete?: boolean;
@@ -636,6 +645,59 @@ export interface AgentRunDTO {
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+export type SuggestionStatus = 'open' | 'accepted' | 'rejected' | 'withdrawn';
+
+/** One block of a suggestion: what it changes (`replace` a block's content,
+ *  `insert` a block subtree, `delete` one, `move` one to `place`). */
+export type SuggestedEditKind = 'replace' | 'insert' | 'delete' | 'move';
+
+/** Where a block goes: after `prevId`, else before `nextId`, else first in
+ *  `parentId` (null: the document). */
+export interface BlockPlace {
+  parentId: string | null;
+  prevId: string | null;
+  nextId: string | null;
+}
+
+/** A block as a suggestion shows it. For agents `markdown` arrives fenced
+ *  (untrusted data) and `json` is left out. */
+export interface SuggestionBlockDTO {
+  markdown: string;
+  json?: Record<string, unknown>;
+}
+
+export interface SuggestedEditDTO {
+  kind: SuggestedEditKind;
+  target: Target;
+  /** The block now (null: gone, or not yet inserted). */
+  current: SuggestionBlockDTO | null;
+  /** The block as proposed (null for delete and move). */
+  proposed: SuggestionBlockDTO | null;
+  place: BlockPlace | null;
+}
+
+/** A stored proposal on a live document (GET /api/documents/:docId/suggestions). */
+export interface SuggestionDTO {
+  id: string;
+  documentId: string;
+  authorId: string;
+  authorDisplayName: string;
+  runId: string | null;
+  changeSetId: string | null;
+  status: SuggestionStatus;
+  /** Made from an edit that conflicted (rather than suggest mode). */
+  conflict: boolean;
+  /** A block changed since the suggestion was made: accepting is refused
+   *  (`target_changed`) until it is made again. */
+  stale: boolean;
+  createdAt: string;
+  edits: SuggestedEditDTO[];
+}
+
+export interface SuggestionsResponse {
+  suggestions: SuggestionDTO[];
 }
 
 /** POST /api/runs/:runId/approve */
@@ -1144,6 +1206,21 @@ export interface PrimerRunUpdatedPayload {
   by: string;
 }
 
+/** An agent or a person proposed a change to a live document. */
+export interface PrimerSuggestionCreatedPayload {
+  document_id: string;
+  suggestion_id: string;
+  author_id: string;
+}
+
+/** A suggestion was accepted, rejected or withdrawn. */
+export interface PrimerSuggestionDecidedPayload {
+  document_id: string;
+  suggestion_id: string;
+  decision: 'accepted' | 'rejected' | 'withdrawn';
+  by: string;
+}
+
 /** Shared records changed. Coalesced per (document, actor) over a short
  *  window; never delivered to the actor who made the changes. Read the
  *  changes with `GET /api/documents/:docId/records/changes?since=<from_change_id - 1>`. */
@@ -1163,6 +1240,8 @@ export interface PrimerEventPayloads {
   'version.published': PrimerVersionPublishedPayload;
   'run.requested': PrimerRunRequestedPayload;
   'run.updated': PrimerRunUpdatedPayload;
+  'suggestion.created': PrimerSuggestionCreatedPayload;
+  'suggestion.decided': PrimerSuggestionDecidedPayload;
 }
 
 export type PrimerEventType = keyof PrimerEventPayloads;

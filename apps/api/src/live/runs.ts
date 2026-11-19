@@ -325,21 +325,19 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
     return { code: 'not_found', message: 'Run not found for this agent and document.', fix: 'Pass a runId from primer_list_runs for this document, or none.' } as Refusal;
   }
   // A run acts for its requester: it never edits more than they could (read
-  // now, so a requester who lost access stops the run's edits too).
+  // now, so a requester who lost access stops the run's edits too). A
+  // requester who can't edit gets the run's edits as suggestions.
   const [doc] = (await db.execute(sql`
     SELECT id, uploader_id AS "uploaderId", visibility FROM documents WHERE id = ${documentId}
   `)) as unknown as { id: string; uploaderId: string; visibility: 'org' | 'private' }[];
   const [requester] = (await db.execute(sql`
     SELECT id, email, display_name AS "displayName", kind, via_user_id AS "viaUserId" FROM users WHERE id = ${run.requestedBy}
   `)) as unknown as AuthUser[];
-  if (!doc || !requester || !canEdit(await loadEffectiveRole(doc, requester))) {
-    return {
-      code: 'requester_cannot_edit',
-      message: 'The person who asked for this run can\'t edit the document, so the run can\'t either.',
-      fix: 'Answer by commenting (primer_create_thread or primer_reply_to_thread), not by editing.',
-    } as Refusal;
-  }
+  if (!doc || !requester) return { code: 'not_found', message: 'Run not found for this agent and document.', fix: 'Pass a runId from primer_list_runs for this document, or none.' } as Refusal;
+  const suggestOnly = !canEdit(await loadEffectiveRole(doc, requester));
   return {
+    /** The requester can't edit: the run's edits become suggestions. */
+    suggestOnly,
     guard: async (work: DryRun): Promise<Refusal | null> => {
       const underBudget = work.unresolved
         ? sql`FALSE`

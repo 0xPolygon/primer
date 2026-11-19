@@ -45,6 +45,7 @@ function html(content: string, extra: Partial<PublishInput> = {}): PublishInput 
 async function publishOk(storage: Storage, input: PublishInput) {
   const r = await publishDocument(storage, input);
   if (!r.ok) throw new Error(`publish refused: ${r.refusal.code}`);
+  if (r.versionId === undefined) throw new Error('publish made no version');
   return r;
 }
 
@@ -131,10 +132,10 @@ describe('publishDocument', () => {
       expect(blocks).toBeGreaterThan(0);
       expect(new TextDecoder().decode(await readBundleFile(storage, version!.bundleKey!, 'export.md'))).toBe(source);
 
-      // Publishing onto a live document is refused, with a fix.
-      const again = await publishDocument(storage, md('# Other\n', { documentId: r.documentId }));
+      // Another format can't be merged into it.
+      const again = await publishDocument(storage, html('<p>Other</p>', { documentId: r.documentId }));
       expect(again.ok).toBe(false);
-      if (!again.ok) expect(again.refusal).toMatchObject({ code: 'republish_unsupported' });
+      if (!again.ok) expect(again.refusal).toMatchObject({ code: 'bad_request' });
     });
   });
 
