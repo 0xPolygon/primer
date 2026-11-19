@@ -1,6 +1,7 @@
 import * as Y from 'yjs';
 import { Hocuspocus } from '@hocuspocus/server';
 import { attachPersistence, loadYDoc } from './persist.ts';
+import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
 
 const NAME = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
@@ -29,12 +30,24 @@ let instance: Hocuspocus | null = null;
 /**
  * The process's one Hocuspocus: one in-memory Y.Doc per open live document,
  * shared by WebSocket peers (live/hub.ts) and server writes (live/pipeline.ts)
- * so both see the same state. Loading applies the stored state and then
- * attaches persistence; unloading waits for queued inserts.
+ * so both see the same state. Peers are authorised per document; loading
+ * applies the stored state and then attaches persistence; unloading waits for
+ * queued inserts.
  */
 export function liveInstance(): Hocuspocus {
   instance ??= new Hocuspocus({
     quiet: true,
+    // WebSocket peers only (live/hub.ts resolved `auth` at the upgrade); server
+    // writes open direct connections, which skip this hook.
+    async onAuthenticate({ context, documentName, connectionConfig }) {
+      const auth = (context as LiveContext).auth;
+      const documentId = documentIdOf(documentName);
+      if (!auth || !documentId) throw new Error('forbidden');
+      const access = await liveAccess(auth, documentId);
+      if (access === 'none') throw new Error('forbidden');
+      connectionConfig.readOnly = access !== 'write';
+      return { user: auth.user, documentId } satisfies LiveContext;
+    },
     async onLoadDocument({ document, documentName }) {
       const documentId = documentIdOf(documentName);
       if (!documentId) throw new Error(`not a live document name: ${documentName}`);

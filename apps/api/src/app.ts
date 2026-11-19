@@ -40,6 +40,7 @@ import type { Storage } from './storage/types.ts';
 import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
 import type { ApiTokenScope } from '@polygonlabs/primer-api-types';
+import type { Hub } from './live/hub.ts';
 
 /** Who is making a request. An agent acts via a person (`viaUserId`); see
  *  lib/permissions.ts for how its role is derived. */
@@ -68,7 +69,10 @@ export interface AppDeps {
   authBaseUrl?: string;                 // NEW; base URL used in device verification links
   adminEmails?: string[];               // normalized allowlist; defaults to ADMIN_EMAILS env
   checkDatabase?: DatabaseCheck;        // /api/ready probe; defaults to `select 1`
+  hub?: Pick<Hub, 'recheckDocument'>;   // live sync; rechecked after sharing changes
 }
+
+const DOCUMENT_WRITE = /^\/api\/documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\/|$)/;
 
 export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -84,6 +88,18 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   app.use('*', authMiddleware(resolver, issuer.length > 0 ? { issuer } : undefined));
   app.use('*', scopeMiddleware);
   app.use('*', csrfMiddleware);
+
+  // Live connections re-check their access after any successful change under
+  // a document (collaborators, visibility, deletion), not only on the timer.
+  const hub = deps.hub;
+  if (hub) {
+    app.use('/api/documents/*', async (c, next) => {
+      await next();
+      if (c.req.method === 'GET' || c.res.status >= 300) return;
+      const documentId = DOCUMENT_WRITE.exec(c.req.path)?.[1];
+      if (documentId) await hub.recheckDocument(documentId);
+    });
+  }
 
   app.use('*', async (c, next) => {
     const start = Date.now();
