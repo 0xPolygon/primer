@@ -20,6 +20,16 @@ const md = new MarkdownIt({
   typographer: false, // no smart-quote rewriting
 }).use(taskLists, { label: false });
 
+/** The one Markdown tokenizer of live imports. Raw HTML is tokenized (so an
+ *  import can keep it, verbatim, in a source block) but never rendered into a
+ *  page: source previews are sanitized and shown in a script-less frame. */
+export const markdownTokenizer = new MarkdownIt({
+  html: true,
+  linkify: true,
+  breaks: false,
+  typographer: false,
+}).use(taskLists, { label: false });
+
 // SECURITY: gray-matter selects its parse engine from the language token after
 // the opening front-matter fence (`---js`, `---json`, …). Its built-in
 // `javascript` engine runs `eval()` on the block, so an uploaded `.md` that
@@ -36,6 +46,19 @@ const FRONTMATTER_ENGINES = {
     parse: () => ({}),
   },
 };
+
+/** Splits YAML/JSON front matter from a Markdown file: the raw front matter
+ *  text exactly as written (fences included, '' when there is none), its
+ *  parsed data, and the body after it. `frontMatter + body === input`. */
+export function splitFrontMatter(input: string): { frontMatter: string; data: Record<string, unknown>; body: string } {
+  const parsed = matter(input, { engines: FRONTMATTER_ENGINES });
+  if (!input.endsWith(parsed.content)) throw new Error('front matter could not be separated from the body');
+  return {
+    frontMatter: input.slice(0, input.length - parsed.content.length),
+    data: { ...parsed.data },
+    body: parsed.content,
+  };
+}
 
 export function markdownToHtml(input: string): MarkdownConversionResult {
   const parsed = matter(input, { engines: FRONTMATTER_ENGINES });
