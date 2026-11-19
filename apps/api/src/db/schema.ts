@@ -99,8 +99,8 @@ export const threads = pgTable('threads', {
 });
 
 // Where a thread shows on a version. The originating version gets a row when
-// the thread is created; publishing a version adds a row for every open thread
-// (lib/threadCarry.ts). `anchor` is null when the quoted text could not be
+// the thread is created; a legacy document's first live version adds a row
+// for every open thread (lib/publish.ts). `anchor` is null when the quoted text could not be
 // found on that version ("context changed"): the thread still shows there, in
 // the sidebar, without a highlight.
 export const threadPlacements = pgTable(

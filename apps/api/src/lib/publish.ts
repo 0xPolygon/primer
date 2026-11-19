@@ -132,7 +132,7 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       if (versionNote !== null && versionNote.length > MAX_VERSION_NOTE) {
         return refuse(400, 'bad_request', `versionNote must be ≤${MAX_VERSION_NOTE} chars.`, 'Shorten the version note.', 'invalid_body');
       }
-      return republishLive(storage, input, doc.format, versionNote);
+      return republishing(existingId, () => republishLive(storage, input, doc.format!, versionNote));
     }
     // Making a legacy document live replaces what it shows: an agent that may
     // only suggest here can't, since there is nothing to suggest against.
@@ -191,6 +191,28 @@ function formatRefusal(format: PublishFormat, live: string): Refused {
     `This live document is ${live}; a ${format} version can't be merged into it.`,
     `Publish the document as ${live}, or edit it with primer_apply_ops.`,
   );
+}
+
+const republishTails = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs a document's republishes one at a time, so the base-version check,
+ * the merge and the checkpoint of one never interleave with another's: two
+ * publishes on the same base can't both win. In-process, like docQueue
+ * (Primer runs one API instance); not the document queue itself, since the
+ * merge's applyPlan runs on that.
+ */
+function republishing<T>(documentId: string, job: () => Promise<T>): Promise<T> {
+  const run = (republishTails.get(documentId) ?? Promise.resolve()).then(job, job);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  republishTails.set(documentId, tail);
+  void tail.then(() => {
+    if (republishTails.get(documentId) === tail) republishTails.delete(documentId);
+  });
+  return run;
 }
 
 /**
