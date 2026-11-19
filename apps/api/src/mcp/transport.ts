@@ -9,6 +9,7 @@ import {
   toolsForScopes,
   type ToolDeps,
 } from './tools.ts';
+import { WIDGET_SKILL_URI, widgetSkill } from '../widgets/skill.ts';
 
 export interface McpTransportDeps extends ToolDeps {
   serverName?: string;
@@ -51,6 +52,13 @@ export async function handleMcpRequest(
       },
     );
   }
+
+  server.registerResource(
+    'widgets',
+    WIDGET_SKILL_URI,
+    { mimeType: 'text/markdown', description: 'How to draw widgets (diagrams and charts): rules, house style and copyable modules.' },
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: await widgetSkill() }] }),
+  );
 
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless

@@ -86,6 +86,13 @@ await copyFile(
   resolve(apiRoot, `dist/companion/mermaid-v${mermaidVersion}.js`),
 );
 
+// The widget skill, served as the MCP resource primer://skills/widgets.
+await mkdir(resolve(apiRoot, 'dist/skills'), { recursive: true });
+await copyFile(
+  resolve(apiRoot, '../../plugins/primer/skills/primer/widgets.md'),
+  resolve(apiRoot, 'dist/skills/widgets.md'),
+);
+
 console.log(
   `api build complete: dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
 );

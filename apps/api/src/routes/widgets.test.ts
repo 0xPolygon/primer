@@ -107,3 +107,19 @@ describe('widgets over MCP and REST', () => {
     });
   });
 });
+
+describe('the widget skill resource', () => {
+  it('MCP serves widgets.md as primer://skills/widgets', async () => {
+    await withApp(async (app) => {
+      const { token } = await agentToken(app);
+      const res = await app.request('/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'primer://skills/widgets' } }),
+      });
+      const line = (await res.text()).split('\n').filter((l) => l.startsWith('data: ')).pop()!;
+      const { result } = JSON.parse(line.slice(6)) as { result: { contents: { text: string }[] } };
+      expect(result.contents[0]!.text).toContain('# Widgets: diagrams and charts in Primer');
+    });
+  });
+});

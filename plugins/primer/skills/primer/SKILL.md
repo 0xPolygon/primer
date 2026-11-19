@@ -101,10 +101,14 @@ interactive pages regardless of how they were uploaded:
 
 ## Diagrams and inline SVG
 
-To embed a diagram, use inline SVG in an **HTML-format** document. Markdown
-format is a dead end for diagrams: the renderer escapes raw `<svg>` (it shows as
-source text) and does not parse data-URI images (`![](data:image/svg+xml;…)`
-stays literal text). Published as `format: "html"`, the sanitizer keeps SVG
+**In a live document (Markdown or text), draw a widget:** `primer_widget_draft`,
+look at its PNG previews, then `primer_widget_publish`. A widget is a diagram or
+chart you write as a JSX/SVG module; people edit its labels in place and comment
+on its parts and data points. Rules, house style and copyable flows, trees,
+2×2s, timelines, funnels, roadmaps and charts: [widgets.md](widgets.md). Raw
+`<svg>` in Markdown is not rendered.
+
+Inside an **HTML-format** document, embed inline SVG: the sanitizer keeps SVG
 shape/`<text>`/`<path>`/`<marker>` tags and the diagram renders.
 
 **Mind the transport on the remote connector.** With the local stdio server,
