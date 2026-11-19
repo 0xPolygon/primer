@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { v7 as uuidv7 } from 'uuid';
+import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../app.ts';
 import { db } from '../../db/client.ts';
@@ -33,7 +34,7 @@ beforeEach(async () => {
 });
 
 describe('makeOAuthBearerResolver', () => {
-  it('resolves a valid primer_oat_ token to its user', async () => {
+  it("resolves a valid primer_oat_ token to the client's agent for its user", async () => {
     await seedUser('user-1');
     const client = await createClient({
       clientName: 'test',
@@ -53,7 +54,10 @@ describe('makeOAuthBearerResolver', () => {
     await withApp(async (app) => {
       const res = await app.request('/probe', { headers: { authorization: `Bearer ${token}` } });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ id: 'user-1' });
+      const { id } = (await res.json()) as { id: string };
+      expect(id).toMatch(/^agent_oauth_[0-9a-f]{24}$/);
+      const [agent] = await db.select().from(users).where(eq(users.id, id));
+      expect(agent).toMatchObject({ kind: 'agent', viaUserId: 'user-1', displayName: 'test' });
     });
   });
 

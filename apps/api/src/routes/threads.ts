@@ -3,15 +3,16 @@ import { eq, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
-import type { AppVariables, AppDeps } from '../app.ts';
+import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
 import { logger } from '../logger.ts';
 import type { CommentDTO, CreateThreadRequest, ThreadDTO, ThreadsListResponse } from '@polygonlabs/primer-api-types';
 import { threads, threadPlacements, versions, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
+import { authorColumns } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import type { Visibility } from '../lib/permissions.ts';
-import { effectiveRole, canRead, canComment, loadCollaboratorRole } from '../lib/permissions.ts';
+import { loadEffectiveRole, canRead, canComment } from '../lib/permissions.ts';
 
 async function loadDocContextForVersion(
   versionId: string,
@@ -84,6 +85,8 @@ interface CommentRow {
   threadId: string;
   authorId: string;
   authorDisplayName: string;
+  authorKind: 'person' | 'agent';
+  authorVia: string | null;
   body: string;
   mentions: string[];
   createdAt: Date;
@@ -98,6 +101,8 @@ function commentToDTO(row: CommentRow): CommentDTO {
     threadId: row.threadId,
     authorId: row.authorId,
     authorDisplayName: row.authorDisplayName,
+    authorKind: row.authorKind,
+    authorVia: row.authorVia,
     body: isTombstoned ? '' : row.body,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt?.toISOString() ?? null,
@@ -181,7 +186,7 @@ async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
       id: comments.id,
       threadId: comments.threadId,
       authorId: comments.authorId,
-      authorDisplayName: users.displayName,
+      ...authorColumns,
       body: comments.body,
       mentions: comments.mentions,
       createdAt: comments.createdAt,
@@ -202,11 +207,10 @@ export type ResolveResult =
 
 /** Resolves a thread as `user` (the document owner or the thread's starter).
  *  Shared by the REST route and the MCP resolve tool. */
-export async function resolveThread(user: { id: string }, threadId: string): Promise<ResolveResult> {
+export async function resolveThread(user: AuthUser, threadId: string): Promise<ResolveResult> {
   const ctx = await loadDocContextForThread(threadId);
   if (!ctx.ok) return { ok: false, status: 404, error: 'not_found' };
-  const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-  const eff = effectiveRole(ctx, user.id, collabRole);
+  const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
   if (!canRead(ctx.visibility, eff)) return { ok: false, status: 404, error: 'not_found' };
 
   const authz = await authorizeThreadMutation(threadId, user.id);
@@ -240,8 +244,7 @@ export function registerThreadRoutes(
     const ctx = await loadDocContextForVersion(versionId);
     if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-    const eff = effectiveRole(ctx, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
     if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     const currentEtag = await computeVersionEtag(versionId);
@@ -280,7 +283,7 @@ export function registerThreadRoutes(
               id: comments.id,
               threadId: comments.threadId,
               authorId: comments.authorId,
-              authorDisplayName: users.displayName,
+              ...authorColumns,
               body: comments.body,
               mentions: comments.mentions,
               createdAt: comments.createdAt,
@@ -324,8 +327,7 @@ export function registerThreadRoutes(
     const ctx = await loadDocContextForVersion(versionId);
     if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-    const eff = effectiveRole(ctx, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
     if (!canComment(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     let payload: Partial<CreateThreadRequest>;
@@ -458,8 +460,7 @@ export function registerThreadRoutes(
     const ctx = await loadDocContextForThread(threadId);
     if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-    const eff = effectiveRole(ctx, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
     if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     const authz = await authorizeThreadMutation(threadId, user.id);

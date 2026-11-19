@@ -25,13 +25,13 @@ The route and cookie exist only under `AUTH_MODE=mock` outside production;
 **Mint a local API token for external tooling.** Sign in as the persona the
 tool should act as, open `http://localhost:5173/settings/tokens`, create a
 token (`primer_pat_…`), and point the tool at `http://localhost:3000` with
-`Authorization: Bearer <token>`. If the tool should act as the shared
-service account instead (`service-claude`), add your persona's email to
-`ADMIN_EMAILS` in `.env` (for `mock-user-1` that's `mock@polygon.technology`)
-and mint a service token from the admin section of the same page.
+`Authorization: Bearer <token>`. If the tool is an agent that should act
+under its own name, add an agent in the Agents section of the same page and
+mint a (scoped) token for it: the agent acts via your persona, with at most
+editor access to its documents.
 
-**Scoped tokens.** `POST /api/tokens` and `POST /api/service-tokens` accept
-an optional `scopes` array (see `API_TOKEN_SCOPES` in
+**Scoped tokens.** `POST /api/tokens` and `POST /api/agents/:agentId/tokens`
+accept a `scopes` array (optional for personal tokens, required for agents) (see `API_TOKEN_SCOPES` in
 `@polygonlabs/primer-api-types`). A scoped token can call only the REST
 routes and MCP tools its scopes grant — `apps/api/src/auth/scopes.ts` is the
 single route→scope table — and gets 403 `insufficient_scope` everywhere else.

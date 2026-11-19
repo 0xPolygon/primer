@@ -26,7 +26,7 @@ import { registerMeRoute } from './routes/me.ts';
 import { registerUserRoutes } from './routes/users.ts';
 import { registerDeviceRoutes } from './routes/device.ts';
 import { registerTokenRoutes } from './routes/tokens.ts';
-import { registerServiceTokenRoutes } from './routes/serviceTokens.ts';
+import { registerAgentRoutes } from './routes/agents.ts';
 import { parseAdminEmails } from './auth/admin.ts';
 import { registerCollaboratorRoutes } from './routes/collaborators.ts';
 import { registerExternalShareAdminRoutes } from './routes/externalShareAdmin.ts';
@@ -41,8 +41,18 @@ import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
 import type { ApiTokenScope } from '@polygonlabs/primer-api-types';
 
+/** Who is making a request. An agent acts via a person (`viaUserId`); see
+ *  lib/permissions.ts for how its role is derived. */
+export type AuthUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  kind: 'person' | 'agent';
+  viaUserId: string | null;
+};
+
 export type AppVariables = {
-  user: { id: string; email: string; displayName: string };
+  user: AuthUser;
   authMethod?: 'bearer' | 'cookie' | 'mock';
   /** Set only for scoped API tokens; absent = unrestricted. See auth/scopes.ts. */
   tokenScopes?: readonly ApiTokenScope[];
@@ -114,7 +124,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerUserRoutes(app);
   registerDeviceRoutes(app, { baseUrl: deps.authBaseUrl ?? process.env.AUTH_BASE_URL ?? '' });
   registerTokenRoutes(app);
-  registerServiceTokenRoutes(app, { adminEmails });
+  registerAgentRoutes(app);
 
   if (issuer.length > 0) {
     registerOAuthRoutes(app, {

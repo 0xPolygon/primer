@@ -5,7 +5,7 @@ import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import { documents, versions } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import {
-  canRead, canEdit, effectiveRole, loadCollaboratorRole,
+  canRead, canEdit, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
 
@@ -52,11 +52,9 @@ export function registerVersionRoutes(app: Hono<{ Variables: AppVariables }>): v
     if (!row) return c.json({ error: 'not_found' }, 404);
     if (row.docDeletedAt !== null) return c.json({ error: 'not_found' }, 404);
 
-    const collabRole = await loadCollaboratorRole(row.documentId, user.id);
-    const eff = effectiveRole(
-      { uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
-      user.id,
-      collabRole,
+    const eff = await loadEffectiveRole(
+      { id: row.documentId, uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
+      user,
     );
     if (!canRead(row.visibility as Visibility, eff)) return c.json({ error: 'not_found' }, 404);
     if (!canEdit(eff)) return c.json({ error: 'forbidden' }, 403);

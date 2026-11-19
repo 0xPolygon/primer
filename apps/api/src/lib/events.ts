@@ -16,6 +16,7 @@
 // Primer never reads a role, grant or permission out of a payload, so no page
 // can widen its own or anyone's access by submitting one.
 import { sql } from 'drizzle-orm';
+import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import {
   DOCUMENT_STATUS_TTL_MS,
@@ -38,8 +39,7 @@ import {
 } from '@polygonlabs/primer-api-types';
 import {
   canRead,
-  effectiveRole,
-  loadCollaboratorRole,
+  loadEffectiveRole,
   type EffectiveRole,
   type Visibility,
 } from './permissions.ts';
@@ -111,23 +111,18 @@ export type EventAccessGate =
 /** Read gate: not_found (per existing route conventions) when the document
  *  doesn't exist, is deleted, or the caller can't see it at all. Returns the
  *  caller's read identity for per-row audience scoping. */
-export async function gateEventAccess(documentId: string, userId: string): Promise<EventAccessGate> {
+export async function gateEventAccess(documentId: string, actor: AuthUser): Promise<EventAccessGate> {
   const doc = await loadEventDocContext(documentId);
   if (!doc) return { status: 'not_found' };
-  const collabRole = await loadCollaboratorRole(documentId, userId);
-  const eff = effectiveRole(
-    { uploaderId: doc.uploaderId, visibility: doc.visibility },
-    userId,
-    collabRole,
-  );
+  const eff = await loadEffectiveRole(doc, actor);
   if (!canRead(doc.visibility, eff)) return { status: 'not_found' };
   return {
     status: 'ok',
     doc,
     identity: {
-      userId,
+      userId: actor.id,
       isOwner: eff === 'owner',
-      isCollaborator: collabRole !== null,
+      isCollaborator: eff !== 'owner' && eff !== 'stranger',
     },
     mayWrite: canWriteEvents(eff),
   };

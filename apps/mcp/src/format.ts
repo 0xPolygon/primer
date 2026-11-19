@@ -1,5 +1,5 @@
 import type { CommentDTO, ThreadDTO, ThreadsListResponse } from '@polygonlabs/primer-api-types';
-import { isElementPathAnchor, isTextRangeAnchor } from '@polygonlabs/primer-api-types';
+import { actorLabel, isElementPathAnchor, isTextRangeAnchor } from '@polygonlabs/primer-api-types';
 
 /**
  * Renders a `ThreadsListResponse` as a markdown summary suited for an LLM
@@ -64,7 +64,7 @@ export function commentRecords(threads: ThreadsListResponse) {
         thread_id: t.id,
         comment_id: c.id,
         author_id: c.authorId,
-        author_name: c.authorDisplayName,
+        author_name: actorLabel({ displayName: c.authorDisplayName, kind: c.authorKind, via: c.authorVia }),
         body: c.body,
         created_at: c.createdAt,
         anchor_text: anchorText(t.anchor),
@@ -94,5 +94,5 @@ function anchorQuote(anchor: ThreadDTO['anchor']): string {
 
 function renderComment(comment: CommentDTO): string {
   if (comment.deletedAt !== null) return '(deleted)';
-  return `**${comment.authorDisplayName}** — ${comment.body} (${comment.createdAt})`;
+  return `**${actorLabel({ displayName: comment.authorDisplayName, kind: comment.authorKind, via: comment.authorVia })}** — ${comment.body} (${comment.createdAt})`;
 }

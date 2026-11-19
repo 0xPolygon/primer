@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import { db } from '../db/client.ts';
 import {
-  canRead, effectiveRole, loadCollaboratorRole,
+  canRead, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
 
@@ -64,8 +64,7 @@ export function registerVersionContentRoute(
     }
 
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(versionWithDoc.documentId, user.id);
-    const eff = effectiveRole(versionWithDoc, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: versionWithDoc.documentId, uploaderId: versionWithDoc.uploaderId, visibility: versionWithDoc.visibility as Visibility }, user);
     if (!canRead(versionWithDoc.visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }

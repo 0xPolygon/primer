@@ -130,8 +130,40 @@ export interface UserDTO {
   displayName: string;
 }
 
+/** A person signs in; an agent acts through tokens, via a person. */
+export type ActorKind = 'person' | 'agent';
+
 export interface MeResponse extends UserDTO {
   isAdmin: boolean;
+  kind: ActorKind;
+  /** The person an agent acts via; null for people. */
+  viaUserId: string | null;
+}
+
+/** How to name an actor in the UI: an agent shows with its person, e.g.
+ *  "Claude (via Mudit)". */
+export function actorLabel(actor: { displayName: string; kind: ActorKind; via: string | null }): string {
+  return actor.kind === 'agent' && actor.via ? `${actor.displayName} (via ${actor.via})` : actor.displayName;
+}
+
+/** One of the caller's agents (GET /api/agents). */
+export interface AgentDTO {
+  id: string;
+  displayName: string;
+  createdAt: string;
+  tokens: ApiTokenSummary[];
+}
+
+export interface AgentsListResponse {
+  agents: AgentDTO[];
+}
+
+export interface CreateAgentRequest {
+  displayName: string;
+}
+
+export interface CreateAgentResponse {
+  id: string;
 }
 
 export interface VersionSummary {
@@ -168,6 +200,9 @@ export interface CommentDTO {
   threadId: string;
   authorId: string;
   authorDisplayName: string;
+  authorKind: ActorKind;
+  /** Display name of the person an agent author acts via; null for people. */
+  authorVia: string | null;
   /** Empty string for a tombstoned comment — the server never discloses the
    *  text of a deleted comment, even to its author. The row keeps it, so an
    *  in-window restore brings the original text back. */

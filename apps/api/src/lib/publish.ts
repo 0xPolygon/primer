@@ -15,7 +15,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
-import type { AppVariables } from '../app.ts';
+import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, versions } from '../db/schema.ts';
 import type { Storage } from '../storage/types.ts';
@@ -23,13 +23,13 @@ import { transformHtml } from '../upload/htmlPipeline.ts';
 import { markdownToHtml, textToHtml } from '../upload/markdown.ts';
 import { MAX_BYTES, MAX_DESCRIPTION, MAX_TITLE } from '../upload/validate.ts';
 import { transactionWithEvents } from './events.ts';
-import { canEdit, canRead, effectiveRole, loadCollaboratorRole, type Visibility } from './permissions.ts';
+import { canEdit, canRead, loadEffectiveRole, type Visibility } from './permissions.ts';
 import { carryOpenThreads, loadCarryOrigins } from './threadCarry.ts';
 
 export const MAX_VERSION_NOTE = 500;
 
 export interface PublishInput {
-  actor: AppVariables['user'];
+  actor: AuthUser;
   /** Absent: create a new document (needs `title`). Present: add a version. */
   documentId?: string;
   title?: string;
@@ -106,7 +106,7 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       .where(eq(documents.id, existingId));
     const notFound = refuse(404, 'not_found', 'Document not found.', 'Check the document id, or create a new document.');
     if (!doc || doc.deletedAt !== null) return notFound;
-    const eff = effectiveRole(doc, actor.id, await loadCollaboratorRole(existingId, actor.id));
+    const eff = await loadEffectiveRole({ id: existingId, uploaderId: doc.uploaderId, visibility: doc.visibility as Visibility }, actor);
     if (!canRead(doc.visibility as Visibility, eff)) return notFound;
     if (!canEdit(eff)) {
       return refuse(403, 'forbidden', 'Only the document owner or an editor can add versions.', 'Ask the owner for editor access, or leave a comment instead.');

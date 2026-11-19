@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   primaryKey,
   index,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import type { AnchorData } from '@polygonlabs/primer-api-types';
 
@@ -20,6 +21,12 @@ export const users = pgTable('users', {
   displayName: text('display_name').notNull(),
   slackUserId: text('slack_user_id'),                                // nullable; populated in Phase 2
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // 'agent' rows are AI agents: minted by a person (`agent_<uuidv7>`) or
+  // created per OAuth MCP client and person (`agent_oauth_<hash>`). An agent
+  // acts via the person in `via_user_id` (null for the legacy shared
+  // `service-claude`). See lib/permissions.ts for how roles combine.
+  kind: text('kind', { enum: ['person', 'agent'] }).notNull().default('person'),
+  viaUserId: text('via_user_id').references((): AnyPgColumn => users.id),
 });
 
 export const documents = pgTable('documents', {

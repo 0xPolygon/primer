@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import type { AppVariables, AppDeps } from '../app.ts';
+import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
 import type {
   AddExternalRecipientRequest, ExternalShareResponse, ExternalShareViewsResponse,
   PublishExternalShareRequest,
@@ -10,7 +10,7 @@ import { documents, versions, externalShares, externalRecipients } from '../db/s
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 import {
-  canManage, canRead, effectiveRole, loadCollaboratorRole, type Visibility,
+  canManage, canRead, loadEffectiveRole, type Visibility,
 } from '../lib/permissions.ts';
 import { generateShareToken } from '../external/tokens.ts';
 import { deleteSessionsForRecipient, deleteSessionsForShare } from '../external/session.ts';
@@ -23,7 +23,7 @@ const VIEWS_LIMIT = 200;
 // doc exists), readers without manage rights get 403.
 async function loadDocForManage(
   docId: string,
-  userId: string,
+  actor: AuthUser,
 ): Promise<{ status: 'not_found' } | { status: 'forbidden' } | { status: 'ok' }> {
   const [row] = await db
     .select({
@@ -34,11 +34,9 @@ async function loadDocForManage(
     .from(documents)
     .where(eq(documents.id, docId));
   if (!row || row.deletedAt !== null) return { status: 'not_found' };
-  const collabRole = await loadCollaboratorRole(docId, userId);
-  const eff = effectiveRole(
-    { uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
-    userId,
-    collabRole,
+  const eff = await loadEffectiveRole(
+    { id: docId, uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
+    actor,
   );
   if (!canRead(row.visibility as Visibility, eff)) return { status: 'not_found' };
   if (!canManage(eff)) return { status: 'forbidden' };
@@ -64,7 +62,7 @@ export function registerExternalShareAdminRoutes(
 ): void {
   app.get('/api/documents/:docId/external-share', async (c) => {
     const docId = c.req.param('docId');
-    const gate = await loadDocForManage(docId, c.get('user').id);
+    const gate = await loadDocForManage(docId, c.get('user'));
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
 
@@ -131,7 +129,7 @@ export function registerExternalShareAdminRoutes(
   app.post('/api/documents/:docId/external-share', async (c) => {
     const docId = c.req.param('docId');
     const user = c.get('user');
-    const gate = await loadDocForManage(docId, user.id);
+    const gate = await loadDocForManage(docId, user);
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
     if (await activeShare(docId)) return c.json({ error: 'share_exists' }, 409);
@@ -149,7 +147,7 @@ export function registerExternalShareAdminRoutes(
 
   app.delete('/api/documents/:docId/external-share', async (c) => {
     const docId = c.req.param('docId');
-    const gate = await loadDocForManage(docId, c.get('user').id);
+    const gate = await loadDocForManage(docId, c.get('user'));
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
     const share = await activeShare(docId);
@@ -164,7 +162,7 @@ export function registerExternalShareAdminRoutes(
   app.post('/api/documents/:docId/external-share/recipients', async (c) => {
     const docId = c.req.param('docId');
     const user = c.get('user');
-    const gate = await loadDocForManage(docId, user.id);
+    const gate = await loadDocForManage(docId, user);
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
     const share = await activeShare(docId);
@@ -205,7 +203,7 @@ export function registerExternalShareAdminRoutes(
   app.delete('/api/documents/:docId/external-share/recipients/:recipientId', async (c) => {
     const docId = c.req.param('docId');
     const recipientId = c.req.param('recipientId');
-    const gate = await loadDocForManage(docId, c.get('user').id);
+    const gate = await loadDocForManage(docId, c.get('user'));
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
     const share = await activeShare(docId);
@@ -226,7 +224,7 @@ export function registerExternalShareAdminRoutes(
 
   app.post('/api/documents/:docId/external-share/publish', async (c) => {
     const docId = c.req.param('docId');
-    const gate = await loadDocForManage(docId, c.get('user').id);
+    const gate = await loadDocForManage(docId, c.get('user'));
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
     const share = await activeShare(docId);
@@ -249,7 +247,7 @@ export function registerExternalShareAdminRoutes(
 
   app.get('/api/documents/:docId/external-share/views', async (c) => {
     const docId = c.req.param('docId');
-    const gate = await loadDocForManage(docId, c.get('user').id);
+    const gate = await loadDocForManage(docId, c.get('user'));
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
     const share = await activeShare(docId);

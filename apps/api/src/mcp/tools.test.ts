@@ -63,7 +63,7 @@ describe('primer_whoami', () => {
     await seedUser('tools-1');
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
-      const res = await handlers.primer_whoami({}, { id: 'tools-1', email: 'tools-1@x.test', displayName: 'tools-1' });
+      const res = await handlers.primer_whoami({}, { id: 'tools-1', email: 'tools-1@x.test', displayName: 'tools-1', kind: 'person' as const, viaUserId: null });
       expect(res.isError).toBeFalsy();
       const parsed = JSON.parse(res.content[0].text);
       expect(parsed.id).toBe('tools-1');
@@ -77,7 +77,7 @@ describe('primer_resolve_url', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_resolve_url(
         { url: 'https://primer.example.com/d/abc-123/v/2' },
-        { id: 'tools-x', email: 'x@x.test', displayName: 'x' },
+        { id: 'tools-x', email: 'x@x.test', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       const parsed = JSON.parse(res.content[0].text);
       expect(parsed.documentId).toBe('abc-123');
@@ -90,7 +90,7 @@ describe('primer_resolve_url', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_resolve_url(
         { url: 'https://example.com/foo' },
-        { id: 'tools-x', email: 'x@x.test', displayName: 'x' },
+        { id: 'tools-x', email: 'x@x.test', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('bad_request');
@@ -103,7 +103,7 @@ describe('primer_create_document → primer_get_document (URL mode)', () => {
     await seedUser('tools-owner');
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
-      const user = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const user = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
 
       const created = await handlers.primer_create_document(
         {
@@ -138,12 +138,12 @@ describe('primer_get_document — open access path', () => {
       const handlers = buildMcpToolHandlers(deps);
       const created = await handlers.primer_create_document(
         { title: 'Private', content: '<p>hi</p>', format: 'html' },
-        { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' },
+        { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null },
       );
       const { documentId } = JSON.parse(created.content[0].text);
       const res = await handlers.primer_get_document(
         { documentId },
-        { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' },
+        { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other', kind: 'person' as const, viaUserId: null },
       );
       // Open access: other user can read
       expect(res.isError).toBeFalsy();
@@ -155,7 +155,7 @@ describe('primer_get_document — open access path', () => {
 });
 
 describe('primer_get_version_content', () => {
-  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
 
   it('returns HTML content when given a versionId', async () => {
     await seedUser('tools-owner');
@@ -329,7 +329,7 @@ describe('MCP tools respect visibility + collab', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_get_document(
         { documentId: docId },
-        { id: 'tools-stranger', email: 'x', displayName: 'x' },
+        { id: 'tools-stranger', email: 'x', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('not_found');
@@ -349,7 +349,7 @@ describe('MCP tools respect visibility + collab', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_get_document(
         { documentId: docId },
-        { id: 'tools-commenter', email: 'x', displayName: 'x' },
+        { id: 'tools-commenter', email: 'x', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       expect(res.isError).toBeFalsy();
     });
@@ -367,7 +367,7 @@ describe('MCP tools respect visibility + collab', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_add_version(
         { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
-        { id: 'tools-editor', email: 'x', displayName: 'x' },
+        { id: 'tools-editor', email: 'x', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       expect(res.isError).toBeFalsy();
     });
@@ -385,7 +385,7 @@ describe('MCP tools respect visibility + collab', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_add_version(
         { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
-        { id: 'tools-commenter', email: 'x', displayName: 'x' },
+        { id: 'tools-commenter', email: 'x', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('forbidden');
@@ -407,7 +407,7 @@ describe('MCP tools: responder role', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_get_document(
         { documentId: docId },
-        { id: 'tools-responder', email: 'x', displayName: 'x' },
+        { id: 'tools-responder', email: 'x', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       expect(res.isError).toBeFalsy();
     });
@@ -425,7 +425,7 @@ describe('MCP tools: responder role', () => {
       const handlers = buildMcpToolHandlers(deps);
       const res = await handlers.primer_add_version(
         { documentId: docId, content: '<html><body>x</body></html>', format: 'html' },
-        { id: 'tools-responder', email: 'x', displayName: 'x' },
+        { id: 'tools-responder', email: 'x', displayName: 'x', kind: 'person' as const, viaUserId: null },
       );
       expect(res.isError).toBe(true);
       expect(JSON.parse(res.content[0].text).code).toBe('forbidden');
@@ -434,7 +434,7 @@ describe('MCP tools: responder role', () => {
 });
 
 describe('primer_list_documents', () => {
-  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
 
   it('lists documents newest-first and excludes soft-deleted', async () => {
     await seedUser('tools-owner');
@@ -503,7 +503,7 @@ describe('primer_list_documents', () => {
   it("scope 'all' is the caller's accessed library: own uploads + org docs they've opened, not everyone's", async () => {
     await seedUser('tools-owner');
     await seedUser('tools-other');
-    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other', kind: 'person' as const, viaUserId: null };
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
       const mine = await handlers.primer_create_document({ title: 'Mine', content: '<p>a</p>', format: 'html' }, owner);
@@ -533,7 +533,7 @@ describe('primer_list_documents', () => {
   it("defaults to scope 'all' when scope is omitted", async () => {
     await seedUser('tools-owner');
     await seedUser('tools-other');
-    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other', kind: 'person' as const, viaUserId: null };
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
       await handlers.primer_create_document({ title: 'Mine', content: '<p>a</p>', format: 'html' }, owner);
@@ -554,7 +554,7 @@ describe('primer_list_documents', () => {
 });
 
 describe('primer_find_document', () => {
-  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
 
   it('matches on title and description, case-insensitively', async () => {
     await seedUser('tools-owner');
@@ -607,7 +607,7 @@ describe('primer_find_document', () => {
   it("scope 'mine' restricts search to the caller's own documents", async () => {
     await seedUser('tools-owner');
     await seedUser('tools-other');
-    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other', kind: 'person' as const, viaUserId: null };
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
       await handlers.primer_create_document({ title: 'Roadmap mine', content: '<p>a</p>', format: 'html' }, owner);
@@ -628,7 +628,7 @@ describe('primer_find_document', () => {
 });
 
 describe('primer_get_document_comments', () => {
-  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
 
   it('returns comments grouped across all versions', async () => {
     await seedUser('tools-owner');
@@ -700,7 +700,7 @@ describe('primer_get_document_comments', () => {
 });
 
 describe('primer_get_all_comments', () => {
-  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+  const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
 
   it('lists comments across all documents newest-first and paginates', async () => {
     await seedUser('tools-owner');
@@ -768,7 +768,7 @@ describe('primer_get_all_comments', () => {
   it("scope 'mine' returns only comments authored by the caller", async () => {
     await seedUser('tools-owner');
     await seedUser('tools-other');
-    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other' };
+    const owner2 = { id: 'tools-other', email: 'tools-other@x.test', displayName: 'tools-other', kind: 'person' as const, viaUserId: null };
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
       // A single shared doc with comments from two different authors.
@@ -795,8 +795,8 @@ describe('primer_get_all_comments', () => {
 });
 
 describe('post-#37 tools respect visibility (canRead filter)', () => {
-  const stranger = { id: 'tools-stranger', email: 'tools-stranger@x.test', displayName: 'tools-stranger' };
-  const commenter = { id: 'tools-commenter', email: 'tools-commenter@x.test', displayName: 'tools-commenter' };
+  const stranger = { id: 'tools-stranger', email: 'tools-stranger@x.test', displayName: 'tools-stranger', kind: 'person' as const, viaUserId: null };
+  const commenter = { id: 'tools-commenter', email: 'tools-commenter@x.test', displayName: 'tools-commenter', kind: 'person' as const, viaUserId: null };
 
   it('primer_list_documents hides a private doc from a stranger; shows it to a commenter collab', async () => {
     await seedUser('tools-owner');
@@ -804,7 +804,7 @@ describe('post-#37 tools respect visibility (canRead filter)', () => {
     await seedUser('tools-commenter');
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
-      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
       const created = await handlers.primer_create_document({ title: 'Private Only', content: '<p>a</p>', format: 'html' }, owner);
       const { documentId } = JSON.parse(created.content[0].text);
       await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
@@ -826,7 +826,7 @@ describe('post-#37 tools respect visibility (canRead filter)', () => {
     await seedUser('tools-commenter');
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
-      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
       const created = await handlers.primer_create_document({ title: 'Secret Roadmap', content: '<p>x</p>', format: 'html' }, owner);
       const { documentId } = JSON.parse(created.content[0].text);
       await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
@@ -847,7 +847,7 @@ describe('post-#37 tools respect visibility (canRead filter)', () => {
     await seedUser('tools-stranger');
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
-      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
       const created = await handlers.primer_create_document({ title: 'X', content: '<p>a</p>', format: 'html' }, owner);
       const { documentId } = JSON.parse(created.content[0].text);
       await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, documentId));
@@ -863,7 +863,7 @@ describe('post-#37 tools respect visibility (canRead filter)', () => {
     await seedUser('tools-stranger');
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
-      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner' };
+      const owner = { id: 'tools-owner', email: 'tools-owner@x.test', displayName: 'tools-owner', kind: 'person' as const, viaUserId: null };
       // Public + private doc, each with one comment.
       const pub = JSON.parse((await handlers.primer_create_document({ title: 'Public', content: '<p>p</p>', format: 'html' }, owner)).content[0].text);
       const priv = JSON.parse((await handlers.primer_create_document({ title: 'Private', content: '<p>s</p>', format: 'html' }, owner)).content[0].text);
@@ -885,7 +885,7 @@ describe('post-#37 tools respect visibility (canRead filter)', () => {
 });
 
 describe('primer_send_events / primer_get_events (issue #78)', () => {
-  const asUserArg = (id: string) => ({ id, email: `${id}@x.test`, displayName: id });
+  const asUserArg = (id: string) => ({ id, email: `${id}@x.test`, displayName: id, kind: 'person' as const, viaUserId: null });
   const validEvent = {
     namespace: 'padd',
     type: 'reconciliation',

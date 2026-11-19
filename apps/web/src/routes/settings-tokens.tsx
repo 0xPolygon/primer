@@ -1,20 +1,21 @@
 import { useState } from 'react';
 import { API_TOKEN_SCOPES, API_TOKEN_SCOPE_DESCRIPTIONS } from '@polygonlabs/primer-api-types';
 import type {
+  AgentDTO,
   ApiTokenScope,
   ApiTokenSummary,
   CreateTokenRequest,
   CreateTokenResponse,
 } from '@polygonlabs/primer-api-types';
 import {
+  useAgents,
   useApiTokens,
-  useCreateServiceToken,
+  useCreateAgent,
+  useCreateAgentToken,
   useCreateToken,
-  useRevokeServiceToken,
+  useRevokeAgentToken,
   useRevokeToken,
-  useServiceTokens,
 } from '../queries/tokens.ts';
-import { useMe } from '../queries/me.ts';
 
 const MAX_NAME_LENGTH = 100;
 
@@ -283,19 +284,10 @@ function SecretReveal({ created, onDismiss }: SecretRevealProps) {
 }
 
 export function TokenSettingsPage() {
-  const me = useMe();
   const q = useApiTokens();
   const revoke = useRevokeToken();
   const create = useCreateToken();
   const [createdSecret, setCreatedSecret] = useState<CreateTokenResponse | null>(null);
-
-  const isAdmin = me.data?.isAdmin === true;
-  const serviceQ = useServiceTokens(isAdmin);
-  const serviceRevoke = useRevokeServiceToken();
-  const serviceCreate = useCreateServiceToken();
-  const [createdServiceSecret, setCreatedServiceSecret] = useState<CreateTokenResponse | null>(
-    null,
-  );
 
   function onRevoke(token: ApiTokenSummary) {
     const confirmed = window.confirm(
@@ -303,14 +295,6 @@ export function TokenSettingsPage() {
     );
     if (!confirmed) return;
     revoke.mutate(token.id);
-  }
-
-  function onRevokeService(token: ApiTokenSummary) {
-    const confirmed = window.confirm(
-      `Revoke service token "${token.name}"? Any tool acting as Claude with it will lose access immediately.`
-    );
-    if (!confirmed) return;
-    serviceRevoke.mutate(token.id);
   }
 
   return (
@@ -375,67 +359,100 @@ export function TokenSettingsPage() {
         </div>
       )}
 
-      {isAdmin && (
-        <section className="space-y-4 border-t border-neutral-200 pt-6 dark:border-neutral-800">
-          <header>
-            <h2 className="text-lg font-semibold">Service account (Claude)</h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-400">
-              Tokens here authenticate as the Claude service user — actions performed
-              with them are attributed to Claude, not to you. Visible to admins only.
-              Grant only the permissions the integration needs; tokens marked Full access
-              predate permissions and should be replaced with a limited one.
-            </p>
-          </header>
+      <AgentsSection />
+    </div>
+  );
+}
 
-          <CreateTokenForm
-            placeholder="Token name, e.g. claude-slack-workspace"
-            pending={serviceCreate.isPending}
-            error={(serviceCreate.error as Error) ?? null}
-            scopesRequired
-            onCreate={(req) => serviceCreate.mutate(req, { onSuccess: setCreatedServiceSecret })}
-          />
+const ERROR_BOX =
+  'rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300';
 
-          {createdServiceSecret && (
-            <SecretReveal
-              created={createdServiceSecret}
-              onDismiss={() => setCreatedServiceSecret(null)}
-            />
-          )}
+/** Agents act via you under their own name ("Claude (via you)"), with at
+ *  most editor access to your documents. */
+function AgentsSection() {
+  const q = useAgents();
+  const create = useCreateAgent();
+  const [name, setName] = useState('');
+  const trimmed = name.trim();
 
-          {serviceQ.isLoading && <div className="text-sm text-neutral-500">Loading…</div>}
+  return (
+    <section className="space-y-4 border-t border-neutral-200 pt-6 dark:border-neutral-800">
+      <header>
+        <h2 className="text-lg font-semibold">Agents</h2>
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+          An agent acts for you under its own name: its comments and documents show
+          as theirs, "via" you. It can edit your documents but never delete them,
+          change who can see them, or manage collaborators. Give its tokens only the
+          permissions the integration needs.
+        </p>
+      </header>
 
-          {serviceQ.error && (
-            <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-              Couldn't load service tokens — {(serviceQ.error as Error).message}.
-            </div>
-          )}
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (trimmed.length === 0) return;
+          create.mutate({ displayName: trimmed }, { onSuccess: () => setName('') });
+        }}
+      >
+        <input
+          type="text"
+          value={name}
+          maxLength={MAX_NAME_LENGTH}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Agent name, e.g. Claude"
+          className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+        />
+        <button
+          type="submit"
+          disabled={trimmed.length === 0 || create.isPending}
+          className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
+        >
+          Add agent
+        </button>
+      </form>
+      {create.error && <div className={ERROR_BOX}>Couldn't add the agent — {(create.error as Error).message}.</div>}
 
-          {serviceRevoke.error && (
-            <div className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-              Revoke failed — {(serviceRevoke.error as Error).message}.
-            </div>
-          )}
-
-          {serviceQ.data && serviceQ.data.tokens.length === 0 && (
-            <div className="rounded border border-dashed border-neutral-300 px-4 py-8 text-center text-sm text-neutral-500 dark:border-neutral-700">
-              No service tokens yet.
-            </div>
-          )}
-
-          {serviceQ.data && serviceQ.data.tokens.length > 0 && (
-            <div className="space-y-3">
-              {serviceQ.data.tokens.map((t) => (
-                <TokenRow
-                  key={t.id}
-                  token={t}
-                  onRevoke={onRevokeService}
-                  revoking={serviceRevoke.isPending && serviceRevoke.variables === t.id}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+      {q.isLoading && <div className="text-sm text-neutral-500">Loading…</div>}
+      {q.error && <div className={ERROR_BOX}>Couldn't load agents — {(q.error as Error).message}.</div>}
+      {q.data && q.data.agents.length === 0 && (
+        <div className="rounded border border-dashed border-neutral-300 px-4 py-8 text-center text-sm text-neutral-500 dark:border-neutral-700">
+          No agents yet.
+        </div>
       )}
+      {q.data?.agents.map((a) => <AgentCard key={a.id} agent={a} />)}
+    </section>
+  );
+}
+
+function AgentCard({ agent }: { agent: AgentDTO }) {
+  const create = useCreateAgentToken(agent.id);
+  const revoke = useRevokeAgentToken(agent.id);
+  const [created, setCreated] = useState<CreateTokenResponse | null>(null);
+
+  function onRevoke(token: ApiTokenSummary) {
+    const confirmed = window.confirm(
+      `Revoke token "${token.name}"? Any tool acting as ${agent.displayName} with it will lose access immediately.`,
+    );
+    if (!confirmed) return;
+    revoke.mutate(token.id);
+  }
+
+  return (
+    <div className="space-y-3 rounded border border-neutral-200 p-4 dark:border-neutral-800">
+      <h3 className="font-medium">{agent.displayName}</h3>
+      <CreateTokenForm
+        placeholder="Token name, e.g. slack-workspace"
+        pending={create.isPending}
+        error={(create.error as Error) ?? null}
+        scopesRequired
+        onCreate={(req) => create.mutate(req, { onSuccess: setCreated })}
+      />
+      {created && <SecretReveal created={created} onDismiss={() => setCreated(null)} />}
+      {revoke.error && <div className={ERROR_BOX}>Revoke failed — {(revoke.error as Error).message}.</div>}
+      {agent.tokens.map((t) => (
+        <TokenRow key={t.id} token={t} onRevoke={onRevoke} revoking={revoke.isPending && revoke.variables === t.id} />
+      ))}
     </div>
   );
 }

@@ -23,6 +23,7 @@ interface UserRow {
   id: string;
   displayName: string;
   email: string;
+  kind?: 'person' | 'agent';
 }
 
 const SUBJECT_TITLE_LIMIT = 50;
@@ -198,7 +199,7 @@ export class MailgunNotifier implements Notifier {
     if (recipientIds.size === 0) return;
 
     const rows = (await db
-      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .select({ id: users.id, displayName: users.displayName, email: users.email, kind: users.kind })
       .from(users)
       .where(inArray(users.id, [...recipientIds, args.actorUserId]))) as UserRow[];
     const actor = rows.find((u) => u.id === args.actorUserId);
@@ -214,6 +215,8 @@ export class MailgunNotifier implements Notifier {
         logger.warn({ recipientId }, 'recipient not found in users table, skipping');
         continue;
       }
+      // Agents have no mailbox (auth/agents.ts).
+      if (recipient.kind === 'agent') continue;
       const mention = mentionSet.has(recipientId);
       const reply = participantSet.has(recipientId);
       const uploaded = args.uploaderUserId !== null && recipientId === args.uploaderUserId;

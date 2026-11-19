@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import { createApp } from '../app.ts';
+import { createApp, type AuthUser } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
@@ -35,11 +35,12 @@ vi.mock('../lib/events.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/events.ts')>();
   return {
     ...actual,
-    gateEventAccess: async (documentId: string, userId: string) => {
+    gateEventAccess: async (documentId: string, actor: AuthUser) => {
+      const userId = actor.id;
       const n = (gateControl.calls.get(userId) ?? 0) + 1;
       gateControl.calls.set(userId, n);
       if (gateControl.failFor.has(userId)) throw new Error('simulated database failure');
-      const result = await actual.gateEventAccess(documentId, userId);
+      const result = await actual.gateEventAccess(documentId, actor);
       const hold = gateControl.holds.get(userId)?.get(n) ?? 0;
       if (hold > 0) await new Promise((resolve) => setTimeout(resolve, hold));
       return result;

@@ -7,7 +7,7 @@ import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import {
-  canRead, canEdit, canManage, effectiveRole, loadCollaboratorRole,
+  canRead, canEdit, canManage, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
@@ -46,8 +46,7 @@ export function registerDocumentRoutes(
     }
 
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(docId, user.id);
-    const eff = effectiveRole(docRows[0], user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: docId, uploaderId: docRows[0].uploaderId, visibility: docRows[0].visibility as Visibility }, user);
     if (!canRead(docRows[0].visibility as Visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }
@@ -178,8 +177,7 @@ export function registerDocumentRoutes(
     if (!existing) return c.json({ error: 'not_found' }, 404);
     if (existing.deletedAt !== null) return c.json({ error: 'not_found' }, 404);
 
-    const collabRole = await loadCollaboratorRole(docId, user.id);
-    const eff = effectiveRole(existing, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: docId, uploaderId: existing.uploaderId, visibility: existing.visibility as Visibility }, user);
     if (!canRead(existing.visibility as Visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }
@@ -235,8 +233,7 @@ export function registerDocumentRoutes(
       .where(eq(documents.id, docId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
 
-    const collabRole = await loadCollaboratorRole(docId, user.id);
-    const eff = effectiveRole(existing, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: docId, uploaderId: existing.uploaderId, visibility: existing.visibility as Visibility }, user);
     if (!canRead(existing.visibility as Visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }
@@ -271,8 +268,7 @@ export function registerDocumentRoutes(
       .where(eq(documents.id, docId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
 
-    const collabRole = await loadCollaboratorRole(docId, user.id);
-    const eff = effectiveRole(existing, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: docId, uploaderId: existing.uploaderId, visibility: existing.visibility as Visibility }, user);
     if (!canRead(existing.visibility as Visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }
@@ -317,8 +313,7 @@ export function registerDocumentRoutes(
     if (!existingDoc) return c.json({ error: 'not_found' }, 404);
     if (existingDoc.deletedAt !== null) return c.json({ error: 'not_found' }, 404);
 
-    const collabRole = await loadCollaboratorRole(docId, user.id);
-    const eff = effectiveRole(existingDoc, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: docId, uploaderId: existingDoc.uploaderId, visibility: existingDoc.visibility as Visibility }, user);
     if (!canRead(existingDoc.visibility as Visibility, eff)) {
       return c.json({ error: 'not_found' }, 404);
     }

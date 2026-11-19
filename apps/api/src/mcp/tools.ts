@@ -2,8 +2,10 @@ import { z, type ZodTypeAny } from 'zod';
 import { v7 as uuidv7 } from 'uuid';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Storage } from '../storage/types.ts';
+import type { AuthUser } from '../app.ts';
 import type { Notifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
+import { authorColumns } from '../lib/actors.ts';
 import { documents, versions, threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { replyToThread } from '../routes/comments.ts';
 import { resolveThread } from '../routes/threads.ts';
@@ -11,9 +13,9 @@ import { parsePrimerUrl } from './urlResolve.ts';
 import { publishDocument } from '../lib/publish.ts';
 import { logger } from '../logger.ts';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope, PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
-import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
+import { actorLabel, isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 import {
-  canRead, canEdit, effectiveRole, loadCollaboratorRole, type Visibility,
+  canRead, isSelfOrAgentOf, libraryOwnerId, loadEffectiveRole, type Visibility,
 } from '../lib/permissions.ts';
 import {
   DEFAULT_EVENTS_PAGE_SIZE,
@@ -42,7 +44,6 @@ export type PrimerErrorCode =
 
 export interface TextContent { type: 'text'; text: string; }
 export interface ToolResult { isError?: boolean; content: TextContent[]; }
-export type AuthUser = { id: string; email: string; displayName: string };
 export type ToolHandler = (args: Record<string, unknown>, user: AuthUser) => Promise<ToolResult>;
 
 export interface ToolDeps {
@@ -100,7 +101,7 @@ function formatCommentsMarkdown(
     const placement = thread.contextChanged ? ' (context changed)' : '';
     const commentLines = thread.comments.map((c: CommentDTO) => {
       if (c.deletedAt !== null) return '(deleted)';
-      return `**${c.authorDisplayName}** — ${c.body} (${c.createdAt})`;
+      return `**${actorLabel({ displayName: c.authorDisplayName, kind: c.authorKind, via: c.authorVia })}** — ${c.body} (${c.createdAt})`;
     });
     return [`> ${quote}`, `${badge} thread ${thread.id}${placement}`, ...commentLines, ''].join('\n');
   });
@@ -236,8 +237,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (docRows.length === 0) return err('not_found', 'document not found');
       if (docRows[0].deletedAt !== null) return err('not_found', 'document not found');
 
-      const collabRole = await loadCollaboratorRole(documentId!, user.id);
-      const eff = effectiveRole(docRows[0], user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: documentId, uploaderId: docRows[0].uploaderId, visibility: docRows[0].visibility as Visibility }, user);
       if (!canRead(docRows[0].visibility as Visibility, eff)) {
         return err('not_found', 'document not found');
       }
@@ -359,8 +359,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         .from(documents)
         .where(eq(documents.id, row.documentId));
       if (!docRow) return err('not_found', 'document not found');
-      const collabRole = await loadCollaboratorRole(row.documentId, user.id);
-      const eff = effectiveRole(docRow, user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: row.documentId, uploaderId: docRow.uploaderId, visibility: docRow.visibility as Visibility }, user);
       if (!canRead(docRow.visibility as Visibility, eff)) {
         return err('not_found', 'version not found');
       }
@@ -393,8 +392,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!existingDoc) return err('not_found', 'document not found');
       if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
 
-      const collabRole = await loadCollaboratorRole(documentId, user.id);
-      const eff = effectiveRole(existingDoc, user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: documentId, uploaderId: existingDoc.uploaderId, visibility: existingDoc.visibility as Visibility }, user);
       if (!canRead(existingDoc.visibility as Visibility, eff)) {
         return err('not_found', 'document not found');
       }
@@ -468,8 +466,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       }[];
       if (!docRow) return err('not_found', 'version not found');
 
-      const collabRole = await loadCollaboratorRole(docRow.documentId, user.id);
-      const eff = effectiveRole(docRow, user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: docRow.documentId, uploaderId: docRow.uploaderId, visibility: docRow.visibility as Visibility }, user);
       if (!canRead(docRow.visibility, eff)) {
         return err('not_found', 'version not found');
       }
@@ -558,15 +555,16 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         cursorCreatedAt = cursorRow.createdAt;
       }
 
+      const me = libraryOwnerId(user);
       const scopePredicate =
-        scope === 'mine' ? sql`${documents.uploaderId} = ${user.id}` : undefined;
+        scope === 'mine' ? isSelfOrAgentOf(documents.uploaderId, me) : undefined;
       const keysetPredicate = cursorCreatedAt
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
       // Library scope: docs the caller has accessed — created, collaborates on,
       // or an org doc they've opened (has a document_views row). Org docs the
       // caller never opened are excluded, mirroring the dashboard library.
-      const accessedPredicate = sql`(${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}) OR (${documents.visibility} = 'org' AND EXISTS (SELECT 1 FROM document_views dv WHERE dv.document_id = ${documents.id} AND dv.user_id = ${user.id})))`;
+      const accessedPredicate = sql`(${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${me}) OR (${documents.visibility} = 'org' AND EXISTS (SELECT 1 FROM document_views dv WHERE dv.document_id = ${documents.id} AND dv.user_id = ${me})))`;
 
       const rows = await db
         .select({
@@ -631,13 +629,14 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
       const pattern = `%${escaped}%`;
       const matchPredicate = sql`(${documents.title} ILIKE ${pattern} ESCAPE '\\' OR ${documents.description} ILIKE ${pattern} ESCAPE '\\')`;
+      const me = libraryOwnerId(user);
       const scopePredicate =
-        scope === 'mine' ? sql`${documents.uploaderId} = ${user.id}` : undefined;
+        scope === 'mine' ? isSelfOrAgentOf(documents.uploaderId, me) : undefined;
       const keysetPredicate = cursorCreatedAt
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
       // canRead filter: exclude private docs the caller cannot read.
-      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}))`;
+      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${me}))`;
 
       const rows = await db
         .select({
@@ -696,11 +695,9 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!doc) return err('not_found', 'document not found');
       if (doc.deletedAt !== null) return err('not_found', 'document not found');
 
-      const collabRole = await loadCollaboratorRole(documentId, user.id);
-      const eff = effectiveRole(
-        { uploaderId: doc.uploaderId, visibility: doc.visibility as Visibility },
-        user.id,
-        collabRole,
+      const eff = await loadEffectiveRole(
+        { id: documentId, uploaderId: doc.uploaderId, visibility: doc.visibility as Visibility },
+        user,
       );
       if (!canRead(doc.visibility as Visibility, eff)) {
         return err('not_found', 'document not found');
@@ -796,7 +793,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         : sql``;
       const scopeFilter = scope === 'mine' ? sql`AND c.author_id = ${user.id}` : sql``;
       // canRead filter: exclude comments on private docs the caller can't read.
-      const canReadFilter = sql`AND (d.visibility = 'org' OR d.uploader_id = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = d.id AND dc.user_id = ${user.id}))`;
+      const me = libraryOwnerId(user);
+      const canReadFilter = sql`AND (d.visibility = 'org' OR ${isSelfOrAgentOf(sql`d.uploader_id`, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = d.id AND dc.user_id = ${me}))`;
 
       const rows = (await db.execute(sql`
         SELECT c.id AS "id",
@@ -864,7 +862,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
     primer_get_events: async (args, user) => {
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       if (!documentId) return err('bad_request', '`documentId` is required.');
-      const g = await gateEventAccess(documentId, user.id);
+      const g = await gateEventAccess(documentId, user);
       if (g.status === 'not_found') return err('not_found', 'document not found');
 
       const sinceParsed = parseSince(
@@ -904,7 +902,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
     primer_send_events: async (args, user) => {
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       if (!documentId) return err('bad_request', '`documentId` is required.');
-      const g = await gateEventAccess(documentId, user.id);
+      const g = await gateEventAccess(documentId, user);
       if (g.status === 'not_found') return err('not_found', 'document not found');
       if (!g.mayWrite) {
         return err('forbidden', 'only the document owner, editors and responders may write events');
@@ -929,7 +927,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (args.state !== 'working' && args.state !== 'idle') {
         return err('bad_request', '`state` must be "working" or "idle".');
       }
-      const g = await gateEventAccess(documentId, user.id);
+      const g = await gateEventAccess(documentId, user);
       if (g.status === 'not_found') return err('not_found', 'document not found');
       if (!g.mayWrite) {
         return err('forbidden', 'only the document owner, editors and responders may set a status');
@@ -987,6 +985,8 @@ async function loadThreads(
     threadId: string;
     authorId: string;
     authorDisplayName: string;
+    authorKind: 'person' | 'agent';
+    authorVia: string | null;
     body: string;
     mentions: string[];
     createdAt: Date;
@@ -1031,7 +1031,7 @@ async function loadThreads(
             id: comments.id,
             threadId: comments.threadId,
             authorId: comments.authorId,
-            authorDisplayName: users.displayName,
+            ...authorColumns,
             body: comments.body,
             mentions: comments.mentions,
             createdAt: comments.createdAt,
@@ -1070,6 +1070,8 @@ async function loadThreads(
       threadId: c.threadId,
       authorId: c.authorId,
       authorDisplayName: c.authorDisplayName,
+      authorKind: c.authorKind,
+      authorVia: c.authorVia,
       body: c.deletedAt !== null ? '' : c.body,
       createdAt: c.createdAt.toISOString(),
       updatedAt: c.updatedAt?.toISOString() ?? null,
@@ -1096,7 +1098,7 @@ function commentRecords(list: ThreadDTO[]) {
         thread_id: t.id,
         comment_id: c.id,
         author_id: c.authorId,
-        author_name: c.authorDisplayName,
+        author_name: actorLabel({ displayName: c.authorDisplayName, kind: c.authorKind, via: c.authorVia }),
         body: c.body,
         created_at: c.createdAt,
         anchor_text: anchorText(t.anchor),

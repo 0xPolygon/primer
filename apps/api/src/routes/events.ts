@@ -106,7 +106,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   }), async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     // Tighter write principal (issue #78 security requirement 2): reading is
     // not enough — only the owner, editors and responders may write. A
@@ -150,7 +150,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   app.get('/api/documents/:documentId/events', async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
 
     const sinceParsed = parseSince(c.req.query('since'));
@@ -214,7 +214,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   app.get('/api/documents/:documentId/events/stream', async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     const parsed = parseStreamParams(c);
     if (!parsed.ok) return c.json({ error: 'bad_request', message: parsed.message }, 400);
@@ -228,7 +228,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     // finishing late.
     const subscribe = (wake: () => void) => subscribeDocWakes(documentId, wake);
     return runEventStream(c, parsed.resumeFrom, subscribe, reader(g.identity), async () => {
-      const fresh = await gate(documentId, user.id);
+      const fresh = await gate(documentId, user);
       return fresh.status === 'not_found' ? null : reader(fresh.identity);
     });
   });
@@ -259,7 +259,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   app.post('/api/documents/:documentId/status', async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (!g.mayWrite) return c.json({ error: 'forbidden' }, 403);
     let raw: unknown;
@@ -280,7 +280,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   app.get('/api/documents/:documentId/status', async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     const body: DocumentStatusResponse = { statuses: await activeDocumentStatuses(documentId) };
     return c.json(body, 200);

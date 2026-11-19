@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
 import type { LibraryResponse, LibraryDocument, FolderDTO, DeletedDocumentEntry } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
+import { isSelfOrAgentOf, libraryOwnerId } from '../lib/permissions.ts';
 
 interface DocRow {
   id: string;
@@ -42,7 +43,8 @@ function toInt(v: unknown): number {
 
 export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): void {
   app.get('/api/library', async (c) => {
-    const userId = c.get('user').id;
+    // An agent browses its person's library (lib/permissions.ts).
+    const userId = libraryOwnerId(c.get('user'));
 
     // Docs in the caller's library: own OR collaborator OR org-doc-they've-opened.
     const docRows = (await db.execute(sql`
@@ -67,7 +69,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
         d.visibility,
         u.display_name      AS "uploaderDisplayName",
         CASE
-          WHEN d.uploader_id = ${userId} THEN 'mine'
+          WHEN ${isSelfOrAgentOf(sql`d.uploader_id`, userId)} THEN 'mine'
           WHEN EXISTS (SELECT 1 FROM document_collaborators dc
                          WHERE dc.document_id = d.id AND dc.user_id = ${userId}) THEN 'collaborator'
           ELSE 'org'
@@ -92,7 +94,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
           -- or an org doc they've opened (has a document_views row). Org docs
           -- the caller never opened are NOT in the library — reachable only by
           -- direct URL, per the PRD's "no global feed" rule.
-          d.uploader_id = ${userId}
+          ${isSelfOrAgentOf(sql`d.uploader_id`, userId)}
           OR EXISTS (SELECT 1 FROM document_collaborators dc
                        WHERE dc.document_id = d.id AND dc.user_id = ${userId})
           OR (d.visibility = 'org' AND EXISTS (
@@ -113,7 +115,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
                     WHERE d.id = df.document_id
                       AND d.deleted_at IS NULL
                       AND (
-                        d.uploader_id = ${userId}
+                        ${isSelfOrAgentOf(sql`d.uploader_id`, userId)}
                         OR EXISTS (
                           SELECT 1 FROM document_collaborators dc
                            WHERE dc.document_id = d.id AND dc.user_id = ${userId}
@@ -135,7 +137,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
     const deletedRows = (await db.execute(sql`
       SELECT id, title, deleted_at AS "deletedAt"
         FROM documents
-       WHERE uploader_id = ${userId}
+       WHERE ${isSelfOrAgentOf(sql`uploader_id`, userId)}
          AND deleted_at IS NOT NULL
          AND deleted_at > now() - interval '30 days'
     ORDER BY deleted_at DESC
