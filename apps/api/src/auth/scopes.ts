@@ -68,6 +68,17 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'PATCH', path: '/api/documents/:docId/collaborators/:userId', scope: 'collaborators:manage' },
   { method: 'DELETE', path: '/api/documents/:docId/collaborators/:userId', scope: 'collaborators:manage' },
 
+  { method: 'POST', path: '/api/documents/:docId/records/get', scope: 'records:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/list', scope: 'records:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/query', scope: 'records:read' },
+  { method: 'GET', path: '/api/documents/:docId/records/changes', scope: 'records:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/set', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/update', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/delete', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/batch', scope: 'records:write' },
+  { method: 'POST', path: '/api/record-changes/:changeId/revert', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/purge-personal', scope: 'records:write' },
+
   { method: 'GET', path: '/api/users/lookup', scope: 'users:read' },
   { method: 'GET', path: '/api/users', scope: 'users:read' },
   { method: 'GET', path: '/api/users/mentionable', scope: 'users:read' },
