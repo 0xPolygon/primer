@@ -61,7 +61,7 @@ export async function writeCheckpoint(
   note: string | null,
   captured: CapturedState,
   /** A republish: the uploaded file, kept with the version. */
-  original?: { versionId: string; originalKey: string; sourceFormat: 'markdown' | 'text' },
+  original?: { versionId: string; originalKey: string; sourceFormat: 'markdown' | 'text' | 'html' },
 ): Promise<CheckpointResponse> {
   const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
   const versionId = original?.versionId ?? uuidv7();

@@ -9,6 +9,7 @@ import { exportHtml, exportMarkdown, exportText, type ExportDecisions } from './
 import { exportDecisions } from './choices.ts';
 import { tabsOf } from './reach.ts';
 import { trustedMeta } from './sources.ts';
+import { currentPageHtml } from '../page/publish.ts';
 
 /**
  * A checkpoint's render bundle (C11): everything shares, previews, print,
@@ -16,13 +17,16 @@ import { trustedMeta } from './sources.ts';
  * never changed. Stored under `bundles/<versionId>/`.
  *
  * - `state.ydoc`: the Y.Doc state the bundle was rendered from;
- * - `export.md` or `export.txt` (the document's own format) and `export.html`;
+ * - `export.md` or `export.txt` (the document's own format) and `export.html`
+ *   (for a page document, its HTML with people's text spliced in);
  * - `static.html`: the static rendering, served like any version's content;
  * - `threads.json`: the open threads at capture with their quotes and comment
  *   counts, so the checkpoint keeps its discussion context;
  * - `files.json`: the ids of the files the content references.
  *
- * Later milestones add `pages/`, `widgets/` and `records.json`.
+ * A page document's stamped source is stored once with the checkpoint that
+ * published it (page/publish.ts `sourceKeyOf`), not copied into each bundle.
+ * Later milestones add `widgets/` and `records.json`.
  */
 export type BundleManifest = { versionId: string; format: string; files: string[] };
 
@@ -39,18 +43,24 @@ export function bundleKeyOf(versionId: string): string {
 }
 
 /** The export file a document format keeps in its bundle. */
-export function exportFileOf(format: string): 'export.md' | 'export.txt' {
-  return format === 'text' ? 'export.txt' : 'export.md';
+export function exportFileOf(format: string): 'export.md' | 'export.txt' | 'export.html' {
+  return format === 'text' ? 'export.txt' : format === 'html' ? 'export.html' : 'export.md';
 }
 
-/** The static rendering of a document state, served like any version's content. */
+/**
+ * The static rendering of a document state, served like any version's
+ * content. A page document (`page`: its HTML now, from `currentPageHtml`) is
+ * its own page, served as uploaded pages are; anything else is BlockNote's
+ * rendering, themed by Primer.
+ */
 export async function renderStatic(
   doc: Y.Doc,
   title: string,
   decisions: ExportDecisions = new Map(),
+  page: string | null = null,
 ): Promise<{ html: string; served: string }> {
-  const html = await exportHtml(doc, title, decisions);
-  const served = transformHtml(html, { themeManaged: true });
+  const html = page ?? (await exportHtml(doc, title, decisions));
+  const served = transformHtml(html, { themeManaged: page === null });
   if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
   return { html, served: served.html };
 }
@@ -85,8 +95,11 @@ export async function renderBundle(
   try {
     const { format } = trustedMeta(doc, opts.documentId);
     const decisions = await exportDecisions(opts.documentId);
-    const { html, served } = await renderStatic(doc, opts.title, decisions);
-    const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
+    const page = format === 'html' ? await currentPageHtml(storage, opts.documentId, doc) : null;
+    if (format === 'html' && page === null) throw new Error('page document has no readable page');
+    const { html, served } = await renderStatic(doc, opts.title, decisions, page);
+    const exported =
+      format === 'html' ? html : format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
       [exportFileOf(format)]: exported,

@@ -19,8 +19,10 @@
 // Markdown or text version becomes live the same way; its open threads are
 // re-anchored by quote, and those whose quote isn't found are orphaned. A
 // Markdown or text version of a live document is merged three ways into it
-// (live/merge.ts) and checkpointed. HTML stays on the version path until pages
-// land.
+// (live/merge.ts) and checkpointed. HTML publishes the same way as a live page
+// document (page/publish.ts): one page block over the stamped upload, whose
+// republishes carry people's text over. Legacy documents keep their versions
+// and render them as before; their next version makes them live.
 import * as Y from 'yjs';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
@@ -34,11 +36,10 @@ import { captureState, writeCheckpoint } from '../live/checkpoint.ts';
 import { anchorThreads, buildLiveDoc, importMarkdown, importText, type ImportResult } from '../live/import.ts';
 import { mergeRepublish } from '../live/merge.ts';
 import type { Storage } from '../storage/types.ts';
-import { transformHtml } from '../upload/htmlPipeline.ts';
+import { anchorPageThreads, buildPageDoc, preparePage, sourceKeyOf, republishPage } from '../page/publish.ts';
 import { MAX_BYTES, MAX_DESCRIPTION, MAX_TITLE } from '../upload/validate.ts';
 import { transactionWithEvents } from './events.ts';
 import { canEdit, canRead, loadEffectiveRole, type Visibility } from './permissions.ts';
-import { carryOpenThreads, loadCarryOrigins } from './threadCarry.ts';
 
 export const MAX_VERSION_NOTE = 500;
 
@@ -131,64 +132,7 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
     return refuse(400, 'bad_request', `versionNote must be ≤${MAX_VERSION_NOTE} chars.`, 'Shorten the version note.', 'invalid_body');
   }
 
-  if (input.format !== 'html') return publishLive(storage, input, { title: title!, description, versionNote });
-
-  const transformed = transformHtml(new TextDecoder('utf-8').decode(input.content));
-  if (!transformed.ok) return refuse(400, 'bad_request', transformed.message, 'Fix the content and publish again.', 'parse_failed');
-  const rendered = { html: transformed.html };
-
-  const documentId = existingId ?? uuidv7();
-  const versionId = uuidv7();
-  const storageKey = `v1/${versionId}.html`;
-  const originalKey = `v1/${versionId}.orig`;
-  const htmlBytes = new TextEncoder().encode(rendered.html);
-  const origins = existingId === undefined ? new Map() : await loadCarryOrigins(storage, documentId);
-
-  const cleanup = async () => {
-    for (const key of [storageKey, originalKey]) {
-      try { await storage.delete(key); } catch {}
-    }
-  };
-  await storage.put(storageKey, htmlBytes);
-  await storage.put(originalKey, input.content);
-
-  let versionNumber: number;
-  try {
-    versionNumber = await transactionWithEvents(async (tx, emit) => {
-      let next = 1;
-      if (existingId === undefined) {
-        await tx.insert(documents).values({ id: documentId, title: title!, description, uploaderId: actor.id });
-      } else {
-        next = (await lockForVersion(tx, documentId, input.baseVersionNumber)) + 1;
-      }
-      await tx.insert(versions).values({
-        id: versionId,
-        documentId,
-        versionNumber: next,
-        storageKey,
-        sizeBytes: htmlBytes.byteLength,
-        versionNote,
-        originalKey,
-        sourceFormat: input.format,
-      });
-      if (existingId !== undefined) {
-        await carryOpenThreads(tx, storage, { documentId, versionId, html: rendered.html, origins });
-      }
-      emit({
-        documentId,
-        versionId,
-        actorId: actor.id,
-        type: 'version.published',
-        payload: { document_id: documentId, version_id: versionId, number: next, author_id: actor.id },
-      });
-      return next;
-    });
-  } catch (err) {
-    await cleanup();
-    return refusalFor(err, input.baseVersionNumber);
-  }
-
-  return { ok: true, documentId, versionId, versionNumber };
+  return publishLive(storage, input, { title: title!, description, versionNote });
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -251,21 +195,27 @@ async function republishLive(
     if ((row?.latest ?? 0) !== input.baseVersionNumber) return refusalFor(new StaleBase(row?.latest ?? 0), input.baseVersionNumber);
   }
   const source = new TextDecoder('utf-8').decode(input.content);
-  let imported: ImportResult;
-  try {
-    imported = live === 'markdown' ? await importMarkdown(source) : importText(source);
-  } catch (err) {
-    return refuse(400, 'bad_request', `Import failed: ${(err as Error).message}`, 'Fix the content and publish again.', 'parse_failed');
-  }
-  if (imported.blocks.length === 0) {
-    return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
-  }
-
-  const reconciliation = await mergeRepublish(documentId, input.actor, imported);
-  if (reconciliation.outcomes.some((o) => o.status === 'applied')) {
-    await db.update(documents).set({ metadata: imported.metadata }).where(eq(documents.id, documentId));
-  }
   const versionId = uuidv7();
+  let reconciliation: Reconciliation;
+  if (live === 'html') {
+    const out = await republishPage(storage, documentId, input.actor, source, versionId);
+    if ('refusal' in out) return { ok: false, status: out.refusal.code === 'not_found' ? 404 : 400, refusal: out.refusal };
+    reconciliation = out.reconciliation;
+  } else {
+    let imported: ImportResult;
+    try {
+      imported = live === 'markdown' ? await importMarkdown(source) : importText(source);
+    } catch (err) {
+      return refuse(400, 'bad_request', `Import failed: ${(err as Error).message}`, 'Fix the content and publish again.', 'parse_failed');
+    }
+    if (imported.blocks.length === 0) {
+      return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
+    }
+    reconciliation = await mergeRepublish(documentId, input.actor, imported);
+    if (reconciliation.outcomes.some((o) => o.status === 'applied')) {
+      await db.update(documents).set({ metadata: imported.metadata }).where(eq(documents.id, documentId));
+    }
+  }
   const originalKey = `v1/${versionId}.orig`;
   await storage.put(originalKey, input.content);
   try {
@@ -273,7 +223,7 @@ async function republishLive(
     const checkpoint = await writeCheckpoint(storage, documentId, input.actor, versionNote, captured, {
       versionId,
       originalKey,
-      sourceFormat: live as 'markdown' | 'text',
+      sourceFormat: live as PublishFormat,
     });
     return { ok: true, documentId, versionId: checkpoint.versionId, versionNumber: checkpoint.versionNumber, reconciliation };
   } catch (err) {
@@ -293,35 +243,57 @@ async function publishLive(
   input: PublishInput,
   doc: { title: string; description: string | null; versionNote: string | null },
 ): Promise<PublishResult> {
-  const format = input.format as 'markdown' | 'text';
+  const format = input.format;
   const source = new TextDecoder('utf-8').decode(input.content);
-  let imported: ImportResult;
-  try {
-    imported = format === 'markdown' ? await importMarkdown(source) : importText(source);
-  } catch (err) {
-    return refuse(400, 'bad_request', `Import failed: ${(err as Error).message}`, 'Fix the content and publish again.', 'parse_failed');
-  }
-  if (imported.blocks.length === 0) {
+  if (source.trim().length === 0) {
     return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
   }
-
   const existingId = input.documentId;
   const documentId = existingId ?? uuidv7();
   await ensureSigningKey(storage);
-  const ydoc = buildLiveDoc(imported, format, documentId);
   const open = existingId === undefined ? [] : await openThreadQuotes(existingId);
-  const anchored = anchorThreads(ydoc, open);
+  const versionId = uuidv7();
+  const written: string[] = [];
+  let ydoc: Y.Doc;
+  let anchored: Set<string>;
+  let metadata: Record<string, unknown> = {};
+  if (format === 'html') {
+    const page = preparePage(source);
+    if ('refusal' in page) return { ok: false, status: 400, refusal: page.refusal };
+    const sourceKey = sourceKeyOf(documentId, versionId);
+    await storage.put(sourceKey, new TextEncoder().encode(page.stamped));
+    written.push(sourceKey);
+    const built = await buildPageDoc(documentId, doc.title, page, sourceKey);
+    ydoc = built.doc;
+    anchored = anchorPageThreads(ydoc, built.blockId, page, open);
+  } else {
+    let imported: ImportResult;
+    try {
+      imported = format === 'markdown' ? await importMarkdown(source) : importText(source);
+    } catch (err) {
+      return refuse(400, 'bad_request', `Import failed: ${(err as Error).message}`, 'Fix the content and publish again.', 'parse_failed');
+    }
+    if (imported.blocks.length === 0) {
+      return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
+    }
+    metadata = imported.metadata;
+    ydoc = buildLiveDoc(imported, format, documentId);
+    anchored = anchorThreads(ydoc, open);
+  }
   const state = Y.encodeStateAsUpdate(ydoc);
   ydoc.destroy();
 
-  const versionId = uuidv7();
   const originalKey = `v1/${versionId}.orig`;
   await storage.put(originalKey, input.content);
+  written.push(originalKey);
+  const cleanup = async () => {
+    for (const key of written) await storage.delete(key).catch(() => undefined);
+  };
   let bundle: Awaited<ReturnType<typeof renderBundle>>;
   try {
     bundle = await renderBundle(storage, { versionId, documentId, title: doc.title, state });
   } catch (err) {
-    await storage.delete(originalKey).catch(() => undefined);
+    await cleanup();
     throw err;
   }
 
@@ -336,11 +308,11 @@ async function publishLive(
           description: doc.description,
           uploaderId: input.actor.id,
           format,
-          metadata: imported.metadata,
+          metadata,
         });
       } else {
         next = (await lockForVersion(tx, documentId, input.baseVersionNumber)) + 1;
-        await tx.update(documents).set({ format, metadata: imported.metadata }).where(eq(documents.id, documentId));
+        await tx.update(documents).set({ format, metadata }).where(eq(documents.id, documentId));
       }
       // The import is the system's first update: docVersion 1 of the log.
       const [first] = await tx
@@ -379,7 +351,7 @@ async function publishLive(
     });
   } catch (err) {
     await deleteBundle(storage, bundle.bundleKey);
-    await storage.delete(originalKey).catch(() => undefined);
+    await cleanup();
     return refusalFor(err, input.baseVersionNumber);
   }
   return { ok: true, documentId, versionId, versionNumber };

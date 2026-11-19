@@ -57,7 +57,7 @@ export function planCarry(opts: {
         const mine = base.has(p.pid) ? docText(tr.doc) : undefined;
         const result = carryText(base.get(p.pid), mine, p.text, uncertain.has(p.pid));
         opts.decisions.push({ ...result, pid: p.pid, target });
-        writeText(tr, p.pid, result.text);
+        writeText(tr, opts.blockId, result.text);
       },
     };
   });

@@ -1457,6 +1457,16 @@ export interface PageInfoResponse {
   policy: PagePolicy;
 }
 
+/** A live page block's frame binding (`GET /api/documents/:docId/pages/:blockId`):
+ *  `versionId` is the checkpoint that published the served source; `texts`
+ *  each pid's source text (the host marks pids a script redrew read-only);
+ *  `embeds` the page's Primer blocks. */
+export interface LivePageInfo extends PageInfoResponse {
+  blockId: string;
+  texts: Record<string, string>;
+  embeds: { embedId: string; kind: 'table' | 'code' | 'mermaid' | 'math' }[];
+}
+
 // ───────────────────── Choices, decisions and tasks ─────────────────────
 // Choice and task blocks live in the document. Votes are shared records
 // (collection `primer.choice/<choiceId>`, record id = the voter's id); the

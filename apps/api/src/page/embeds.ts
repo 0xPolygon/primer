@@ -67,7 +67,7 @@ export function readEmbeds(original: string): { embeds: Embed[] } | { refusal: R
 
 function invalidEmbed(path: string, id: string | undefined): Refusal {
   return {
-    code: 'bad_request',
+    code: 'invalid_op',
     message:
       id === undefined
         ? `The Primer block at ${path} has no data-embed-id.`

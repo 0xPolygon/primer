@@ -10,6 +10,7 @@ import type {
 } from '@polygonlabs/primer-api-types';
 import { docFiles, documents, versions, users } from '../db/schema.ts';
 import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/bundle.ts';
+import { currentPageHtml } from '../page/publish.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
 import { exportDecisions } from '../live/choices.ts';
@@ -493,9 +494,12 @@ export function registerDocumentRoutes(
     const access = await docAccess(docId, c.get('user'));
     if (!access) return c.json({ error: 'not_found' }, 404);
     if (!access.format) return notLive(c);
-    const format = (c.req.query('format') ?? (access.format === 'text' ? 'text' : 'markdown')) as ExportFormat;
+    const format = (c.req.query('format') ?? (access.format === 'markdown' ? 'markdown' : access.format)) as ExportFormat;
     if (format !== 'markdown' && format !== 'text' && format !== 'html') {
       return c.json({ error: 'invalid_query', message: 'format must be markdown, text or html' }, 400);
+    }
+    if (access.format === 'html' && format !== 'html') {
+      return c.json({ error: 'invalid_query', message: 'a page exports as html' }, 400);
     }
     const versionParam = c.req.query('version');
     let body: string | Uint8Array<ArrayBuffer>;
@@ -517,8 +521,10 @@ export function registerDocumentRoutes(
     } else {
       await ensureSigningKey(deps.storage);
       const decisions = await exportDecisions(docId);
-      body = await withLiveDocument(docId, (doc) =>
-        format === 'html'
+      body = await withLiveDocument(docId, async (doc) =>
+        access.format === 'html'
+          ? ((await currentPageHtml(deps.storage, docId, doc)) ?? '')
+          : format === 'html'
           ? exportHtml(doc, access.title, decisions)
           : format === 'text'
             ? exportText(doc, docId)
@@ -562,7 +568,11 @@ export function registerDocumentRoutes(
     } else {
       await ensureSigningKey(deps.storage);
       const decisions = await exportDecisions(docId);
-      html = (await withLiveDocument(docId, (doc) => renderStatic(doc, access.title, decisions))).served;
+      html = (
+        await withLiveDocument(docId, async (doc) =>
+          renderStatic(doc, access.title, decisions, access.format === 'html' ? await currentPageHtml(deps.storage, docId, doc) : null),
+        )
+      ).served;
     }
     return new Response(printable(html), {
       status: 200,

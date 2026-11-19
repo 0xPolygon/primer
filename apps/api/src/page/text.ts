@@ -1,6 +1,8 @@
 // Page text in the Y.Doc: one fragment `page/<blockId>/<pid>` per pid (C3),
 // holding a single paragraph whose text (hard breaks as `\n`) is the pid's
-// current text. The overlay editor binds to it; the server reads and writes it
+// current text. The paragraph's block id is the page block's id, so a pid
+// target `{ tabId, blockId, pid }` locates it like any block: preconditions,
+// suggestions and comment anchors work unchanged. The overlay editor binds to it; the server reads and writes it
 // through the pipeline.
 import type * as Y from 'yjs';
 import type { Node as PmNode } from '@tiptap/pm/model';
@@ -53,17 +55,17 @@ function inline(text: string): PmNode[] {
  * Sets a pid's text. When the fragment already holds one paragraph, only the
  * changed middle (between the common prefix and suffix) is replaced, so
  * comment marks on the rest of the text stay. Otherwise the fragment is
- * replaced with one paragraph whose block id is the pid.
+ * replaced with one paragraph whose block id is the page block's.
  */
 export function setPidText(target: Target, text: string): PlannedEdit {
-  return { target, inverse: false, build: (tr) => writeText(tr, target.pid!, text) };
+  return { target, inverse: false, build: (tr) => writeText(tr, target.blockId, text) };
 }
 
-export function writeText(tr: Transform, pid: string, text: string): void {
+export function writeText(tr: Transform, blockId: string, text: string): void {
   const para = singleParagraph(tr.doc);
   if (!para) {
     const editor = serverEditor();
-    const fresh = editor._blocksToProsemirrorNode([{ id: pid, type: 'paragraph', content: [] }] as never);
+    const fresh = editor._blocksToProsemirrorNode([{ id: blockId, type: 'paragraph', content: [] }] as never);
     tr.replaceWith(0, tr.doc.content.size, fresh.content);
     const start = singleParagraph(tr.doc)!.start;
     if (text) tr.insert(start, inline(text));

@@ -12,6 +12,7 @@ import { registerUploadRoute } from './routes/upload.ts';
 import { registerConvertRoute } from './routes/convert.ts';
 import { registerDocumentRoutes } from './routes/documents.ts';
 import { registerVersionContentRoute } from './routes/versionContent.ts';
+import { registerPageRoutes } from './routes/pages.ts';
 import { registerExternalShareRoutes } from './routes/externalShare.ts';
 import { registerCompanionRoute } from './routes/companion.ts';
 import { registerMermaidAssetRoute } from './routes/mermaidAsset.ts';
@@ -116,6 +117,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerCollaboratorRoutes(app, deps);
   registerExternalShareAdminRoutes(app, deps);
   registerVersionContentRoute(app, deps);
+  registerPageRoutes(app, deps);
   registerExternalShareRoutes(app, deps);
   registerCompanionRoute(app);
   registerMermaidAssetRoute(app);

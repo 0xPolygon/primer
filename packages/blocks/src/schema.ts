@@ -8,6 +8,7 @@ import { sourceBlock } from './source.tsx';
 import { pendingBlock } from './pending.tsx';
 import { choiceBlock, choiceOptionBlock } from './choice.tsx';
 import { taskBlock } from './task.tsx';
+import { pageBlock } from './page.tsx';
 
 /**
  * Primer's document model: every stock BlockNote block, code with languages,
@@ -25,6 +26,7 @@ export const primerSchema = BlockNoteSchema.create({
     choice: choiceBlock(),
     choiceOption: choiceOptionBlock(),
     task: taskBlock(),
+    page: pageBlock(),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip },
 });
