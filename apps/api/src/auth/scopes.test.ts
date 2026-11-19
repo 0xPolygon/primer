@@ -266,6 +266,52 @@ describe('enforcing scopes', () => {
     });
   });
 
+  it('records:write alone never purges other people\'s personal records', async () => {
+    await withApp(async (app) => {
+      const writer = await mintAgentToken(app, ['documents:write', 'records:write']);
+      const up = await upload(app, writer.token);
+      const docId = up.documentId!;
+      // The agent owns what it uploaded, so only the scope stands in the way.
+      const purge = () =>
+        app.request(`/api/documents/${docId}/records/purge-personal`, {
+          method: 'POST',
+          headers: bearer(writer.token),
+          body: JSON.stringify({ userId: HUMAN_ID }),
+        });
+      const refused = await purge();
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { error: string }).error).toBe('insufficient_scope');
+      expect(toolsForScopes(['records:write'])).not.toContain('primer_purge_personal_records');
+
+      // Even with records:manage, an agent never purges: it owns this
+      // document, and OAuth agents carry no scopes at all.
+      const agentManager = await mintAgentToken(app, ['records:manage']);
+      expect(toolsForScopes(['records:manage'])).toContain('primer_purge_personal_records');
+      const agentPurge = await app.request(`/api/documents/${docId}/records/purge-personal`, {
+        method: 'POST',
+        headers: bearer(agentManager.token),
+        body: JSON.stringify({ userId: HUMAN_ID }),
+      });
+      expect(agentPurge.status).toBe(403);
+      expect(((await agentPurge.json()) as { error: string }).error).toBe('forbidden');
+
+      // A person's token with records:manage purges on documents they own
+      // (their agent's upload included).
+      const personRes = await app.request('/api/tokens', {
+        method: 'POST',
+        headers: asUserJson(ADMIN_ID),
+        body: JSON.stringify({ name: 'manage', scopes: ['records:manage'] }),
+      });
+      const person = (await personRes.json()) as CreateTokenResponse;
+      const allowed = await app.request(`/api/documents/${docId}/records/purge-personal`, {
+        method: 'POST',
+        headers: bearer(person.token),
+        body: JSON.stringify({ userId: HUMAN_ID }),
+      });
+      expect(allowed.status).toBe(200);
+    });
+  });
+
   it('leaves unrestricted tokens and browser sessions as they were', async () => {
     await withApp(async (app) => {
       const { token } = await mintUnrestrictedToken(app);
