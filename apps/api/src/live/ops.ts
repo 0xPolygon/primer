@@ -1,3 +1,4 @@
+import { pinCitations } from './citations.ts';
 import { Fragment, type Node as PmNode } from '@tiptap/pm/model';
 import type { Transform } from '@tiptap/pm/transform';
 import { sql } from 'drizzle-orm';
@@ -85,6 +86,11 @@ export async function applyOps(documentId: string, actor: AuthUser, raw: unknown
   const prepared: Prepared[] = [];
   const errors: OpError[] = [];
   for (const [index, op] of (req.ops as unknown[]).entries()) {
+    const unpinned = await pinCitations(actor, op);
+    if (unpinned) {
+      errors.push({ index, refusal: invalid(unpinned, 'Cite a document you can read (docId, optionally versionNumber) or an http(s) url.') });
+      continue;
+    }
     const out = await prepareOp(op);
     if ('error' in out) errors.push({ index, refusal: invalid(out.error, out.fix) });
     else prepared.push(out);

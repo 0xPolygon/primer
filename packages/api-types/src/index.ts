@@ -1742,3 +1742,24 @@ export interface DigestResponse {
   until: string;
   documents: CatchUpDTO[];
 }
+
+/** One citation in a live document (M10b.4), in reading order. */
+export interface CitationDTO {
+  /** Its number as the chip shows it (1-based, reading order). */
+  number: number;
+  target: Target;
+  url?: string;
+  /** A cited Primer document, pinned to `versionNumber`. */
+  docId?: string;
+  versionNumber?: number;
+  quote: string;
+  /** The cited Primer document, when the caller can read it. */
+  source?: { title: string; versionId: string | null };
+  /** Set for agent callers: the quote is text people or agents wrote, fenced. */
+  untrusted?: true;
+}
+
+/** GET /api/documents/:docId/citations */
+export interface CitationsResponse {
+  citations: CitationDTO[];
+}

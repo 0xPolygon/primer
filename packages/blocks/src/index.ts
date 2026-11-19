@@ -14,4 +14,5 @@ export {
   type PrimerBlockServices,
 } from './services.ts';
 export { dropdownOptions } from './chips.tsx';
+export { citationHref, citationLabel, type CitationProps } from './citation.tsx';
 export { BLOCK_TEXT_EN, type BlockText } from './text.ts';
