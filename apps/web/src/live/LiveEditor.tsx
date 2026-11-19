@@ -7,7 +7,7 @@ import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
 import { createExtension } from '@blocknote/core';
 import { CommentsExtension } from '@blocknote/core/comments';
 import { ThreadsSidebar } from '@blocknote/react';
-import { PrimerBlocksContext, primerSchema, type WidgetBlockProps } from '@primer/blocks';
+import { PrimerBlocksContext, primerSchema, type DataTableBlockProps, type WidgetBlockProps } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
 import type { CatchUpSince, DocFileUploadResponse, Target, ViewerRole } from '@polygonlabs/primer-api-types';
@@ -32,6 +32,7 @@ import { useBlockServices, type ChoiceStore } from './blockServices.ts';
 import { DecisionRegister } from './DecisionRegister.tsx';
 import { PageView } from './PageView.tsx';
 import { WidgetView } from './WidgetView.tsx';
+import { DataTableView, type DataTableViewProps } from './DataTableView.tsx';
 import './blocks.css';
 
 export type LiveEditorProps = {
@@ -81,8 +82,8 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // Taken once: a refetch of the document records a newer visit.
   const [since] = useState(() => props.lastView ?? null);
   const [catchUp, setCatchUp] = useState<Target[]>([]);
-  // Page and widget blocks render their views and overlay through the block services.
-  const { live, documentId, readOnly, theme, userId, role, userName } = props;
+  // Page, widget and data-table blocks render their views and overlay through the block services.
+  const { live, documentId, readOnly, theme, userId, role, userName, canVote } = props;
   const withPages = useMemo(() => {
     const context = {
       doc: live.doc,
@@ -94,8 +95,12 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
     };
     const BoundPageView = (p: { blockId: string; title: string }) => <PageView {...context} {...p} />;
     const BoundWidgetView = (p: { blockId: string; props: WidgetBlockProps }) => <WidgetView {...context} {...p} />;
-    return { ...services, PageView: BoundPageView, WidgetView: BoundWidgetView };
-  }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName]);
+    // Records are written by whoever may vote (owner, editor, responder).
+    const BoundDataTableView = (p: { blockId: string; props: DataTableBlockProps; update: DataTableViewProps['update'] }) => (
+      <DataTableView {...context} {...p} canWrite={canVote} />
+    );
+    return { ...services, PageView: BoundPageView, WidgetView: BoundWidgetView, DataTableView: BoundDataTableView };
+  }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName, canVote]);
   return (
     <PrimerBlocksContext.Provider value={withPages}>
       <div className="flex h-full flex-col" data-live-editor={props.documentId}>
@@ -326,6 +331,13 @@ function primerSlashItems(editor: unknown) {
       aliases: ['task', 'todo', 'assign', 'action'],
       group: t('slash.group'),
       onItemClick: insert({ type: 'task' }),
+    },
+    {
+      title: t('slash.dataTable'),
+      subtext: t('slash.dataTableHint'),
+      aliases: ['table', 'data', 'records', 'database', 'sheet'],
+      group: t('slash.group'),
+      onItemClick: insert({ type: 'dataTable' }),
     },
   ];
 }

@@ -65,7 +65,9 @@ export interface RecordsHostDeps {
 
 export function createRecordsHost(binding: PageBinding, deps: RecordsHostDeps): RecordsHost {
   const reads = typeof binding === 'object' && binding.policy === 'records';
-  const capability = reads
+  // A checkpoint's page reads the records frozen with it, inside the page
+  // (v1.js): the host binds no live access, so every call it sees is refused.
+  const capability = reads && !binding.frozen
     ? createRecordsCapability({ documentId: binding.documentId, pageTarget: binding.versionId, fetchImpl: deps.fetchImpl })
     : null;
   let post: ((msg: OutboundProtocolMessage) => void) | null = null;

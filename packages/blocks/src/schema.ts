@@ -11,6 +11,7 @@ import { choiceBlock, choiceOptionBlock } from './choice.tsx';
 import { taskBlock } from './task.tsx';
 import { pageBlock } from './page.tsx';
 import { widgetBlock } from './widget.tsx';
+import { dataTableBlock } from './dataTable.tsx';
 
 /**
  * Primer's document model: every stock BlockNote block, code with languages,
@@ -30,6 +31,7 @@ export const primerSchema = BlockNoteSchema.create({
     task: taskBlock(),
     page: pageBlock(),
     widget: widgetBlock(),
+    dataTable: dataTableBlock(),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip, citation: citationChip },
 });
