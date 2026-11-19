@@ -7,7 +7,7 @@ import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
 import { createExtension } from '@blocknote/core';
 import { CommentsExtension } from '@blocknote/core/comments';
 import { ThreadsSidebar } from '@blocknote/react';
-import { PrimerBlocksContext, primerSchema } from '@primer/blocks';
+import { PrimerBlocksContext, primerSchema, type WidgetBlockProps } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
 import type { CatchUpSince, DocFileUploadResponse, Target, ViewerRole } from '@polygonlabs/primer-api-types';
@@ -31,6 +31,7 @@ import { CatchUpPanel, ChangeHighlights, useCheckpointChanges } from './changes.
 import { useBlockServices, type ChoiceStore } from './blockServices.ts';
 import { DecisionRegister } from './DecisionRegister.tsx';
 import { PageView } from './PageView.tsx';
+import { WidgetView } from './WidgetView.tsx';
 import './blocks.css';
 
 export type LiveEditorProps = {
@@ -80,7 +81,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // Taken once: a refetch of the document records a newer visit.
   const [since] = useState(() => props.lastView ?? null);
   const [catchUp, setCatchUp] = useState<Target[]>([]);
-  // Page blocks render their frame and overlay through the block services.
+  // Page and widget blocks render their views and overlay through the block services.
   const { live, documentId, readOnly, theme, userId, role, userName } = props;
   const withPages = useMemo(() => {
     const context = {
@@ -92,7 +93,8 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
       viewer: { id: userId, isOwner: role === 'owner', canComment: role !== 'stranger', name: userName },
     };
     const BoundPageView = (p: { blockId: string; title: string }) => <PageView {...context} {...p} />;
-    return { ...services, PageView: BoundPageView };
+    const BoundWidgetView = (p: { blockId: string; props: WidgetBlockProps }) => <WidgetView {...context} {...p} />;
+    return { ...services, PageView: BoundPageView, WidgetView: BoundWidgetView };
   }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName]);
   return (
     <PrimerBlocksContext.Provider value={withPages}>

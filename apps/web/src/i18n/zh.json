@@ -626,5 +626,15 @@
   "liveEditor.changes": "自检查点以来的更改",
   "addVersionModal.suggestedTitle": "没有新版本：你的更改已成为建议",
   "addVersionModal.suggestedBody": "建议：{suggested}。冲突：{conflicts}。未更改：{unchanged}。有编辑权限的人会在文档中接受或拒绝每条建议。",
-  "addVersionModal.openSuggestions": "打开文档"
+  "addVersionModal.openSuggestions": "打开文档",
+  "overlay.editLabel": "编辑标签",
+  "widget.drawing": "代理正在绘制此小组件。",
+  "widget.unavailable": "此小组件暂时无法显示。",
+  "widget.comments": "对此小组件的评论",
+  "widget.replies": "另外 {count} 条",
+  "widget.commentOn": "评论 {name}",
+  "widget.commentPlaceholder": "添加评论",
+  "widget.comment": "评论",
+  "widget.cancel": "取消",
+  "widget.commentFailed": "评论未保存，请重试。"
 }

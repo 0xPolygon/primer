@@ -165,6 +165,8 @@ describe('route scope table', () => {
       'primer_add_task',
       'primer_update_task',
       'primer_promote_conversation',
+      'primer_widget_draft',
+      'primer_widget_publish',
     ]);
   });
 });

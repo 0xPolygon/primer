@@ -626,5 +626,15 @@
   "liveEditor.changes": "Änderungen seit Checkpoint",
   "addVersionModal.suggestedTitle": "Keine neue Version: Ihre Änderungen sind Vorschläge",
   "addVersionModal.suggestedBody": "Vorgeschlagen: {suggested}. Konflikte: {conflicts}. Unverändert: {unchanged}. Eine Person mit Bearbeitungsrechten nimmt jeden Vorschlag im Dokument an oder lehnt ihn ab.",
-  "addVersionModal.openSuggestions": "Dokument öffnen"
+  "addVersionModal.openSuggestions": "Dokument öffnen",
+  "overlay.editLabel": "Beschriftung bearbeiten",
+  "widget.drawing": "Der Agent zeichnet dieses Widget.",
+  "widget.unavailable": "Dieses Widget kann gerade nicht angezeigt werden.",
+  "widget.comments": "Kommentare zu diesem Widget",
+  "widget.replies": "{count} weitere",
+  "widget.commentOn": "Kommentar zu {name}",
+  "widget.commentPlaceholder": "Kommentar hinzufügen",
+  "widget.comment": "Kommentieren",
+  "widget.cancel": "Abbrechen",
+  "widget.commentFailed": "Der Kommentar wurde nicht gespeichert. Bitte erneut versuchen."
 }

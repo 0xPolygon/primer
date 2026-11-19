@@ -30,6 +30,7 @@ import { tokenScopes } from '../auth/scopes.ts';
 import { publishDocument } from '../lib/publish.ts';
 import { recheckAccess } from '../auth/revocation.ts';
 import { refusalResponse } from './upload.ts';
+import { bundleWidgets } from '../widgets/bundle.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -591,7 +592,13 @@ export function registerDocumentRoutes(
       const decisions = await exportDecisions(docId);
       html = (
         await withLiveDocument(docId, async (doc) =>
-          renderStatic(doc, access.title, decisions, access.format === 'html' ? await currentPageHtml(deps.storage, docId, doc) : null),
+          renderStatic(
+            doc,
+            access.title,
+            decisions,
+            access.format === 'html' ? await currentPageHtml(deps.storage, docId, doc) : null,
+            (await bundleWidgets(doc, docId)).embed,
+          ),
         )
       ).served;
     }

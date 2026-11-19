@@ -1,4 +1,5 @@
 // Page text in the Y.Doc: one fragment `page/<blockId>/<pid>` per pid (C3),
+// and widget labels the same way, `widget/<blockId>/<textId>` (widgets/labels.ts),
 // holding a single paragraph whose text (hard breaks as `\n`) is the pid's
 // current text. The paragraph's block id is the page block's id, so a pid
 // target `{ tabId, blockId, pid }` locates it like any block: preconditions,

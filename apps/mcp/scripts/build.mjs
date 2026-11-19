@@ -55,9 +55,8 @@ await chmod(outfile, 0o755);
 
 // The authoring skill, served as the MCP resource primer://skills/authoring.
 await mkdir(resolve(mcpRoot, 'dist/skills'), { recursive: true });
-await copyFile(
-  resolve(mcpRoot, '../../plugins/primer/skills/primer/authoring.md'),
-  resolve(mcpRoot, 'dist/skills/authoring.md'),
-);
+for (const name of ['authoring.md', 'widgets.md']) {
+  await copyFile(resolve(mcpRoot, `../../plugins/primer/skills/primer/${name}`), resolve(mcpRoot, `dist/skills/${name}`));
+}
 
-console.log('mcp build complete: dist/index.js, dist/skills/authoring.md');
+console.log('mcp build complete: dist/index.js, dist/skills/authoring.md, dist/skills/widgets.md');

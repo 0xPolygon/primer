@@ -55,8 +55,11 @@ export function Overlay(props: OverlayProps) {
   const { doc, documentId, target, kind, readOnly, theme, viewer, onClose } = props;
   const box = useRef<HTMLDivElement>(null);
   const threadStore = useMemo(
-    () => (kind === 'text' && target.pid ? new PrimerThreadStore(documentId, target.tabId, viewer, undefined, { blockId: target.blockId, pid: target.pid }) : null),
-    [documentId, kind, target.tabId, target.blockId, target.pid, viewer],
+    () =>
+      kind === 'text' && (target.pid || target.textId)
+        ? new PrimerThreadStore(documentId, target.tabId, viewer, undefined, { blockId: target.blockId, pid: target.pid, textId: target.textId })
+        : null,
+    [documentId, kind, target.tabId, target.blockId, target.pid, target.textId, viewer],
   );
   useThreadEvents(documentId, () => void threadStore?.refresh());
 
@@ -119,7 +122,7 @@ export function Overlay(props: OverlayProps) {
     <div
       ref={box}
       role="dialog"
-      aria-label={t(kind === 'text' ? 'overlay.editText' : 'overlay.editBlock')}
+      aria-label={t(kind === 'text' ? (target.textId ? 'overlay.editLabel' : 'overlay.editText') : 'overlay.editBlock')}
       data-primer-overlay={subFragmentName(target)}
       className="fixed z-50 rounded border border-sky-400 bg-white shadow-lg dark:bg-neutral-900"
       style={{ left: props.rect.x - 4, top: props.rect.y - 4, width: width + 8, minHeight: props.rect.height + 8 }}
