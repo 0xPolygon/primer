@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useEffect, useState } from 'react';
 import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { BottomSheet, type SnapPoint } from './BottomSheet.tsx';
@@ -50,7 +51,7 @@ export function MobileFoldersSheet(props: MobileFoldersSheetProps) {
   function submitCreate() {
     const normalized = normalizeFolderNameClient(draftName);
     if (!normalized.ok) {
-      setCreateError(normalized.reason === 'empty' ? 'Name required' : 'Too long (max 60)');
+      setCreateError(normalized.reason === 'empty' ? t('mobileFoldersSheet.nameRequired') : t('mobileFoldersSheet.tooLong'));
       return;
     }
     create.mutate(
@@ -62,7 +63,7 @@ export function MobileFoldersSheet(props: MobileFoldersSheetProps) {
           setCreateError(null);
         },
         onError: (e) => {
-          setCreateError(String(e).includes('409') ? 'Name already used' : 'Could not create');
+          setCreateError(String(e).includes('409') ? t('mobileFoldersSheet.nameUsed') : t('mobileFoldersSheet.couldNotCreate'));
         },
       },
     );
@@ -81,14 +82,14 @@ export function MobileFoldersSheet(props: MobileFoldersSheetProps) {
         <div className="flex flex-col gap-1 px-3 py-2 text-sm">
           {/* All docs shortcut */}
           <SheetRow
-            label="All docs"
+            label={t('mobileFoldersSheet.allDocs')}
             count={props.totalCount}
             active={props.selectedFolderId === null}
             onClick={() => select(null)}
           />
           {/* Uncategorized shortcut */}
           <SheetRow
-            label="Uncategorized"
+            label={t('mobileFoldersSheet.uncategorized')}
             count={props.uncategorizedCount}
             active={props.selectedFolderId === FOLDER_UNCATEGORIZED}
             onClick={() => select(FOLDER_UNCATEGORIZED)}
@@ -130,7 +131,7 @@ export function MobileFoldersSheet(props: MobileFoldersSheetProps) {
                       setCreateError(null);
                     }
                   }}
-                  placeholder="New folder name"
+                  placeholder={t('mobileFoldersSheet.newFolderName')}
                   className="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
                   disabled={create.isPending}
                 />
@@ -144,7 +145,7 @@ export function MobileFoldersSheet(props: MobileFoldersSheetProps) {
                 onClick={() => setIsAdding(true)}
                 className="text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
               >
-                + New folder
+                {t('mobileFoldersSheet.newFolder')}
               </button>
             )}
           </div>
@@ -155,10 +156,10 @@ export function MobileFoldersSheet(props: MobileFoldersSheetProps) {
 }
 
 function buildHandleLabel(selectedFolderId: string | null, folders: FolderDTO[]): string {
-  if (selectedFolderId === null) return 'Folders';
-  if (selectedFolderId === FOLDER_UNCATEGORIZED) return 'Folders · Uncategorized';
+  if (selectedFolderId === null) return t('mobileFoldersSheet.folders');
+  if (selectedFolderId === FOLDER_UNCATEGORIZED) return t('mobileFoldersSheet.foldersUncategorized');
   const folder = folders.find((f) => f.id === selectedFolderId);
-  return folder ? `Folders · ${folder.name}` : 'Folders';
+  return folder ? t('mobileFoldersSheet.foldersNamed', { name: folder.name }) : t('mobileFoldersSheet.folders');
 }
 
 function SheetRow(props: { label: string; count: number; active: boolean; onClick: () => void }) {

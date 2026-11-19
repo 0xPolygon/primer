@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useEffect, useRef, useState } from 'react';
 import type {
   Anchor,
@@ -179,7 +180,7 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
         ref={iframeRef}
         src={src}
         sandbox="allow-scripts allow-forms allow-modals allow-downloads"
-        title="Artifact"
+        title={t('artifactIframe.artifact')}
         style={{ border: 0, display: 'block', ...fitStyle }}
       />
     </div>

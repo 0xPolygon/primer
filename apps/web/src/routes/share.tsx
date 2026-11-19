@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { isPlausibleEmail, isCompleteCode, contentUrl, shareApi } from '../lib/shareViewer.ts';
+import { t } from '../i18n/index.ts';
 
 type Step =
   | { kind: 'checking' }
@@ -19,7 +20,7 @@ function PolygonWordmark() {
       viewBox="0 0 729 200"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      aria-label="Polygon · Primer"
+      aria-label={t('share.wordmarkLabel')}
     >
       <path
         d="M89.2494 79.5209L75.937 71.8399L36 94.8805V140.959L75.937 164L115.877 140.959V69.2796L138.063 56.4803L160.252 69.2796V94.8805L138.063 107.68L124.751 100.001V120.479L138.063 128.16L178 105.119V59.0406L138.063 36L98.1259 59.0406V130.72L75.937 143.52L53.7506 130.72V105.119L75.937 92.3202L89.2494 99.9988V79.5209Z"
@@ -39,14 +40,14 @@ function PolygonWordmark() {
 function SubBrandLabel() {
   return (
     <span className="text-xs font-medium tracking-widest uppercase text-[#A0A1A6] ml-3">
-      Primer
+      {t('share.subBrand')}
     </span>
   );
 }
 
 export function SharePage() {
   const { shareToken = '' } = useParams();
-  useDocumentTitle('Shared document — Primer');
+  useDocumentTitle(t('share.pageTitle'));
   const [step, setStep] = useState<Step>({ kind: 'checking' });
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -87,11 +88,11 @@ export function SharePage() {
     });
     setBusy(false);
     if (res.status === 503) {
-      setError('Email delivery is not available right now. Please contact the person who shared this document.');
+      setError(t('share.emailUnavailable'));
       return;
     }
     if (res.status === 429) {
-      setError('Too many requests. Please wait a minute and try again.');
+      setError(t('share.tooManyRequests'));
       return;
     }
     // Enumeration-safe by design: we always proceed to the code screen.
@@ -114,9 +115,9 @@ export function SharePage() {
       return;
     }
     if (res.status === 429) {
-      setError('Too many attempts. Please wait a minute and try again.');
+      setError(t('share.tooManyAttempts'));
     } else {
-      setError("That code didn't work. Check it and try again, or request a new one.");
+      setError(t('share.badCode'));
     }
   }
 
@@ -134,15 +135,15 @@ export function SharePage() {
       <div className="w-full max-w-md rounded-2xl border border-[#1B1B1D] bg-[#1F1E20] p-8 shadow-xl">
         {step.kind === 'checking' && (
           // BRAND PASS: secondary text color Grey 200 (#A0A1A6)
-          <p className="text-sm text-[#A0A1A6]">Checking access…</p>
+          <p className="text-sm text-[#A0A1A6]">{t('share.checkingAccess')}</p>
         )}
 
         {step.kind === 'email' && (
           <form onSubmit={submitEmail}>
             {/* BRAND PASS: headings in white (#FFFFFF), body in Grey 100 (#F2F3F7) */}
-            <h1 className="text-lg font-semibold text-[#FFFFFF] mb-1">A document has been shared with you</h1>
+            <h1 className="text-lg font-semibold text-[#FFFFFF] mb-1">{t('share.sharedWithYou')}</h1>
             <p className="text-sm text-[#A0A1A6] mb-6">
-              Enter your email address. If it has access, we'll send you a verification code.
+              {t('share.enterEmail')}
             </p>
             {/* BRAND PASS: input with Stroke border, Grey 300 placeholder, white text */}
             <input
@@ -150,7 +151,7 @@ export function SharePage() {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
+              placeholder={t('share.emailPlaceholder')}
               className="w-full rounded-lg border border-[#353535] bg-[#141415] text-[#F2F3F7] placeholder:text-[#595A5F] px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-1 focus:ring-[#6700E5] focus:border-[#6700E5]"
             />
             {/* BRAND PASS: primary button — POL Purple (#6700E5), white text */}
@@ -159,17 +160,16 @@ export function SharePage() {
               disabled={!isPlausibleEmail(email) || busy}
               className="w-full rounded-lg bg-[#6700E5] text-white py-2 text-sm font-medium disabled:opacity-40 hover:bg-[#5500C0] transition-colors"
             >
-              {busy ? 'Sending…' : 'Send code'}
+              {busy ? t('share.sending') : t('share.sendCode')}
             </button>
           </form>
         )}
 
         {step.kind === 'code' && (
           <form onSubmit={submitCode}>
-            <h1 className="text-lg font-semibold text-[#FFFFFF] mb-1">Check your email</h1>
+            <h1 className="text-lg font-semibold text-[#FFFFFF] mb-1">{t('share.checkEmail')}</h1>
             <p className="text-sm text-[#A0A1A6] mb-6">
-              If <span className="font-medium text-[#F2F3F7]">{step.email}</span> has access, we've sent it a 6-digit code.
-              The code expires in 10 minutes.
+              {t('share.codeSentPrefix')} <span className="font-medium text-[#F2F3F7]">{step.email}</span> {t('share.codeSentSuffix')}
             </p>
             {/* BRAND PASS: OTP input — centered, large tracking, Stroke border */}
             <input
@@ -188,7 +188,7 @@ export function SharePage() {
               disabled={!isCompleteCode(code) || busy}
               className="w-full rounded-lg bg-[#6700E5] text-white py-2 text-sm font-medium disabled:opacity-40 hover:bg-[#5500C0] transition-colors"
             >
-              {busy ? 'Verifying…' : 'View document'}
+              {busy ? t('share.verifying') : t('share.viewDocument')}
             </button>
             {/* BRAND PASS: ghost link — Grey 200 secondary text */}
             <button
@@ -196,28 +196,28 @@ export function SharePage() {
               onClick={() => { setStep({ kind: 'email' }); setCode(''); setError(null); }}
               className="w-full mt-3 text-xs text-[#A0A1A6] underline hover:text-[#F2F3F7] transition-colors"
             >
-              Use a different email or request a new code
+              {t('share.useDifferentEmail')}
             </button>
           </form>
         )}
 
         {step.kind === 'ready' && (
           <div>
-            <h1 className="text-lg font-semibold text-[#FFFFFF] mb-1">{step.documentTitle || 'Shared document'}</h1>
+            <h1 className="text-lg font-semibold text-[#FFFFFF] mb-1">{step.documentTitle || t('share.sharedDocument')}</h1>
             {step.published ? (
               <>
-                <p className="text-sm text-[#A0A1A6] mb-6">You're verified on this device.</p>
+                <p className="text-sm text-[#A0A1A6] mb-6">{t('share.verified')}</p>
                 {/* BRAND PASS: primary action link — POL Purple (#6700E5) */}
                 <a
                   href={contentUrl(shareToken)}
                   className="block w-full rounded-lg bg-[#6700E5] text-white py-2 text-center text-sm font-medium hover:bg-[#5500C0] transition-colors"
                 >
-                  Open document
+                  {t('share.openDocument')}
                 </a>
               </>
             ) : (
               <p className="text-sm text-[#A0A1A6]">
-                Nothing is published to this share yet. Check back later, or contact the person who shared it.
+                {t('share.nothingPublished')}
               </p>
             )}
           </div>

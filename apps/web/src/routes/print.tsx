@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
@@ -14,7 +15,7 @@ export function PrintPage() {
   const [params] = useSearchParams();
   const docId = extractCanonicalDocId(raw);
   const frame = useRef<HTMLIFrameElement>(null);
-  useDocumentTitle('Print');
+  useDocumentTitle(t('print.title'));
   if (!docId) return null;
   const version = params.get('version');
   const src = `/api/documents/${docId}/print${version ? `?version=${encodeURIComponent(version)}` : ''}`;
@@ -26,10 +27,10 @@ export function PrintPage() {
           onClick={() => frame.current?.contentWindow?.postMessage('primer:print', '*')}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          Print / PDF
+          {t('print.printPdf')}
         </button>
       </div>
-      <iframe ref={frame} src={src} sandbox="allow-scripts allow-modals" title="Print preview" className="min-h-0 flex-1 bg-white" />
+      <iframe ref={frame} src={src} sandbox="allow-scripts allow-modals" title={t('print.preview')} className="min-h-0 flex-1 bg-white" />
     </div>
   );
 }

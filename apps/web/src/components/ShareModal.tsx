@@ -14,6 +14,7 @@ import { copyText } from '../lib/clipboardCopy.ts';
 import { internalDocUrl } from '../lib/internalDocUrl.ts';
 import { ExternalSharePanel } from './ExternalSharePanel.tsx';
 import { CopyIcon, CheckIcon } from './icons.tsx';
+import { t } from '../i18n';
 
 interface Props {
   open: boolean;
@@ -117,7 +118,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
     try {
       await setVisibility.mutateAsync(next);
     } catch (e) {
-      setInlineError(`Could not change visibility: ${(e as Error).message}`);
+      setInlineError(t('shareModal.changeVisibilityFailed', { message: (e as Error).message }));
     }
   }
 
@@ -131,10 +132,10 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
       setPendingUserId(null);
     } catch (e) {
       const msg = (e as Error).message;
-      if (msg.includes('collaborator_exists')) setInlineError('Already a collaborator.');
-      else if (msg.includes('invalid_role_for_visibility')) setInlineError('Commenter is only meaningful under private visibility.');
-      else if (msg.includes('owner_not_collaborator')) setInlineError('The doc owner is already the doc owner.');
-      else setInlineError(`Could not add: ${msg}`);
+      if (msg.includes('collaborator_exists')) setInlineError(t('shareModal.alreadyCollaborator'));
+      else if (msg.includes('invalid_role_for_visibility')) setInlineError(t('shareModal.commenterPrivateOnly'));
+      else if (msg.includes('owner_not_collaborator')) setInlineError(t('shareModal.ownerAlreadyOwner'));
+      else setInlineError(t('shareModal.addFailed', { message: msg }));
     }
   }
 
@@ -143,7 +144,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
     try {
       await updateRole.mutateAsync({ userId: row.userId, role: next });
     } catch (e) {
-      setInlineError(`Could not change role: ${(e as Error).message}`);
+      setInlineError(t('shareModal.changeRoleFailed', { message: (e as Error).message }));
     }
   }
 
@@ -152,7 +153,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
     try {
       await removeCollab.mutateAsync(row.userId);
     } catch (e) {
-      setInlineError(`Could not remove: ${(e as Error).message}`);
+      setInlineError(t('shareModal.removeFailed', { message: (e as Error).message }));
     }
   }
 
@@ -174,11 +175,11 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
       >
         <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
           <h2 id="share-modal-title" className="text-base font-semibold">
-            Share "{doc.data?.document.title ?? '…'}"
+            {t('shareModal.title', { title: doc.data?.document.title ?? '…' })}
           </h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t('shareModal.close')}
             onClick={onClose}
             className="rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800"
           >
@@ -189,7 +190,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
         <div className="space-y-5 px-4 py-4">
           {/* Internal link */}
           <section>
-            <h3 className="mb-2 text-sm font-semibold">Internal link</h3>
+            <h3 className="mb-2 text-sm font-semibold">{t('shareModal.internalLink')}</h3>
             <div className="flex items-center gap-2">
               <input
                 readOnly
@@ -199,8 +200,8 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
               />
               <button
                 type="button"
-                title={linkCopied ? 'Copied' : 'Copy internal link'}
-                aria-label={linkCopied ? 'Copied' : 'Copy internal link'}
+                title={linkCopied ? t('shareModal.copied') : t('shareModal.copyInternalLink')}
+                aria-label={linkCopied ? t('shareModal.copied') : t('shareModal.copyInternalLink')}
                 className={`rounded border border-neutral-300 p-1.5 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800 ${linkCopied ? 'text-green-600 dark:text-green-400' : ''}`}
                 onClick={() => void onCopyInternalLink()}
               >
@@ -209,14 +210,14 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
             </div>
             <p className="mt-2 text-xs text-neutral-500">
               {visibility === 'org'
-                ? 'For sharing inside Polygon — anyone at Polygon can open this link.'
-                : 'For sharing inside Polygon — only you and the collaborators below can open this link.'}
+                ? t('shareModal.linkHintOrg')
+                : t('shareModal.linkHintPrivate')}
             </p>
           </section>
 
           {/* Visibility */}
           <section>
-            <h3 className="mb-2 text-sm font-semibold">Visibility</h3>
+            <h3 className="mb-2 text-sm font-semibold">{t('shareModal.visibility')}</h3>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -227,7 +228,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
                     : 'rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
                 }
               >
-                Everyone at Polygon
+                {t('shareModal.everyone')}
               </button>
               <button
                 type="button"
@@ -238,19 +239,19 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
                     : 'rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
                 }
               >
-                Private
+                {t('shareModal.private')}
               </button>
             </div>
             <p className="mt-2 text-xs text-neutral-500">
               {visibility === 'org'
-                ? 'Anyone at Polygon can read and comment. Responders can also respond through the document. Only owner and editors can make changes.'
-                : 'Only you and the collaborators listed below can access this document.'}
+                ? t('shareModal.visibilityHintOrg')
+                : t('shareModal.visibilityHintPrivate')}
             </p>
           </section>
 
           {/* Add collaborator */}
           <section>
-            <h3 className="mb-2 text-sm font-semibold">Add collaborator</h3>
+            <h3 className="mb-2 text-sm font-semibold">{t('shareModal.addCollaborator')}</h3>
             <div className="space-y-2">
               <input
                 type="text"
@@ -259,7 +260,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
                   setSearchInput(e.target.value);
                   setPendingUserId(null);
                 }}
-                placeholder="Search by name…"
+                placeholder={t('shareModal.searchPlaceholder')}
                 className="w-full rounded border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-950"
               />
               {debouncedQ.length > 0 && search.data && search.data.length > 0 && (
@@ -284,7 +285,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
                 </ul>
               )}
               {debouncedQ.length > 0 && search.data && search.data.length === 0 && (
-                <p className="text-xs text-neutral-500">No matches.</p>
+                <p className="text-xs text-neutral-500">{t('shareModal.noMatches')}</p>
               )}
               {pendingUserId && (
                 <div className="flex items-center gap-2">
@@ -296,7 +297,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
                     {options.map((o) => (
                       <option key={o.value} value={o.value} disabled={o.disabled} title={o.tooltip}>
                         {o.label}
-                        {o.disabled ? ' (private only)' : ''}
+                        {o.disabled ? t('shareModal.privateOnly') : ''}
                       </option>
                     ))}
                   </select>
@@ -306,7 +307,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
                     disabled={addCollab.isPending}
                     className="rounded border border-neutral-900 bg-neutral-900 px-3 py-1 text-sm text-white disabled:opacity-50"
                   >
-                    {addCollab.isPending ? 'Adding…' : 'Add'}
+                    {addCollab.isPending ? t('shareModal.adding') : t('shareModal.add')}
                   </button>
                 </div>
               )}
@@ -315,9 +316,9 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
 
           {/* Current collaborators */}
           <section>
-            <h3 className="mb-2 text-sm font-semibold">Collaborators</h3>
+            <h3 className="mb-2 text-sm font-semibold">{t('shareModal.collaborators')}</h3>
             {collabs.data && collabs.data.length === 0 && (
-              <p className="text-xs text-neutral-500">No collaborators yet.</p>
+              <p className="text-xs text-neutral-500">{t('shareModal.noCollaborators')}</p>
             )}
             {collabs.data && collabs.data.length > 0 && (
               <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
@@ -340,13 +341,13 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
                             title={o.tooltip}
                           >
                             {o.label}
-                            {o.disabled && o.value !== c.role ? ' (private only)' : ''}
+                            {o.disabled && o.value !== c.role ? t('shareModal.privateOnly') : ''}
                           </option>
                         ))}
                       </select>
                       <button
                         type="button"
-                        aria-label={`Remove ${c.displayName}`}
+                        aria-label={t('shareModal.removeCollaborator', { name: c.displayName })}
                         onClick={() => onRemove(c)}
                         className="rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-red-600 dark:hover:bg-neutral-800"
                       >
@@ -374,7 +375,7 @@ export function ShareModal({ open, docId, versionNumber, onClose }: Props) {
             onClick={onClose}
             className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
-            Done
+            {t('shareModal.done')}
           </button>
         </footer>
       </div>

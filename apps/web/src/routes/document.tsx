@@ -101,7 +101,7 @@ export function DocumentSurface(props: {
 }) {
   if (!props.live) return <>{props.frame()}</>;
   return (
-    <Suspense fallback={<div className="p-4 text-sm text-neutral-500">Loading editor…</div>}>
+    <Suspense fallback={<div className="p-4 text-sm text-neutral-500">{t('document.loadingEditor')}</div>}>
       <LiveEditor documentId={props.documentId} readOnly={props.readOnly} theme={props.theme} userName={props.userName} onOpenLegacyVersion={props.onOpenLegacyVersion} />
     </Suspense>
   );
@@ -125,6 +125,7 @@ interface PendingGrant {
 }
 import { DocDetailFolderControl } from '../components/DocDetailFolderControl.tsx';
 import { relativeTime } from '../lib/relativeTime.ts';
+import { t } from '../i18n';
 
 // A pending anchor belongs to the version it was captured on: the new
 // thread posts there, never to whatever the page shows at submit time.
@@ -580,7 +581,7 @@ function DocumentPageInner() {
       URL.revokeObjectURL(url);
       return null;
     } catch {
-      return { kind: 'error', message: 'Download failed. Try again.' };
+      return { kind: 'error', message: t('document.downloadFailed') };
     }
   }
 
@@ -640,7 +641,7 @@ function DocumentPageInner() {
   }
 
   async function copyComments(): Promise<ActionFeedback> {
-    if (!docQuery.data) return { kind: 'error', message: 'Comments not loaded yet.' };
+    if (!docQuery.data) return { kind: 'error', message: t('document.commentsNotLoaded') };
     const md = formatThreadsAsMarkdown(
       { title: docQuery.data.document.title },
       { versionNumber: currentVersionNumber },
@@ -648,8 +649,8 @@ function DocumentPageInner() {
     );
     const result = await copyText(md);
     return result === 'failed'
-      ? { kind: 'error', message: 'Copy failed. Try Download instead.' }
-      : { kind: 'success', message: 'Copied' };
+      ? { kind: 'error', message: t('document.copyFailed') }
+      : { kind: 'success', message: t('document.copied') };
   }
 
   const togglePickMode = () => {
@@ -715,7 +716,7 @@ function DocumentPageInner() {
       if (err instanceof ApiError && err.status === 404) {
         throw new ApiError(
           404,
-          "This comment can't be posted: the version it was started on is gone, or you can no longer comment on this document. Your text is still here.",
+          t('document.commentCannotBePosted'),
           err.code,
         );
       }
@@ -797,11 +798,11 @@ function DocumentPageInner() {
     return () => window.removeEventListener('resize', compute);
   }, [readMostly, isMobile, pendingSelection]);
 
-  if (docQuery.isLoading) return <div className="text-neutral-500">Loading…</div>;
+  if (docQuery.isLoading) return <div className="text-neutral-500">{t('document.loading')}</div>;
   if (docQuery.error) {
     return (
       <div className="text-red-600 dark:text-red-400">
-        Could not load document: {(docQuery.error as Error).message}
+        {t('document.loadFailed', { message: (docQuery.error as Error).message })}
       </div>
     );
   }
@@ -810,16 +811,16 @@ function DocumentPageInner() {
   if (versionNotFound) {
     return (
       <div className="space-y-3">
-        <h1 className="text-xl font-semibold">Version not found</h1>
+        <h1 className="text-xl font-semibold">{t('document.versionNotFound')}</h1>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          Version {requestedNumber} doesn't exist for this document.
+          {t('document.versionMissing', { number: requestedNumber })}
         </p>
         <button
           type="button"
           onClick={() => navigate(`/d/${docId}`)}
           className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
         >
-          Back to latest
+          {t('document.backToLatest')}
         </button>
       </div>
     );
@@ -833,10 +834,10 @@ function DocumentPageInner() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({}),
     });
-    if (!res.ok) return { kind: 'error', message: 'Saving the checkpoint failed.' };
+    if (!res.ok) return { kind: 'error', message: t('document.saveCheckpointFailed') };
     const checkpoint = (await res.json()) as CheckpointResponse;
     await queryClient.invalidateQueries({ queryKey: ['versions', docId] });
-    return { kind: 'success', message: `Checkpoint v${checkpoint.versionNumber} saved` };
+    return { kind: 'success', message: t('document.checkpointSaved', { number: checkpoint.versionNumber }) };
   }
 
   function exportAs(format: 'markdown' | 'html' | 'print') {
@@ -912,35 +913,35 @@ function DocumentPageInner() {
             )}
             <EditableField
               value={document.title}
-              placeholder="Add a title"
+              placeholder={t('document.addTitle')}
               canEdit={canEdit}
               displayClassName="text-lg md:text-xl font-semibold line-clamp-2 md:line-clamp-none"
               maxLength={200}
-              ariaLabel="Document title"
+              ariaLabel={t('document.titleLabel')}
               onSave={async (next) => {
                 if (next === null || next.trim().length === 0) {
-                  throw new Error('Title cannot be empty');
+                  throw new Error(t('document.titleEmpty'));
                 }
                 await editDoc.mutateAsync({ title: next });
               }}
             />
             {docQuery.data?.document.externallyShared && (
               <span
-                title="This document has an active external share"
+                title={t('document.externalShareTooltip')}
                 className="ml-2 inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 text-[11px] font-medium align-middle"
               >
-                Shared externally
+                {t('document.sharedExternally')}
               </span>
             )}
           </div>
           <EditableField
             value={document.description}
-            placeholder="Add a description"
+            placeholder={t('document.addDescription')}
             canEdit={canEdit}
             multiline
             displayClassName="max-w-[60ch] break-words text-sm text-neutral-600 dark:text-neutral-400 line-clamp-2 md:line-clamp-none"
             maxLength={2000}
-            ariaLabel="Document description"
+            ariaLabel={t('document.descriptionLabel')}
             onSave={async (next) => {
               await editDoc.mutateAsync({ description: next });
             }}
@@ -968,7 +969,7 @@ function DocumentPageInner() {
                   : 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200'
               }`}
             >
-              {pickMode ? 'Cancel' : '+ Add Comment'}
+              {pickMode ? t('document.cancel') : t('document.addComment')}
             </button>
           )}
           <div className="hidden items-center gap-3 md:flex">
@@ -993,18 +994,15 @@ function DocumentPageInner() {
           <span>
             {isLive ? (
               <>
-                You're viewing checkpoint v{currentVersionNumber} of "{document.title}". Checkpoints are
-                read-only; switch to the live document to edit and comment.
+                {t('document.viewingCheckpoint', { number: currentVersionNumber, title: document.title })}
               </>
             ) : newerPublishedWhileOpen ? (
               <>
-                A newer version (v{latestNumber}) of "{document.title}" was published. You're
-                still viewing v{currentVersionNumber}; switch to the latest to add new comments.
+                {t('document.newerPublished', { latest: latestNumber, title: document.title, number: currentVersionNumber })}
               </>
             ) : (
               <>
-                You're viewing v{currentVersionNumber} of "{document.title}". This version is
-                read-only. Switch to v{latestNumber} (latest) to add new comments.
+                {t('document.viewingVersion', { number: currentVersionNumber, title: document.title, latest: latestNumber })}
               </>
             )}
           </span>
@@ -1013,7 +1011,7 @@ function DocumentPageInner() {
             onClick={() => void switchToLatest()}
             className="rounded border border-amber-700 px-2 py-0.5 text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/30"
           >
-            {isLive ? 'Open live document' : 'Switch to latest'}
+            {isLive ? t('document.openLive') : t('document.switchToLatest')}
           </button>
         </div>
       )}
@@ -1024,7 +1022,7 @@ function DocumentPageInner() {
           className="flex items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-200"
         >
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" aria-hidden="true" />
-          {workingNow.map((s) => s.displayName).join(', ')} {workingNow.length === 1 ? 'is' : 'are'} revising…
+          {t(workingNow.length === 1 ? 'document.revisingOne' : 'document.revisingMany', { names: workingNow.map((s) => s.displayName).join(', ') })}
         </div>
       )}
 
@@ -1038,7 +1036,7 @@ function DocumentPageInner() {
             documentId={docId!}
             readOnly={!canEdit}
             theme={theme}
-            userName={me.data?.displayName ?? 'Someone'}
+            userName={me.data?.displayName ?? t('document.someone')}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
             frame={() =>
               currentVersionId && (
@@ -1093,8 +1091,8 @@ function DocumentPageInner() {
           showBackdrop
           handleLabel={
             pickMode
-              ? 'Picking element… (tap to cancel)'
-              : `💬 ${threads.filter(hasLiveComments).length} comments`
+              ? t('document.pickingElement')
+              : t('document.commentCount', { count: threads.filter(hasLiveComments).length })
           }
         >
           <CommentSidebar
@@ -1130,7 +1128,7 @@ function DocumentPageInner() {
           }}
           className="flex items-center gap-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs text-white shadow-lg"
         >
-          <span>Add comment in sidebar →</span>
+          <span>{t('document.addCommentInSidebar')}</span>
           <button
             type="button"
             onClick={() => setPendingSelection(null)}

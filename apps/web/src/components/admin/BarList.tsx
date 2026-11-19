@@ -1,3 +1,5 @@
+import { t } from '../../i18n/index.ts';
+
 interface BarItem {
   key: string;        // stable React key
   label: string;      // visible label
@@ -10,7 +12,7 @@ interface Props {
   emptyText?: string;
 }
 
-export function BarList({ items, formatValue, emptyText = 'No activity in this window.' }: Props) {
+export function BarList({ items, formatValue, emptyText = t('barList.emptyText') }: Props) {
   if (items.length === 0) {
     return (
       <p className="text-sm text-neutral-500 dark:text-neutral-400">{emptyText}</p>

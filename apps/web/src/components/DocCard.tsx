@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { Link } from 'react-router-dom';
 import type { LibraryDocument, FolderDTO } from '@polygonlabs/primer-api-types';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
@@ -20,7 +21,7 @@ export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
       ? { background: 'linear-gradient(135deg, hsl(220, 15%, 25%), hsl(220, 15%, 45%))' }
       : { background: `linear-gradient(135deg, hsl(${hue}, 65%, 55%), hsl(${hue2}, 65%, 55%))` };
 
-  const byline = doc.ownership === 'mine' ? 'just you' : `by ${doc.uploaderDisplayName}`;
+  const byline = doc.ownership === 'mine' ? t('docCard.justYou') : t('docCard.byAuthor', { name: doc.uploaderDisplayName });
 
   const assignedFolder =
     doc.folderId !== null && doc.folderId !== selectedFolderId
@@ -34,7 +35,7 @@ export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
           {doc.visibility === 'private' && (
             <span className="absolute left-2 top-2 flex items-center gap-1 text-xs text-white">
               <PrivateLockIcon className="h-3 w-3" />
-              private
+              {t('docCard.private')}
             </span>
           )}
         </div>
@@ -43,14 +44,14 @@ export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
             {doc.title}
           </div>
           <div className="mt-1 line-clamp-2 h-8 text-xs text-neutral-500">
-            {doc.description ?? <em className="text-neutral-400 dark:text-neutral-600">no description</em>}
+            {doc.description ?? <em className="text-neutral-400 dark:text-neutral-600">{t('docCard.noDescription')}</em>}
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] text-neutral-500">
             <span className="truncate">
               {byline} · {relativeTime(doc.lastActivityAt)}
             </span>
             <span>
-              {doc.threadCount === 0 ? 'no threads' : `${doc.activeThreadCount}/${doc.threadCount} active`}
+              {doc.threadCount === 0 ? t('docCard.noThreads') : t('docCard.activeThreads', { active: doc.activeThreadCount, total: doc.threadCount })}
             </span>
           </div>
         </div>

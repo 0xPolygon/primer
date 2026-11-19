@@ -16,6 +16,7 @@ import {
   useRevokeAgentToken,
   useRevokeToken,
 } from '../queries/tokens.ts';
+import { t } from '../i18n/index.ts';
 
 const MAX_NAME_LENGTH = 100;
 
@@ -27,11 +28,11 @@ function formatDateTime(iso: string | null): string {
 }
 
 function formatLastUsed(iso: string | null): string {
-  return iso ? formatDateTime(iso) : 'Never';
+  return iso ? formatDateTime(iso) : t('settingsTokens.never');
 }
 
 function formatExpires(iso: string | null): string {
-  return iso ? formatDateTime(iso) : 'Never';
+  return iso ? formatDateTime(iso) : t('settingsTokens.never');
 }
 
 function ScopeList({ scopes }: { scopes: ApiTokenSummary['scopes'] }) {
@@ -39,9 +40,9 @@ function ScopeList({ scopes }: { scopes: ApiTokenSummary['scopes'] }) {
     return (
       <span
         className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
-        title="Can call every endpoint an API token may call"
+        title={t('settingsTokens.fullAccessTitle')}
       >
-        Full access
+        {t('settingsTokens.fullAccess')}
       </span>
     );
   }
@@ -78,29 +79,29 @@ function TokenRow({ token, onRevoke, revoking }: TokenRowProps) {
             </span>
             {isRevoked ? (
               <span className="rounded bg-neutral-200 px-2 py-0.5 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
-                Revoked {formatDateTime(token.revokedAt)}
+                {t('settingsTokens.revokedAt', { date: formatDateTime(token.revokedAt) })}
               </span>
             ) : (
               <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800 dark:bg-green-900/40 dark:text-green-300">
-                Active
+                {t('settingsTokens.active')}
               </span>
             )}
           </div>
           <div className="font-mono text-xs text-neutral-600 dark:text-neutral-400">
-            primer_pat_{token.tokenPrefix}…
+            {t('settingsTokens.tokenPrefixDisplay', { prefix: token.tokenPrefix })}
           </div>
           <ScopeList scopes={token.scopes} />
           <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-neutral-600 dark:text-neutral-400 sm:grid-cols-3">
             <div>
-              <dt className="text-neutral-500 dark:text-neutral-500">Created</dt>
+              <dt className="text-neutral-500 dark:text-neutral-500">{t('settingsTokens.created')}</dt>
               <dd>{formatDateTime(token.createdAt)}</dd>
             </div>
             <div>
-              <dt className="text-neutral-500 dark:text-neutral-500">Last used</dt>
+              <dt className="text-neutral-500 dark:text-neutral-500">{t('settingsTokens.lastUsed')}</dt>
               <dd>{formatLastUsed(token.lastUsedAt)}</dd>
             </div>
             <div>
-              <dt className="text-neutral-500 dark:text-neutral-500">Expires</dt>
+              <dt className="text-neutral-500 dark:text-neutral-500">{t('settingsTokens.expires')}</dt>
               <dd>{formatExpires(token.expiresAt)}</dd>
             </div>
           </dl>
@@ -112,7 +113,7 @@ function TokenRow({ token, onRevoke, revoking }: TokenRowProps) {
             onClick={() => onRevoke(token)}
             className="shrink-0 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:bg-neutral-900 dark:text-red-400 dark:hover:bg-red-900/20"
           >
-            {revoking ? 'Revoking…' : 'Revoke'}
+            {revoking ? t('settingsTokens.revoking') : t('settingsTokens.revoke')}
           </button>
         )}
       </div>
@@ -176,7 +177,7 @@ function CreateTokenForm({ placeholder, pending, error, scopesRequired, onCreate
           disabled={!valid || pending}
           className="shrink-0 rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
         >
-          {pending ? 'Creating…' : 'Create token'}
+          {pending ? t('settingsTokens.creating') : t('settingsTokens.createToken')}
         </button>
       </div>
       {!scopesRequired && (
@@ -186,13 +187,13 @@ function CreateTokenForm({ placeholder, pending, error, scopesRequired, onCreate
             checked={limitedChoice}
             onChange={(e) => setLimitedChoice(e.target.checked)}
           />
-          Limit this token to specific permissions
+          {t('settingsTokens.limitPermissions')}
         </label>
       )}
       {limited && (
         <fieldset className="space-y-1 rounded-md border border-neutral-200 p-3 dark:border-neutral-800">
           <legend className="px-1 text-xs text-neutral-500">
-            Permissions{scopesRequired ? ' (required)' : ''}
+            {scopesRequired ? t('settingsTokens.permissionsRequired') : t('settingsTokens.permissions')}
           </legend>
           {API_TOKEN_SCOPES.map((scope) => (
             <label key={scope} className="flex items-start gap-2 text-sm">
@@ -211,22 +212,21 @@ function CreateTokenForm({ placeholder, pending, error, scopesRequired, onCreate
             </label>
           ))}
           <p className="pt-1 text-xs text-neutral-500">
-            Deleting documents, changing visibility, external sharing, and managing tokens are
-            never available to a limited token.
+            {t('settingsTokens.limitedTokenNotice')}
           </p>
         </fieldset>
       )}
       {name.length > 0 && !nameValid && (
         <p className="text-xs text-red-600 dark:text-red-400">
-          Name must be 1–{MAX_NAME_LENGTH} characters.
+          {t('settingsTokens.nameLength', { max: MAX_NAME_LENGTH })}
         </p>
       )}
       {limited && selected.size === 0 && nameValid && (
-        <p className="text-xs text-neutral-500">Select at least one permission.</p>
+        <p className="text-xs text-neutral-500">{t('settingsTokens.selectPermission')}</p>
       )}
       {error && (
         <p className="text-xs text-red-600 dark:text-red-400">
-          Create failed — {error.message}
+          {t('settingsTokens.createFailed', { message: error.message })}
         </p>
       )}
     </form>
@@ -258,7 +258,7 @@ function SecretReveal({ created, onDismiss }: SecretRevealProps) {
   return (
     <div className="rounded border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/20">
       <div className="mb-2 text-sm font-medium text-amber-900 dark:text-amber-200">
-        Token "{created.summary.name}" created — copy it now. It will not be shown again.
+        {t('settingsTokens.tokenCreated', { name: created.summary.name })}
       </div>
       <div className="flex items-center gap-2">
         <code className="min-w-0 flex-1 select-all break-all rounded bg-white px-2 py-1.5 font-mono text-xs text-neutral-900 dark:bg-neutral-900 dark:text-neutral-100">
@@ -269,7 +269,7 @@ function SecretReveal({ created, onDismiss }: SecretRevealProps) {
           onClick={copy}
           className="shrink-0 rounded-md border border-amber-400 bg-white px-3 py-1.5 text-sm text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:bg-neutral-900 dark:text-amber-200 dark:hover:bg-amber-900/40"
         >
-          {copied ? 'Copied!' : 'Copy'}
+          {copied ? t('settingsTokens.copied') : t('settingsTokens.copy')}
         </button>
       </div>
       <button
@@ -277,7 +277,7 @@ function SecretReveal({ created, onDismiss }: SecretRevealProps) {
         onClick={onDismiss}
         className="mt-2 text-xs text-amber-800 underline hover:no-underline dark:text-amber-300"
       >
-        I've saved it — dismiss
+        {t('settingsTokens.dismiss')}
       </button>
     </div>
   );
@@ -291,7 +291,7 @@ export function TokenSettingsPage() {
 
   function onRevoke(token: ApiTokenSummary) {
     const confirmed = window.confirm(
-      `Revoke token "${token.name}"? Any tool using it will lose access immediately.`
+      t('settingsTokens.confirmRevoke', { name: token.name }),
     );
     if (!confirmed) return;
     revoke.mutate(token.id);
@@ -300,15 +300,14 @@ export function TokenSettingsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <header className="border-b border-neutral-200 pb-3 dark:border-neutral-800">
-        <h1 className="text-2xl font-semibold">API tokens</h1>
+        <h1 className="text-2xl font-semibold">{t('settingsTokens.title')}</h1>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          Tokens authenticate your programmatic tools (CLI, MCP, agents) as you.
-          Tokens never expire — revoke any token you no longer use.
+          {t('settingsTokens.intro')}
         </p>
       </header>
 
       <CreateTokenForm
-        placeholder="Token name, e.g. claude-slack"
+        placeholder={t('settingsTokens.namePlaceholder')}
         pending={create.isPending}
         error={(create.error as Error) ?? null}
         scopesRequired={false}
@@ -319,41 +318,41 @@ export function TokenSettingsPage() {
         <SecretReveal created={createdSecret} onDismiss={() => setCreatedSecret(null)} />
       )}
 
-      {q.isLoading && <div className="text-sm text-neutral-500">Loading…</div>}
+      {q.isLoading && <div className="text-sm text-neutral-500">{t('settingsTokens.loading')}</div>}
 
       {q.error && (
         <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-          Couldn't load tokens — {(q.error as Error).message}.{' '}
+          {t('settingsTokens.loadFailed', { message: (q.error as Error).message })}{' '}
           <button
             type="button"
             onClick={() => q.refetch()}
             className="underline hover:no-underline"
           >
-            Retry
+            {t('settingsTokens.retry')}
           </button>
         </div>
       )}
 
       {revoke.error && (
         <div className="rounded border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-          Revoke failed — {(revoke.error as Error).message}.
+          {t('settingsTokens.revokeFailed', { message: (revoke.error as Error).message })}
         </div>
       )}
 
       {q.data && q.data.tokens.length === 0 && (
         <div className="rounded border border-dashed border-neutral-300 px-4 py-8 text-center text-sm text-neutral-500 dark:border-neutral-700">
-          No tokens yet. Create one above to connect a tool.
+          {t('settingsTokens.noTokens')}
         </div>
       )}
 
       {q.data && q.data.tokens.length > 0 && (
         <div className="space-y-3">
-          {q.data.tokens.map((t) => (
+          {q.data.tokens.map((tok) => (
             <TokenRow
-              key={t.id}
-              token={t}
+              key={tok.id}
+              token={tok}
               onRevoke={onRevoke}
-              revoking={revoke.isPending && revoke.variables === t.id}
+              revoking={revoke.isPending && revoke.variables === tok.id}
             />
           ))}
         </div>
@@ -378,12 +377,9 @@ function AgentsSection() {
   return (
     <section className="space-y-4 border-t border-neutral-200 pt-6 dark:border-neutral-800">
       <header>
-        <h2 className="text-lg font-semibold">Agents</h2>
+        <h2 className="text-lg font-semibold">{t('settingsTokens.agents')}</h2>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          An agent acts for you under its own name: its comments and documents show
-          as theirs, "via" you. It can edit your documents but never delete them,
-          change who can see them, or manage collaborators. Give its tokens only the
-          permissions the integration needs.
+          {t('settingsTokens.agentsIntro')}
         </p>
       </header>
 
@@ -400,7 +396,7 @@ function AgentsSection() {
           value={name}
           maxLength={64}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Agent name, e.g. Claude"
+          placeholder={t('settingsTokens.agentNamePlaceholder')}
           className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
         />
         <button
@@ -408,16 +404,16 @@ function AgentsSection() {
           disabled={trimmed.length === 0 || create.isPending}
           className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900"
         >
-          Add agent
+          {t('settingsTokens.addAgent')}
         </button>
       </form>
-      {create.error && <div className={ERROR_BOX}>Couldn't add the agent — {(create.error as Error).message}.</div>}
+      {create.error && <div className={ERROR_BOX}>{t('settingsTokens.addAgentFailed', { message: (create.error as Error).message })}</div>}
 
-      {q.isLoading && <div className="text-sm text-neutral-500">Loading…</div>}
-      {q.error && <div className={ERROR_BOX}>Couldn't load agents — {(q.error as Error).message}.</div>}
+      {q.isLoading && <div className="text-sm text-neutral-500">{t('settingsTokens.loading')}</div>}
+      {q.error && <div className={ERROR_BOX}>{t('settingsTokens.loadAgentsFailed', { message: (q.error as Error).message })}</div>}
       {q.data && q.data.agents.length === 0 && (
         <div className="rounded border border-dashed border-neutral-300 px-4 py-8 text-center text-sm text-neutral-500 dark:border-neutral-700">
-          No agents yet.
+          {t('settingsTokens.noAgents')}
         </div>
       )}
       {q.data?.agents.map((a) => <AgentCard key={a.id} agent={a} />)}
@@ -432,7 +428,7 @@ function AgentCard({ agent }: { agent: AgentDTO }) {
 
   function onRevoke(token: ApiTokenSummary) {
     const confirmed = window.confirm(
-      `Revoke token "${token.name}"? Any tool acting as ${agent.displayName} with it will lose access immediately.`,
+      t('settingsTokens.confirmRevokeAgent', { name: token.name, agent: agent.displayName }),
     );
     if (!confirmed) return;
     revoke.mutate(token.id);
@@ -442,16 +438,16 @@ function AgentCard({ agent }: { agent: AgentDTO }) {
     <div className="space-y-3 rounded border border-neutral-200 p-4 dark:border-neutral-800">
       <h3 className="font-medium">{agent.displayName}</h3>
       <CreateTokenForm
-        placeholder="Token name, e.g. slack-workspace"
+        placeholder={t('settingsTokens.agentTokenPlaceholder')}
         pending={create.isPending}
         error={(create.error as Error) ?? null}
         scopesRequired
         onCreate={(req) => create.mutate(req, { onSuccess: setCreated })}
       />
       {created && <SecretReveal created={created} onDismiss={() => setCreated(null)} />}
-      {revoke.error && <div className={ERROR_BOX}>Revoke failed — {(revoke.error as Error).message}.</div>}
-      {agent.tokens.map((t) => (
-        <TokenRow key={t.id} token={t} onRevoke={onRevoke} revoking={revoke.isPending && revoke.variables === t.id} />
+      {revoke.error && <div className={ERROR_BOX}>{t('settingsTokens.revokeFailed', { message: (revoke.error as Error).message })}</div>}
+      {agent.tokens.map((tok) => (
+        <TokenRow key={tok.id} token={tok} onRevoke={onRevoke} revoking={revoke.isPending && revoke.variables === tok.id} />
       ))}
     </div>
   );

@@ -1,4 +1,5 @@
 import type { AdminStatsBucket } from '@polygonlabs/primer-api-types';
+import { t } from '../../i18n/index.ts';
 
 interface StatCardProps {
   label: string;
@@ -16,7 +17,7 @@ export function StatCard({ label, bucket }: StatCardProps) {
         {bucket.total.toLocaleString()}
       </div>
       <div className={`mt-1 text-xs ${deltaClass}`}>
-        +{bucket.last7d.toLocaleString()} this week
+        +{bucket.last7d.toLocaleString()} {t('statCard.thisWeek')}
       </div>
     </div>
   );

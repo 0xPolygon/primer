@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 export type MenuItemId =
   | 'share'
   | 'open-fullscreen'
@@ -30,28 +31,28 @@ export interface MenuInput {
 export function buildMenuItems({ isUploader, includeShare = false, live = false }: MenuInput): MenuItem[] {
   const items: MenuItem[] = [];
   if (includeShare && isUploader) {
-    items.push({ id: 'share', label: 'Share…' });
+    items.push({ id: 'share', label: t('libDocumentActionsMenu.share') });
     items.push({ id: 'separator' });
   }
   if (live) {
     items.push(
-      { id: 'export-markdown', label: 'Export Markdown' },
-      { id: 'export-html', label: 'Export HTML' },
-      { id: 'export-print', label: 'Print / PDF' },
+      { id: 'export-markdown', label: t('libDocumentActionsMenu.exportMarkdown') },
+      { id: 'export-html', label: t('libDocumentActionsMenu.exportHtml') },
+      { id: 'export-print', label: t('libDocumentActionsMenu.printPdf') },
       { id: 'separator' },
     );
   }
   items.push(
-    { id: 'open-fullscreen', label: 'Open full screen' },
-    { id: 'download-html', label: 'Download HTML' },
-    { id: 'notebooklm', label: 'Send to NotebookLM…' },
+    { id: 'open-fullscreen', label: t('libDocumentActionsMenu.openFullScreen') },
+    { id: 'download-html', label: t('libDocumentActionsMenu.downloadHtml') },
+    { id: 'notebooklm', label: t('libDocumentActionsMenu.sendToNotebookLm') },
     { id: 'separator' },
-    { id: 'copy', label: 'Copy comments as Markdown' },
-    { id: 'download', label: 'Download comments as Markdown' },
+    { id: 'copy', label: t('libDocumentActionsMenu.copyCommentsAsMarkdown') },
+    { id: 'download', label: t('libDocumentActionsMenu.downloadCommentsAsMarkdown') },
   );
   if (isUploader) {
     items.push({ id: 'separator' });
-    items.push({ id: 'delete', label: 'Delete document…', destructive: true });
+    items.push({ id: 'delete', label: t('libDocumentActionsMenu.deleteDocument'), destructive: true });
   }
   return items;
 }

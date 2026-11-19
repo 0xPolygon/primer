@@ -10,7 +10,7 @@ import type { DocFileUploadResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
-import { editorDictionary } from '../i18n/index.ts';
+import { editorDictionary, t } from '../i18n/index.ts';
 import { ChipMenus } from './ChipMenus.tsx';
 import { routeMarkdownPasteToServer } from './paste.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
@@ -102,7 +102,7 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, onOpenL
           aria-pressed={historyOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          History
+          {t('liveEditor.history')}
         </button>
       </div>
       <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} slashMenu={false} className="flex min-h-0 flex-1">
