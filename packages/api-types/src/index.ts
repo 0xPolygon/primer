@@ -888,3 +888,13 @@ export interface DocumentStatusDTO {
 export interface DocumentStatusResponse {
   statuses: DocumentStatusDTO[];
 }
+
+/** POST /api/convert/markdown: Markdown to BlockNote blocks by the importer's
+ *  parser (what an upload uses), so a paste lands as the same blocks. */
+export interface ConvertMarkdownRequest {
+  markdown: string;
+}
+export interface ConvertMarkdownResponse {
+  /** BlockNote block JSON without ids; the editor assigns them on insert. */
+  blocks: unknown[];
+}

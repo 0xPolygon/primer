@@ -11,6 +11,7 @@ import type { DocFileUploadResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
+import { routeMarkdownPasteToServer } from './paste.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
 import { TabStrip, useTabs } from './TabStrip.tsx';
 import { MAIN_TAB, tabFragmentName } from './tabs.ts';
@@ -89,6 +90,7 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, onOpenL
     }),
     [live, tabId],
   );
+  useEffect(() => routeMarkdownPasteToServer(editor), [editor]);
 
   return (
     <>
