@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { listRecordChanges, recordsApi, revertChange } from './store.ts';
+import { listRecordChanges, purgePersonalRecords, recordsApi, revertChange } from './store.ts';
 import { flushDataChanged } from './changed.ts';
-import { OWNER, READER, VIEWER, seedRecordsDoc } from './records.testlib.ts';
+import { AGENT, OWNER, READER, VIEWER, seedRecordsDoc } from './records.testlib.ts';
 
 const big = (n: number) => ({ blob: 'x'.repeat(n) });
 
@@ -129,6 +129,55 @@ describe('records store', () => {
     });
     expect(second.ok && second.value.records.map((r) => r.data.n)).toEqual([2]);
     expect(second.ok && second.value.nextCursor).toBeNull();
+    await flushDataChanged();
+  });
+
+  it('personal caps are per principal and never block shared writes', async () => {
+    const doc = await seedRecordsDoc();
+    const viewer = recordsApi(VIEWER, doc);
+    // ~1 MB of personal records fills the viewer's own cap...
+    const fill = await viewer.batch({
+      ops: Array.from({ length: 17 }, (_, i) => ({
+        verb: 'set' as const, collection: 'mine', scope: 'personal' as const, recordId: `p${i}`, data: big(60_000),
+      })),
+    });
+    expect(fill.ok).toBe(true);
+    const over = await viewer.set({ collection: 'mine', scope: 'personal', recordId: 'p-over', data: big(60_000) });
+    expect(!over.ok && over.refusal).toMatchObject({ code: 'records_cap', details: { scope: 'personal' } });
+    // ...but shared writes, theirs and everyone else's, still go through.
+    expect((await viewer.set({ collection: 'votes', scope: 'shared', recordId: 'v', data: { optionId: 'a' } })).ok).toBe(true);
+    expect((await recordsApi(OWNER, doc).set({ collection: 'mine', scope: 'personal', recordId: 'o', data: big(60_000) })).ok).toBe(true);
+
+    // The owner can purge them; nobody else can.
+    expect(!(await purgePersonalRecords(VIEWER, doc, OWNER.id)).ok).toBe(true);
+    expect(!(await purgePersonalRecords(AGENT, doc, VIEWER.id)).ok).toBe(true);
+    const purged = await purgePersonalRecords(OWNER, doc, VIEWER.id);
+    expect(purged.ok && purged.value.deleted).toBe(17);
+    expect((await viewer.set({ collection: 'mine', scope: 'personal', recordId: 'p-over', data: big(60_000) })).ok).toBe(true);
+    await flushDataChanged();
+  });
+
+  it('merges and reverts never launder untrusted data', async () => {
+    const doc = await seedRecordsDoc();
+    const agent = recordsApi(AGENT, doc);
+    await recordsApi(VIEWER, doc).set({ collection: 'notes', scope: 'shared', recordId: 'n', data: { text: 'from a viewer' } });
+    const merged = await agent.update({ collection: 'notes', scope: 'shared', recordId: 'n', data: { checked: true } });
+    expect(merged.ok && merged.value.record).toMatchObject({ updatedBy: AGENT.id, untrusted: true });
+    const read = await agent.get({ collection: 'notes', scope: 'shared', recordId: 'n' });
+    expect(read.ok && read.value.record?.untrusted).toBe(true);
+
+    // A full set by the agent is its own content again.
+    const own = await agent.set({ collection: 'notes', scope: 'shared', recordId: 'n', data: { text: 'mine' } });
+    expect(own.ok && own.value.record.untrusted).toBeUndefined();
+
+    // Reverting that set restores the viewer-shaped data, and its taint.
+    const log = await listRecordChanges(AGENT, doc, {});
+    if (!log.ok) throw new Error('no log');
+    const ownSet = log.value.changes[log.value.changes.length - 1];
+    expect(ownSet.untrusted).toBe(true); // its before image came from the viewer
+    expect((await revertChange(ownSet.id, OWNER)).ok).toBe(true);
+    const restored = await agent.get({ collection: 'notes', scope: 'shared', recordId: 'n' });
+    expect(restored.ok && restored.value.record).toMatchObject({ data: { text: 'from a viewer', checked: true }, untrusted: true });
     await flushDataChanged();
   });
 });

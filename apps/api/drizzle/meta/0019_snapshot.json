@@ -1,5 +1,5 @@
 {
-  "id": "1221e054-1b8a-4af4-ab39-85b52b0a4c75",
+  "id": "7a9819db-fdfb-4b5f-8ec9-d6dd1333ff43",
   "prevId": "ef4c6f3f-71ff-49dd-a257-bdf92be695e6",
   "version": "7",
   "dialect": "postgresql",
@@ -529,6 +529,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "before_contributors": {
+          "name": "before_contributors",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "after_contributors": {
+          "name": "after_contributors",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
         "actor_id": {
           "name": "actor_id",
           "type": "text",
@@ -650,6 +662,12 @@
         "data": {
           "name": "data",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contributors": {
+          "name": "contributors",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": true
         },

@@ -582,6 +582,11 @@ export const docRecords = pgTable(
     // Set for personal records (the viewer or agent they belong to); null for shared.
     ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
     data: jsonb('data').notNull(),
+    // Everyone whose writes shaped the current data: a full set resets it to
+    // the writer, an update merge adds the writer, a revert carries the
+    // restored content's contributors plus the reverter. An agent reads the
+    // record as untrusted when anyone but itself is in it.
+    contributors: text('contributors').array().notNull(),
     version: integer('version').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     updatedBy: text('updated_by').notNull().references(() => users.id),
@@ -611,6 +616,9 @@ export const docRecordChanges = pgTable(
     op: text('op', { enum: ['set', 'update', 'delete'] }).notNull(),
     before: jsonb('before'),
     after: jsonb('after'),
+    // Contributors of the before and after data (see doc_records.contributors).
+    beforeContributors: text('before_contributors').array(),
+    afterContributors: text('after_contributors').array(),
     actorId: text('actor_id').notNull().references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

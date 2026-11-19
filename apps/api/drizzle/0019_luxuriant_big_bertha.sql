@@ -8,6 +8,8 @@ CREATE TABLE "doc_record_changes" (
 	"op" text NOT NULL,
 	"before" jsonb,
 	"after" jsonb,
+	"before_contributors" text[],
+	"after_contributors" text[],
 	"actor_id" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -19,6 +21,7 @@ CREATE TABLE "doc_records" (
 	"scope" text NOT NULL,
 	"owner_user_id" text,
 	"data" jsonb NOT NULL,
+	"contributors" text[] NOT NULL,
 	"version" integer NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_by" text NOT NULL

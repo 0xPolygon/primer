@@ -12,12 +12,19 @@
 //   always the caller.
 // - Every write runs under one per-document lock, so caps hold under
 //   concurrency and change ids follow commit order within a document
-//   (`changes?since=` is then a complete resume point).
-// - An agent reading what someone else wrote gets it marked `untrusted`:
-//   record data is data, never instructions.
+//   (`changes?since=` is then a complete resume point). Shared records have
+//   per-document caps; each principal's personal records have their own, so
+//   no viewer can fill a document for everyone. The owner can purge another
+//   user's personal records.
+// - Provenance: each record keeps `contributors`, everyone whose writes shaped
+//   its current data. An agent reading a record (or a change) that anyone but
+//   itself contributed to gets it marked `untrusted`: record data is data,
+//   never instructions. A merge or a revert can't launder it.
 import { sql } from 'drizzle-orm';
 import {
   DEFAULT_RECORDS_PAGE_SIZE,
+  MAX_PERSONAL_RECORDS_BYTES_PER_USER,
+  MAX_PERSONAL_RECORDS_PER_USER,
   MAX_RECORDS_BATCH,
   MAX_RECORDS_BYTES_PER_DOCUMENT,
   MAX_RECORDS_PAGE_SIZE,
@@ -41,7 +48,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
 import { canWriteEvents, loadEventDocContext } from '../lib/events.ts';
-import { canEdit, canRead, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
+import { canEdit, canManage, canRead, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
 import { scheduleDataChanged } from './changed.ts';
 
 export type RecordsResult<T> = { ok: true; value: T } | { ok: false; refusal: Refusal };
@@ -149,9 +156,10 @@ interface RecordRow {
   updatedAt: Date | string;
   updatedBy: string;
   writtenBy: string;
+  contributors: string[];
 }
 
-const RECORD_COLUMNS = sql`r.collection, r.record_id AS "recordId", r.scope, r.data, r.version,
+const RECORD_COLUMNS = sql`r.collection, r.record_id AS "recordId", r.scope, r.data, r.version, r.contributors,
   r.updated_at AS "updatedAt", r.updated_by AS "updatedBy", ${actorNameOf('u')} AS "writtenBy"`;
 
 function iso(v: Date | string): string {
@@ -169,8 +177,13 @@ function toDTO(row: RecordRow, actor: AuthUser): RecordDTO {
     updatedBy: row.updatedBy,
     writtenBy: row.writtenBy,
   };
-  if (actor.kind === 'agent' && row.updatedBy !== actor.id) dto.untrusted = true;
+  if (untrustedFor(actor, [row.contributors])) dto.untrusted = true;
   return dto;
+}
+
+/** An agent trusts only content it alone wrote. */
+function untrustedFor(actor: AuthUser, contributors: (string[] | null)[]): boolean {
+  return actor.kind === 'agent' && contributors.some((list) => (list ?? []).some((id) => id !== actor.id));
 }
 
 /** The owner column for a scope: the caller for personal records. */
@@ -217,13 +230,22 @@ async function readRecord(tx: Exec, documentId: string, op: RecordBatchOp, actor
   return row ?? null;
 }
 
-/** Applies one write inside the locked transaction. Throws Refused. */
+/** A Postgres text[] literal, passed as one parameter. */
+function pgTextArray(values: string[] | null): string | null {
+  if (values === null) return null;
+  return `{${values.map((v) => `"${v.replace(/["\\]/g, '\\$&')}"`).join(',')}}`;
+}
+
+/** Applies one write inside the locked transaction. Throws Refused.
+ *  `restoredContributors` is set by a revert: the restored data keeps the
+ *  provenance it had. */
 async function applyWrite(
   tx: Tx,
   documentId: string,
   op: RecordBatchOp,
   actor: AuthUser,
   changes: Change[],
+  restoredContributors?: string[],
 ): Promise<{ record: RecordDTO } | { deleted: boolean }> {
   const current = await readRecord(tx, documentId, op, actor);
   if (op.expectVersion !== undefined && (current?.version ?? 0) !== op.expectVersion) {
@@ -235,12 +257,14 @@ async function applyWrite(
     );
   }
   const owner = ownerOf(op.scope, actor);
-  const logChange = async (kind: RecordBatchOp['verb'], before: unknown, after: unknown) => {
+  const logChange = async (kind: RecordBatchOp['verb'], after: unknown, afterContributors: string[] | null) => {
     const [row] = (await tx.execute(sql`
-      INSERT INTO doc_record_changes (document_id, collection, record_id, scope, owner_user_id, op, before, after, actor_id)
+      INSERT INTO doc_record_changes (document_id, collection, record_id, scope, owner_user_id, op,
+                                      before, after, before_contributors, after_contributors, actor_id)
       VALUES (${documentId}, ${op.collection}, ${op.recordId}, ${op.scope}, ${owner}, ${kind},
-              ${before === null ? null : JSON.stringify(before)}::jsonb,
-              ${after === null ? null : JSON.stringify(after)}::jsonb, ${actor.id})
+              ${current === null ? null : JSON.stringify(current.data)}::jsonb,
+              ${after === null ? null : JSON.stringify(after)}::jsonb,
+              ${pgTextArray(current?.contributors ?? null)}::text[], ${pgTextArray(afterContributors)}::text[], ${actor.id})
       RETURNING id
     `)) as unknown as { id: number | string }[];
     changes.push({ id: Number(row.id), collection: op.collection, scope: op.scope });
@@ -253,7 +277,7 @@ async function applyWrite(
        WHERE r.document_id = ${documentId} AND r.collection = ${op.collection} AND r.scope = ${op.scope}
          AND ${ownerMatch(op.scope, actor)} AND r.record_id = ${op.recordId}
     `);
-    await logChange('delete', current.data, null);
+    await logChange('delete', null, null);
     return { deleted: true };
   }
 
@@ -268,15 +292,47 @@ async function applyWrite(
     throw new Refused(refuse('records_cap', `A record holds at most ${MAX_RECORD_BYTES} bytes of data.`).refusal);
   }
   const version = (current?.version ?? 0) + 1;
+  // A full set is the writer's alone; a merge or a revert adds the writer to
+  // whoever shaped the content it keeps.
+  const kept = op.verb === 'update' ? current!.contributors : (restoredContributors ?? []);
+  const contributors = [...new Set([...kept, actor.id])].sort();
   await tx.execute(sql`
-    INSERT INTO doc_records (document_id, collection, record_id, scope, owner_user_id, data, version, updated_at, updated_by)
-    VALUES (${documentId}, ${op.collection}, ${op.recordId}, ${op.scope}, ${owner}, ${json}::jsonb, ${version}, now(), ${actor.id})
+    INSERT INTO doc_records (document_id, collection, record_id, scope, owner_user_id, data, contributors, version, updated_at, updated_by)
+    VALUES (${documentId}, ${op.collection}, ${op.recordId}, ${op.scope}, ${owner}, ${json}::jsonb,
+            ${pgTextArray(contributors)}::text[], ${version}, now(), ${actor.id})
     ON CONFLICT (document_id, collection, scope, coalesce(owner_user_id, ''), record_id)
-    DO UPDATE SET data = EXCLUDED.data, version = EXCLUDED.version, updated_at = now(), updated_by = EXCLUDED.updated_by
+    DO UPDATE SET data = EXCLUDED.data, contributors = EXCLUDED.contributors, version = EXCLUDED.version,
+                  updated_at = now(), updated_by = EXCLUDED.updated_by
   `);
-  await logChange(op.verb, current?.data ?? null, next);
+  await logChange(op.verb, next, contributors);
   const row = await readRecord(tx, documentId, op, actor);
   return { record: toDTO(row!, actor) };
+}
+
+/** Refuses a write whose result crosses a cap: the document's shared caps
+ *  when it touched shared records, the caller's personal caps when it
+ *  touched personal ones (a caller only ever writes its own). */
+async function checkCaps(tx: Tx, documentId: string, actor: AuthUser, changes: Change[]): Promise<void> {
+  const scopes = new Set(changes.map((c) => c.scope));
+  for (const scope of scopes) {
+    const owner = scope === 'personal' ? sql`owner_user_id = ${actor.id}` : sql`owner_user_id IS NULL`;
+    const [usage] = (await tx.execute(sql`
+      SELECT count(*)::int AS count, COALESCE(sum(octet_length(data::text)), 0)::bigint AS bytes
+        FROM doc_records WHERE document_id = ${documentId} AND scope = ${scope} AND ${owner}
+    `)) as unknown as { count: number; bytes: number | string }[];
+    const [maxCount, maxBytes, what] = scope === 'shared'
+      ? [MAX_RECORDS_PER_DOCUMENT, MAX_RECORDS_BYTES_PER_DOCUMENT, 'A document holds at most']
+      : [MAX_PERSONAL_RECORDS_PER_USER, MAX_PERSONAL_RECORDS_BYTES_PER_USER, 'You can keep at most'];
+    if (usage.count > maxCount || Number(usage.bytes) > maxBytes) {
+      throw new Refused(
+        refuse('records_cap', `${what} ${maxCount} ${scope} records and ${maxBytes} bytes of ${scope} record data.`, {
+          scope,
+          count: usage.count,
+          bytes: Number(usage.bytes),
+        }).refusal,
+      );
+    }
+  }
 }
 
 /** Runs writes atomically under the document's records lock, checks the
@@ -293,19 +349,7 @@ async function runWrites<T>(
       changes.length = 0;
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${RECORDS_LOCK_KEY}, hashtext(${documentId}))`);
       const out = await fn(tx, changes);
-      const [usage] = (await tx.execute(sql`
-        SELECT count(*)::int AS count, COALESCE(sum(octet_length(data::text)), 0)::bigint AS bytes
-          FROM doc_records WHERE document_id = ${documentId}
-      `)) as unknown as { count: number; bytes: number | string }[];
-      if (usage.count > MAX_RECORDS_PER_DOCUMENT || Number(usage.bytes) > MAX_RECORDS_BYTES_PER_DOCUMENT) {
-        throw new Refused(
-          refuse(
-            'records_cap',
-            `A document holds at most ${MAX_RECORDS_PER_DOCUMENT} records and ${MAX_RECORDS_BYTES_PER_DOCUMENT} bytes of record data.`,
-            { count: usage.count, bytes: Number(usage.bytes) },
-          ).refusal,
-        );
-      }
+      await checkCaps(tx, documentId, actor, changes);
       return out;
     });
   } catch (err) {
@@ -469,13 +513,16 @@ interface ChangeRow {
   op: RecordChangeDTO['op'];
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
+  beforeContributors: string[] | null;
+  afterContributors: string[] | null;
   actorId: string;
   actorName: string;
   createdAt: Date | string;
 }
 
 const CHANGE_COLUMNS = sql`c.id, c.document_id AS "documentId", c.collection, c.record_id AS "recordId", c.scope,
-  c.owner_user_id AS "ownerUserId", c.op, c.before, c.after, c.actor_id AS "actorId",
+  c.owner_user_id AS "ownerUserId", c.op, c.before, c.after, c.before_contributors AS "beforeContributors",
+  c.after_contributors AS "afterContributors", c.actor_id AS "actorId",
   ${actorNameOf('u')} AS "actorName", c.created_at AS "createdAt"`;
 
 function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
@@ -491,7 +538,7 @@ function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
     actorName: row.actorName,
     createdAt: iso(row.createdAt),
   };
-  if (actor.kind === 'agent' && row.actorId !== actor.id) dto.untrusted = true;
+  if (untrustedFor(actor, [row.beforeContributors, row.afterContributors, [row.actorId]])) dto.untrusted = true;
   return dto;
 }
 
@@ -547,7 +594,39 @@ export async function revertChange(changeId: number, actor: AuthUser): Promise<R
   const op: RecordBatchOp = row.before === null
     ? { verb: 'delete', collection: row.collection, scope: row.scope, recordId: row.recordId }
     : { verb: 'set', collection: row.collection, scope: row.scope, recordId: row.recordId, data: row.before };
-  const out = await runWrites(row.documentId, actor, (tx, changes) => applyWrite(tx, row.documentId, op, actor, changes));
+  const out = await runWrites(row.documentId, actor, (tx, changes) =>
+    applyWrite(tx, row.documentId, op, actor, changes, row.beforeContributors ?? [row.actorId]),
+  );
   if (!out.ok) return out;
   return { ok: true, value: { changeId } };
+}
+
+/** Deletes one user's personal records on a document (the owner's way to
+ *  reclaim space or remove what a viewer stored). Logged as deletes in that
+ *  user's personal change log. */
+export async function purgePersonalRecords(
+  actor: AuthUser,
+  documentId: string,
+  userId: unknown,
+): Promise<RecordsResult<{ deleted: number }>> {
+  if (typeof userId !== 'string' || userId.length === 0) return refuse('bad_request', 'userId is required');
+  const a = await access(documentId, actor);
+  if (!a) return refuse('not_found', 'Document not found.');
+  if (!canManage(a.role)) return refuse('forbidden', "Only the document owner can purge someone's personal records.");
+  return runWrites(documentId, actor, async (tx) => {
+    const rows = (await tx.execute(sql`
+      DELETE FROM doc_records
+       WHERE document_id = ${documentId} AND scope = 'personal' AND owner_user_id = ${userId}
+      RETURNING collection, record_id AS "recordId", data, contributors
+    `)) as unknown as { collection: string; recordId: string; data: unknown; contributors: string[] }[];
+    for (const r of rows) {
+      await tx.execute(sql`
+        INSERT INTO doc_record_changes (document_id, collection, record_id, scope, owner_user_id, op,
+                                        before, after, before_contributors, after_contributors, actor_id)
+        VALUES (${documentId}, ${r.collection}, ${r.recordId}, 'personal', ${userId}, 'delete',
+                ${JSON.stringify(r.data)}::jsonb, NULL, ${pgTextArray(r.contributors)}::text[], NULL, ${actor.id})
+      `);
+    }
+    return { deleted: rows.length };
+  });
 }
