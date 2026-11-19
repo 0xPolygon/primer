@@ -34,3 +34,8 @@ user-visible change yet; the Markdown editor builds on this.
   `DocumentFormat`, `AgentMode`, the checkpoint, export and file DTOs,
   `DocumentDetail.format`, and the refusal codes `target_changed` and
   `republish_unsupported`.
+- **Event streams honour revocation.** The per-document and owner (`scope=me`)
+  SSE streams re-resolve their credentials on every recheck and close as soon
+  as the token is revoked, the session ends or access is removed, through the
+  same registry as live-sync sockets (`auth/revocation.ts`). Before, the owner
+  stream never re-checked its credentials.

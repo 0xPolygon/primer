@@ -4,9 +4,9 @@ import crossws from 'crossws/adapters/node';
 import type { Connection, Document, Hocuspocus, WebSocketLike } from '@hocuspocus/server';
 import type { UserResolver } from '../auth/resolver.ts';
 import { logger } from '../logger.ts';
-import { liveAccess, resolveFromHeaders, type LiveAuth, type LiveContext } from './auth.ts';
+import { onAccessRecheck, resolveFromHeaders, type AccessMatch } from '../auth/revocation.ts';
+import { liveAccess, type LiveAuth, type LiveContext } from './auth.ts';
 import { documentIdOf, liveInstance, onPersistenceFailure } from './instance.ts';
-import { onLiveRecheck, type LiveMatch } from './revoke.ts';
 
 /** The WebSocket path live documents sync on. */
 export const COLLAB_PATH = '/collab';
@@ -23,8 +23,8 @@ export type Hub = {
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
   /** Re-evaluates the matching connections now: closes those that lost read
    *  access (or whose credentials no longer resolve), makes read-only those
-   *  that lost write. Handlers reach it through `recheckLive`. */
-  recheck(match: LiveMatch): Promise<void>;
+   *  that lost write. Handlers reach it through `recheckAccess`. */
+  recheck(match: AccessMatch): Promise<void>;
   close(): void;
 };
 
@@ -38,7 +38,7 @@ export type Hub = {
  * Per document, `onAuthenticate` (live/instance.ts) admits readers read-only
  * and owners and editors read-write; bearer connections are always read-only.
  * Every handler that removes credentials or access rechecks the affected
- * connections at once (`recheckLive`); a timer is the backstop.
+ * connections at once (`recheckAccess`); a timer is the backstop.
  */
 export function createHub(deps: { resolver: UserResolver; appOrigin: string }): Hub {
   const hocuspocus = liveInstance();
@@ -107,21 +107,21 @@ export function createHub(deps: { resolver: UserResolver; appOrigin: string }): 
       return documentId ? document.getConnections().map((connection) => ({ connection, documentId })) : [];
     });
 
-  const matches = (connection: Connection, documentId: string, match: LiveMatch): boolean => {
+  const matches = (connection: Connection, documentId: string, match: AccessMatch): boolean => {
     const auth = (connection.context as LiveContext).auth;
     if ('documentId' in match) return match.documentId === documentId;
     if ('userId' in match) return auth?.user.id === match.userId;
     return auth?.credentialHash === match.credentialHash;
   };
 
-  const recheck = async (match: LiveMatch) => {
+  const recheck = async (match: AccessMatch) => {
     await Promise.all(
       connections()
         .filter(({ connection, documentId }) => matches(connection, documentId, match))
         .map(({ connection, documentId }) => recheckConnection(connection, documentId)),
     );
   };
-  const stopRecheck = onLiveRecheck(recheck);
+  const stopRecheck = onAccessRecheck(recheck);
 
   let tick = 0;
   const timer = setInterval(() => {

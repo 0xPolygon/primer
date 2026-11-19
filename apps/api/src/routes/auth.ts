@@ -6,7 +6,7 @@ import { logger } from '../logger.ts';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { createSession, deleteSession } from '../auth/session.ts';
-import { recheckLive } from '../live/revoke.ts';
+import { recheckAccess } from '../auth/revocation.ts';
 
 const STATE_COOKIE_MAX_AGE_SEC = 10 * 60;            // 10 minutes
 const DEFAULT_SESSION_COOKIE = 'primer_sid';
@@ -134,9 +134,9 @@ export function registerAuthRoutes(
     const sid = parseCookie(cookieHeader, sessionCookieName);
     if (sid) {
       await deleteSession(sid);
-      // The user's live connections re-resolve; this session's close.
+      // The user's open connections re-resolve; this session's close.
       const user = c.get('user');
-      if (user) await recheckLive({ userId: user.id });
+      if (user) await recheckAccess({ userId: user.id });
     }
     const clearCookie = serializeCookie(sessionCookieName, '', cookieOpts(0, secure));
     c.header('set-cookie', clearCookie);

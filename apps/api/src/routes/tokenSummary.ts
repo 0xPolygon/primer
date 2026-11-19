@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { recheckLive } from '../live/revoke.ts';
+import { recheckAccess } from '../auth/revocation.ts';
 import { apiTokens } from '../db/schema.ts';
 import { generateToken } from '../auth/tokens.ts';
 import type { ApiTokenScope, ApiTokenSummary, CreateTokenResponse } from '@polygonlabs/primer-api-types';
@@ -155,7 +155,7 @@ export async function revokeTokenForUser(userId: string, id: string): Promise<bo
     WHERE id = ${id} AND user_id = ${userId} AND revoked_at IS NULL
     RETURNING token_hash
   `)) as unknown as { token_hash: string }[];
-  // An open live connection made with this token closes now.
-  for (const row of revoked) await recheckLive({ credentialHash: row.token_hash });
+  // Open connections made with this token close now.
+  for (const row of revoked) await recheckAccess({ credentialHash: row.token_hash });
   return true;
 }

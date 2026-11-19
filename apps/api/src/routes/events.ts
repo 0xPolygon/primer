@@ -44,7 +44,10 @@
 import type { Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
+import { createHash } from 'node:crypto';
 import type { AppVariables } from '../app.ts';
+import type { UserResolver } from '../auth/resolver.ts';
+import { stillResolves, watchAccess, type AccessKey } from '../auth/revocation.ts';
 import { libraryOwnerId } from '../lib/permissions.ts';
 import {
   type DocumentStatusResponse,
@@ -86,7 +89,15 @@ import {
 // rejected before it is fully read.
 const MAX_EVENTS_BODY_BYTES = MAX_EVENTS_PER_BATCH * (MAX_EVENT_PAYLOAD_BYTES + 4 * 1024);
 
-export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): void {
+export function registerEventRoutes(
+  app: Hono<{ Variables: AppVariables }>,
+  deps: { resolver: UserResolver },
+): void {
+  // Open streams re-resolve their credentials on every recheck, so a revoked
+  // token, expired session or logout stops them.
+  const stillSignedIn = (c: Context<{ Variables: AppVariables }>) =>
+    stillResolves(deps.resolver, c.req.raw.headers, c.get('user'));
+
   // ── Write: atomic batch ────────────────────────────────────────────
   // Body is uniformly { events: [event…] } — a single send is a batch of
   // one. Each event carries its own namespace/type/payload/audience
@@ -229,9 +240,10 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     // finishing late.
     const subscribe = (wake: () => void) => subscribeDocWakes(documentId, wake);
     return runEventStream(c, parsed.resumeFrom, subscribe, reader(g.identity), async () => {
+      if (!(await stillSignedIn(c))) return null;
       const fresh = await gate(documentId, user);
       return fresh.status === 'not_found' ? null : reader(fresh.identity);
-    });
+    }, { ...accessKey(c), documentId });
   });
 
   // ── Read: SSE stream (every document the caller owns) ──────────────
@@ -251,7 +263,14 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     const reader = (afterId: number) =>
       listOwnedEvents({ userId: ownerId, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
     const subscribe = (wake: () => void) => subscribeOwnerWakes(ownerId, wake);
-    return runEventStream(c, parsed.resumeFrom, subscribe, reader, async () => reader);
+    return runEventStream(
+      c,
+      parsed.resumeFrom,
+      subscribe,
+      reader,
+      async () => ((await stillSignedIn(c)) ? reader : null),
+      accessKey(c),
+    );
   });
 
   // ── Working status ─────────────────────────────────────────────────
@@ -314,6 +333,16 @@ function parseStreamParams(c: Context<{ Variables: AppVariables }>): StreamParam
   return { ok: true, filters: filterParsed.filters, resumeFrom };
 }
 
+/** What a stream is found by when access changes (auth/revocation.ts). */
+function accessKey(c: Context<{ Variables: AppVariables }>): AccessKey {
+  const bearer = c.get('authMethod') === 'bearer' ? c.req.header('authorization') : undefined;
+  const key: AccessKey = { userId: c.get('user').id };
+  if (bearer?.startsWith('Bearer ')) {
+    key.credentialHash = createHash('sha256').update(bearer.slice('Bearer '.length).trim(), 'utf8').digest('hex');
+  }
+  return key;
+}
+
 type PageReader = (afterId: number) => Promise<ListEventsPage>;
 /** Opens a reader for one pass: re-checks access and returns a page reader,
  *  or null when the caller may no longer read (the stream then closes). */
@@ -331,6 +360,7 @@ function runEventStream(
   subscribe: (wake: () => void) => () => void,
   firstReader: PageReader,
   open: OpenReader,
+  key: AccessKey,
 ): Response | Promise<Response> {
   const keepaliveMs = Number(process.env.EVENTS_SSE_KEEPALIVE_MS ?? 25_000);
   return streamSSE(c, async (stream) => {
@@ -341,6 +371,7 @@ function runEventStream(
     });
     let keepalive: ReturnType<typeof setInterval> | undefined;
     let unsubscribe: () => void = () => {};
+    let unwatch: () => void = () => {};
 
     // Ends this connection from the server side. Never throws: it runs on
     // error paths inside detached chains, where an escaping rejection would
@@ -350,6 +381,7 @@ function runEventStream(
       closed = true;
       clearInterval(keepalive);
       unsubscribe();
+      unwatch();
       releaseHold();
       try {
         await stream.close();
@@ -400,6 +432,7 @@ function runEventStream(
       closed = true;
       clearInterval(keepalive);
       unsubscribe();
+      unwatch();
       releaseHold();
     });
 
@@ -439,6 +472,16 @@ function runEventStream(
     keepalive = setInterval(() => {
       void tick();
     }, keepaliveMs);
+
+    // A credential or access change rechecks now, independent of the tick
+    // and of a pass in flight (which stops writing once the stream closes).
+    unwatch = watchAccess(key, () => {
+      if (closed) return;
+      void open().then(
+        (read) => (read === null ? shutdown() : undefined),
+        () => shutdown(),
+      );
+    });
 
     // Catch up from the resume point (a no-op read when starting live).
     await pump();

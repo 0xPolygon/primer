@@ -1,50 +1,15 @@
-import { createHash } from 'node:crypto';
-import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
-import type { ApiTokenScope } from '@polygonlabs/primer-api-types';
-import type { AppVariables, AuthUser } from '../app.ts';
-import type { UserResolver } from '../auth/resolver.ts';
+import type { AuthUser } from '../app.ts';
+import type { ResolvedAuth } from '../auth/revocation.ts';
 import { db } from '../db/client.ts';
 import { canEdit, canRead, loadEffectiveRole, type Visibility } from '../lib/permissions.ts';
 
 /** Who opened a live connection, resolved once from the upgrade request. */
-export type LiveAuth = {
-  user: AuthUser;
-  authMethod: 'bearer' | 'cookie' | 'mock';
-  scopes?: readonly ApiTokenScope[];
-  /** sha-256 hex of the bearer token, so revoking it finds this connection. */
-  credentialHash?: string;
-};
+export type LiveAuth = ResolvedAuth;
 
 /** The per-connection Hocuspocus context: `auth` from the upgrade, `user`
  *  and `documentId` added once the document is authorised. */
 export type LiveContext = { auth?: LiveAuth; user?: AuthUser; documentId?: string };
-
-/**
- * Runs Primer's resolver chain (OAuth, PAT, session or mock, and the proxy
- * resolver when configured) against request headers, through a minimal stand-in
- * for the Hono context the resolvers read (`req.header`) and write
- * (`set('authMethod' | 'tokenScopes')`).
- */
-export async function resolveFromHeaders(resolver: UserResolver, headers: Headers): Promise<LiveAuth | null> {
-  const vars = new Map<string, unknown>();
-  const shim = {
-    req: { header: (name: string) => headers.get(name) ?? undefined },
-    set: (key: string, value: unknown) => void vars.set(key, value),
-    get: (key: string) => vars.get(key),
-  } as unknown as Context<{ Variables: AppVariables }>;
-  const user = await resolver(shim);
-  if (!user) return null;
-  const authMethod = (vars.get('authMethod') as LiveAuth['authMethod'] | undefined) ?? 'cookie';
-  const auth: LiveAuth = { user, authMethod };
-  const scopes = vars.get('tokenScopes') as readonly ApiTokenScope[] | undefined;
-  if (scopes) auth.scopes = scopes;
-  const bearer = headers.get('authorization');
-  if (authMethod === 'bearer' && bearer?.startsWith('Bearer ')) {
-    auth.credentialHash = createHash('sha256').update(bearer.slice('Bearer '.length).trim(), 'utf8').digest('hex');
-  }
-  return auth;
-}
 
 /**
  * What a connection may do on a live document: `none` (stranger, deleted,

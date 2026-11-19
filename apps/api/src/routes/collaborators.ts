@@ -13,7 +13,7 @@ import { documents, documentCollaborators, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import { actorName } from '../lib/actors.ts';
 import { logger } from '../logger.ts';
-import { recheckLive } from '../live/revoke.ts';
+import { recheckAccess } from '../auth/revocation.ts';
 import {
   canManage,
   canRead,
@@ -200,7 +200,7 @@ export function registerCollaboratorRoutes(
       .update(documentCollaborators)
       .set({ role })
       .where(and(eq(documentCollaborators.documentId, docId), eq(documentCollaborators.userId, targetUserId)));
-    await recheckLive({ documentId: docId });
+    await recheckAccess({ documentId: docId });
 
     const [row] = await db
       .select({
@@ -235,7 +235,7 @@ export function registerCollaboratorRoutes(
     await db
       .delete(documentCollaborators)
       .where(and(eq(documentCollaborators.documentId, docId), eq(documentCollaborators.userId, targetUserId)));
-    await recheckLive({ documentId: docId });
+    await recheckAccess({ documentId: docId });
     return new Response(null, { status: 204 });
   });
 }
