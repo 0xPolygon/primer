@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   primaryKey,
   index,
+  date,
   customType,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
@@ -624,5 +625,34 @@ export const docRecordChanges = pgTable(
   },
   (t) => ({
     byDoc: index('doc_record_changes_doc_idx').on(t.documentId, t.id),
+  }),
+);
+
+/**
+ * Tracked tasks: an index of the task blocks in live documents, never written
+ * any other way. The live-update hook (live/tasks.ts) keeps it in sync from
+ * block props, and `rebuildTaskIndex` recreates it from the Y.Doc.
+ */
+export const docTasks = pgTable(
+  'doc_tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    tabId: text('tab_id').notNull(),
+    blockId: text('block_id').notNull(),
+    title: text('title').notNull(),
+    // Checked against users when indexed: the document is client-writable.
+    assigneeId: text('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+    dueDate: date('due_date', { mode: 'string' }),
+    status: text('status', { enum: ['open', 'done'] }).notNull(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    block: uniqueIndex('doc_tasks_block').on(t.documentId, t.blockId),
+    assignee: index('doc_tasks_assignee').on(t.assigneeId),
   }),
 );

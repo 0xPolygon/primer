@@ -3,7 +3,7 @@ import { Hocuspocus } from '@hocuspocus/server';
 import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
-import { SYSTEM_ORIGIN } from './origin.ts';
+import { SYSTEM_ORIGIN, originOf, type LiveOrigin } from './origin.ts';
 
 const NAME = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
@@ -23,6 +23,15 @@ const failureHandlers = new Set<(documentId: string, doc: Y.Doc) => void>();
 export function onPersistenceFailure(handler: (documentId: string, doc: Y.Doc) => void): () => void {
   failureHandlers.add(handler);
   return () => failureHandlers.delete(handler);
+}
+
+const updateHandlers = new Set<(documentId: string, origin: LiveOrigin) => void>();
+
+/** Runs after every change to a loaded live document, with who made it
+ *  (indexes kept from the document, such as tasks, schedule their sync). */
+export function onLiveUpdate(handler: (documentId: string, origin: LiveOrigin) => void): () => void {
+  updateHandlers.add(handler);
+  return () => updateHandlers.delete(handler);
 }
 
 let instance: Hocuspocus | null = null;
@@ -60,6 +69,10 @@ export function liveInstance(): Hocuspocus {
           logger.error({ documentId, error: err.message }, 'live document: saving an update failed');
           for (const handler of failureHandlers) handler(documentId, document);
         },
+      });
+      document.on('update', (_update: Uint8Array, origin: unknown) => {
+        const by = originOf(origin);
+        for (const handler of updateHandlers) handler(documentId, by);
       });
       // Detach only once the document is really gone: Hocuspocus keeps it
       // after beforeUnloadDocument when someone connected meanwhile.
