@@ -31,6 +31,7 @@ export function registerDocumentRoutes(
         visibility: documents.visibility,
         createdAt: documents.createdAt,
         deletedAt: documents.deletedAt,
+        format: documents.format,
         uploaderDisplayName: actorName,
       })
       .from(documents)
@@ -83,6 +84,7 @@ export function registerDocumentRoutes(
         visibility: doc.visibility as 'org' | 'private',
         createdAt: doc.createdAt.toISOString(),
         externallyShared: Boolean(ext?.externallyShared),
+        format: doc.format,
       } satisfies DocumentDetail,
       latestVersion: {
         id: v.id,
