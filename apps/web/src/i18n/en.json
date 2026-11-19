@@ -623,5 +623,8 @@
   "catchUp.suggestionDecided": "{name}: suggestion {decision}",
   "catchUp.published": "{name} published version {number}",
   "catchUp.blocks": "Changed blocks are highlighted ({count}).",
-  "liveEditor.changes": "Changes since checkpoint"
+  "liveEditor.changes": "Changes since checkpoint",
+  "addVersionModal.suggestedTitle": "No new version: your changes are suggestions",
+  "addVersionModal.suggestedBody": "Suggested: {suggested}. Conflicts: {conflicts}. Unchanged: {unchanged}. A person with edit rights accepts or rejects each suggestion in the document.",
+  "addVersionModal.openSuggestions": "Open the document"
 }

@@ -623,5 +623,8 @@
   "catchUp.suggestionDecided": "{name}: Vorschlag {decision}",
   "catchUp.published": "{name} hat Version {number} veröffentlicht",
   "catchUp.blocks": "Geänderte Blöcke sind hervorgehoben ({count}).",
-  "liveEditor.changes": "Änderungen seit Checkpoint"
+  "liveEditor.changes": "Änderungen seit Checkpoint",
+  "addVersionModal.suggestedTitle": "Keine neue Version: Ihre Änderungen sind Vorschläge",
+  "addVersionModal.suggestedBody": "Vorgeschlagen: {suggested}. Konflikte: {conflicts}. Unverändert: {unchanged}. Eine Person mit Bearbeitungsrechten nimmt jeden Vorschlag im Dokument an oder lehnt ihn ab.",
+  "addVersionModal.openSuggestions": "Dokument öffnen"
 }

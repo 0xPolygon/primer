@@ -623,5 +623,8 @@
   "catchUp.suggestionDecided": "{name}：建议 {decision}",
   "catchUp.published": "{name} 发布了版本 {number}",
   "catchUp.blocks": "已高亮显示更改的块（{count}）。",
-  "liveEditor.changes": "自检查点以来的更改"
+  "liveEditor.changes": "自检查点以来的更改",
+  "addVersionModal.suggestedTitle": "没有新版本：你的更改已成为建议",
+  "addVersionModal.suggestedBody": "建议：{suggested}。冲突：{conflicts}。未更改：{unchanged}。有编辑权限的人会在文档中接受或拒绝每条建议。",
+  "addVersionModal.openSuggestions": "打开文档"
 }
