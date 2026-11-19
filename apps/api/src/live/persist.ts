@@ -165,6 +165,9 @@ export function compact(documentId: string, opts: { above?: number } = {}): Prom
   });
 }
 
+/** Elements that are blocks: BlockNote's container plus Primer's layout blocks. */
+const BLOCK_ELEMENTS = new Set(['blockContainer', 'choice', 'choiceOption']);
+
 function touchedBy(doc: Y.Doc, tr: Y.Transaction): string[] {
   const touched = new Set<string>();
   const rootNames = new Map<unknown, string>();
@@ -191,10 +194,11 @@ function touchedBy(doc: Y.Doc, tr: Y.Transaction): string[] {
   return [...touched];
 }
 
-/** The id of a `blockContainer` element, read from its attribute item so it
- *  still works for an element deleted in this transaction. */
+/** The id of a block element (a `blockContainer`, or a layout block such as
+ *  a choice or one of its options), read from its attribute item so it still
+ *  works for an element deleted in this transaction. */
 function blockIdOf(type: Y.AbstractType<any>): string | null {
-  if (!(type instanceof Y.XmlElement) || type.nodeName !== 'blockContainer') return null;
+  if (!(type instanceof Y.XmlElement) || !BLOCK_ELEMENTS.has(type.nodeName)) return null;
   const item = type._map.get('id');
   const value = item?.content.getContent()[item.length - 1];
   return typeof value === 'string' ? value : null;

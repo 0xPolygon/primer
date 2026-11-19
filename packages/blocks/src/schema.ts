@@ -4,6 +4,8 @@ import { codeBlockOptions } from '@blocknote/code-block';
 import { createReactMathBlockSpec } from '@blocknote/math-block';
 import { createReactDiagramBlockSpec } from '@blocknote/diagram-block';
 import { sourceBlock } from './source.tsx';
+import { choiceBlock, choiceOptionBlock } from './choice.tsx';
+import { taskBlock } from './task.tsx';
 
 /**
  * Primer's document model: every stock BlockNote block, code with languages,
@@ -17,6 +19,9 @@ export const primerSchema = BlockNoteSchema.create({
     mathBlock: createReactMathBlockSpec(),
     diagram: createReactDiagramBlockSpec(),
     source: sourceBlock(),
+    choice: choiceBlock(),
+    choiceOption: choiceOptionBlock(),
+    task: taskBlock(),
   },
 });
 
