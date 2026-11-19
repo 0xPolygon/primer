@@ -1,5 +1,6 @@
 import * as Y from 'yjs';
 import { sql } from 'drizzle-orm';
+import { primerSchema } from '@primer/blocks';
 import { db } from '../db/client.ts';
 import { docUpdates } from '../db/schema.ts';
 import { docQueue } from './queue.ts';
@@ -172,7 +173,10 @@ export function compact(documentId: string, opts: { above?: number } = {}): Prom
 }
 
 /** Elements that are blocks: BlockNote's container plus Primer's layout blocks. */
-const BLOCK_ELEMENTS = new Set(['blockContainer', 'choice', 'choiceOption']);
+const BLOCK_ELEMENTS = new Set([
+  'blockContainer',
+  ...Object.values(primerSchema.blockSpecs).flatMap((spec) => (spec.config.layoutOnly ? [spec.config.type] : [])),
+]);
 
 const COMMENT_KEY = /^comment(--|$)/;
 
@@ -242,7 +246,7 @@ function touchedBy(doc: Y.Doc, tr: Y.Transaction): string[] {
 }
 
 /** The id of a block element (a `blockContainer`, or a layout block such as
- *  a choice or one of its options), read from its attribute item so it still
+ *  a choice, a column list or a column), read from its attribute item so it still
  *  works for an element deleted in this transaction. */
 function blockIdOf(type: Y.AbstractType<any>): string | null {
   if (!(type instanceof Y.XmlElement) || !BLOCK_ELEMENTS.has(type.nodeName)) return null;

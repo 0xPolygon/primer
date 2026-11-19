@@ -34,6 +34,17 @@ export type Evidence = { label: string; url?: string; docId?: string };
 export type Assignee = { id: string; name: string; kind: 'person' | 'agent' };
 
 /**
+ * What an embed block shows, as the server resolved it for this viewer. A link
+ * card is text and one inlined image: the browser never fetches the linked
+ * page. `none` is an embed this viewer can't read or that holds nothing.
+ */
+export type EmbedState =
+  | { status: 'loading' }
+  | { status: 'none' }
+  | { status: 'link'; url: string; title: string; description: string; siteName: string; image: string | null }
+  | { status: 'document'; documentId: string; title: string; excerpt: string };
+
+/**
  * What Primer's blocks need from the app around them: votes and picks go
  * through the API (never the document), and assignees are looked up there.
  * The web editor provides it; without it (the server editor, static
@@ -49,6 +60,8 @@ export type PrimerBlockServices = {
   vote(choiceId: string, optionId: string): Promise<void>;
   pick(choiceId: string, input: PickInput): Promise<void>;
   assignees: Assignee[];
+  /** The embed block's content for this viewer (`url` / `documentId` are the block's props). */
+  useEmbed(blockId: string, url: string, documentId: string): EmbedState;
   /** The blocks' strings in the viewer's locale. */
   text: BlockText;
   /** Renders a page block's frame and overlay (the web editor). */

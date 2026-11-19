@@ -35,3 +35,34 @@ describe('blockVersion', () => {
     expect(version(tr.doc, 'parent')).toBe(version(before, 'parent'));
   });
 });
+
+describe('layout blocks', () => {
+  it('findBlock finds a column and the blocks inside it', () => {
+    const doc = serverEditor()._blocksToProsemirrorNode([
+      {
+        id: 'cols',
+        type: 'columnList',
+        children: [
+          { id: 'left', type: 'column', children: [{ id: 'l1', type: 'paragraph', content: 'Left' }] },
+          { id: 'right', type: 'column', children: [{ id: 'r1', type: 'paragraph', content: 'Right' }] },
+        ],
+      },
+    ] as never);
+    for (const id of ['cols', 'left', 'right', 'l1', 'r1']) expect(findBlock(doc, id), id).not.toBeNull();
+    // Editing a block inside a column changes the column's and the list's version.
+    const edited = serverEditor()._blocksToProsemirrorNode([
+      {
+        id: 'cols',
+        type: 'columnList',
+        children: [
+          { id: 'left', type: 'column', children: [{ id: 'l1', type: 'paragraph', content: 'Left, edited' }] },
+          { id: 'right', type: 'column', children: [{ id: 'r1', type: 'paragraph', content: 'Right' }] },
+        ],
+      },
+    ] as never);
+    const version = (d: typeof doc, id: string) => blockVersion(findBlock(d, id)!.node);
+    expect(version(edited, 'left')).not.toBe(version(doc, 'left'));
+    expect(version(edited, 'cols')).not.toBe(version(doc, 'cols'));
+    expect(version(edited, 'right')).toBe(version(doc, 'right'));
+  });
+});

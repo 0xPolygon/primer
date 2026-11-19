@@ -10,6 +10,9 @@ import { pendingBlock } from './pending.tsx';
 import { choiceBlock, choiceOptionBlock } from './choice.tsx';
 import { taskBlock } from './task.tsx';
 import { pageBlock } from './page.tsx';
+import { calloutBlock } from './callout.tsx';
+import { columnBlock, columnListBlock } from './columns.tsx';
+import { embedBlock } from './embed.tsx';
 
 /**
  * Primer's document model: every stock BlockNote block, code with languages,
@@ -28,6 +31,10 @@ export const primerSchema = BlockNoteSchema.create({
     choiceOption: choiceOptionBlock(),
     task: taskBlock(),
     page: pageBlock(),
+    callout: calloutBlock(),
+    columnList: columnListBlock(),
+    column: columnBlock(),
+    embed: embedBlock(),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip, citation: citationChip },
 });

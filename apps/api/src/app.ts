@@ -22,6 +22,7 @@ import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
 import { registerEventRoutes } from './routes/events.ts';
 import { registerRecordRoutes } from './routes/records.ts';
+import { registerEmbedRoutes } from './routes/embeds.ts';
 import { registerChoiceRoutes } from './routes/choices.ts';
 import { registerTaskRoutes } from './routes/tasks.ts';
 import { registerCatchUpRoutes } from './routes/catchup.ts';
@@ -132,6 +133,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerEventRoutes(app, { resolver });
   registerRecordRoutes(app);
   registerChoiceRoutes(app);
+  registerEmbedRoutes(app);
   registerTaskRoutes(app);
   registerCatchUpRoutes(app, deps);
   registerCitationRoutes(app);

@@ -1562,6 +1562,20 @@ export interface ChoiceTallyResponse {
   decision: ChoiceDecisionDTO | null;
 }
 
+/**
+ * GET /api/documents/:docId/embeds/:blockId — what an embed block shows this
+ * viewer. `echo` is the block's `url` and `documentId` as the server read them,
+ * so a client whose edit hasn't synced yet can tell the answer is stale.
+ * A link card is text plus at most one inlined image (a `data:` URI): the
+ * browser never fetches the linked page. `none` covers an empty embed and a
+ * document this viewer can't read (the two look the same on purpose).
+ */
+export type EmbedResponse = { echo: { url: string; documentId: string } } & (
+  | { kind: 'none' }
+  | { kind: 'link'; url: string; title: string; description: string; siteName: string; image: string | null }
+  | { kind: 'document'; documentId: string; title: string; excerpt: string }
+);
+
 /** POST /api/documents/:docId/choices/:blockId/vote — null withdraws. */
 export interface VoteRequest {
   optionId: string | null;
