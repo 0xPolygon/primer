@@ -8,6 +8,17 @@ import { randomBytes } from 'node:crypto';
  * `<untr<untrusted>usted>` leaves a tag behind). `label` names what the text
  * is, e.g. `request` gives `<untrusted-request-1f9c…>…</untrusted-request-1f9c…>`.
  */
+/** `value` with every string inside it fenced (numbers, booleans and the
+ *  shape stay): JSON that people wrote, for an agent. */
+export function fenceStrings<T>(value: T, label?: string): T {
+  if (typeof value === 'string') return fenceUntrusted(value, label) as T;
+  if (Array.isArray(value)) return value.map((v) => fenceStrings(v, label)) as T;
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fenceStrings(v, label)])) as T;
+  }
+  return value;
+}
+
 export function fenceUntrusted(text: string, label?: string): string {
   if (label !== undefined && !/^[a-z]+$/.test(label)) throw new Error(`fence label must be lowercase letters: ${label}`);
   const tag = `untrusted-${label ? `${label}-` : ''}${randomBytes(8).toString('hex')}`;

@@ -20,6 +20,7 @@
 //   its current data. An agent reading a record (or a change) that anyone but
 //   itself contributed to gets it marked `untrusted`: record data is data,
 //   never instructions. A merge or a revert can't launder it.
+import { fenceStrings } from '../lib/untrusted.ts';
 import { sql } from 'drizzle-orm';
 import {
   DEFAULT_RECORDS_PAGE_SIZE,
@@ -177,7 +178,10 @@ function toDTO(row: RecordRow, actor: AuthUser): RecordDTO {
     updatedBy: row.updatedBy,
     writtenBy: row.writtenBy,
   };
-  if (untrustedFor(actor, [row.contributors])) dto.untrusted = true;
+  if (untrustedFor(actor, [row.contributors])) {
+    dto.untrusted = true;
+    dto.data = fenceStrings(dto.data, 'record');
+  }
   return dto;
 }
 
@@ -550,7 +554,11 @@ function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
     actorName: row.actorName,
     createdAt: iso(row.createdAt),
   };
-  if (untrustedFor(actor, [row.beforeContributors, row.afterContributors, [row.actorId]])) dto.untrusted = true;
+  if (untrustedFor(actor, [row.beforeContributors, row.afterContributors, [row.actorId]])) {
+    dto.untrusted = true;
+    dto.before = fenceStrings(dto.before, 'record');
+    dto.after = fenceStrings(dto.after, 'record');
+  }
   return dto;
 }
 

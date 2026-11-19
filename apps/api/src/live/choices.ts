@@ -42,6 +42,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
+import { fenceUntrusted } from '../lib/untrusted.ts';
 import { recordsApi } from '../records/store.ts';
 import {
   checkPlacement,
@@ -152,6 +153,19 @@ async function decisionFor(documentId: string, choiceId: string, choice: { props
   return standing((await decisionsOf(documentId, [choiceId])).get(choiceId), choice.props, choice.options);
 }
 
+/** A decision for an agent: the text people wrote in it is fenced. */
+function fenceDecision(d: ChoiceDecisionDTO): ChoiceDecisionDTO {
+  const f = (text: string) => fenceUntrusted(text, 'content');
+  return {
+    ...d,
+    question: f(d.question),
+    label: f(d.label),
+    rationale: f(d.rationale),
+    evidence: d.evidence.map((e) => ({ ...e, label: f(e.label) })),
+    openQuestions: d.openQuestions.map(f),
+  };
+}
+
 export async function choiceTally(actor: AuthUser, documentId: string, choiceId: string): Promise<Result<ChoiceTallyResponse>> {
   if (!validBlockId(choiceId)) return refuse('not_found', 'Choice not found.');
   const access = await liveDocAccess(documentId, actor);
@@ -159,7 +173,8 @@ export async function choiceTally(actor: AuthUser, documentId: string, choiceId:
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
   const tally = await countVotes(actor, documentId, choiceId, choice.options);
-  return { ok: true, value: { ...tally, decision: await decisionFor(documentId, choiceId, choice) } };
+  const decision = await decisionFor(documentId, choiceId, choice);
+  return { ok: true, value: { ...tally, decision: decision && actor.kind === 'agent' ? fenceDecision(decision) : decision } };
 }
 
 /** Records the caller's vote (`optionId: null` withdraws it). People only. */
@@ -367,7 +382,14 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
         ? { optionId: proposed.id, label: proposed.label, by: c.props.proposedBy ?? '', note: c.props.proposalNote ?? '' }
         : null,
     };
-    if (actor.kind === 'agent') entry.untrusted = true;
+    if (actor.kind === 'agent') {
+      const f = (text: string) => fenceUntrusted(text, 'content');
+      entry.untrusted = true;
+      entry.question = f(entry.question);
+      entry.options = entry.options.map((o) => ({ ...o, label: f(o.label) }));
+      if (entry.decided) entry.decided = fenceDecision(entry.decided);
+      if (entry.proposed) entry.proposed = { ...entry.proposed, label: f(entry.proposed.label), note: f(entry.proposed.note) };
+    }
     decisions.push(entry);
   }
   decisions.sort((a, b) => (a.status === b.status ? 0 : a.status === 'decided' ? -1 : 1));

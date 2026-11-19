@@ -48,6 +48,9 @@ describe('task blocks', () => {
     // The assignee finds it across documents, fenced: people wrote the title.
     const mine = await listMyTasks(AGENT);
     expect(mine.ok && mine.value.tasks.map((t) => [t.id, t.untrusted])).toEqual([[task!.id, true]]);
+    // ...and the title is fenced for the agent, plain for a person.
+    expect(mine.ok && mine.value.tasks[0]!.title).toMatch(/^<untrusted-content-[0-9a-f]+>\nDraft the launch note\n<\/untrusted-content-[0-9a-f]+>$/);
+    expect(listed.ok && listed.value.tasks[0]!.title).toBe('Draft the launch note');
   });
 
   it('checking it off updates status', async () => {

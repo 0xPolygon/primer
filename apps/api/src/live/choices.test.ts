@@ -15,6 +15,9 @@ import { serverEditor } from './editor.ts';
 import { paragraph, seedBlocks, withLiveDoc } from './live.testlib.ts';
 import type { Target } from '@polygonlabs/primer-api-types';
 
+/** The text inside one fence (`<untrusted-content-…>`), or null when it isn't fenced. */
+const fenced = (text: string) => /^<(untrusted-content-[0-9a-f]+)>\n([\s\S]*)\n<\/\1>$/.exec(text)?.[2] ?? null;
+
 const EDITOR = { kind: 'person' as const, actorId: OWNER.id, runId: null };
 
 async function removeBlock(doc: string, target: Target, origin: Parameters<typeof applyPlan>[1]) {
@@ -133,21 +136,22 @@ describe('choice blocks', () => {
       [first.target.blockId, 'decided'],
       [second.target.blockId, 'open'],
     ]);
-    expect(register.value.decisions[0]).toMatchObject({
-      question: 'Which database?',
-      untrusted: true,
-      proposed: null,
-      decided: {
-        optionId: pg,
-        label: 'Postgres',
-        rationale: 'We already run it.',
-        evidence: [{ label: 'Benchmarks', url: 'https://example.com/bench' }],
-        openQuestions: ['Who owns backups?'],
-        decidedBy: OWNER.id,
-        decidedByName: 'Ada',
-      },
-    });
-    expect(register.value.decisions[0]!.options.find((o) => o.id === lite)?.votes).toBe(1);
+    const first0 = register.value.decisions[0]!;
+    expect(first0).toMatchObject({ untrusted: true, proposed: null, decided: { optionId: pg, decidedBy: OWNER.id, decidedByName: 'Ada' } });
+    // People's words reach an agent fenced: question, option labels, rationale, evidence labels, open questions.
+    expect(fenced(first0.question)).toBe('Which database?');
+    expect(fenced(first0.decided!.label)).toBe('Postgres');
+    expect(fenced(first0.decided!.rationale)).toBe('We already run it.');
+    expect(fenced(first0.decided!.evidence[0]!.label)).toBe('Benchmarks');
+    expect(first0.decided!.evidence[0]!.url).toBe('https://example.com/bench');
+    expect(first0.decided!.openQuestions.map(fenced)).toEqual(['Who owns backups?']);
+    expect(first0.options.map((o) => fenced(o.label))).toEqual(['Postgres', 'SQLite', 'DuckDB']);
+    expect(first0.options.find((o) => o.id === lite)?.votes).toBe(1);
+    // The decision an agent reads from the tally is fenced the same way; a person reads it plain.
+    const tally = await choiceTally(AGENT, doc, first.target.blockId);
+    expect(tally.ok && fenced(tally.value.decision!.rationale)).toBe('We already run it.');
+    const plain = await listDecisions(OWNER, doc);
+    expect(plain.ok && plain.value.decisions[0]).toMatchObject({ question: 'Which database?', decided: { rationale: 'We already run it.' } });
 
     // decision.made wakes whoever watches the document; ids only.
     const made = await db.select().from(events).where(and(eq(events.documentId, doc), eq(events.type, 'decision.made')));
