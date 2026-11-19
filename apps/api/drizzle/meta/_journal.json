@@ -134,13 +134,6 @@
       "when": 1795105532475,
       "tag": "0018_magenta_wolfpack",
       "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "7",
-      "when": 1795109220850,
-      "tag": "0019_widgets",
-      "breakpoints": true
     }
   ]
 }
