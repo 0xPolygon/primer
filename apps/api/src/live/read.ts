@@ -12,7 +12,7 @@ import { fragmentDoc } from './marks.ts';
 import type { AppliedBlock } from './pipeline.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
-import { MAIN_TAB, fragmentFor, pageBlocks, tabFragmentName, tabsOf } from './reach.ts';
+import { MAIN_TAB, fragmentFor, pageBlocks, tabFragmentName, tabsOf, blockOfFragment } from './reach.ts';
 import { fenceUntrusted } from '../lib/untrusted.ts';
 import { loadStamped } from '../page/publish.ts';
 import { readPidText } from '../page/text.ts';
@@ -158,7 +158,13 @@ async function touchedSince(documentId: string, since: number): Promise<Set<stri
   const rows = (await db.execute(sql`
     SELECT DISTINCT unnest(touched) AS id FROM doc_updates WHERE document_id = ${documentId} AND id > ${since}
   `)) as unknown as { id: string }[];
-  return new Set(rows.map((r) => r.id));
+  const touched = new Set(rows.map((r) => r.id));
+  // Text edited in a page (or an embed, a widget label) changes its block.
+  for (const id of [...touched]) {
+    const block = blockOfFragment(id);
+    if (block) touched.add(block);
+  }
+  return touched;
 }
 
 async function withDoc<T>(documentId: string, fn: (doc: Y.Doc) => T): Promise<T> {

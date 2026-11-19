@@ -21,6 +21,12 @@ export function fragmentFor(doc: Y.Doc, target: Target): Y.XmlFragment {
   return doc.getXmlFragment(fragmentName(target));
 }
 
+/** The block a sub-fragment (page text, embed, widget label) belongs to:
+ *  editing its text changes that block. Null for anything else. */
+export function blockOfFragment(name: string): string | null {
+  return /^(?:page|embed|widget)\/([^/]+)\//.exec(name)?.[1] ?? null;
+}
+
 export function isTabFragment(name: string): boolean {
   return name === MAIN_FRAGMENT || name.startsWith('tab/');
 }

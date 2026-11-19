@@ -20,7 +20,7 @@ import { canRead, libraryOwnerId, loadEffectiveRole, type Visibility } from '../
 import { fenceUntrusted } from '../lib/untrusted.ts';
 import { withLiveDocument } from './instance.ts';
 import { getLiveDoc } from './read.ts';
-import { tabsOf } from './reach.ts';
+import { blockOfFragment, tabsOf } from './reach.ts';
 
 /** Changed blocks a catch-up lists in full. */
 const MAX_BLOCKS = 50;
@@ -102,7 +102,7 @@ export async function getCatchUp(actor: AuthUser, documentId: string, since: Cat
     const touched = new Set<string>();
     for (const row of rows) {
       if (isOwn(row.actorId)) continue;
-      for (const id of row.touched) touched.add(id);
+      for (const id of row.touched) touched.add(blockOfFragment(id) ?? id);
       if (row.actorId) person(row.actorId).edits += row.n;
     }
     if (touched.size > 0) {
