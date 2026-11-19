@@ -23,6 +23,7 @@ import { registerEventRoutes } from './routes/events.ts';
 import { registerRecordRoutes } from './routes/records.ts';
 import { registerChoiceRoutes } from './routes/choices.ts';
 import { registerTaskRoutes } from './routes/tasks.ts';
+import { registerCatchUpRoutes } from './routes/catchup.ts';
 import { registerMentionNotifications } from './live/mentions.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
@@ -128,6 +129,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerRecordRoutes(app);
   registerChoiceRoutes(app);
   registerTaskRoutes(app);
+  registerCatchUpRoutes(app, deps);
   registerMentionNotifications(deps.notifier);
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);

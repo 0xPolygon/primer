@@ -126,7 +126,10 @@ export async function applyPlan(documentId: string, origin: LiveOrigin, plan: Pl
     plan.mode === 'suggest' ||
     (!plan.annotation && origin.kind === 'agent' && (await effectiveAgentMode(documentId, origin.actorId)) === 'suggest');
   const changeSetId = suggesting ? (plan.changeSetId ?? uuidv7()) : (plan.changeSetId ?? null);
-  const connection = await liveInstance().openDirectConnection(liveDocName(documentId), origin);
+  // An annotation (a comment mark) changes no content: persistence records
+  // it as touching nothing, so delta reads and catch-up don't show it as an edit.
+  const context = plan.annotation ? { ...origin, annotation: true } : origin;
+  const connection = await liveInstance().openDirectConnection(liveDocName(documentId), context);
   try {
     const doc = connection.document!;
     const step = await docQueue(documentId)(async () => {

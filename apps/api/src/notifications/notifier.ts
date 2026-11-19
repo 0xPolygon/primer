@@ -41,6 +41,13 @@ export interface NotifyDocumentMentionArgs {
   actorUserId: string;
 }
 
+/** A person's digest (live/digestEmail.ts). `render` lays it out with the
+ *  app's base URL for links; the notifier only addresses and sends it. */
+export interface NotifyDigestArgs {
+  userId: string;
+  render: (appBaseUrl: string) => Promise<{ subject: string; text: string; html: string }>;
+}
+
 export interface Notifier {
   /**
    * Whether OTP emails can actually reach recipients. The external-share
@@ -52,6 +59,7 @@ export interface Notifier {
   notifyExternalOtp(args: NotifyExternalOtpArgs): Promise<void>;
   notifyExternalFirstView(args: NotifyExternalFirstViewArgs): Promise<void>;
   notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void>;
+  notifyDigest(args: NotifyDigestArgs): Promise<void>;
 }
 
 export class NoopNotifier implements Notifier {
@@ -68,6 +76,9 @@ export class NoopNotifier implements Notifier {
   }
   async notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void> {
     logger.debug({ args }, 'notifyDocumentMention (no-op)');
+  }
+  async notifyDigest(args: NotifyDigestArgs): Promise<void> {
+    logger.debug({ userId: args.userId }, 'notifyDigest (no-op)');
   }
   async notifyExternalOtp(args: NotifyExternalOtpArgs): Promise<void> {
     logger.info({ toEmail: args.toEmail, code: args.code }, 'external OTP code (no-op notifier, dev only)');

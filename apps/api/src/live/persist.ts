@@ -76,7 +76,8 @@ export function attachPersistence(
   // Deleted content is garbage-collected before `update` fires, so the
   // touched ids are collected while the transaction is still intact.
   const onAfterTransaction = (tr: Y.Transaction) => {
-    tr.meta.set(TOUCHED, touchedBy(doc, tr));
+    const annotation = (tr.origin as { context?: { annotation?: boolean } } | null)?.context?.annotation === true;
+    tr.meta.set(TOUCHED, annotation ? [] : touchedBy(doc, tr));
   };
   const onUpdate = (update: Uint8Array, origin: unknown, _doc: Y.Doc, tr: Y.Transaction) => {
     if (state.failed) return;

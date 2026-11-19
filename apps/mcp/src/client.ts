@@ -31,6 +31,7 @@ import type {
   UserDTO,
   UserLookupResponse,
   VersionsListResponse,
+  DigestResponse,
 } from '@polygonlabs/primer-api-types';
 
 /**
@@ -463,6 +464,14 @@ export class PrimerClient {
     return this.request<TasksResponse>({
       method: 'GET',
       path: documentId ? `/api/documents/${encodeURIComponent(documentId)}/tasks` : '/api/tasks?assignee=me',
+    });
+  }
+
+  /** What changed across the caller's library since `since` (default: the last day). */
+  getDigest(since?: string): Promise<DigestResponse> {
+    return this.request<DigestResponse>({
+      method: 'GET',
+      path: since ? `/api/me/digest?since=${encodeURIComponent(since)}` : '/api/me/digest',
     });
   }
 
