@@ -31,5 +31,8 @@ Awareness of change: catch-up, a digest, change highlights, fuzzy re-anchoring, 
 - **Promote a conversation.** `primer_promote_conversation`, `POST
   /api/documents/from-conversation` and "Promote to document" on a thread:
   one quote block per message, text kept literal.
-- Comment marks no longer count as edits in delta reads; agents' ops can't
+- Comment marks no longer count as edits in delta reads, and text edited
+  inside a page counts as a change to its page block; agents' ops can't
   write a choice's decision props.
+- The "Add version" dialog shows the suggestions a republish made when it
+  made no version.
