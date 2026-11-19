@@ -34,7 +34,11 @@ export type PrimerErrorCode =
   | 'rate_limited'
   | 'network'
   | 'login_denied'
-  | 'login_expired';
+  | 'login_expired'
+  /** Server refusals passed through by code (see api-types RefusalCode). */
+  | 'stale_base'
+  | 'record_conflict'
+  | 'records_cap';
 
 export class PrimerApiError extends Error {
   readonly code: PrimerErrorCode;
@@ -89,9 +93,12 @@ interface RequestOptions {
 interface ApiErrorBody {
   error?: string;
   message?: string;
-  /** Present on publish refusals: what to do instead. */
-  refusal?: { fix?: string };
+  /** Present on refusals: its code and what to do instead. */
+  refusal?: { code?: string; fix?: string };
 }
+
+/** Refusal codes the tool layer branches on, kept as the server sent them. */
+const PASSED_THROUGH = new Set<string>(['stale_base', 'record_conflict', 'records_cap']);
 
 function statusToCode(status: number): PrimerErrorCode {
   if (status === 401) return 'not_authenticated';
@@ -381,7 +388,8 @@ export class PrimerClient {
 
     if (!res.ok) {
       const body = await parseErrorBody(res);
-      const code = statusToCode(res.status);
+      const refused = body?.refusal?.code;
+      const code = refused !== undefined && PASSED_THROUGH.has(refused) ? (refused as PrimerErrorCode) : statusToCode(res.status);
       const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
       const message = body?.refusal?.fix ? `${base} ${body.refusal.fix}` : base;
       throw new PrimerApiError(code, message, res.status);
