@@ -578,13 +578,15 @@ export interface LiveDocDTO {
   /** The tab's HTML pages: each page block's source (as published, with its
    *  `data-pid`s: edit it and republish with the pids intact) and the current
    *  text of each pid, people's text fenced as untrusted data, with the
-   *  version an `update` of that pid expects. */
+   *  version an `update` of that pid expects. At most 20 pages and 5,000
+   *  pids per page are listed. */
   pages?: LivePageDTO[];
 }
 
 export interface LivePageDTO {
   target: Target;
-  source: string;
+  /** null when the page's source can't be read (the page is unavailable). */
+  source: string | null;
   texts: { target: Target; text: string; version: string }[];
 }
 

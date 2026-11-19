@@ -11,6 +11,7 @@ import type { Reconciliation, Refusal } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { effectiveAgentMode } from '../lib/permissions.ts';
 import { db } from '../db/client.ts';
+import { logger } from '../logger.ts';
 import { findBlock } from '../live/blocks.ts';
 import { serverEditor } from '../live/editor.ts';
 import { liveDocName, liveInstance } from '../live/instance.ts';
@@ -41,10 +42,19 @@ export function isOwnSourceKey(documentId: string, key: string): boolean {
   return new RegExp(`^pages/${documentId}/${UUID}\\.html$`).test(key) && new RegExp(`^${UUID}$`).test(documentId);
 }
 
-/** The stamped source of a page block, or null when its key isn't this document's. */
+/**
+ * The stamped source of a page block, or null when its key isn't this
+ * document's or can't be read. Page block props are editor-writable, so a
+ * bad key is an editor's doing and must never fail a whole read.
+ */
 export async function loadStamped(storage: Storage, documentId: string, page: PageRef): Promise<string | null> {
   if (!isOwnSourceKey(documentId, page.sourceKey)) return null;
-  return new Response(await storage.get(page.sourceKey)).text();
+  try {
+    return await new Response(await storage.get(page.sourceKey)).text();
+  } catch (err) {
+    logger.warn({ documentId, blockId: page.blockId, err }, 'page: stamped source unreadable');
+    return null;
+  }
 }
 
 /** The page block of a page document (its first). */
@@ -125,10 +135,13 @@ export function anchorPageThreads(doc: Y.Doc, blockId: string, page: PreparedPag
 
 /** The page document's HTML now: its stamped source with people's text spliced in. */
 export async function currentPageHtml(storage: Storage, documentId: string, doc: Y.Doc): Promise<string | null> {
-  const page = mainPage(doc);
-  if (!page) return null;
-  const stamped = await loadStamped(storage, documentId, page);
-  return stamped === null ? null : renderPage(doc, { tabId: page.tabId, blockId: page.blockId, stamped });
+  // The first page block whose source loads: an editor's bogus block can't
+  // take the page's place.
+  for (const page of pageBlocks(doc)) {
+    const stamped = await loadStamped(storage, documentId, page);
+    if (stamped !== null) return renderPage(doc, { tabId: page.tabId, blockId: page.blockId, stamped });
+  }
+  return null;
 }
 
 /**

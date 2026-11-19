@@ -209,4 +209,27 @@ describe('page documents', () => {
       expect(!refused.ok && refused.refusal.code).toBe('forbidden');
     });
   });
+
+  it("a page block with a bogus sourceKey doesn't break reading the document", async () => {
+    await withStorage(async (storage) => {
+      const r = await publishPage(storage, PAGE);
+      const page = await pageOf(r.documentId);
+      const bogus = `pages/${r.documentId}/01a1f557-0000-7000-8000-000000000000.html`;
+      await applyPlan(r.documentId, originFor(owner), {
+        onConflict: 'refuse',
+        edits: [
+          {
+            target: { tabId: 'main', blockId: page.blockId },
+            inverse: false,
+            build: (tr, at) => void tr.setNodeMarkup(at!.pos + 1, undefined, { ...at!.node.firstChild!.attrs, sourceKey: bogus }),
+          },
+        ],
+      });
+      const read = await getLiveDoc(r.documentId, owner, { format: 'markdown', storage });
+      expect(read.ok).toBe(true);
+      if (!read.ok) return;
+      expect(read.value.blocks).toHaveLength(1);
+      expect(read.value.pages).toEqual([{ target: { tabId: 'main', blockId: page.blockId }, source: null, texts: [] }]);
+    });
+  });
 });

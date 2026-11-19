@@ -186,26 +186,35 @@ export async function appliedBlockDTO(applied: AppliedBlock, tabId: string): Pro
   };
 }
 
+/** Pages and pids an agent read lists at most. */
+const MAX_PAGES = 20;
+const MAX_PIDS = 5000;
+
 /** The tab's page blocks for an agent: the stamped source, and each pid's
- *  current text (fenced: people write it) with its version. */
+ *  current text (fenced: people write it) with its version. Page refs come
+ *  from the editor-writable document, so a page whose source can't be read
+ *  is listed as unavailable and never fails the read. */
 async function readPages(storage: Storage, documentId: string, tabId: string): Promise<LivePageDTO[]> {
   const refs = await withDoc(documentId, (ydoc) =>
     pageBlocks(ydoc)
       .filter((p) => p.tabId === tabId)
+      .slice(0, MAX_PAGES)
       .map((p) => ({
         ref: p,
-        texts: p.pids.map((pid) => {
+        texts: p.pids.slice(0, MAX_PIDS).map((pid) => {
           const target: Target = { tabId, blockId: p.blockId, pid };
           const at = findBlock(fragmentDoc(fragmentFor(ydoc, target)), p.blockId);
           return { target, text: fenceUntrusted(readPidText(ydoc, target), 'pagetext'), version: at ? blockVersion(at.node) : '' };
         }),
       })),
   );
+  const sources = new Map<string, Promise<string | null>>();
   const out: LivePageDTO[] = [];
   for (const { ref, texts } of refs) {
-    const source = await loadStamped(storage, documentId, ref);
-    if (source === null) continue;
-    out.push({ target: { tabId, blockId: ref.blockId }, source, texts });
+    if (!sources.has(ref.sourceKey)) sources.set(ref.sourceKey, loadStamped(storage, documentId, ref));
+    const source = await sources.get(ref.sourceKey)!;
+    const target = { tabId, blockId: ref.blockId };
+    out.push(source === null ? { target, source: null, texts: [] } : { target, source, texts });
   }
   return out;
 }
