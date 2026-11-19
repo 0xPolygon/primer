@@ -72,7 +72,7 @@ describe('LiveEditor', () => {
   it('live document renders the editor and legacy renders the iframe', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
     const frame = () => createElement('iframe', { title: 'legacy-frame' });
-    const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', frame };
+    const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, frame };
 
     const live = await render(createElement(DocumentSurface, { ...props, live: true }));
     await until(() => live.querySelector('[contenteditable="true"].bn-editor')?.textContent?.includes('Seeded from the Y.Doc') === true);

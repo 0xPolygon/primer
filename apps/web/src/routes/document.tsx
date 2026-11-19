@@ -23,6 +23,7 @@ import type {
   TextRangeAnchor,
   ElementPathAnchor,
   ThreadAnchor,
+  ViewerRole,
   VersionsListResponse,
 } from '@polygonlabs/primer-api-types';
 import { useDocument, useDeleteDocument, useEditDocument } from '../queries/documents.ts';
@@ -97,12 +98,21 @@ export function DocumentSurface(props: {
   readOnly: boolean;
   theme: 'light' | 'dark';
   userName: string;
+  userId: string;
+  role: ViewerRole;
   frame: () => ReactNode;
 }) {
   if (!props.live) return <>{props.frame()}</>;
   return (
     <Suspense fallback={<div className="p-4 text-sm text-neutral-500">Loading editor…</div>}>
-      <LiveEditor documentId={props.documentId} readOnly={props.readOnly} theme={props.theme} userName={props.userName} />
+      <LiveEditor
+        documentId={props.documentId}
+        readOnly={props.readOnly}
+        theme={props.theme}
+        userName={props.userName}
+        userId={props.userId}
+        role={props.role}
+      />
     </Suspense>
   );
 }
@@ -1034,6 +1044,8 @@ function DocumentPageInner() {
             readOnly={!canEdit}
             theme={theme}
             userName={me.data?.displayName ?? 'Someone'}
+            userId={me.data?.id ?? ''}
+            role={docQuery.data?.myRole ?? 'stranger'}
             frame={() =>
               currentVersionId && (
                 <ArtifactIframe
