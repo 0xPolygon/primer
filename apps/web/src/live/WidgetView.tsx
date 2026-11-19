@@ -291,7 +291,11 @@ function AnchorComposer(props: { documentId: string; picked: Picked; onDone: (po
       role="dialog"
       aria-label={t('widget.commentOn', { name: anchorName(picked.anchor) })}
       className="primer-widget-composer fixed z-50 w-72 rounded border border-neutral-300 bg-white p-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
-      style={{ left: picked.rect.x, top: picked.rect.y + picked.rect.height + 6 }}
+      // Below the mark, kept on screen (it is fixed, so it can't be scrolled to).
+      style={{
+        left: Math.max(8, Math.min(picked.rect.x, window.innerWidth - 300)),
+        top: Math.max(8, Math.min(picked.rect.y + picked.rect.height + 6, window.innerHeight - 180)),
+      }}
     >
       <p className="mb-1 text-xs text-neutral-500">{t('widget.commentOn', { name: anchorName(picked.anchor) })}</p>
       <textarea
