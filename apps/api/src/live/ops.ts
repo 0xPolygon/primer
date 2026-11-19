@@ -20,12 +20,15 @@ import { originFor } from './origin.ts';
 import { applyPlan, type AppliedBlock, type Located, type PlannedEdit } from './pipeline.ts';
 import { appliedBlockDTO } from './read.ts';
 import { rebaseUpdate, type UpdateInput } from './rebase.ts';
+import { runHooks } from './runs.ts';
 
 export type { BlockInput, LiveOp, ApplyOpsRequest } from '@polygonlabs/primer-api-types';
 
 const MAX_OPS = 200;
 const MAX_BLOCKS_PER_OP = 500;
 const VERSION = /^[0-9a-f]{16}$/;
+
+type RunHooks = Exclude<Awaited<ReturnType<typeof runHooks>>, Refusal>;
 
 export type OpError = { index: number; refusal: Refusal };
 export type ApplyOpsResult =
@@ -39,19 +42,6 @@ type Prepared =
   | { op: 'replaceRange'; from: Target; to: Target; expectVersions: Record<string, string>; nodes: PmNode[]; input: BlockInput[] }
   | { op: 'delete'; target: Target; expectVersion: string }
   | { op: 'move'; target: Target; at: Target; position: 'before' | 'after'; expectVersion: string };
-
-/** What a run adds to a batch (live/runs.ts): its guard and its undo log. */
-export type RunHooks = {
-  guard: (work: { edits: number; removals: number }) => Promise<Refusal | null>;
-  afterPersist: NonNullable<Parameters<typeof applyPlan>[2]['afterPersist']>;
-  onTarget?: (target: Target) => void;
-};
-
-/** Run support plugs in here (live/runs.ts sets it), so ops stay free of run tables. */
-let runHooksFor: ((documentId: string, actor: AuthUser, runId: string) => Promise<RunHooks | Refusal>) | null = null;
-export function setRunHooks(fn: typeof runHooksFor): void {
-  runHooksFor = fn;
-}
 
 /**
  * Agents edit a live document by block (plan M4.2). Every op is validated and
@@ -96,8 +86,7 @@ export async function applyOps(documentId: string, actor: AuthUser, raw: unknown
 
   let hooks: RunHooks | null = null;
   if (typeof req.runId === 'string') {
-    if (!runHooksFor) return reject([], 'Runs are not available.');
-    const out = await runHooksFor(documentId, actor, req.runId);
+    const out = await runHooks(documentId, actor, req.runId);
     if ('code' in out) return { ok: false, status: out.code === 'not_found' ? 404 : 409, refusal: out };
     hooks = out;
   }

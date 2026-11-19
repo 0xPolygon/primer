@@ -54,6 +54,13 @@ export function toRelative(fragment: Y.XmlFragment, pos: number): string {
   return Buffer.from(Y.encodeRelativePosition(rel)).toString('base64');
 }
 
+/** Position `pos` in `fragment` as relative-position JSON, the form
+ *  y-prosemirror's collaboration cursors read from awareness. */
+export function toRelativeJSON(fragment: Y.XmlFragment, pos: number): unknown {
+  const rel = absolutePositionToRelativePosition(pos, fragment, sizeMapping(serverEditor().editor.pmSchema) as never);
+  return Y.relativePositionToJSON(rel);
+}
+
 /** The absolute range of a relative selection in `target`'s fragment, or null. */
 export function resolveSelection(doc: Y.Doc, target: Target, sel: RelativeSelection): { from: number; to: number } | null {
   const fragment = doc.getXmlFragment(fragmentName(target));

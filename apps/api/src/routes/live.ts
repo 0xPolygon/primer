@@ -3,10 +3,11 @@ import type { LiveReadFormat } from '@polygonlabs/primer-api-types';
 import type { AppVariables } from '../app.ts';
 import { getLiveDoc } from '../live/read.ts';
 import { applyOps } from '../live/ops.ts';
+import { runViewer } from '../live/runs.ts';
 
 /** Agent-facing reads and writes of live documents (live/read.ts, live/ops.ts). */
 export function registerLiveRoutes(app: Hono<{ Variables: AppVariables }>): void {
-  // ?format=markdown|html|json&tabId=&since=<docVersion>&from=<blockId>&to=<blockId>
+  // ?format=markdown|html|json&tabId=&since=<docVersion>&from=<blockId>&to=<blockId>&runId=
   app.get('/api/documents/:docId/live', async (c) => {
     const q = c.req.query();
     const format = parseFormat(q.format);
@@ -18,7 +19,8 @@ export function registerLiveRoutes(app: Hono<{ Variables: AppVariables }>): void
     const tabId = q.tabId || 'main';
     if ((q.from === undefined) !== (q.to === undefined)) return badRequest(c, 'Pass both from and to, or neither.');
     const range = q.from !== undefined ? { from: { tabId, blockId: q.from }, to: { tabId, blockId: q.to! } } : undefined;
-    const out = await getLiveDoc(c.req.param('docId'), c.get('user'), { format, tabId, since, range });
+    const viewer = q.runId ? ((await runViewer(c.req.param('docId'), c.get('user'), q.runId)) ?? undefined) : undefined;
+    const out = await getLiveDoc(c.req.param('docId'), c.get('user'), { format, tabId, since, range, viewer });
     if (!out.ok) return c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
     return c.json(out.value, 200);
   });

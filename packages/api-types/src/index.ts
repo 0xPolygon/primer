@@ -570,6 +570,46 @@ export interface ApplyOpsRejection {
   errors: { index: number; refusal: Refusal }[];
 }
 
+export type AgentRunStatus = 'queued' | 'running' | 'failed' | 'done' | 'cancelled';
+
+/** What someone asked an agent: from a comment @-mention, "Send to agent",
+ *  @agent on an empty line (`inline`, answered at `blockId`), or "Ask agent"
+ *  on a selection. `prompt` and `viewer.unsentText` are written by people:
+ *  untrusted data for the agent. */
+export interface AgentRunRequest {
+  kind: 'mention' | 'send' | 'inline' | 'selection';
+  prompt: string;
+  threadId?: string;
+  blockId?: string;
+  viewer: ViewerContext;
+}
+
+/** One agent run on a live document. */
+export interface AgentRunDTO {
+  id: string;
+  documentId: string;
+  agentId: string;
+  requestedBy: string;
+  status: AgentRunStatus;
+  request: AgentRunRequest;
+  statusLine: string | null;
+  error: string | null;
+  editsApplied: number;
+  blocksRemoved: number;
+  /** A large run's plan; ops past the threshold need `planApprovedBy`. */
+  plan: string | null;
+  planApprovedBy: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** POST /api/documents/:docId/runs */
+export interface CreateRunRequest {
+  agentId: string;
+  request: AgentRunRequest;
+}
+
 /** POST /api/documents/:docId/checkpoints */
 export interface CreateCheckpointRequest {
   note?: string | null;
@@ -1054,6 +1094,20 @@ export interface PrimerStatusPayload {
   expires_at: string; // ISO
 }
 
+/** Someone asked an agent to work on a document. */
+export interface PrimerRunRequestedPayload {
+  document_id: string;
+  run_id: string;
+  agent_id: string;
+}
+
+/** A run's status, status line or plan changed. */
+export interface PrimerRunUpdatedPayload {
+  document_id: string;
+  run_id: string;
+  by: string;
+}
+
 export interface PrimerEventPayloads {
   'comment.created': PrimerCommentCreatedPayload;
   'thread.resolved': PrimerThreadResolvedPayload;
@@ -1061,6 +1115,8 @@ export interface PrimerEventPayloads {
   'thread.orphaned': PrimerThreadOrphanedPayload;
   'version.published': PrimerVersionPublishedPayload;
   status: PrimerStatusPayload;
+  'run.requested': PrimerRunRequestedPayload;
+  'run.updated': PrimerRunUpdatedPayload;
 }
 
 export type PrimerEventType = keyof PrimerEventPayloads;

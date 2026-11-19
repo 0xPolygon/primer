@@ -158,6 +158,7 @@ describe('route scope table', () => {
       'primer_create_document',
       'primer_add_version',
       'primer_apply_ops',
+      'primer_update_run',
     ]);
   });
 });

@@ -1,5 +1,6 @@
 import type {
   Target,
+  AgentRunDTO,
   ApplyOpsRequest,
   Reconciliation,
   LiveDocDTO,
@@ -185,12 +186,13 @@ export class PrimerClient {
   /** Reads a live document's blocks (see primer_get_doc). */
   getLiveDoc(
     documentId: string,
-    opts: { format?: LiveReadFormat; tabId?: string; since?: number; range?: { from: Target; to: Target } } = {},
+    opts: { format?: LiveReadFormat; tabId?: string; since?: number; range?: { from: Target; to: Target }; runId?: string } = {},
   ): Promise<LiveDocDTO> {
     const q = new URLSearchParams();
     if (opts.format) q.set('format', opts.format);
     if (opts.tabId) q.set('tabId', opts.tabId);
     if (opts.since !== undefined) q.set('since', String(opts.since));
+    if (opts.runId) q.set('runId', opts.runId);
     if (opts.range) {
       q.set('from', opts.range.from.blockId);
       q.set('to', opts.range.to.blockId);
@@ -200,6 +202,30 @@ export class PrimerClient {
       method: 'GET',
       path: `/api/documents/${encodeURIComponent(documentId)}/live${qs ? `?${qs}` : ''}`,
     });
+  }
+
+  /** The caller's (an agent's) runs; active ones by default. */
+  listRuns(opts: { documentId?: string; status?: string } = {}): Promise<{ runs: AgentRunDTO[] }> {
+    const q = new URLSearchParams();
+    if (opts.documentId) q.set('documentId', opts.documentId);
+    if (opts.status) q.set('status', opts.status);
+    const qs = q.toString();
+    return this.request<{ runs: AgentRunDTO[] }>({ method: 'GET', path: `/api/runs${qs ? `?${qs}` : ''}` });
+  }
+
+  /** Claims, updates, finishes or fails one of the caller's runs. */
+  updateRun(
+    runId: string,
+    action: 'claim' | 'status' | 'finish' | 'fail',
+    input: { statusLine?: string; plan?: string; error?: string } = {},
+  ): Promise<AgentRunDTO> {
+    const id = encodeURIComponent(runId);
+    if (action === 'claim') return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/claim`, json: {} });
+    if (action === 'status') {
+      return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/status`, json: { statusLine: input.statusLine, plan: input.plan } });
+    }
+    const json = action === 'fail' ? { error: input.error ?? 'failed' } : {};
+    return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/finish`, json });
   }
 
   /** Edits a live document by block (see primer_apply_ops). */

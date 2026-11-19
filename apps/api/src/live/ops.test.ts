@@ -1,69 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { v7 as uuidv7 } from 'uuid';
 import { yXmlFragmentToProsemirrorJSON } from 'y-prosemirror';
 import type { PartialBlock } from '@blocknote/core';
-import type { Reconciliation } from '@polygonlabs/primer-api-types';
-import type { AuthUser } from '../app.ts';
-import { db } from '../db/client.ts';
-import { threads, users } from '../db/schema.ts';
 import { serverEditor } from './editor.ts';
-import { createLiveDoc, paragraph, seedBlocks, withLiveDoc } from './live.testlib.ts';
+import { comment, createLiveDoc, makeAgent, markdownOf, ops, paragraph, seedBlocks, versions, withLiveDoc } from './live.testlib.ts';
 import { applyOps } from './ops.ts';
-import { SYSTEM_ORIGIN } from './origin.ts';
-import { applyPlan } from './pipeline.ts';
 import { getLiveDoc } from './read.ts';
 
 const main = (blockId: string) => ({ tabId: 'main', blockId });
-
-export async function makeAgent(via = 'mock-user-1'): Promise<AuthUser> {
-  const id = `agent_${uuidv7()}`;
-  await db.insert(users).values({ id, email: '', displayName: 'Helper', kind: 'agent', viaUserId: via });
-  return { id, email: '', displayName: 'Helper', kind: 'agent', viaUserId: via };
-}
-
-export async function versions(documentId: string, agent: AuthUser): Promise<Record<string, string>> {
-  const out = await getLiveDoc(documentId, agent, { format: 'json' });
-  if (!out.ok) throw new Error(out.refusal.message);
-  return Object.fromEntries(out.value.blocks.map((b) => [b.target.blockId, b.version]));
-}
-
-export async function markdownOf(documentId: string, agent: AuthUser): Promise<string[]> {
-  const out = await getLiveDoc(documentId, agent, { format: 'markdown' });
-  if (!out.ok) throw new Error(out.refusal.message);
-  return out.value.blocks.map((b) => b.markdown!);
-}
-
-export async function ops(documentId: string, agent: AuthUser, req: Record<string, unknown>): Promise<Reconciliation> {
-  const out = await applyOps(documentId, agent, { baseVersion: 0, ...req });
-  if (!out.ok) throw new Error(JSON.stringify(out));
-  return out.value;
-}
-
-/** Puts an open thread's comment mark on `quote` in block `blockId`. */
-export async function comment(documentId: string, blockId: string, quote: string, opts: { resolved?: boolean } = {}): Promise<string> {
-  const threadId = uuidv7();
-  await db.insert(threads).values({
-    id: threadId,
-    documentId,
-    versionId: null,
-    anchor: { type: 'prose', target: main(blockId), quote },
-    resolvedAt: opts.resolved ? new Date() : null,
-  });
-  await applyPlan(documentId, SYSTEM_ORIGIN, {
-    onConflict: 'refuse',
-    edits: [
-      {
-        target: main(blockId),
-        inverse: false,
-        build: (tr, at) => {
-          const from = at!.pos + 2 + at!.node.firstChild!.textContent.indexOf(quote);
-          tr.addMark(from, from + quote.length, serverEditor().editor.pmSchema.marks.comment!.create({ threadId }));
-        },
-      },
-    ],
-  });
-  return threadId;
-}
 
 async function storedJson(documentId: string): Promise<string> {
   return withLiveDoc(documentId, (doc) => JSON.stringify(yXmlFragmentToProsemirrorJSON(doc.getXmlFragment('document-store'))));
