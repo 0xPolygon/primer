@@ -36,12 +36,12 @@ export function registerUserRoutes(app: Hono<{ Variables: AppVariables }>): void
       return c.json({ error: 'bad_request', message: 'email query param is required' }, 400);
     }
     const [row] = await db
-      .select({ id: users.id })
+      .select({ id: users.id, email: users.email, displayName: users.displayName })
       .from(users)
       .where(sql`lower(${users.email}) = ${email.toLowerCase()}`)
       .limit(1);
     if (!row) return c.json({ error: 'not_found' }, 404);
-    const body: UserLookupResponse = { id: row.id };
+    const body: UserLookupResponse = row;
     return c.json(body, 200);
   });
 

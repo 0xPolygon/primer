@@ -472,3 +472,22 @@ describe('PrimerClient.getEvents / sendEvents (issue #78)', () => {
     expect(url).toBe('http://localhost:3000/api/documents/doc-1/collaborators');
   });
 });
+
+describe('PrimerClient.records', () => {
+  it('POSTs the verb and keeps a refusal code the tools branch on', async () => {
+    const refusal = { code: 'record_conflict', message: 'Record "r" is at version 2, not 1.', fix: 'Read the record again.' };
+    const mockFetch = vi.fn(async () => jsonResponse({ error: 'record_conflict', refusal }, 409));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+
+    const err = await client
+      .records('d1', 'set', { collection: 'c', scope: 'shared', recordId: 'r', data: {}, expectVersion: 1 })
+      .catch((e: unknown) => e);
+
+    const [url, init] = firstCall(mockFetch);
+    expect(url).toBe('http://localhost:3000/api/documents/d1/records/set');
+    expect(init.method).toBe('POST');
+    expect(err).toBeInstanceOf(PrimerApiError);
+    expect((err as PrimerApiError).code).toBe('record_conflict');
+    expect((err as PrimerApiError).message).toContain('Read the record again.');
+  });
+});

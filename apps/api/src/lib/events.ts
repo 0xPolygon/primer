@@ -15,7 +15,7 @@
 // the owner sets through the collaborators API (`routes/collaborators.ts`);
 // Primer never reads a role, grant or permission out of a payload, so no page
 // can widen its own or anyone's access by submitting one.
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from './actors.ts';
@@ -537,6 +537,12 @@ export interface ListEventsPage {
   nextPageToken: string | null;
 }
 
+/** A reader is never handed the `data.changed` events it authored: its own
+ *  record writes must not wake it (records/changed.ts). */
+function notOwnDataChanged(authorColumn: SQL, readerId: string): SQL {
+  return sql`NOT (namespace = ${PRIMER_EVENT_NAMESPACE} AND type = 'data.changed' AND ${authorColumn} = ${readerId})`;
+}
+
 function filterConditions(filters: EventFilters) {
   const conditions = [];
   if (filters.namespace !== undefined) {
@@ -579,6 +585,8 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
     OR (audience IN ('collaborators', 'artifact') AND ${tierReadable})
   )`);
 
+  conditions.push(notOwnDataChanged(sql`author_id`, identity.userId));
+
   const where = sql.join(conditions, sql` AND `);
   // Fetch one extra row to learn whether another page exists.
   const rows = (await db.execute(sql`
@@ -604,13 +612,17 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
  *  once. Backs `GET /api/events/stream?scope=me`. */
 export async function listOwnedEvents(args: {
   userId: string;
+  /** Who reads (the agent itself, not its person): never handed its own
+   *  `data.changed`. */
+  readerId: string;
   filters: EventFilters;
   afterId: number;
   limit: number;
 }): Promise<ListEventsPage> {
-  const { userId, filters, afterId, limit } = args;
+  const { userId, readerId, filters, afterId, limit } = args;
   const conditions = [
     sql`e.id > ${afterId}`,
+    notOwnDataChanged(sql`e.author_id`, readerId),
     isSelfOrAgentOf(sql`d.uploader_id`, userId),
     sql`d.deleted_at IS NULL`,
     ...filterConditions(filters),

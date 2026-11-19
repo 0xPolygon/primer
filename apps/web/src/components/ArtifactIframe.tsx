@@ -7,6 +7,9 @@ import type {
 } from '../companion/protocol.ts';
 import { parseInboundMessage, parseWindowEnvelope } from '../companion/protocol.ts';
 import { createMessageBuffer } from '../companion/buffer.ts';
+import { api } from '../lib/fetch.ts';
+import { browserEventSourceFactory } from '../lib/eventsFeed.ts';
+import { createRecordsHost, loadPageBinding, type RecordsHost } from '../live/recordsHost.ts';
 import {
   computeFitScale,
   fitIframeStyle,
@@ -27,6 +30,10 @@ interface Props {
   fitToWidth?: boolean;
 }
 
+/** A record-reading page that keeps navigating itself is left revoked and
+ *  blank after this many reloads instead of looping. */
+const MAX_BREACH_RELOADS = 3;
+
 // SECURITY-CRITICAL: The sandbox value below is the primary defense against
 // hostile JS inside uploaded artifacts. Do NOT add `allow-same-origin`,
 // `allow-popups`, or `allow-popups-to-escape-sandbox`. Adding any of these
@@ -44,6 +51,13 @@ interface Props {
 export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender, fitToWidth }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
+  // Bumped to reload a record-reading page from Primer after it navigated itself.
+  const [reload, setReload] = useState(0);
+  const breachesRef = useRef(0);
+  const hostRef = useRef<RecordsHost | null>(null);
+  // Loads seen before the page's binding arrived, replayed once it does.
+  const pendingLoadsRef = useRef(0);
+  useEffect(() => { breachesRef.current = 0; }, [src]);
 
   // Latest-value refs so deferred handlers see current props, not the values
   // closed over at mount.
@@ -87,11 +101,27 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
     // never completes; sendInit is idempotent so duplicate triggers are safe.
     const buffer = createMessageBuffer<OutboundProtocolMessage>(50);
     let initSent = false;
+    let disposed = false;
+    // No init (so no port) until the server says what this page may do.
+    let host: RecordsHost | null = null;
+    let wantInit = false;
+    pendingLoadsRef.current = 0;
+    void loadPageBinding(src, api).then((binding) => {
+      if (disposed) return;
+      host = createRecordsHost(binding, { fetchImpl: api, eventSourceFactory: browserEventSourceFactory });
+      hostRef.current = host;
+      const seen = pendingLoadsRef.current;
+      pendingLoadsRef.current = 0;
+      for (let i = 0; i < seen; i++) noteLoadRef.current();
+      if (wantInit && !host.capability?.revoked) sendInit();
+    });
 
     const sendInit = () => {
-      if (initSent) return;
+      wantInit = true;
+      if (initSent || !host) return;
       if (!iframe.contentWindow) return;
       initSent = true;
+      const pageHost = host;
 
       const channel = new MessageChannel();
       const port = channel.port1;
@@ -100,6 +130,9 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
       port.onmessage = (event) => {
         const parsed = parseInboundMessage(event.data);
         if (!parsed) return;
+        if (pageHost.handle(parsed)) return;
+        // Record-reading pages never reach outside Primer.
+        if (parsed.type === 'open_external' && !pageHost.allowsOutbound) return;
         if (parsed.type === 'content_metrics') {
           // Rendering concern owned by this component — not forwarded.
           if (fitToWidthRef.current) {
@@ -118,10 +151,12 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
           type: 'init',
           anchors: anchorsRef.current,
           theme: themeRef.current,
+          features: pageHost.features,
         } satisfies OutboundProtocolMessage,
         '*',
         [channel.port2],
       );
+      pageHost.attach((msg) => port.postMessage(msg));
 
       // Wire the sender for the parent route. The cleanup function
       // deregisters this sender BEFORE closing the port, so callers can rely
@@ -148,6 +183,9 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
     iframe.addEventListener('load', onLoad);
 
     return () => {
+      disposed = true;
+      host?.dispose();
+      hostRef.current = null;
       window.removeEventListener('message', onWindowMessage);
       iframe.removeEventListener('load', onLoad);
       // Deregister the sender BEFORE closing the port so any caller still
@@ -156,7 +194,28 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
       portRef.current?.close();
       portRef.current = null;
     };
-  }, [src]);
+  }, [src, reload]);
+
+  // Every load of the frame, counted from its creation (React attaches this
+  // before the first load can fire). A second load of a record-reading page
+  // is the page navigating itself: access is revoked there and then, and the
+  // page is reloaded from Primer with a fresh frame and capability.
+  const onFrameLoad = () => noteLoadRef.current();
+  const noteLoadRef = useRef(() => {});
+  noteLoadRef.current = () => {
+    const host = hostRef.current;
+    if (!host) {
+      pendingLoadsRef.current += 1;
+      return;
+    }
+    if (host.onLoad() !== 'breach') return;
+    portRef.current?.close();
+    portRef.current = null;
+    registerSenderRef.current?.(null);
+    if (breachesRef.current >= MAX_BREACH_RELOADS) return;
+    breachesRef.current += 1;
+    setReload((n) => n + 1);
+  };
 
   // Push theme changes to the companion. The init handshake already carries
   // the current theme; this effect propagates subsequent toggles. The first
@@ -176,8 +235,10 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
       style={{ overflowX: allowPanX ? 'auto' : 'hidden', overflowY: 'hidden' }}
     >
       <iframe
+        key={`${src}#${reload}`}
         ref={iframeRef}
         src={src}
+        onLoad={onFrameLoad}
         sandbox="allow-scripts allow-forms allow-modals allow-downloads"
         title="Artifact"
         style={{ border: 0, display: 'block', ...fitStyle }}

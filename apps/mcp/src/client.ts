@@ -9,6 +9,10 @@ import type {
   DocumentStatusResponse,
   DocumentStatusState,
   EventsListResponse,
+  PurgePersonalRecordsResponse,
+  RecordChangesResponse,
+  RecordVerb,
+  RecordVerbResults,
   SendEventsResponse,
   ThreadDTO,
   ThreadsListResponse,
@@ -32,7 +36,11 @@ export type PrimerErrorCode =
   | 'rate_limited'
   | 'network'
   | 'login_denied'
-  | 'login_expired';
+  | 'login_expired'
+  /** Server refusals passed through by code (see api-types RefusalCode). */
+  | 'stale_base'
+  | 'record_conflict'
+  | 'records_cap';
 
 export class PrimerApiError extends Error {
   readonly code: PrimerErrorCode;
@@ -87,9 +95,12 @@ interface RequestOptions {
 interface ApiErrorBody {
   error?: string;
   message?: string;
-  /** Present on publish refusals: what to do instead. */
-  refusal?: { fix?: string };
+  /** Present on refusals: its code and what to do instead. */
+  refusal?: { code?: string; fix?: string };
 }
+
+/** Refusal codes the tool layer branches on, kept as the server sent them. */
+const PASSED_THROUGH = new Set<string>(['stale_base', 'record_conflict', 'records_cap']);
 
 function statusToCode(status: number): PrimerErrorCode {
   if (status === 401) return 'not_authenticated';
@@ -268,6 +279,43 @@ export class PrimerClient {
     });
   }
 
+  /** Calls one records verb (`POST /api/documents/:docId/records/<verb>`)
+   *  with its arguments; the server validates and authorises. */
+  records<V extends RecordVerb>(documentId: string, verb: V, args: Record<string, unknown>): Promise<RecordVerbResults[V]> {
+    return this.request<RecordVerbResults[V]>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/${verb}`,
+      json: args,
+    });
+  }
+
+  /** The records change log after `since`. */
+  recordChanges(documentId: string, opts: { since?: number; limit?: number } = {}): Promise<RecordChangesResponse> {
+    const params = new URLSearchParams();
+    if (opts.since !== undefined) params.set('since', String(opts.since));
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    const qs = params.size > 0 ? `?${params.toString()}` : '';
+    return this.request<RecordChangesResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/changes${qs}`,
+    });
+  }
+
+  revertRecordChange(changeId: number): Promise<{ changeId: number }> {
+    return this.request<{ changeId: number }>({
+      method: 'POST',
+      path: `/api/record-changes/${encodeURIComponent(String(changeId))}/revert`,
+    });
+  }
+
+  purgePersonalRecords(documentId: string, userId: string): Promise<PurgePersonalRecordsResponse> {
+    return this.request<PurgePersonalRecordsResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/purge-personal`,
+      json: { userId },
+    });
+  }
+
   /** Resolves a human-entered email to the canonical server user id —
    *  the id space row authorship is attributed in. */
   lookupUser(email: string): Promise<UserLookupResponse> {
@@ -350,7 +398,8 @@ export class PrimerClient {
 
     if (!res.ok) {
       const body = await parseErrorBody(res);
-      const code = statusToCode(res.status);
+      const refused = body?.refusal?.code;
+      const code = refused !== undefined && PASSED_THROUGH.has(refused) ? (refused as PrimerErrorCode) : statusToCode(res.status);
       const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
       const message = body?.refusal?.fix ? `${base} ${body.refusal.fix}` : base;
       throw new PrimerApiError(code, message, res.status);
