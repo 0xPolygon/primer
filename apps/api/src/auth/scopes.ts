@@ -78,7 +78,8 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/documents/:docId/records/delete', scope: 'records:write' },
   { method: 'POST', path: '/api/documents/:docId/records/batch', scope: 'records:write' },
   { method: 'POST', path: '/api/record-changes/:changeId/revert', scope: 'records:write' },
-  { method: 'POST', path: '/api/documents/:docId/records/purge-personal', scope: 'records:write' },
+  // Destroys other people's data: never implied by records:write.
+  { method: 'POST', path: '/api/documents/:docId/records/purge-personal', scope: 'records:manage' },
 
   { method: 'GET', path: '/api/users/lookup', scope: 'users:read' },
   { method: 'GET', path: '/api/users', scope: 'users:read' },

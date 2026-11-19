@@ -192,7 +192,7 @@ export const TOOL_SCOPES: Record<ToolName, ApiTokenScope | null> = {
   primer_record_changes: 'records:read',
   primer_write_records: 'records:write',
   primer_revert_record_change: 'records:write',
-  primer_purge_personal_records: 'records:write',
+  primer_purge_personal_records: 'records:manage',
 };
 
 /** Tools available to a request with the given token scopes (null = all). */

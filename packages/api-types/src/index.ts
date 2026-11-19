@@ -549,6 +549,7 @@ export const API_TOKEN_SCOPES = [
   'users:read',
   'records:read',
   'records:write',
+  'records:manage',
 ] as const;
 
 export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
@@ -566,6 +567,7 @@ export const API_TOKEN_SCOPE_DESCRIPTIONS: Record<ApiTokenScope, string> = {
   'records:read': "Read a document's shared records, your own personal records, and their change log",
   'records:write':
     'Write and revert shared records, and write your own personal records, where your role on the document allows it (the owner, an editor or a responder)',
+  'records:manage': "Delete other people's personal records on documents you own",
 };
 
 export function isApiTokenScope(value: unknown): value is ApiTokenScope {

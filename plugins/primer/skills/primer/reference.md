@@ -205,7 +205,7 @@ Per-document storage for pages and agents (like Claude Artifacts storage). Recor
 
 #### `primer_purge_personal_records`
 
-- **Input:** `{ documentId, userId }`. Deletes one user's personal records on the document. Owner only. **Output:** `{ deleted }`.
+- **Input:** `{ documentId, userId }`. Deletes one user's personal records on the document. Owner only, and a scoped token needs `records:manage` (never implied by `records:write`). **Output:** `{ deleted }`.
 
 #### Pages that read records
 

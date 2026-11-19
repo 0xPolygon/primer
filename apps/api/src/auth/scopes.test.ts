@@ -266,6 +266,34 @@ describe('enforcing scopes', () => {
     });
   });
 
+  it('records:write alone never purges other people\'s personal records', async () => {
+    await withApp(async (app) => {
+      const writer = await mintAgentToken(app, ['documents:write', 'records:write']);
+      const up = await upload(app, writer.token);
+      const docId = up.documentId!;
+      // The agent owns what it uploaded, so only the scope stands in the way.
+      const purge = () =>
+        app.request(`/api/documents/${docId}/records/purge-personal`, {
+          method: 'POST',
+          headers: bearer(writer.token),
+          body: JSON.stringify({ userId: HUMAN_ID }),
+        });
+      const refused = await purge();
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { error: string }).error).toBe('insufficient_scope');
+      expect(toolsForScopes(['records:write'])).not.toContain('primer_purge_personal_records');
+
+      const manager = await mintAgentToken(app, ['records:manage']);
+      expect(toolsForScopes(['records:manage'])).toContain('primer_purge_personal_records');
+      const allowed = await app.request(`/api/documents/${docId}/records/purge-personal`, {
+        method: 'POST',
+        headers: bearer(manager.token),
+        body: JSON.stringify({ userId: HUMAN_ID }),
+      });
+      expect(allowed.status).toBe(200);
+    });
+  });
+
   it('leaves unrestricted tokens and browser sessions as they were', async () => {
     await withApp(async (app) => {
       const { token } = await mintUnrestrictedToken(app);
