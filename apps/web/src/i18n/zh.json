@@ -601,5 +601,21 @@
   "suggestions.kindReplace": "修改",
   "suggestions.kindInsert": "添加",
   "suggestions.kindDelete": "删除",
-  "suggestions.kindMove": "移动"
+  "suggestions.kindMove": "移动",
+  "libDocumentActionsMenu.branch": "分支（私人草稿）",
+  "libDocumentActionsMenu.fork": "创建副本",
+  "libDocumentActionsMenu.newFromTemplate": "从模板新建",
+  "libDocumentActionsMenu.proposeBranch": "向原文档提议",
+  "libDocumentActionsMenu.markTemplate": "设为模板",
+  "libDocumentActionsMenu.unmarkTemplate": "取消模板",
+  "headerActions.copyDocumentFailed": "无法复制文档。",
+  "headerActions.proposeFailed": "无法提议该分支：{reason}",
+  "libraryToolbar.templates": "模板",
+  "library.useTemplate": "使用模板",
+  "suggestions.changeSet": "一起提议的 {count} 处修改",
+  "suggestions.acceptAll": "全部接受",
+  "suggestions.rejectAll": "全部拒绝",
+  "suggestions.conflict": "冲突",
+  "suggestions.versionNow": "当前",
+  "suggestions.versionProposed": "提议"
 }

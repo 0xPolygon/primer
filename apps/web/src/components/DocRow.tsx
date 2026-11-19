@@ -4,6 +4,7 @@ import type { LibraryDocument, FolderDTO } from '@polygonlabs/primer-api-types';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 import { DocKebabMenu } from './DocKebabMenu.tsx';
 import { DocFolderChip } from './DocFolderChip.tsx';
+import { UseTemplateButton } from './UseTemplateButton.tsx';
 import { relativeTime } from '../lib/relativeTime.ts';
 
 export interface DocRowProps {
@@ -41,6 +42,7 @@ export function DocRow({ doc, folders, selectedFolderId }: DocRowProps) {
         </div>
       </Link>
       <div className="flex shrink-0 items-center gap-3">
+        <UseTemplateButton doc={doc} />
         <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">
           {doc.threadCount === 0
             ? t('docRow.noThreadsYet')

@@ -601,5 +601,21 @@
   "suggestions.kindReplace": "Änderung",
   "suggestions.kindInsert": "Hinzufügen",
   "suggestions.kindDelete": "Löschen",
-  "suggestions.kindMove": "Verschieben"
+  "suggestions.kindMove": "Verschieben",
+  "libDocumentActionsMenu.branch": "Branch (privater Entwurf)",
+  "libDocumentActionsMenu.fork": "Kopie erstellen",
+  "libDocumentActionsMenu.newFromTemplate": "Neu aus Vorlage",
+  "libDocumentActionsMenu.proposeBranch": "Dem Original vorschlagen",
+  "libDocumentActionsMenu.markTemplate": "Als Vorlage festlegen",
+  "libDocumentActionsMenu.unmarkTemplate": "Nicht mehr als Vorlage",
+  "headerActions.copyDocumentFailed": "Das Dokument konnte nicht kopiert werden.",
+  "headerActions.proposeFailed": "Branch konnte nicht vorgeschlagen werden: {reason}",
+  "libraryToolbar.templates": "Vorlagen",
+  "library.useTemplate": "Vorlage verwenden",
+  "suggestions.changeSet": "{count} gemeinsam vorgeschlagene Änderungen",
+  "suggestions.acceptAll": "Alle annehmen",
+  "suggestions.rejectAll": "Alle ablehnen",
+  "suggestions.conflict": "Konflikt",
+  "suggestions.versionNow": "Aktuell",
+  "suggestions.versionProposed": "Vorgeschlagen"
 }

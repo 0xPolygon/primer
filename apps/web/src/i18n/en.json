@@ -601,5 +601,21 @@
   "suggestions.kindReplace": "Change",
   "suggestions.kindInsert": "Add",
   "suggestions.kindDelete": "Delete",
-  "suggestions.kindMove": "Move"
+  "suggestions.kindMove": "Move",
+  "libDocumentActionsMenu.branch": "Branch (private draft)",
+  "libDocumentActionsMenu.fork": "Make a copy",
+  "libDocumentActionsMenu.newFromTemplate": "New from template",
+  "libDocumentActionsMenu.proposeBranch": "Propose to parent",
+  "libDocumentActionsMenu.markTemplate": "Make template",
+  "libDocumentActionsMenu.unmarkTemplate": "Stop using as template",
+  "headerActions.copyDocumentFailed": "Couldn't copy the document.",
+  "headerActions.proposeFailed": "Couldn't propose the branch: {reason}",
+  "libraryToolbar.templates": "Templates",
+  "library.useTemplate": "Use template",
+  "suggestions.changeSet": "{count} changes proposed together",
+  "suggestions.acceptAll": "Accept all",
+  "suggestions.rejectAll": "Reject all",
+  "suggestions.conflict": "Conflict",
+  "suggestions.versionNow": "Now",
+  "suggestions.versionProposed": "Proposed"
 }

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import { VersionSelector } from './VersionSelector.tsx';
 import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
 import { t } from '../i18n';
+import { useCopyDocument, useDocument, useEditDocument, useProposeBranch } from '../queries/documents.ts';
 
 export interface ActionFeedback {
   kind: 'success' | 'error';
@@ -62,6 +64,11 @@ export function HeaderActions({
   const menuRef = useRef<HTMLDivElement>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const navigate = useNavigate();
+  const detail = useDocument(docId).data?.document;
+  const copy = useCopyDocument();
+  const propose = useProposeBranch(docId);
+  const editDoc = useEditDocument(docId);
 
   useEffect(() => {
     if (menuState !== 'menu') return;
@@ -146,8 +153,32 @@ export function HeaderActions({
       setMenuState('closed');
       onExport?.('print');
     },
+    branch: () => copyAs('branch'),
+    fork: () => copyAs('fork'),
+    propose: () => {
+      setMenuState('closed');
+      propose.mutate(undefined, {
+        onSuccess: (out) => navigate(`/d/${out.documentId}`),
+        onError: (err) => showFeedback({ kind: 'error', message: t('headerActions.proposeFailed', { reason: err.message }) }, 5000),
+      });
+    },
+    template: () => {
+      setMenuState('closed');
+      editDoc.mutate({ isTemplate: !detail?.isTemplate });
+    },
     delete: () => setMenuState('confirm'),
   };
+
+  function copyAs(kind: 'branch' | 'fork') {
+    setMenuState('closed');
+    copy.mutate(
+      { docId, kind },
+      {
+        onSuccess: (id) => navigate(`/d/${id}`),
+        onError: () => showFeedback({ kind: 'error', message: t('headerActions.copyDocumentFailed') }),
+      },
+    );
+  }
 
   return (
     <div className="flex shrink-0 items-center gap-1.5">
@@ -198,7 +229,13 @@ export function HeaderActions({
             role="menu"
             className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
           >
-            {buildMenuItems({ isUploader, includeShare: variant === 'mobile', live: onExport !== undefined }).map(
+            {buildMenuItems({
+              isUploader,
+              includeShare: variant === 'mobile',
+              live: onExport !== undefined,
+              isBranch: Boolean(detail?.branchOf),
+              isTemplate: Boolean(detail?.isTemplate),
+            }).map(
               (item, index) => {
                 if (item.id === 'separator') {
                   return (
