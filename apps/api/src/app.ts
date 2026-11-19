@@ -20,6 +20,8 @@ import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
 import { registerEventRoutes } from './routes/events.ts';
 import { registerRecordRoutes } from './routes/records.ts';
+import { registerChoiceRoutes } from './routes/choices.ts';
+import { registerTaskRoutes } from './routes/tasks.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
@@ -115,6 +117,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerCommentRoutes(app, deps);
   registerEventRoutes(app, { resolver });
   registerRecordRoutes(app);
+  registerChoiceRoutes(app);
+  registerTaskRoutes(app);
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
   registerLibraryRoute(app);

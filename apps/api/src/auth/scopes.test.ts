@@ -157,6 +157,10 @@ describe('route scope table', () => {
       'primer_whoami',
       'primer_create_document',
       'primer_add_version',
+      'primer_add_choice',
+      'primer_propose_pick',
+      'primer_add_task',
+      'primer_update_task',
     ]);
   });
 });
