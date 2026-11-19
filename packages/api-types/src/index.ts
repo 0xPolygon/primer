@@ -326,7 +326,9 @@ export type RefusalCode =
   /** Records: the record changed since the `expectVersion` the caller read. */
   | 'record_conflict'
   /** Records: the page did not opt in to records, or its access was revoked. */
-  | 'records_unavailable';
+  | 'records_unavailable'
+  /** Records: a page has too many calls in flight, or a call timed out or was cancelled. */
+  | 'records_busy';
 
 export interface Refusal {
   code: RefusalCode;

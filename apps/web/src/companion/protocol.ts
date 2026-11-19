@@ -18,6 +18,7 @@ import type {
   ElementPathAnchor,
   EventInput,
   EventRowDTO,
+  Refusal,
   TextRangeAnchor,
 } from '@polygonlabs/primer-api-types';
 import {
@@ -30,6 +31,7 @@ import {
   isElementPathAnchor,
   isEventAudience,
   isTextRangeAnchor,
+  RECORD_VERBS,
 } from '@polygonlabs/primer-api-types';
 
 export interface SerializableRect {
@@ -47,9 +49,16 @@ export interface Anchor {
 // Parent → Iframe
 export type Theme = 'light' | 'dark';
 
+/** Optional bridge capabilities the host grants a page at init. `records`:
+ *  the page opted in to records, is served with the records outbound
+ *  policy, and gets `window.primer.records`. */
+export type BridgeFeature = 'page-text' | 'embeds' | 'records';
+
 export interface MsgInit {
   type: 'init';
   anchors: Anchor[];
+  /** Granted features; absent means none. */
+  features?: BridgeFeature[];
   /** Parent's effective theme at iframe load. Companion sets
    *  document.documentElement.dataset.theme accordingly. Older companion
    *  snapshots ignore unknown init fields, so this is forward-compatible. */
@@ -102,6 +111,22 @@ export interface MsgSubmitResult {
   error?: string;
 }
 
+/** The answer to one `records_call`. */
+export interface MsgRecordsResult {
+  type: 'records_result';
+  callId: string;
+  ok: boolean;
+  value?: unknown;
+  refusal?: Refusal;
+}
+/** Others changed shared records (a `primer.data.changed` event). Pages
+ *  catch up with `changesSince` after a reconnect. */
+export interface MsgRecordsChanged {
+  type: 'records_changed';
+  collections: string[];
+  toChangeId: number;
+}
+
 export type OutboundProtocolMessage =
   | MsgInit
   | MsgUpdateAnchors
@@ -111,7 +136,9 @@ export type OutboundProtocolMessage =
   | MsgRequestAnchorPositions
   | MsgThemeChanged
   | MsgEventsRelay
-  | MsgSubmitResult;
+  | MsgSubmitResult
+  | MsgRecordsResult
+  | MsgRecordsChanged;
 
 // Iframe → Parent
 export interface MsgSelectionCaptured {
@@ -180,6 +207,21 @@ export interface MsgSubmitEvents {
   events: EventInput[];
 }
 
+/** The page's call into records. `args` names only what the page may
+ *  choose (collection, scope, record, data, filters, paging); the host binds
+ *  the document and the viewer, whatever `args` says. */
+export type RecordsCallVerb = (typeof RECORD_VERBS)[number] | 'changesSince';
+export interface MsgRecordsCall {
+  type: 'records_call';
+  callId: string;
+  verb: RecordsCallVerb;
+  args: Record<string, unknown>;
+}
+export interface MsgRecordsCancel {
+  type: 'records_cancel';
+  callId: string;
+}
+
 export type InboundProtocolMessage =
   | MsgSelectionCaptured
   | MsgSelectionCleared
@@ -191,7 +233,9 @@ export type InboundProtocolMessage =
   | MsgOpenExternal
   | MsgAnchorClicked
   | MsgCompanionLog
-  | MsgSubmitEvents;
+  | MsgSubmitEvents
+  | MsgRecordsCall
+  | MsgRecordsCancel;
 
 /** Window-level handshake messages — go via window.postMessage (not the
  *  port) because they exist for the case where the port isn't established
@@ -299,9 +343,24 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
       }
       return { type: 'submit_events', events };
     }
+    case 'records_call': {
+      if (!isCallId(raw.callId)) return null;
+      if (!isString(raw.verb) || !RECORDS_CALL_VERBS.includes(raw.verb as RecordsCallVerb)) return null;
+      if (!isObject(raw.args) || Array.isArray(raw.args)) return null;
+      return { type: 'records_call', callId: raw.callId, verb: raw.verb as RecordsCallVerb, args: raw.args };
+    }
+    case 'records_cancel':
+      if (!isCallId(raw.callId)) return null;
+      return { type: 'records_cancel', callId: raw.callId };
     default:
       return null;
   }
+}
+
+const RECORDS_CALL_VERBS: readonly string[] = [...RECORD_VERBS, 'changesSince'];
+
+function isCallId(v: unknown): v is string {
+  return isString(v) && v.length > 0 && v.length <= 64;
 }
 
 /** Validates one untrusted event of a submit batch against the api-types
