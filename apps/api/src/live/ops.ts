@@ -358,7 +358,7 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
 
 /** Removes a block; a last child takes its (then empty) group with it. The
  *  last top-level block stays: a document always has one. */
-function removeBlock(tr: Transform, at: NonNullable<Located>): Refusal | void {
+export function removeBlock(tr: Transform, at: NonNullable<Located>): Refusal | void {
   const $pos = tr.doc.resolve(at.pos);
   if ($pos.parent.childCount > 1) {
     tr.delete(at.pos, at.pos + at.node.nodeSize);

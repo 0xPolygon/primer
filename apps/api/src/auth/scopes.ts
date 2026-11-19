@@ -59,6 +59,7 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/runs/:runId/status', scope: 'documents:write' },
   { method: 'POST', path: '/api/runs/:runId/finish', scope: 'documents:write' },
   { method: 'POST', path: '/api/runs/:runId/cancel', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/undo', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write' },
   { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write' },

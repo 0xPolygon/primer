@@ -13,6 +13,7 @@ import {
   updateRunStatus,
   type RunResult,
 } from '../live/runs.ts';
+import { undoRun } from '../live/undo.ts';
 import { jsonBody } from './live.ts';
 
 /** Agent runs on live documents (live/runs.ts). */
@@ -55,5 +56,7 @@ export function registerRunRoutes(app: Hono<{ Variables: AppVariables }>): void 
 
   app.post('/api/runs/:runId/cancel', async (c) => send(c as never, await cancelRun(c.get('user'), c.req.param('runId'))));
   app.post('/api/runs/:runId/retry', async (c) => send(c as never, await retryRun(c.get('user'), c.req.param('runId')), 201));
+  // Undo one run's edits (live/undo.ts); a Reconciliation like ops.
+  app.post('/api/runs/:runId/undo', async (c) => send(c as never, await undoRun(c.req.param('runId'), c.get('user'))));
   app.post('/api/runs/:runId/approve', async (c) => send(c as never, await approveRun(c.get('user'), c.req.param('runId'))));
 }
