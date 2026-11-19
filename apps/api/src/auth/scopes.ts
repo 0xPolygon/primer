@@ -38,9 +38,9 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/documents/:documentId/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/status', scope: 'documents:read' },
-  { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read', upcoming: true },
-  { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read', upcoming: true },
-  { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read', upcoming: true },
+  { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read' },
+  { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read' },
+  { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read' },
 
   { method: 'POST', path: '/api/upload', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/versions', scope: 'documents:write' },
@@ -49,9 +49,9 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   // (routes/documents.ts).
   { method: 'PATCH', path: '/api/documents/:docId', scope: 'documents:write' },
   { method: 'PATCH', path: '/api/versions/:versionId', scope: 'documents:write' },
-  { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write', upcoming: true },
-  { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write', upcoming: true },
-  { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write', upcoming: true },
+  { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write' },
+  { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write' },
 
   { method: 'POST', path: '/api/versions/:versionId/threads', scope: 'comments:write' },
   { method: 'POST', path: '/api/threads/:threadId/comments', scope: 'comments:write' },
