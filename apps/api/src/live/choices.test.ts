@@ -12,7 +12,7 @@ import { AGENT, OWNER, READER, VIEWER, seedRecordsDoc } from '../records/records
 import { addChoice, choiceTally, clearDecision, exportDecisions, flushDecisionSync, listDecisions, pick, proposePick, vote } from './choices.ts';
 import { exportHtml, exportMarkdown } from './export.ts';
 import { serverEditor } from './editor.ts';
-import { withLiveDoc } from './live.testlib.ts';
+import { paragraph, seedBlocks, withLiveDoc } from './live.testlib.ts';
 import type { Target } from '@polygonlabs/primer-api-types';
 
 const EDITOR = { kind: 'person' as const, actorId: OWNER.id, runId: null };
@@ -282,6 +282,33 @@ describe('choice blocks', () => {
       ops: [{ op: 'update', target, block: { json: { type: 'choice', props: { question: 'Which database?', decisionId: uuidv7(), decidedOptionId: optionIds[0] } } } }],
     });
     expect(!out.ok && out.errors?.[0]?.refusal).toMatchObject({ code: 'invalid_op', message: expect.stringContaining('decisionId') });
+  });
+
+  it('an agent lays out a choice through apply_ops, and the register shows it undecided', async () => {
+    const doc = await liveDoc();
+    await seedBlocks(doc, [paragraph('intro', 'Intro')]);
+    const out = await applyOps(doc, AGENT, {
+      ops: [
+        {
+          op: 'add',
+          at: { tabId: 'main', blockId: 'intro' },
+          position: 'after',
+          blocks: [
+            {
+              json: {
+                type: 'choice',
+                props: { question: 'Which queue?' },
+                children: ['Kafka', 'SQS'].map((text) => ({ type: 'choiceOption', children: [{ type: 'paragraph', content: text }] })),
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    const register = await listDecisions(OWNER, doc);
+    const choice = register.ok ? register.value.decisions.find((d) => d.question === 'Which queue?') : undefined;
+    expect(choice).toMatchObject({ status: 'open', options: [expect.objectContaining({ label: 'Kafka' }), expect.objectContaining({ label: 'SQS' })] });
   });
 
   it('an editor collaborator decides; a reader sees the register', async () => {

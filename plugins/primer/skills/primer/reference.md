@@ -294,12 +294,11 @@ A page opts in with `<meta name="primer-records" content="read">` in its `<head>
 
 ### Choices and decisions
 
-A choice block lays out a question and its options in a live document. People vote (one vote each, stored as shared records in `primer.choice/<blockId>`) and comment on the options; one person with edit rights decides, recording the picked option with a rationale, evidence and open questions. Agents lay out choices and may propose a pick, never make one.
+A choice block lays out a question and its options in a live document. People vote (one vote each, stored as shared records in `primer.choice/<blockId>`) and comment on the options; one person with edit rights decides, recording the picked option with a rationale, evidence and open questions. Agents lay out choices (`primer_apply_ops`) and may propose a pick, never make one.
 
-#### `primer_add_choice`
+#### Laying out a choice
 
-- **Input:** `{ documentId, question, options: string[] (2–20), tabId?, afterBlockId? }`. Placed after `afterBlockId`, or at the end of the tab (`main` by default). Needs edit rights.
-- **Output:** `{ target: { tabId, blockId }, optionIds, docVersion }`. Each option is a block; its id is the option id.
+There is no separate tool: add the block with `primer_apply_ops`. `{ op: "add", at, position, blocks: [{ json: { type: "choice", props: { question }, children: [{ type: "choiceOption", children: [{ type: "paragraph", content: "Postgres" }] }, …] } }] }`, 2–20 options. Each option block's id is the option id (the returned `blocks` list them). Ops that write a choice's decision props (`decisionId`, `decided…`) are refused `invalid_op`: only a person decides.
 
 #### `primer_propose_pick`
 
@@ -315,13 +314,12 @@ A choice block lays out a question and its options in a live document. People vo
 
 A task block is a checklist item tracked as a task, with an assignee (a person or an agent) and a due date. Ticking the box closes it. Primer indexes task blocks and announces changes; it runs no task system of its own.
 
-#### `primer_add_task`
+#### Adding and updating a task
 
-- **Input:** `{ documentId, title, assigneeId?, due? (YYYY-MM-DD), tabId?, afterBlockId? }`. Needs edit rights. **Output:** `{ target, docVersion }`.
+There are no separate tools: use `primer_apply_ops`.
 
-#### `primer_update_task`
-
-- **Input:** `{ documentId, blockId, status?: "open" | "done", progress? }`. `progress` is one short line shown inline while the task is open: report on tasks assigned to you as you work. `status: "done"` closes the task.
+- **Add:** `{ op: "add", at, position, blocks: [{ json: { type: "task", props: { assigneeId?, due? (YYYY-MM-DD), status: "open" }, content: "Title" } }] }`.
+- **Report:** `{ op: "update", target, expectVersion, block: { json: { type: "task", props: { progress?, status? }, content: "Title" } } }`. `progress` is one short line shown inline while the task is open: report on tasks assigned to you as you work. `status: "done"` closes the task; `"open"` reopens it.
 
 #### `primer_list_tasks`
 

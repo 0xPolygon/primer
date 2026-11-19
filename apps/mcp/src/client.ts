@@ -6,15 +6,10 @@ import type {
   Reconciliation,
   LiveDocDTO,
   LiveReadFormat,
-  AddChoiceRequest,
-  AddChoiceResponse,
-  AddTaskRequest,
-  AddTaskResponse,
   AddVersionResponse,
   DecisionsResponse,
   ProposePickRequest,
   TasksResponse,
-  UpdateTaskRequest,
   Collaborator,
   CollaboratorRole,
   CollaboratorsListResponse,
@@ -472,15 +467,6 @@ export class PrimerClient {
     });
   }
 
-  /** Adds a choice block (question and options) to a live document. */
-  addChoice(documentId: string, input: AddChoiceRequest): Promise<AddChoiceResponse> {
-    return this.request<AddChoiceResponse>({
-      method: 'POST',
-      path: `/api/documents/${encodeURIComponent(documentId)}/choices`,
-      json: input,
-    });
-  }
-
   /** Recommends an option of an undecided choice; a person decides. */
   proposePick(documentId: string, blockId: string, input: ProposePickRequest): Promise<{ docVersion: number }> {
     return this.request<{ docVersion: number }>({
@@ -495,24 +481,6 @@ export class PrimerClient {
     return this.request<DecisionsResponse>({
       method: 'GET',
       path: `/api/documents/${encodeURIComponent(documentId)}/decisions`,
-    });
-  }
-
-  /** Adds a task block to a live document. */
-  addTask(documentId: string, input: AddTaskRequest): Promise<AddTaskResponse> {
-    return this.request<AddTaskResponse>({
-      method: 'POST',
-      path: `/api/documents/${encodeURIComponent(documentId)}/tasks`,
-      json: input,
-    });
-  }
-
-  /** Sets a task's status and/or progress line. */
-  updateTask(documentId: string, blockId: string, input: UpdateTaskRequest): Promise<{ docVersion: number }> {
-    return this.request<{ docVersion: number }>({
-      method: 'PATCH',
-      path: `/api/documents/${encodeURIComponent(documentId)}/tasks/${encodeURIComponent(blockId)}`,
-      json: input,
     });
   }
 
