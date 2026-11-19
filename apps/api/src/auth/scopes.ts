@@ -37,7 +37,6 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/documents/:documentId/events', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
-  { method: 'GET', path: '/api/documents/:documentId/status', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/live', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/agents', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/runs', scope: 'documents:read' },
@@ -81,7 +80,6 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/runs/:runId/retry', scope: 'comments:write' },
 
   { method: 'POST', path: '/api/documents/:documentId/events', scope: 'events:write' },
-  { method: 'POST', path: '/api/documents/:documentId/status', scope: 'events:write' },
 
   { method: 'GET', path: '/api/documents/:docId/collaborators', scope: 'collaborators:manage' },
   { method: 'POST', path: '/api/documents/:docId/collaborators', scope: 'collaborators:manage' },

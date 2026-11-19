@@ -10,8 +10,6 @@ import type {
   CommentDTO,
   DocumentDetailResponse,
   EventInput,
-  DocumentStatusResponse,
-  DocumentStatusState,
   EventsListResponse,
   SendEventsResponse,
   ThreadDTO,
@@ -337,16 +335,6 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/documents/${encodeURIComponent(documentId)}/events`,
       json: { events },
-    });
-  }
-
-  /** Records the caller's working status on a document; returns who is
-   *  working on it now. */
-  setStatus(documentId: string, state: DocumentStatusState): Promise<DocumentStatusResponse> {
-    return this.request<DocumentStatusResponse>({
-      method: 'POST',
-      path: `/api/documents/${encodeURIComponent(documentId)}/status`,
-      json: { state },
     });
   }
 

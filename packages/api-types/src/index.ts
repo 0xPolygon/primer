@@ -1096,18 +1096,6 @@ export interface PrimerVersionPublishedPayload {
   author_id: string;
 }
 
-export type DocumentStatusState = 'working' | 'idle';
-
-/** How long a `working` status counts before it expires unless refreshed. */
-export const DOCUMENT_STATUS_TTL_MS = 10 * 60 * 1000;
-
-export interface PrimerStatusPayload {
-  document_id: string;
-  state: DocumentStatusState;
-  by: string;
-  expires_at: string; // ISO
-}
-
 /** Someone asked an agent to work on a document. */
 export interface PrimerRunRequestedPayload {
   document_id: string;
@@ -1128,27 +1116,8 @@ export interface PrimerEventPayloads {
   'thread.updated': PrimerThreadUpdatedPayload;
   'thread.orphaned': PrimerThreadOrphanedPayload;
   'version.published': PrimerVersionPublishedPayload;
-  status: PrimerStatusPayload;
   'run.requested': PrimerRunRequestedPayload;
   'run.updated': PrimerRunUpdatedPayload;
 }
 
 export type PrimerEventType = keyof PrimerEventPayloads;
-
-/** POST /api/documents/:id/status */
-export interface SetDocumentStatusRequest {
-  state: DocumentStatusState;
-}
-
-/** One person currently working on a document (an unexpired `working`). */
-export interface DocumentStatusDTO {
-  by: string;
-  displayName: string;
-  state: 'working';
-  expiresAt: string; // ISO
-}
-
-/** GET /api/documents/:id/status — who is working on the document now. */
-export interface DocumentStatusResponse {
-  statuses: DocumentStatusDTO[];
-}

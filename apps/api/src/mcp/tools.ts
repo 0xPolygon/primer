@@ -31,9 +31,7 @@ import {
   gateEventAccess,
   insertEventBatch,
   listEvents,
-  activeDocumentStatuses,
   parseSince,
-  setDocumentStatus,
   transactionWithEvents,
   validateEventBatch,
   validateEventFilters,
@@ -130,7 +128,6 @@ export const TOOL_NAMES = [
   'primer_get_all_comments',
   'primer_get_events',
   'primer_send_events',
-  'primer_set_status',
   'primer_reply_to_thread',
   'primer_resolve_thread',
   'primer_create_thread',
@@ -191,7 +188,6 @@ export const TOOL_SCOPES: Record<ToolName, ApiTokenScope | null> = {
   primer_create_document: 'documents:write',
   primer_add_version: 'documents:write',
   primer_send_events: 'events:write',
-  primer_set_status: 'events:write',
   primer_reply_to_thread: 'comments:write',
   primer_resolve_thread: 'comments:write',
   primer_create_thread: 'comments:write',
@@ -949,22 +945,6 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       return ok({ events: rows });
     },
 
-    // Same rules as POST /api/documents/:id/status (routes/events.ts).
-    primer_set_status: async (args, user) => {
-      const documentId = typeof args.document_id === 'string' ? args.document_id : '';
-      if (!documentId) return err('bad_request', '`document_id` is required.');
-      if (args.state !== 'working' && args.state !== 'idle') {
-        return err('bad_request', '`state` must be "working" or "idle".');
-      }
-      const g = await gateEventAccess(documentId, user);
-      if (g.status === 'not_found') return err('not_found', 'document not found');
-      if (!g.mayWrite) {
-        return err('forbidden', 'only the document owner, editors and responders may set a status');
-      }
-      await setDocumentStatus(documentId, user.id, args.state);
-      return ok({ statuses: await activeDocumentStatuses(documentId) });
-    },
-
     // ── Thread replies (same core and rules as the REST routes) ─────
 
     primer_reply_to_thread: async (args, user) => {
@@ -1283,14 +1263,6 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
           }),
         )
         .min(1),
-    },
-  },
-  primer_set_status: {
-    description:
-      'Tell the people reading a document that you are working on it (state "working") or done (state "idle"). Readers see "<your name> is revising…" on the page while it is fresh. A working status expires after 10 minutes, so call it again to refresh during long work, and set idle when you publish or stop. Only the document owner, editors and responders may set it. Returns { statuses }: everyone working on the document now.',
-    inputSchema: {
-      document_id: z.string(),
-      state: z.enum(['working', 'idle']),
     },
   },
 };

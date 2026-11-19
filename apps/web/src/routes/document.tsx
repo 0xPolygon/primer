@@ -50,7 +50,6 @@ import {
 import { useTheme } from '../lib/useTheme.ts';
 import { createDraftTracker, DraftReporterContext } from '../lib/drafts.ts';
 import { createVersionFollower, type FollowState } from '../lib/versionFollow.ts';
-import { useDocumentStatus } from '../queries/status.ts';
 import {
   commentsFilename,
   formatThreadsAsMarkdown,
@@ -298,18 +297,12 @@ function DocumentPageInner() {
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
-  const workingNow = useDocumentStatus(docId ?? '');
-
   // What the page does with Primer's own lifecycle events from the
-  // document's stream (comments, threads, working status): they replace
+  // document's stream (comments, threads): they replace
   // polling. Kept in a ref so the long-lived feed always runs the latest
   // closure. version.published goes to the follower (see the feed effect).
   const onDocChangeRef = useRef<(row: EventRowDTO) => void>(() => {});
   onDocChangeRef.current = (row: EventRowDTO) => {
-    if (row.type === 'status') {
-      void queryClient.invalidateQueries({ queryKey: ['status', docId] });
-      return;
-    }
     // comment.created, thread.resolved, thread.updated
     void queryClient.invalidateQueries({ queryKey: ['threads'] });
   };
@@ -317,7 +310,6 @@ function DocumentPageInner() {
   onResyncRef.current = () => {
     void queryClient.invalidateQueries({ queryKey: ['threads'] });
     void queryClient.invalidateQueries({ queryKey: ['versions', docId] });
-    void queryClient.invalidateQueries({ queryKey: ['status', docId] });
   };
 
   const onComposerDirtyChange = useCallback((dirty: boolean) => {
@@ -1020,16 +1012,6 @@ function DocumentPageInner() {
           >
             {isLive ? 'Open live document' : 'Switch to latest'}
           </button>
-        </div>
-      )}
-
-      {workingNow.length > 0 && (
-        <div
-          role="status"
-          className="flex items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-200"
-        >
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" aria-hidden="true" />
-          {workingNow.map((s) => s.displayName).join(', ')} {workingNow.length === 1 ? 'is' : 'are'} revising…
         </div>
       )}
 
