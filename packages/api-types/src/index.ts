@@ -310,7 +310,17 @@ export type RefusalCode =
   /** A live edit's target block changed (or is gone) since the version it read. */
   | 'target_changed'
   /** Publishing a new version onto a live document is not supported yet. */
-  | 'republish_unsupported';
+  | 'republish_unsupported'
+  /** Collaborators: no user has that email. */
+  | 'user_not_found'
+  /** Collaborators: the user already collaborates on the document. */
+  | 'collaborator_exists'
+  /** Collaborators: the owner can't be added as a collaborator. */
+  | 'owner_not_collaborator'
+  /** Collaborators: the role isn't available at the document's visibility. */
+  | 'invalid_role_for_visibility'
+  /** Collaborators: an actor can't grant a role above its own. */
+  | 'role_exceeds_own';
 
 export interface Refusal {
   code: RefusalCode;
@@ -806,6 +816,8 @@ export interface EventsListResponse {
  *  id space. */
 export interface UserLookupResponse {
   id: string;
+  email: string;
+  displayName: string;
 }
 
 // ───────────────────── Lifecycle events (server-only) ─────────────────────
