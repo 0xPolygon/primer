@@ -16,9 +16,9 @@ describe('importMarkdown', () => {
     for (const name of markdownFixtures) {
       const source = fixture(name);
       const imported = await importMarkdown(source);
-      const doc = buildLiveDoc(imported, 'markdown');
+      const doc = buildLiveDoc(imported, 'markdown', 'doc-1');
       // Everything the editor holds, as Markdown and as source text.
-      const held = (await exportMarkdown(doc)) + readBlocks(doc, 'main').map(plainText).join('\n');
+      const held = (await exportMarkdown(doc, 'doc-1')) + readBlocks(doc, 'main').map(plainText).join('\n');
       const words = source.replace(/^---[\s\S]*?\n---\n/, '').match(/[A-Za-z0-9]{3,}/g) ?? [];
       const missing = words.filter((w) => !held.includes(w));
       expect(missing, name).toEqual([]);

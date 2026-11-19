@@ -3,29 +3,30 @@ import { createRequire } from 'node:module';
 import * as Y from 'yjs';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
 import { MAIN_TAB, tabFragmentName } from './reach.ts';
-import { groupVersion, metaOf, pmDocOf, sourcesOf, type SourceEntry } from './sources.ts';
+import { sourcePreview } from './import.ts';
+import { groupVersion, pmDocOf, trustedMeta, trustedSources } from './sources.ts';
 
 /**
  * The document as Markdown (M2b.2): untouched groups are their source lines,
  * byte for byte; only changed or new blocks are serialised. An untouched
  * document exports exactly the uploaded file.
  */
-export async function exportMarkdown(doc: Y.Doc): Promise<string> {
-  const parts = planTab(doc, MAIN_TAB);
+export async function exportMarkdown(doc: Y.Doc, documentId: string): Promise<string> {
+  const parts = planTab(doc, documentId, MAIN_TAB);
   const texts = await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(p.run) : null)));
   return assemble(parts, texts);
 }
 
 /** The document as plain text, by the same rule. */
-export function exportText(doc: Y.Doc): string {
-  const parts = planTab(doc, MAIN_TAB);
+export function exportText(doc: Y.Doc, documentId: string): string {
+  const parts = planTab(doc, documentId, MAIN_TAB);
   return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
 }
 
 /**
  * The static rendering (C11 `static.html`): BlockNote's full HTML inside its
- * own container, with its stylesheet inlined. Source blocks show their
- * sanitized preview. Shares, previews, print and email all use this.
+ * own container, with its stylesheet inlined. Source blocks show a preview
+ * rendered again from their Markdown (the stored preview is editor-writable). Shares, previews, print and email all use this.
  */
 export async function exportHtml(doc: Y.Doc, title = ''): Promise<string> {
   const body = await htmlOf(readBlocks(doc, MAIN_TAB));
@@ -43,14 +44,15 @@ type Part =
 /**
  * Walks a tab's top-level blocks in order. A block that starts a source group
  * whose blocks are all still there, contiguous and unchanged (and whose
- * reference definitions are too) emits the group's slice and gap. Anything
+ * reference definitions are too) emits the group's slice and gap, provided
+ * the server signed the entry at import for this document. Anything
  * else is a run to serialise, up to the next group start, keeping the
  * original gap after it when the run starts a group.
  */
-function planTab(doc: Y.Doc, tabId: string): Part[] {
+function planTab(doc: Y.Doc, documentId: string, tabId: string): Part[] {
   const blocks = readBlocks(doc, tabId);
   const pm = pmDocOf(doc.getXmlFragment(tabFragmentName(tabId)));
-  const sources = new Map(sourcesOf(doc).entries()) as Map<string, SourceEntry>;
+  const sources = trustedSources(doc, documentId);
   const index = new Map(blocks.map((b, i) => [b.id, i]));
 
   const intact = (key: string): boolean => {
@@ -68,7 +70,7 @@ function planTab(doc: Y.Doc, tabId: string): Part[] {
 
   const parts: Part[] = [];
   if (tabId === MAIN_TAB) {
-    const meta = metaOf(doc);
+    const meta = trustedMeta(doc, documentId);
     parts.push({ kind: 'head', text: meta.frontMatter + meta.lead });
   }
   for (let i = 0; i < blocks.length; ) {
@@ -125,7 +127,7 @@ async function htmlOf(blocks: PrimerBlock[]): Promise<string> {
   for (const segment of segments(blocks)) {
     out.push(
       isSource(segment[0]!)
-        ? segment.map((b) => `<div class="primer-source">${(b.props as { previewHtml: string }).previewHtml}</div>`).join('')
+        ? segment.map((b) => `<div class="primer-source">${sourcePreview(String((b.props as { markdown: string }).markdown))}</div>`).join('')
         : await serverEditor().blocksToFullHTML(segment as never),
     );
   }

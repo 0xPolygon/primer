@@ -15,7 +15,7 @@ const fixture = (name: string) => readFileSync(new URL(name, fixtures), 'utf8');
 /** A stored live document holding `source`, imported. */
 async function storedImport(source: string): Promise<string> {
   const id = await createLiveDoc();
-  const built = buildLiveDoc(await importMarkdown(source), 'markdown');
+  const built = buildLiveDoc(await importMarkdown(source), 'markdown', id);
   await withLiveDoc(id, (doc) => Y.applyUpdate(doc, Y.encodeStateAsUpdate(built)));
   return id;
 }
@@ -38,7 +38,7 @@ function setText(blockId: string, text: string): PlannedEdit {
   };
 }
 
-const exportOf = (id: string) => withLiveDoc(id, (doc) => exportMarkdown(doc));
+const exportOf = (id: string) => withLiveDoc(id, (doc) => exportMarkdown(doc, id));
 
 /** The [first, last] input lines that differ from the output, or null. */
 function changedLines(input: string, output: string): [number, number] | null {
@@ -56,13 +56,13 @@ describe('export', () => {
   it('untouched round trip is byte-identical', async () => {
     for (const name of readdirSync(fixtures).filter((f) => f.endsWith('.md'))) {
       const source = fixture(name);
-      expect(await exportMarkdown(buildLiveDoc(await importMarkdown(source), 'markdown')), name).toBe(source);
+      expect(await exportMarkdown(buildLiveDoc(await importMarkdown(source), 'markdown', 'doc-1'), 'doc-1'), name).toBe(source);
     }
   });
 
   it('.txt round trip is byte-identical', () => {
     const source = fixture('plain.txt');
-    expect(exportText(buildLiveDoc(importText(source), 'text'))).toBe(source);
+    expect(exportText(buildLiveDoc(importText(source), 'text', 'doc-1'), 'doc-1')).toBe(source);
   });
 
   it('editing one block changes only its lines', async () => {
@@ -118,5 +118,30 @@ describe('export', () => {
     expect(out).toContain('[contributing guide](');
     // Unrelated groups stay verbatim.
     expect(out).toContain('## Quick start\n');
+  });
+
+  it('a source slice or front matter rewritten by a client never reaches the export', async () => {
+    const source = fixture('adr.md');
+    const id = await storedImport(source);
+    const heading = await blockWithText(id, 'ADR 7: One apply pipeline');
+    // What any editor's socket could write: the maps live in the Y.Doc.
+    await withLiveDoc(id, (doc) => {
+      const sources = doc.getMap<Record<string, unknown>>('sources');
+      const entry = sources.get(heading)!;
+      sources.set(heading, { ...entry, slice: '# ADR 7: One apply pipeline\n\nHIDDEN-SLICE-TEXT\n' });
+      doc.getMap('meta').set('frontMatter', '---\nnote: HIDDEN-FRONT-MATTER\n---\n');
+    });
+    const out = await exportOf(id);
+    expect(out).not.toContain('HIDDEN');
+    // The heading is serialised from its block instead, and the rest stays verbatim.
+    expect(out).toContain('# ADR 7: One apply pipeline\n');
+    expect(out).toContain('| Agent ops | agent | block version |');
+    // An entry copied from another document doesn't verify either.
+    const other = await storedImport(source);
+    const copied = await withLiveDoc(other, (doc) => doc.getMap('sources').toJSON());
+    await withLiveDoc(id, (doc) => {
+      for (const [key, value] of Object.entries(copied)) doc.getMap('sources').set(key, value);
+    });
+    expect(await exportOf(id)).not.toContain('HIDDEN');
   });
 });

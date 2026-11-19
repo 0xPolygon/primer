@@ -3,12 +3,15 @@ import * as Y from 'yjs';
 import sanitizeHtml from 'sanitize-html';
 import type Token from 'markdown-it/lib/token.mjs';
 import { getDocument } from '@blocknote/server-util/dom';
+import { Transform } from '@tiptap/pm/transform';
+import type { Node as PmNode } from '@tiptap/pm/model';
+import { updateYFragment } from 'y-prosemirror';
 import type { DocumentFormat } from '@polygonlabs/primer-api-types';
 import { markdownTokenizer as md, splitFrontMatter } from '../upload/markdown.ts';
 import { sanitizeUploadedHtml } from '../upload/sanitize.ts';
 import { serverEditor } from './editor.ts';
 import { MAIN_TAB, tabFragmentName } from './reach.ts';
-import { groupVersion, pmDocOf, sourcesOf, type SourceEntry } from './sources.ts';
+import { groupVersion, pmDocOf, writeSources, type SourceEntry } from './sources.ts';
 
 export type { SourceEntry } from './sources.ts';
 
@@ -107,24 +110,65 @@ export function importText(source: string): ImportResult {
  * entries with the version of the blocks as stored, and `meta`. Built
  * detached; the caller stores its whole state as the document's first update.
  */
-export function buildLiveDoc(imported: ImportResult, format: DocumentFormat): Y.Doc {
+export function buildLiveDoc(imported: ImportResult, format: DocumentFormat, documentId: string): Y.Doc {
   const doc = new Y.Doc();
   const fragment = doc.getXmlFragment(tabFragmentName(MAIN_TAB));
   serverEditor().blocksToYXmlFragment(imported.blocks as never, fragment);
   const stored = pmDocOf(fragment);
-  doc.transact(() => {
-    const sources = sourcesOf(doc);
-    for (const [key, entry] of imported.sources) {
-      const version = groupVersion(stored, entry.groupIds);
-      if (version === null) throw new Error(`imported block ${key} is missing from the stored document`);
-      sources.set(key, { ...entry, version });
-    }
-    const meta = doc.getMap<string>('meta');
-    meta.set('format', format);
-    meta.set('frontMatter', imported.frontMatter);
-    meta.set('lead', imported.lead);
-  });
+  const entries = new Map<string, SourceEntry>();
+  for (const [key, entry] of imported.sources) {
+    const version = groupVersion(stored, entry.groupIds);
+    if (version === null) throw new Error(`imported block ${key} is missing from the stored document`);
+    entries.set(key, { ...entry, version });
+  }
+  writeSources(doc, documentId, entries, { format, frontMatter: imported.frontMatter, lead: imported.lead });
   return doc;
+}
+
+/**
+ * Re-anchors threads by quote on a freshly built document (a legacy document
+ * becoming live): each quote found exactly once, within one text block, gets
+ * BlockNote's `comment` mark for its thread, the live anchor of record. The
+ * rest are orphaned: they keep their quote and get no mark. Returns the ids
+ * of the threads that were anchored.
+ */
+export function anchorThreads(doc: Y.Doc, quotes: { threadId: string; quote: string }[]): Set<string> {
+  const fragment = doc.getXmlFragment(tabFragmentName(MAIN_TAB));
+  const tr = new Transform(pmDocOf(fragment));
+  const comment = tr.doc.type.schema.marks.comment!;
+  const anchored = new Set<string>();
+  for (const { threadId, quote } of quotes) {
+    const at = findQuote(tr.doc, quote.trim());
+    if (!at) continue;
+    tr.addMark(at.from, at.to, comment.create({ threadId, orphan: false }));
+    anchored.add(threadId);
+  }
+  if (tr.docChanged) updateYFragment(doc, fragment, tr.doc, { mapping: new Map(), isOMark: new Map() });
+  return anchored;
+}
+
+/** The one place `quote` occurs inside a single text block, or null when it
+ *  occurs nowhere or more than once. */
+function findQuote(pm: PmNode, quote: string): { from: number; to: number } | null {
+  if (quote.length === 0) return null;
+  const found: { from: number; to: number }[] = [];
+  pm.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    let chars = '';
+    const at: number[] = [];
+    node.forEach((child, offset) => {
+      const text = child.isText ? child.text! : '\n';
+      for (let i = 0; i < text.length; i++) {
+        chars += text[i];
+        at.push(pos + 1 + offset + (child.isText ? i : 0));
+      }
+    });
+    for (let i = chars.indexOf(quote); i !== -1; i = chars.indexOf(quote, i + 1)) {
+      found.push({ from: at[i]!, to: at[i + quote.length - 1]! + 1 });
+    }
+    return false;
+  });
+  return found.length === 1 ? found[0]! : null;
 }
 
 // ───────────────────────── groups ─────────────────────────
@@ -285,9 +329,14 @@ function blocksSignature(blocks: ImportedBlock[]): Signature {
  *  preview (lines that render nothing, like reference definitions, preview as
  *  their text). */
 function sourceBlock(slice: string, env: object): ImportedBlock {
+  return { id: randomUUID(), type: 'source', props: { markdown: slice, previewHtml: sourcePreview(slice, env) }, children: [] };
+}
+
+/** A source slice's preview: rendered, sanitized and without scripts. Export
+ *  renders it again from the Markdown rather than trusting the stored prop. */
+export function sourcePreview(slice: string, env: object = {}): string {
   const rendered = md.render(slice, { ...env });
-  const previewHtml = rendered.trim().length > 0 ? withoutScripts(sanitizeUploadedHtml(rendered)) : `<pre>${md.utils.escapeHtml(slice)}</pre>`;
-  return { id: randomUUID(), type: 'source', props: { markdown: slice, previewHtml }, children: [] };
+  return rendered.trim().length > 0 ? withoutScripts(sanitizeUploadedHtml(rendered)) : `<pre>${md.utils.escapeHtml(slice)}</pre>`;
 }
 
 function withoutScripts(html: string): string {
