@@ -33,11 +33,13 @@ export interface MenuInput {
   isBranch?: boolean;
   /** Listed under Templates: forking it is "New from template". */
   isTemplate?: boolean;
+  /** The viewer owns it (marks it as a template). */
+  isOwner?: boolean;
 }
 
 /** Pure function: given who's viewing, return the ordered menu items. The
  *  caller maps each item to a click handler. */
-export function buildMenuItems({ isUploader, includeShare = false, live = false, isBranch = false, isTemplate = false }: MenuInput): MenuItem[] {
+export function buildMenuItems({ isUploader, includeShare = false, live = false, isBranch = false, isTemplate = false, isOwner = false }: MenuInput): MenuItem[] {
   const items: MenuItem[] = [];
   if (includeShare && isUploader) {
     items.push({ id: 'share', label: t('libDocumentActionsMenu.share') });
@@ -55,7 +57,7 @@ export function buildMenuItems({ isUploader, includeShare = false, live = false,
       { id: 'branch', label: t('libDocumentActionsMenu.branch') },
       { id: 'fork', label: t(isTemplate ? 'libDocumentActionsMenu.newFromTemplate' : 'libDocumentActionsMenu.fork') },
     );
-    if (isUploader) {
+    if (isOwner) {
       items.push({ id: 'template', label: t(isTemplate ? 'libDocumentActionsMenu.unmarkTemplate' : 'libDocumentActionsMenu.markTemplate') });
     }
     items.push({ id: 'separator' });

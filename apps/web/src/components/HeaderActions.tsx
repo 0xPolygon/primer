@@ -65,7 +65,8 @@ export function HeaderActions({
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const navigate = useNavigate();
-  const detail = useDocument(docId).data?.document;
+  const docQuery = useDocument(docId);
+  const detail = docQuery.data?.document;
   const copy = useCopyDocument();
   const propose = useProposeBranch(docId);
   const editDoc = useEditDocument(docId);
@@ -235,6 +236,7 @@ export function HeaderActions({
               live: onExport !== undefined,
               isBranch: Boolean(detail?.branchOf),
               isTemplate: Boolean(detail?.isTemplate),
+              isOwner: docQuery.data?.myRole === 'owner',
             }).map(
               (item, index) => {
                 if (item.id === 'separator') {

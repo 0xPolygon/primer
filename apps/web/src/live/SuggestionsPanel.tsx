@@ -70,7 +70,7 @@ export function SuggestionsPanel(props: {
         [...sets].filter(([, n]) => n > 1).map(([id, n]) => (
           <div key={id} className="flex items-center justify-between gap-2 rounded bg-neutral-100 p-2 text-xs dark:bg-neutral-800" data-change-set={id}>
             <span>{t('suggestions.changeSet', { count: n })}</span>
-            <span className="flex gap-2">
+            <span className="flex shrink-0 gap-2 whitespace-nowrap">
               <button type="button" onClick={() => void decideSet(id, 'reject')} className="h-6 rounded border border-neutral-300 px-2 dark:border-neutral-700">
                 {t('suggestions.rejectAll')}
               </button>
