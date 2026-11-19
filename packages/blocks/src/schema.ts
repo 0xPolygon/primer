@@ -6,6 +6,8 @@ import { createReactDiagramBlockSpec } from '@blocknote/diagram-block';
 import { dateChip, dropdownChip, mentionChip } from './chips.tsx';
 import { sourceBlock } from './source.tsx';
 import { pendingBlock } from './pending.tsx';
+import { choiceBlock, choiceOptionBlock } from './choice.tsx';
+import { taskBlock } from './task.tsx';
 
 /**
  * Primer's document model: every stock BlockNote block, code with languages,
@@ -20,6 +22,9 @@ export const primerSchema = BlockNoteSchema.create({
     diagram: createReactDiagramBlockSpec(),
     source: sourceBlock(),
     pending: pendingBlock(),
+    choice: choiceBlock(),
+    choiceOption: choiceOptionBlock(),
+    task: taskBlock(),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip },
 });

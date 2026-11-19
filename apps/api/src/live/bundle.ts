@@ -5,7 +5,8 @@ import { comments, docFiles, threads } from '../db/schema.ts';
 import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { readBlocks } from './editor.ts';
-import { exportHtml, exportMarkdown, exportText } from './export.ts';
+import { exportHtml, exportMarkdown, exportText, type ExportDecisions } from './export.ts';
+import { exportDecisions } from './choices.ts';
 import { tabsOf } from './reach.ts';
 import { trustedMeta } from './sources.ts';
 
@@ -43,8 +44,12 @@ export function exportFileOf(format: string): 'export.md' | 'export.txt' {
 }
 
 /** The static rendering of a document state, served like any version's content. */
-export async function renderStatic(doc: Y.Doc, title: string): Promise<{ html: string; served: string }> {
-  const html = await exportHtml(doc, title);
+export async function renderStatic(
+  doc: Y.Doc,
+  title: string,
+  decisions: ExportDecisions = new Map(),
+): Promise<{ html: string; served: string }> {
+  const html = await exportHtml(doc, title, decisions);
   const served = transformHtml(html, { themeManaged: true });
   if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
   return { html, served: served.html };
@@ -79,8 +84,9 @@ export async function renderBundle(
   Y.applyUpdate(doc, opts.state);
   try {
     const { format } = trustedMeta(doc, opts.documentId);
-    const { html, served } = await renderStatic(doc, opts.title);
-    const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId);
+    const decisions = await exportDecisions(opts.documentId);
+    const { html, served } = await renderStatic(doc, opts.title, decisions);
+    const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
       [exportFileOf(format)]: exported,

@@ -12,6 +12,7 @@ import { docFiles, documents, versions, users } from '../db/schema.ts';
 import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/bundle.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
+import { exportDecisions } from '../live/choices.ts';
 import { withLiveDocument } from '../live/instance.ts';
 import { ensureSigningKey } from '../live/signing.ts';
 import { MAX_BYTES } from '../upload/validate.ts';
@@ -519,8 +520,13 @@ export function registerDocumentRoutes(
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
       await ensureSigningKey(deps.storage);
+      const decisions = await exportDecisions(docId);
       body = await withLiveDocument(docId, (doc) =>
-        format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
+        format === 'html'
+          ? exportHtml(doc, access.title, decisions)
+          : format === 'text'
+            ? exportText(doc, docId)
+            : exportMarkdown(doc, docId, decisions),
       );
     }
     const ext = format === 'html' ? 'html' : format === 'text' ? 'txt' : 'md';
@@ -559,7 +565,8 @@ export function registerDocumentRoutes(
       html = new TextDecoder().decode(await readBundleFile(deps.storage, version.bundleKey, 'static.html'));
     } else {
       await ensureSigningKey(deps.storage);
-      html = (await withLiveDocument(docId, (doc) => renderStatic(doc, access.title))).served;
+      const decisions = await exportDecisions(docId);
+      html = (await withLiveDocument(docId, (doc) => renderStatic(doc, access.title, decisions))).served;
     }
     return new Response(printable(html), {
       status: 200,

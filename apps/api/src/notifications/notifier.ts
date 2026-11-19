@@ -33,6 +33,14 @@ export interface NotifyExternalFirstViewArgs {
   docTitle: string;
 }
 
+/** A person was mentioned (an inline mention chip) in a live document. */
+export interface NotifyDocumentMentionArgs {
+  doc: { id: string; title: string };
+  blockId: string;
+  mentionedUserId: string;
+  actorUserId: string;
+}
+
 export interface Notifier {
   /**
    * Whether OTP emails can actually reach recipients. The external-share
@@ -43,6 +51,7 @@ export interface Notifier {
   notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void>;
   notifyExternalOtp(args: NotifyExternalOtpArgs): Promise<void>;
   notifyExternalFirstView(args: NotifyExternalFirstViewArgs): Promise<void>;
+  notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void>;
 }
 
 export class NoopNotifier implements Notifier {
@@ -56,6 +65,9 @@ export class NoopNotifier implements Notifier {
   async notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void> {
     if (args.addedUserId === args.addedByUserId) return;
     logger.debug({ args }, 'notifyCollaboratorAdded (no-op)');
+  }
+  async notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void> {
+    logger.debug({ args }, 'notifyDocumentMention (no-op)');
   }
   async notifyExternalOtp(args: NotifyExternalOtpArgs): Promise<void> {
     logger.info({ toEmail: args.toEmail, code: args.code }, 'external OTP code (no-op notifier, dev only)');

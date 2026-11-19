@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as Y from 'yjs';
+import { optionLabel } from '@primer/blocks';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
 import { MAIN_TAB, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { sourcePreview } from './import.ts';
@@ -12,11 +13,14 @@ import { groupVersion, pmDocOf, trustedMeta, trustedSources } from './sources.ts
  * document exports exactly the uploaded file. Tabs after `main` follow in
  * order, each under a `# <title>` heading.
  */
-export async function exportMarkdown(doc: Y.Doc, documentId: string): Promise<string> {
+/** `decisions`: the server's recorded decisions (none shown without them). */
+export async function exportMarkdown(doc: Y.Doc, documentId: string, decisions: ExportDecisions = new Map()): Promise<string> {
   const tabs: string[] = [];
   for (const tab of tabsOf(doc)) {
     const parts = planTab(doc, documentId, tab.id);
-    tabs.push(assemble(parts, await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(p.run) : null)))));
+    tabs.push(
+      assemble(parts, await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(withDecisions(p.run, decisions)) : null)))),
+    );
   }
   return joinTabs(tabsOf(doc), tabs, (title) => `# ${title}`);
 }
@@ -52,17 +56,63 @@ function oneLine(title: string): string {
  * Tabs after `main` follow under their titles. Shares, previews, print and
  * email all use this.
  */
-export async function exportHtml(doc: Y.Doc, title = ''): Promise<string> {
+export async function exportHtml(doc: Y.Doc, title = '', decisions: ExportDecisions = new Map()): Promise<string> {
   let body = '';
   for (const tab of tabsOf(doc)) {
     if (tab.id !== MAIN_TAB) body += `<h1 class="primer-tab-title">${escapeHtml(oneLine(tab.title) || 'Untitled')}</h1>`;
-    body += await htmlOf(readBlocks(doc, tab.id));
+    body += await htmlOf(withDecisions(readBlocks(doc, tab.id), decisions));
   }
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style><style>${STATIC_CSS}</style></head>` +
     `<body><div class="bn-root bn-container"><div class="bn-default-styles">${body}</div></div></body></html>`
   );
+}
+
+/** A choice's recorded decision, as exports show it. */
+export type ExportDecision = {
+  decisionId: string;
+  optionId: string;
+  question: string;
+  label: string;
+  rationale: string;
+  decidedByName: string;
+};
+/** Recorded decisions by choice block id (`exportDecisions` in live/choices.ts). */
+export type ExportDecisions = Map<string, ExportDecision>;
+
+/** The choice's render-only decision props (the server fills them here). */
+const DECISION_PROPS = ['decidedOptionId', 'decidedLabel', 'decidedQuestion', 'decisionChanged', 'rationale', 'decidedByName'];
+
+/**
+ * Choice blocks with their decision props filled from the server's record
+ * and nothing else: whatever the (client-writable) document holds there is
+ * dropped, so a forged decision never reaches an export or a static render.
+ */
+function withDecisions(blocks: PrimerBlock[], decisions: ExportDecisions): PrimerBlock[] {
+  return blocks.map((block) => {
+    const children = withDecisions(block.children as PrimerBlock[], decisions);
+    if (block.type !== 'choice') return children === block.children ? block : ({ ...block, children } as PrimerBlock);
+    const props: Record<string, unknown> = { ...block.props };
+    for (const key of DECISION_PROPS) props[key] = '';
+    // A decision applies only to the block carrying its nonce, with the option still there.
+    const d = decisions.get(block.id);
+    const option = d && block.props.decisionId === d.decisionId
+      ? (block.children as PrimerBlock[]).find((o) => o.id === d.optionId)
+      : undefined;
+    if (d && option) {
+      const changed = d.question !== String(block.props.question ?? '') || d.label !== optionLabel(option as never);
+      Object.assign(props, {
+        decidedOptionId: d.optionId,
+        decidedLabel: d.label,
+        decidedQuestion: d.question,
+        decisionChanged: changed ? 'true' : '',
+        rationale: d.rationale,
+        decidedByName: d.decidedByName,
+      });
+    }
+    return { ...block, props, children } as PrimerBlock;
+  });
 }
 
 type Part =

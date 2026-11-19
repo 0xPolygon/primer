@@ -95,6 +95,7 @@ export function DocumentSurface(props: {
   live: boolean;
   documentId: string;
   readOnly: boolean;
+  canVote: boolean;
   theme: 'light' | 'dark';
   userName: string;
   userId: string;
@@ -108,6 +109,7 @@ export function DocumentSurface(props: {
       <LiveEditor
         documentId={props.documentId}
         readOnly={props.readOnly}
+        canVote={props.canVote}
         theme={props.theme}
         userName={props.userName}
         userId={props.userId}
@@ -1029,6 +1031,7 @@ function DocumentPageInner() {
             live={liveView}
             documentId={docId!}
             readOnly={!canEdit}
+            canVote={canSubmitEventsDoc(docQuery.data?.myRole)}
             theme={theme}
             userName={me.data?.displayName ?? t('document.someone')}
             userId={me.data?.id ?? ''}
