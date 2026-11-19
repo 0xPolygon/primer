@@ -27,12 +27,13 @@ function stripAnnotations(json: NodeJson): NodeJson {
   return out;
 }
 
-/** The `blockContainer` with this id, and its position, or null. */
+/** The block with this id (a `blockContainer`, or a layout block such as a
+ *  choice and its options), and its position, or null. */
 export function findBlock(doc: PmNode, blockId: string): { pos: number; node: PmNode } | null {
   let found: { pos: number; node: PmNode } | null = null;
   doc.descendants((node, pos) => {
     if (found) return false;
-    if (node.type.name === 'blockContainer' && node.attrs.id === blockId) {
+    if (node.type.isInGroup('bnBlock') && node.attrs.id === blockId) {
       found = { pos, node };
       return false;
     }

@@ -3,6 +3,7 @@ import diff from 'fast-diff';
 import type { SuggestedEditDTO, SuggestionDTO, SuggestionsResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { useThreadEvents } from './threadEvents.ts';
+import { t, type MessageKey } from '../i18n/index.ts';
 
 const SUGGESTION_EVENTS: ReadonlySet<string> = new Set(['suggestion.created', 'suggestion.decided']);
 
@@ -42,12 +43,12 @@ export function SuggestionsPanel(props: {
     const res = await api(`/api/suggestions/${encodeURIComponent(id)}/${decision}`, { method: 'POST' });
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { refusal?: { message: string; fix: string } } | null;
-      setError(body?.refusal ? `${body.refusal.message} ${body.refusal.fix}` : `Could not ${decision} (${res.status}).`);
+      setError(body?.refusal ? `${body.refusal.message} ${body.refusal.fix}` : t(decision === 'accept' ? 'suggestions.acceptFailed' : 'suggestions.rejectFailed', { status: res.status }));
     }
     await refresh();
   };
 
-  if (suggestions.length === 0) return <p className="p-2 text-xs text-neutral-500">No open suggestions.</p>;
+  if (suggestions.length === 0) return <p className="p-2 text-xs text-neutral-500">{t('suggestions.none')}</p>;
   return (
     <div className="flex flex-col gap-2" data-suggestions-panel>
       {error && <p className="rounded bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">{error}</p>}
@@ -55,7 +56,7 @@ export function SuggestionsPanel(props: {
         <article key={s.id} className="rounded border border-neutral-200 p-2 text-xs dark:border-neutral-700" data-suggestion-id={s.id}>
           <header className="mb-1 flex items-center justify-between gap-2">
             <span className="font-medium">{s.authorDisplayName}</span>
-            {s.stale && <span className="text-amber-600">Changed since</span>}
+            {s.stale && <span className="text-amber-600">{t('suggestions.changedSince')}</span>}
           </header>
           {s.edits.map((edit, i) => (
             <EditDiff key={i} edit={edit} onShow={props.onShow} />
@@ -63,10 +64,10 @@ export function SuggestionsPanel(props: {
           {props.canDecide && (
             <div className="mt-2 flex justify-end gap-2">
               <button type="button" onClick={() => void decide(s.id, 'reject')} className="h-6 rounded border border-neutral-300 px-2 dark:border-neutral-700">
-                Reject
+                {t('suggestions.reject')}
               </button>
               <button type="button" onClick={() => void decide(s.id, 'accept')} className="h-6 rounded bg-emerald-600 px-2 text-white hover:bg-emerald-700">
-                Accept
+                {t('suggestions.accept')}
               </button>
             </div>
           )}
@@ -76,11 +77,11 @@ export function SuggestionsPanel(props: {
   );
 }
 
-const KIND_LABEL: Record<SuggestedEditDTO['kind'], string> = {
-  replace: 'Change',
-  insert: 'Add',
-  delete: 'Delete',
-  move: 'Move',
+const KIND_LABEL: Record<SuggestedEditDTO['kind'], MessageKey> = {
+  replace: 'suggestions.kindReplace',
+  insert: 'suggestions.kindInsert',
+  delete: 'suggestions.kindDelete',
+  move: 'suggestions.kindMove',
 };
 
 /** One block's change: the current text against the proposed text. */
@@ -90,7 +91,7 @@ function EditDiff({ edit, onShow }: { edit: SuggestedEditDTO; onShow?: (blockId:
   return (
     <div className="mt-1">
       <button type="button" className="text-neutral-500 hover:underline" onClick={() => onShow?.(edit.target.blockId)}>
-        {KIND_LABEL[edit.kind]}
+        {t(KIND_LABEL[edit.kind])}
       </button>
       <p className="mt-0.5 whitespace-pre-wrap break-words" data-diff>
         {diff(before, after).map(([op, text], i) =>

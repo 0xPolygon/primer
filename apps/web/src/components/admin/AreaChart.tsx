@@ -1,5 +1,6 @@
 import type { DailyStackPoint } from '@polygonlabs/primer-api-types';
 import { linearScale, niceTicks, formatTickDate } from './chartGeom.ts';
+import { t } from '../../i18n/index.ts';
 
 interface Props {
   data: DailyStackPoint[];
@@ -45,7 +46,7 @@ export function AreaChart({ data, height = 200 }: Props) {
   const xTickIndices = [0, Math.floor(data.length / 2), data.length - 1];
 
   return (
-    <svg viewBox={`0 0 ${WIDTH} ${height}`} className="w-full" role="img" aria-label="Daily content created">
+    <svg viewBox={`0 0 ${WIDTH} ${height}`} className="w-full" role="img" aria-label={t('areaChart.dailyContentCreated')}>
       {polygons}
       {yTicks.map((t, i) => (
         <text key={i} x={PAD.left - 4} y={y(t)} textAnchor="end" dominantBaseline="middle"
@@ -65,10 +66,10 @@ export function AreaChart({ data, height = 200 }: Props) {
 
 export function EmptyChart({ width, height }: { width: number; height: number }) {
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label="No data">
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-label={t('areaChart.noData')}>
       <text x={width / 2} y={height / 2} textAnchor="middle" dominantBaseline="middle"
             className="text-xs fill-neutral-400 dark:fill-neutral-500">
-        No data yet
+        {t('areaChart.noDataYet')}
       </text>
     </svg>
   );

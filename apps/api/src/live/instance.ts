@@ -1,11 +1,11 @@
 import * as Y from 'yjs';
 import { Hocuspocus } from '@hocuspocus/server';
-import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
+import { attachPersistence, loadYDoc, persistedUpTo, touchedOf } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
 import { sanitizeClientAwareness } from './awareness.ts';
-import { SYSTEM_ORIGIN } from './origin.ts';
 import { cancelOrphanSync, scheduleOrphanSync } from './orphans.ts';
+import { SYSTEM_ORIGIN, originOf, type LiveOrigin } from './origin.ts';
 
 const NAME = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
@@ -25,6 +25,17 @@ const failureHandlers = new Set<(documentId: string, doc: Y.Doc) => void>();
 export function onPersistenceFailure(handler: (documentId: string, doc: Y.Doc) => void): () => void {
   failureHandlers.add(handler);
   return () => failureHandlers.delete(handler);
+}
+
+type UpdateHandler = (documentId: string, origin: LiveOrigin, touched: string[]) => void;
+const updateHandlers = new Set<UpdateHandler>();
+
+/** Runs after every change to a loaded live document, with who made it and
+ *  the block ids it touched (indexes kept from the document, such as tasks,
+ *  schedule their sync). */
+export function onLiveUpdate(handler: UpdateHandler): () => void {
+  updateHandlers.add(handler);
+  return () => updateHandlers.delete(handler);
 }
 
 let instance: Hocuspocus | null = null;
@@ -71,6 +82,11 @@ export function liveInstance(): Hocuspocus {
       });
       const recheckThreads = () => scheduleOrphanSync(documentId, document);
       document.on('update', recheckThreads);
+      document.on('update', (_update: Uint8Array, origin: unknown, _doc: Y.Doc, tr: Y.Transaction) => {
+        const by = originOf(origin);
+        const touched = touchedOf(tr);
+        for (const handler of updateHandlers) handler(documentId, by, touched);
+      });
       // Detach only once the document is really gone: Hocuspocus keeps it
       // after beforeUnloadDocument when someone connected meanwhile.
       document.on('destroy', () => {

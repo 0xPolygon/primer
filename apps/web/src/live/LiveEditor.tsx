@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
+import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { VersioningSidebar } from '@blocknote/react/versioning';
 import { BlockNoteView } from '@blocknote/ariakit';
 import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
 import { createExtension } from '@blocknote/core';
 import { CommentsExtension } from '@blocknote/core/comments';
 import { ThreadsSidebar } from '@blocknote/react';
-import * as locales from '@blocknote/core/locales';
-import { primerSchema } from '@primer/blocks';
+import { PrimerBlocksContext, primerSchema } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
 import type { DocFileUploadResponse, ViewerRole } from '@polygonlabs/primer-api-types';
@@ -15,6 +15,9 @@ import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { AgentStatus } from './AgentStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
+import { editorDictionary, t } from '../i18n/index.ts';
+import { ChipMenus } from './ChipMenus.tsx';
+import { routeMarkdownPasteToServer } from './paste.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
 import { TabStrip, useTabs } from './TabStrip.tsx';
 import { MAIN_TAB, tabFragmentName } from './tabs.ts';
@@ -23,15 +26,22 @@ import { commentDeleteGuard, type HeldDelete } from './commentDeleteGuard.ts';
 import { DeleteCommentedDialog } from './DeleteCommentedDialog.tsx';
 import { useThreadEvents } from './threadEvents.ts';
 import { SuggestionsPanel } from './SuggestionsPanel.tsx';
+import { useBlockServices, type ChoiceStore } from './blockServices.ts';
+import { DecisionRegister } from './DecisionRegister.tsx';
+import './blocks.css';
 
 export type LiveEditorProps = {
   documentId: string;
   readOnly: boolean;
+  /** Whether this viewer may vote on choices (owner, editor or responder). */
+  canVote: boolean;
   theme: 'light' | 'dark';
   /** Shown on this viewer's cursor to everyone else. */
   userName: string;
   userId: string;
   role: ViewerRole;
+  /** Opens a version from before the document went live in the version viewer. */
+  onOpenLegacyVersion?: (versionNumber: number) => void;
 };
 
 /**
@@ -59,19 +69,36 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   const [selected, setSelected] = useState(MAIN_TAB);
   // A tab someone else deleted falls back to the first.
   const active = tabs.some((t) => t.id === selected) ? selected : MAIN_TAB;
+  // Choice and task blocks reach the API through these (people pick; the
+  // browser is always a person's session).
+  const { services, store } = useBlockServices(props.documentId, { canPick: !props.readOnly, canVote: props.canVote });
   return (
-    <div className="flex h-full flex-col" data-live-editor={props.documentId}>
-      <ConnectionStatus provider={props.live.provider} />
-      <AgentStatus provider={props.live.provider} />
-      <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
-      {/* One editor per tab fragment, mounted when its tab is opened. */}
-      <TabEditor key={active} tabId={active} {...props} />
-    </div>
+    <PrimerBlocksContext.Provider value={services}>
+      <div className="flex h-full flex-col" data-live-editor={props.documentId}>
+        <ConnectionStatus provider={props.live.provider} />
+        <AgentStatus provider={props.live.provider} />
+        <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
+        {/* One editor per tab fragment, mounted when its tab is opened. */}
+        <TabEditor key={active} tabId={active} store={store} {...props} />
+      </div>
+    </PrimerBlocksContext.Provider>
   );
 }
 
-function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId, role }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
+function TabEditor({
+  live,
+  tabId,
+  documentId,
+  readOnly,
+  theme,
+  userName,
+  userId,
+  role,
+  onOpenLegacyVersion,
+  store,
+}: LiveEditorProps & { live: LiveProvider; tabId: string; store: ChoiceStore }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [decisionsOpen, setDecisionsOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [suggestionCount, setSuggestionCount] = useState(0);
@@ -113,14 +140,14 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
             }),
           ],
         }),
-        YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId) }),
+        YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId, onOpenLegacyVersion) }),
       ],
       collaboration: {
         provider: { awareness: live.provider.awareness ?? undefined },
         fragment: live.doc.getXmlFragment(tabFragmentName(tabId)),
         user: { name: userName, color: colorFor(userName) },
       },
-      dictionary: dictionaryFor(typeof navigator === 'undefined' ? 'en' : navigator.language),
+      dictionary: editorDictionary(),
       uploadFile: async (file: File) => {
         const form = new FormData();
         form.append('file', file);
@@ -139,6 +166,7 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
     threadStore.editor = editor;
     void threadStore.refresh();
   }, [editor, threadStore]);
+  useEffect(() => routeMarkdownPasteToServer(editor), [editor]);
 
   return (
     <>
@@ -149,7 +177,7 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
           aria-pressed={commentsOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          Comments
+          {t('liveEditor.comments')}
         </button>
         <button
           type="button"
@@ -157,7 +185,15 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
           aria-pressed={suggestionsOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          Suggestions{suggestionCount > 0 ? ` (${suggestionCount})` : ''}
+          {suggestionCount > 0 ? t('liveEditor.suggestionsCount', { count: suggestionCount }) : t('liveEditor.suggestions')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setDecisionsOpen((open) => !open)}
+          aria-pressed={decisionsOpen}
+          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          {t('liveEditor.decisions')}
         </button>
         <button
           type="button"
@@ -165,24 +201,25 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
           aria-pressed={historyOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          History
+          {t('liveEditor.history')}
         </button>
       </div>
-      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} className="flex min-h-0 flex-1">
+      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} slashMenu={false} className="flex min-h-0 flex-1">
+        <ChipMenus editor={editor} slashItems={primerSlashItems(editor)} />
         <div className="min-w-0 flex-1 overflow-y-auto py-4">
           <BlockNoteViewEditor />
         </div>
         {commentsOpen && (
           <div className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 p-2 dark:border-neutral-800" data-threads-sidebar>
             <select
-              aria-label="Show comments"
+              aria-label={t('liveEditor.showComments')}
               value={filter}
               onChange={(e) => setFilter(e.target.value as typeof filter)}
               className="mb-2 h-7 rounded border border-neutral-300 bg-transparent px-2 text-xs dark:border-neutral-700"
             >
-              <option value="open">Open</option>
-              <option value="resolved">Resolved</option>
-              <option value="all">All</option>
+              <option value="open">{t('liveEditor.filterOpen')}</option>
+              <option value="resolved">{t('liveEditor.filterResolved')}</option>
+              <option value="all">{t('liveEditor.filterAll')}</option>
             </select>
             <ThreadsSidebar filter={filter} />
           </div>
@@ -199,6 +236,11 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
             onShow={(blockId) => editor.setTextCursorPosition(blockId, 'start')}
           />
         </div>
+        {decisionsOpen && (
+          <div className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 dark:border-neutral-800">
+            <DecisionRegister documentId={documentId} store={store} onClose={() => setDecisionsOpen(false)} />
+          </div>
+        )}
         {historyOpen && (
           <div className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 dark:border-neutral-800">
             <VersioningSidebar onClose={() => setHistoryOpen(false)} />
@@ -222,15 +264,37 @@ function initialsAvatar(name: string): string {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
+/** Slash menu entries for Primer's own blocks. */
+function primerSlashItems(editor: unknown) {
+  const insert = (block: object) => () => insertOrUpdateBlockForSlashMenu(editor as never, block as never);
+  return [
+    {
+      title: t('slash.choice'),
+      subtext: t('slash.choiceHint'),
+      aliases: ['choice', 'decision', 'vote', 'poll', 'options'],
+      group: t('slash.group'),
+      onItemClick: insert({
+        type: 'choice',
+        children: [
+          { type: 'choiceOption', children: [{ type: 'paragraph' }] },
+          { type: 'choiceOption', children: [{ type: 'paragraph' }] },
+        ],
+      }),
+    },
+    {
+      title: t('slash.task'),
+      subtext: t('slash.taskHint'),
+      aliases: ['task', 'todo', 'assign', 'action'],
+      group: t('slash.group'),
+      onItemClick: insert({ type: 'task' }),
+    },
+  ];
+}
+
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4d7c0f'];
 
 function colorFor(name: string): string {
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return COLORS[Math.abs(hash) % COLORS.length]!;
-}
-
-function dictionaryFor(language: string) {
-  const all = locales as unknown as Record<string, typeof locales.en>;
-  return all[language.toLowerCase().split('-')[0] ?? 'en'] ?? locales.en;
 }

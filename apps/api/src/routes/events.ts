@@ -258,7 +258,7 @@ export function registerEventRoutes(
     // An agent follows its person's owner stream (lib/permissions.ts).
     const ownerId = libraryOwnerId(user);
     const reader = (afterId: number) =>
-      listOwnedEvents({ userId: ownerId, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
+      listOwnedEvents({ userId: ownerId, readerId: user.id, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
     const subscribe = (wake: () => void) => subscribeOwnerWakes(ownerId, wake);
     return runEventStream(
       c,

