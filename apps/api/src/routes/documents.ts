@@ -11,6 +11,7 @@ import { docFiles, documents, versions, users } from '../db/schema.ts';
 import { exportFileOf, readBundleFile } from '../live/bundle.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
+import { exportDecisions } from '../live/choices.ts';
 import { withLiveDocument } from '../live/instance.ts';
 import { ensureSigningKey } from '../live/signing.ts';
 import { MAX_BYTES } from '../upload/validate.ts';
@@ -493,8 +494,13 @@ export function registerDocumentRoutes(
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
       await ensureSigningKey(deps.storage);
+      const decisions = await exportDecisions(docId);
       body = await withLiveDocument(docId, (doc) =>
-        format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
+        format === 'html'
+          ? exportHtml(doc, access.title, decisions)
+          : format === 'text'
+            ? exportText(doc, docId)
+            : exportMarkdown(doc, docId, decisions),
       );
     }
     const ext = format === 'html' ? 'html' : format === 'text' ? 'txt' : 'md';

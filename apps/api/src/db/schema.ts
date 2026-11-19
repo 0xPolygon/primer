@@ -671,6 +671,9 @@ export const docDecisions = pgTable(
       .references(() => documents.id, { onDelete: 'cascade' }),
     blockId: text('block_id').notNull(),
     optionId: text('option_id').notNull(),
+    // What was decided, as it read then: the block's text may change later.
+    question: text('question').notNull(),
+    optionLabel: text('option_label').notNull(),
     rationale: text('rationale').notNull(),
     evidence: jsonb('evidence').notNull(),
     openQuestions: jsonb('open_questions').notNull(),

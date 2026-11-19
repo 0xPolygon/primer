@@ -1,5 +1,5 @@
 {
-  "id": "e186e850-cc7c-4031-ba48-8c0830106c72",
+  "id": "47916355-b592-4552-abe4-468d7534e244",
   "prevId": "7a9819db-fdfb-4b5f-8ec9-d6dd1333ff43",
   "version": "7",
   "dialect": "postgresql",
@@ -390,6 +390,18 @@
         },
         "option_id": {
           "name": "option_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "option_label": {
+          "name": "option_label",
           "type": "text",
           "primaryKey": false,
           "notNull": true

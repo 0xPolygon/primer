@@ -2,6 +2,8 @@ CREATE TABLE "doc_decisions" (
 	"document_id" uuid NOT NULL,
 	"block_id" text NOT NULL,
 	"option_id" text NOT NULL,
+	"question" text NOT NULL,
+	"option_label" text NOT NULL,
 	"rationale" text NOT NULL,
 	"evidence" jsonb NOT NULL,
 	"open_questions" jsonb NOT NULL,

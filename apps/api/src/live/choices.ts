@@ -50,7 +50,9 @@ import {
   type Result,
 } from './blockTools.ts';
 import type { PrimerBlock } from './editor.ts';
-import { withLiveDocument } from './instance.ts';
+import { onLiveUpdate, withLiveDocument } from './instance.ts';
+import { logger } from '../logger.ts';
+import type { ExportDecision, ExportDecisions } from './export.ts';
 
 type Option = { id: string; label: string };
 
@@ -100,17 +102,20 @@ async function countVotes(actor: AuthUser, documentId: string, choiceId: string,
 async function decisionsOf(documentId: string, choiceIds: string[]): Promise<Map<string, ChoiceDecisionDTO>> {
   if (choiceIds.length === 0) return new Map();
   const rows = (await db.execute(sql`
-    SELECT d.block_id AS "blockId", d.option_id AS "optionId", d.rationale, d.evidence, d.open_questions AS "openQuestions",
+    SELECT d.block_id AS "blockId", d.option_id AS "optionId", d.question, d.option_label AS label,
+           d.rationale, d.evidence, d.open_questions AS "openQuestions",
            d.decided_by AS "decidedBy", ${actorNameOf('u')} AS "decidedByName", d.decided_at AS "decidedAt"
       FROM doc_decisions d JOIN users u ON u.id = d.decided_by
      WHERE d.document_id = ${documentId} AND d.block_id IN ${sql`(${sql.join(choiceIds.map((id) => sql`${id}`), sql`, `)})`}
-  `)) as unknown as (Omit<ChoiceDecisionDTO, 'label' | 'decidedAt'> & { blockId: string; decidedAt: Date | string })[];
+  `)) as unknown as (Omit<ChoiceDecisionDTO, 'decidedAt' | 'changedSinceDecided'> & { blockId: string; decidedAt: Date | string })[];
   return new Map(
     rows.map((r) => [
       r.blockId,
       {
         optionId: r.optionId,
-        label: '',
+        question: r.question,
+        label: r.label,
+        changedSinceDecided: false,
         rationale: r.rationale,
         evidence: r.evidence,
         openQuestions: r.openQuestions,
@@ -122,11 +127,17 @@ async function decisionsOf(documentId: string, choiceIds: string[]): Promise<Map
   );
 }
 
-/** A choice's decision, when its option is still one of the choice's options. */
-async function decisionFor(documentId: string, choiceId: string, options: Option[]): Promise<ChoiceDecisionDTO | null> {
-  const d = (await decisionsOf(documentId, [choiceId])).get(choiceId);
+/** A recorded decision as it stands against the live choice: none once the
+ *  decided option is gone; flagged when the question or the option's label
+ *  changed after the pick (the saved text is what was decided). */
+function standing(d: ChoiceDecisionDTO | undefined, question: string, options: Option[]): ChoiceDecisionDTO | null {
   const option = d && options.find((o) => o.id === d.optionId);
-  return d && option ? { ...d, label: option.label } : null;
+  if (!d || !option) return null;
+  return { ...d, changedSinceDecided: d.question !== question || d.label !== option.label };
+}
+
+async function decisionFor(documentId: string, choiceId: string, choice: { props: Record<string, string>; options: Option[] }) {
+  return standing((await decisionsOf(documentId, [choiceId])).get(choiceId), choice.props.question ?? '', choice.options);
 }
 
 export async function choiceTally(actor: AuthUser, documentId: string, choiceId: string): Promise<Result<ChoiceTallyResponse>> {
@@ -136,7 +147,7 @@ export async function choiceTally(actor: AuthUser, documentId: string, choiceId:
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
   const tally = await countVotes(actor, documentId, choiceId, choice.options);
-  return { ok: true, value: { ...tally, decision: await decisionFor(documentId, choiceId, choice.options) } };
+  return { ok: true, value: { ...tally, decision: await decisionFor(documentId, choiceId, choice) } };
 }
 
 /** Records the caller's vote (`optionId: null` withdraws it). People only. */
@@ -150,7 +161,7 @@ export async function vote(actor: AuthUser, documentId: string, choiceId: string
   if (!access.ok) return access;
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
-  if (await decisionFor(documentId, choiceId, choice.options)) return refuse('choice_decided', 'This choice is decided.');
+  if (await decisionFor(documentId, choiceId, choice)) return refuse('choice_decided', 'This choice is decided.');
   if (optionId !== null && !choice.options.some((o) => o.id === optionId)) {
     return refuse('bad_request', `Option ${optionId} is not an option of this choice.`);
   }
@@ -223,32 +234,28 @@ export async function pick(actor: AuthUser, documentId: string, choiceId: string
     ...(e.url ? { url: e.url } : {}),
     ...(e.docId ? { docId: e.docId } : {}),
   }));
+  const option = choice.options.find((o) => o.id === req.optionId);
+  if (!option) return refuse('bad_request', `Option ${req.optionId} is not an option of this choice.`);
+  // The document only loses the pending proposal; the decision is the
+  // server's row, with the question and label as they were when decided.
   return setBlockProps(
     actor,
     documentId,
     { tabId: choice.tabId, blockId: choiceId },
     choiceCheck(req.optionId),
-    {
-      decidedOptionId: req.optionId,
-      rationale: req.rationale ?? '',
-      evidence: JSON.stringify(evidence),
-      openQuestions: JSON.stringify(req.openQuestions ?? []),
-      decidedBy: actor.id,
-      decidedByName: label(actor),
-      decidedAt: new Date().toISOString(),
-      proposedOptionId: '',
-      proposedBy: '',
-      proposalNote: '',
-    },
+    { proposedOptionId: '', proposedBy: '', proposalNote: '' },
     async () => {
       await transactionWithEvents(async (tx, emit) => {
         await tx.execute(sql`
-          INSERT INTO doc_decisions (document_id, block_id, option_id, rationale, evidence, open_questions, decided_by, decided_at)
-          VALUES (${documentId}, ${choiceId}, ${req.optionId}, ${req.rationale ?? ''}, ${JSON.stringify(evidence)}::jsonb,
-                  ${JSON.stringify(req.openQuestions ?? [])}::jsonb, ${actor.id}, now())
+          INSERT INTO doc_decisions (document_id, block_id, option_id, question, option_label, rationale, evidence,
+                                     open_questions, decided_by, decided_at)
+          VALUES (${documentId}, ${choiceId}, ${req.optionId}, ${choice.props.question ?? ''}, ${option.label},
+                  ${req.rationale ?? ''}, ${JSON.stringify(evidence)}::jsonb, ${JSON.stringify(req.openQuestions ?? [])}::jsonb,
+                  ${actor.id}, now())
           ON CONFLICT (document_id, block_id) DO UPDATE
-            SET option_id = EXCLUDED.option_id, rationale = EXCLUDED.rationale, evidence = EXCLUDED.evidence,
-                open_questions = EXCLUDED.open_questions, decided_by = EXCLUDED.decided_by, decided_at = now()
+            SET option_id = EXCLUDED.option_id, question = EXCLUDED.question, option_label = EXCLUDED.option_label,
+                rationale = EXCLUDED.rationale, evidence = EXCLUDED.evidence, open_questions = EXCLUDED.open_questions,
+                decided_by = EXCLUDED.decided_by, decided_at = now()
         `);
         emit({
           documentId,
@@ -275,7 +282,7 @@ export async function proposePick(
   if (!access.ok) return access;
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
-  if (await decisionFor(documentId, choiceId, choice.options)) return refuse('choice_decided', 'This choice is decided.');
+  if (await decisionFor(documentId, choiceId, choice)) return refuse('choice_decided', 'This choice is decided.');
   return setBlockProps(
     actor,
     documentId,
@@ -335,9 +342,7 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
   const decisions: DecisionDTO[] = [];
   for (const c of choices) {
     const tally = await countVotes(actor, documentId, c.id, c.options);
-    const d = recorded.get(c.id);
-    const decidedOption = d && c.options.find((o) => o.id === d.optionId);
-    const decided = d && decidedOption ? { ...d, label: decidedOption.label } : null;
+    const decided = standing(recorded.get(c.id), c.props.question ?? '', c.options);
     const proposed = c.options.find((o) => o.id === c.props.proposedOptionId);
     const entry: DecisionDTO = {
       target: { tabId: c.tabId, blockId: c.id },
@@ -354,4 +359,68 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
   }
   decisions.sort((a, b) => (a.status === b.status ? 0 : a.status === 'decided' ? -1 : 1));
   return { ok: true, value: { decisions } };
+}
+
+// ───────────────────────── Keeping decisions with their blocks ─────────────────────────
+
+/** Deletes decisions whose choice block, or decided option, is gone from the
+ *  document, so a block id used again never inherits an old decision. */
+export async function reconcileDecisions(documentId: string): Promise<void> {
+  const rows = (await db.execute(sql`
+    SELECT block_id AS "blockId", option_id AS "optionId" FROM doc_decisions WHERE document_id = ${documentId}
+  `)) as unknown as { blockId: string; optionId: string }[];
+  if (rows.length === 0) return;
+  const live = await withLiveDocument(documentId, (doc) => {
+    const options = new Map<string, Set<string>>();
+    for (const e of liveBlocks(doc)) if (e.block.type === 'choice') options.set(e.block.id, new Set(optionsOf(e.block).map((o) => o.id)));
+    return options;
+  });
+  for (const r of rows) {
+    if (live.get(r.blockId)?.has(r.optionId)) continue;
+    await db.execute(sql`
+      DELETE FROM doc_decisions WHERE document_id = ${documentId} AND block_id = ${r.blockId} AND option_id = ${r.optionId}
+    `);
+  }
+}
+
+const pendingDecisions = new Map<string, ReturnType<typeof setTimeout>>();
+const runningDecisions = new Set<Promise<void>>();
+
+function runDecisionSync(documentId: string): void {
+  const job = reconcileDecisions(documentId).catch((err: unknown) => {
+    logger.warn({ documentId, error: String(err) }, 'choices: decision sync failed');
+  });
+  runningDecisions.add(job);
+  void job.finally(() => runningDecisions.delete(job));
+}
+
+onLiveUpdate((documentId) => {
+  if (pendingDecisions.has(documentId)) return;
+  const timer = setTimeout(() => {
+    pendingDecisions.delete(documentId);
+    runDecisionSync(documentId);
+  }, 500);
+  timer.unref?.();
+  pendingDecisions.set(documentId, timer);
+});
+
+/** Runs every scheduled decision sync now and waits (tests, shutdown). */
+export async function flushDecisionSync(): Promise<void> {
+  for (const [documentId, timer] of [...pendingDecisions]) {
+    clearTimeout(timer);
+    pendingDecisions.delete(documentId);
+    runDecisionSync(documentId);
+  }
+  await Promise.all([...runningDecisions]);
+}
+
+/** Decisions for exports and static renders, keyed by choice block id: the
+ *  server's record, never the document's props. */
+export async function exportDecisions(documentId: string): Promise<ExportDecisions> {
+  const rows = (await db.execute(sql`
+    SELECT d.block_id AS "blockId", d.option_id AS "optionId", d.rationale, ${actorNameOf('u')} AS "decidedByName"
+      FROM doc_decisions d JOIN users u ON u.id = d.decided_by
+     WHERE d.document_id = ${documentId}
+  `)) as unknown as ({ blockId: string } & ExportDecision)[];
+  return new Map(rows.map(({ blockId, ...d }) => [blockId, d]));
 }

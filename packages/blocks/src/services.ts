@@ -9,6 +9,10 @@ export type ChoiceTally = {
   /** The recorded decision (from the API, never the document), or null. */
   decision: {
     optionId: string;
+    /** The option's label as it read when decided. */
+    label: string;
+    /** The question or the option's label changed after the pick. */
+    changedSinceDecided: boolean;
     rationale: string;
     evidence: Evidence[];
     openQuestions: string[];
@@ -39,7 +43,8 @@ export type PrimerBlockServices = {
   canPick: boolean;
   /** Whether this viewer may vote (people with write access). */
   canVote: boolean;
-  useTally(choiceId: string): ChoiceTally;
+  /** null until the first read arrives. */
+  useTally(choiceId: string): ChoiceTally | null;
   vote(choiceId: string, optionId: string): Promise<void>;
   pick(choiceId: string, input: PickInput): Promise<void>;
   assignees: Assignee[];

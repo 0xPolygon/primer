@@ -1152,7 +1152,11 @@ export interface ChoiceOptionDTO {
 /** A recorded decision (server-side; never read from the document). */
 export interface ChoiceDecisionDTO {
   optionId: string;
+  /** The question and the option's label as they read when decided. */
+  question: string;
   label: string;
+  /** The question or the option's label was edited after the pick. */
+  changedSinceDecided: boolean;
   rationale: string;
   evidence: ChoiceEvidence[];
   openQuestions: string[];

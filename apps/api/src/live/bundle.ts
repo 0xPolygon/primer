@@ -6,6 +6,7 @@ import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { readBlocks } from './editor.ts';
 import { exportHtml, exportMarkdown, exportText } from './export.ts';
+import { exportDecisions } from './choices.ts';
 import { tabsOf } from './reach.ts';
 import { trustedMeta } from './sources.ts';
 
@@ -50,10 +51,11 @@ export async function renderBundle(
   Y.applyUpdate(doc, opts.state);
   try {
     const { format } = trustedMeta(doc, opts.documentId);
-    const html = await exportHtml(doc, opts.title);
+    const decisions = await exportDecisions(opts.documentId);
+    const html = await exportHtml(doc, opts.title, decisions);
     const served = transformHtml(html, { themeManaged: true });
     if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
-    const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId);
+    const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
       [exportFileOf(format)]: exported,

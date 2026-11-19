@@ -126,10 +126,10 @@ export function optionLabel(option: AnyBlock): string {
 function useDecision(block: AnyBlock, services: PrimerBlockServices | null): DecisionView | null {
   const tally = (services?.useTally ?? noTally)(block.id);
   if (services) {
-    const d = tally?.decision;
-    const option = d && block.children.find((o) => o.id === d.optionId);
-    return d && option ? { ...d, label: optionLabel(option) } : null;
+    return tally?.decision ?? null;
   }
+  // Exports and static renders: the server fills these props from its record
+  // (live/export.ts) and drops whatever the document held.
   const p = block.props as Record<string, string>;
   const option = block.children.find((o) => o.id === p.decidedOptionId);
   if (!option) return null;
@@ -139,12 +139,20 @@ function useDecision(block: AnyBlock, services: PrimerBlockServices | null): Dec
     evidence: parseEvidence(p.evidence),
     openQuestions: parseOpenQuestions(p.openQuestions),
     decidedByName: p.decidedByName ?? '',
+    changedSinceDecided: false,
   };
 }
 
 const noTally = (): ChoiceTally | null => null;
 
-type DecisionView = { label: string; rationale: string; evidence: Evidence[]; openQuestions: string[]; decidedByName: string };
+type DecisionView = {
+  label: string;
+  rationale: string;
+  evidence: Evidence[];
+  openQuestions: string[];
+  decidedByName: string;
+  changedSinceDecided: boolean;
+};
 
 function ChoiceFrame({ block, editor, slotRef }: ChoiceFrameProps) {
   const services = usePrimerBlockServices();
@@ -168,7 +176,7 @@ function ChoiceFrame({ block, editor, slotRef }: ChoiceFrameProps) {
       </div>
       <div className="primer-choice-options" ref={slotRef} />
       <div className="primer-choice-foot" contentEditable={false}>
-        {editor.isEditable && !decided && (
+        {services && editor.isEditable && !decided && (
           <button type="button" className="primer-choice-add" onClick={() => addOption(editor, block.id)}>
             + Add option
           </button>
@@ -198,6 +206,7 @@ function Decision({ decision }: { decision: DecisionView }) {
       <div>
         <strong>Decision:</strong> {decision.label}
         {decision.decidedByName && <span className="primer-choice-meta"> by {decision.decidedByName}</span>}
+        {decision.changedSinceDecided && <span className="primer-choice-meta"> (changed since decided)</span>}
       </div>
       {decision.rationale && <p className="primer-choice-rationale">{decision.rationale}</p>}
       {evidence.length > 0 && (
@@ -342,8 +351,8 @@ function OptionFrame({ block, editor, slotRef }: OptionFrameProps) {
 
 function VoteButton(props: { services: PrimerBlockServices; choiceId: string; optionId: string; locked: boolean }) {
   const tally = props.services.useTally(props.choiceId);
-  const count = tally.counts[props.optionId] ?? 0;
-  const mine = tally.mine === props.optionId;
+  const count = tally?.counts[props.optionId] ?? 0;
+  const mine = tally?.mine === props.optionId;
   return (
     <button
       type="button"
@@ -351,7 +360,7 @@ function VoteButton(props: { services: PrimerBlockServices; choiceId: string; op
       aria-pressed={mine}
       aria-label={`Vote (${count})`}
       disabled={!props.services.canVote || props.locked}
-      onClick={() => void props.services.vote(props.choiceId, props.optionId)}
+      onClick={() => void props.services.vote(props.choiceId, props.optionId).catch(() => undefined)}
     >
       {mine ? '●' : '○'} {count}
     </button>
