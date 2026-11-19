@@ -1,5 +1,6 @@
 import { Fragment, type Node as PmNode } from '@tiptap/pm/model';
 import type { Transform } from '@tiptap/pm/transform';
+import type * as Y from 'yjs';
 import { sql } from 'drizzle-orm';
 import {
   isTarget,
@@ -17,10 +18,10 @@ import { canEdit } from '../lib/permissions.ts';
 import { blockVersion, findBlock } from './blocks.ts';
 import { InputError, inputToBlocks } from './convert.ts';
 import { originFor } from './origin.ts';
-import { applyPlan, type AppliedBlock, type Located, type PlannedEdit } from './pipeline.ts';
+import { applyPlan, liveFragment, type AppliedBlock, type Located, type PlannedEdit } from './pipeline.ts';
 import { appliedBlockDTO } from './read.ts';
 import { rebaseUpdate, type UpdateInput } from './rebase.ts';
-import { runHooks } from './runs.ts';
+import { activeRequestedRunIds, finishDirectRun, runHooks, startDirectRun } from './runs.ts';
 
 export type { BlockInput, LiveOp, ApplyOpsRequest } from '@polygonlabs/primer-api-types';
 
@@ -51,6 +52,11 @@ type Prepared =
  * stale op is a `conflict` (`target_changed`) while the others apply; an op
  * that removes text of an open comment thread is refused
  * `deletes_commented_text` unless `allowCommentedDelete`.
+ *
+ * An agent's batch always runs under a run (its budget, cancel and undo):
+ * the `runId` it names, else a direct run opened for this batch alone; while
+ * the agent has a run a person asked for on this document, a batch without
+ * its `runId` is refused `run_required`.
  *
  * `onConflict: 'suggest'` is passed to the pipeline unchanged: that is where
  * suggestions (M5) turn conflicts into proposals.
@@ -84,9 +90,48 @@ export async function applyOps(documentId: string, actor: AuthUser, raw: unknown
   }
   if (errors.length > 0) return reject(errors, `${errors.length} of ${req.ops.length} ops are invalid; nothing was applied.`);
 
+  // Every agent write is scoped to a run: the one it names, or (with no run
+  // active on this document) one the server opens for this batch alone.
+  let runId = typeof req.runId === 'string' ? req.runId : null;
+  let direct = false;
+  if (actor.kind === 'agent' && runId === null) {
+    const active = await activeRequestedRunIds(documentId, actor.id);
+    if (active.length > 0) {
+      return {
+        ok: false,
+        status: 409,
+        refusal: {
+          code: 'run_required',
+          message: `You have an active run on this document (${active.join(', ')}); its edits must go through it.`,
+          fix: `Send the ops again with runId: "${active[0]}".`,
+          details: { runIds: active },
+        },
+      };
+    }
+    runId = await startDirectRun(documentId, actor);
+    direct = true;
+  }
+  let error: string | null = null;
+  try {
+    return await applyScoped(documentId, actor, runId, direct, { prepared, onConflict, allowCommentedDelete });
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+    throw err;
+  } finally {
+    if (direct) await finishDirectRun(runId!, error);
+  }
+}
+
+async function applyScoped(
+  documentId: string,
+  actor: AuthUser,
+  runId: string | null,
+  direct: boolean,
+  { prepared, onConflict, allowCommentedDelete }: { prepared: Prepared[]; onConflict: 'refuse' | 'suggest'; allowCommentedDelete: boolean },
+): Promise<ApplyOpsResult> {
   let hooks: RunHooks | null = null;
-  if (typeof req.runId === 'string') {
-    const out = await runHooks(documentId, actor, req.runId);
+  if (runId !== null) {
+    const out = await runHooks(documentId, actor, runId);
     if ('code' in out) {
       return { ok: false, status: out.code === 'not_found' ? 404 : out.code === 'requester_cannot_edit' ? 403 : 409, refusal: out };
     }
@@ -103,23 +148,18 @@ export async function applyOps(documentId: string, actor: AuthUser, raw: unknown
       allowCommentedDelete,
       note: (n) => notes.set(index, n),
       applied: (blocks) => applied.set(index, blocks),
-      onTarget: hooks?.onTarget,
+      // A direct run ends with this batch: no cursor left behind.
+      onTarget: direct ? undefined : hooks?.onTarget,
     }),
   );
-  const work = {
-    edits: prepared.length,
-    removals: prepared.reduce(
-      (n, p) => n + (p.op === 'delete' ? 1 : p.op === 'replaceRange' ? Object.keys(p.expectVersions).length : 0),
-      0,
-    ),
-  };
+  const edited = prepared.reduce((n, p) => n + (p.op === 'add' || p.op === 'replaceRange' ? countBlocks(p.nodes) : 1), 0);
 
-  const result = await applyPlan(documentId, originFor(actor, typeof req.runId === 'string' ? req.runId : null), {
+  const result = await applyPlan(documentId, originFor(actor, runId), {
     edits,
     onConflict,
-    guard: async () => {
+    guard: async (doc) => {
       if (hooks) {
-        const refused = await hooks.guard(work);
+        const refused = await hooks.guard({ edits: edited, removals: removals(doc, prepared) });
         if (refused) return refused;
       }
       for (const id of await openThreadIds(documentId)) open.add(id);
@@ -318,21 +358,10 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
         target: p.from,
         expectVersion: p.expectVersions[p.from.blockId],
         build: guarded(p.from, (tr, at) => {
-          const $from = tr.doc.resolve(at!.pos);
-          const parent = $from.parent;
-          const ids: string[] = [];
-          let end = -1;
-          let pos = at!.pos;
-          for (let i = $from.index(); i < parent.childCount; i++) {
-            const child = parent.child(i);
-            ids.push(child.attrs.id as string);
-            pos += child.nodeSize;
-            if (child.attrs.id === p.to.blockId) {
-              end = pos;
-              break;
-            }
-          }
-          if (end < 0) return invalid('`to` is not a later sibling of `from`.', 'Pick `to` among the siblings after `from` (same parent).');
+          const range = rangeOf(tr.doc, at!, p.to.blockId);
+          if (!range) return invalid('`to` is not a later sibling of `from`.', 'Pick `to` among the siblings after `from` (same parent).');
+          const { end } = range;
+          const ids = range.blocks.map((b) => b.attrs.id as string);
           const stale: { blockId: string; version: string | null }[] = [];
           for (const id of ids) {
             const found = findBlock(tr.doc, id)!;
@@ -356,6 +385,58 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
         }),
       };
   }
+}
+
+/** The sibling blocks from `at` through `toBlockId`, and the position after
+ *  the last one; null when `toBlockId` is not a later sibling. */
+function rangeOf(doc: PmNode, at: NonNullable<Located>, toBlockId: string): { blocks: PmNode[]; end: number } | null {
+  const $from = doc.resolve(at.pos);
+  const parent = $from.parent;
+  const blocks: PmNode[] = [];
+  let pos = at.pos;
+  for (let i = $from.index(); i < parent.childCount; i++) {
+    const child = parent.child(i);
+    blocks.push(child);
+    pos += child.nodeSize;
+    if (child.attrs.id === toBlockId) return { blocks, end: pos };
+  }
+  return null;
+}
+
+/** Blocks (`blockContainer`s) in `nodes`, nested ones included. */
+function countBlocks(nodes: readonly PmNode[]): number {
+  let n = 0;
+  for (const node of nodes) {
+    if (node.type.name === 'blockContainer') n++;
+    node.descendants((d) => {
+      if (d.type.name === 'blockContainer') n++;
+    });
+  }
+  return n;
+}
+
+/** Blocks the batch's deletes and replacements would remove, subtrees
+ *  included, counted on the live document (a missing target or bad range
+ *  counts 0: that op conflicts). */
+function removals(doc: Y.Doc, prepared: Prepared[]): number {
+  const fragments = new Map<string, PmNode>();
+  const live = (target: Target) => {
+    if (!fragments.has(target.tabId)) fragments.set(target.tabId, liveFragment(doc, target));
+    return fragments.get(target.tabId)!;
+  };
+  let n = 0;
+  for (const p of prepared) {
+    if (p.op === 'delete') {
+      const at = findBlock(live(p.target), p.target.blockId);
+      if (at) n += countBlocks([at.node]);
+    } else if (p.op === 'replaceRange') {
+      const root = live(p.from);
+      const at = findBlock(root, p.from.blockId);
+      const range = at ? rangeOf(root, at, p.to.blockId) : null;
+      if (range) n += countBlocks(range.blocks);
+    }
+  }
+  return n;
 }
 
 /** Removes a block; a last child takes its (then empty) group with it. The

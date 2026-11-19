@@ -72,9 +72,10 @@ export type Plan = {
   /** `suggest` turns conflicts into suggestions once suggestions exist; until
    *  then both report `conflict`. */
   onConflict: 'refuse' | 'suggest';
-  /** Runs on the document's queue just before the mutation; a refusal turns
-   *  every edit into a conflict carrying it (e.g. a cancelled run). */
-  guard?: () => Promise<Refusal | null>;
+  /** Runs on the document's queue just before the mutation, with the live
+   *  Y.Doc (read it with `liveFragment`); a refusal turns every edit into a
+   *  conflict carrying it (e.g. a cancelled run). */
+  guard?: (doc: Y.Doc) => Promise<Refusal | null>;
   /** Runs once the update is stored, with its docVersion (e.g. to write the
    *  run's inverses). */
   afterPersist?: (result: { docVersion: number; inverses: BlockInverse[] }) => Promise<void>;
@@ -95,7 +96,7 @@ export async function applyPlan(documentId: string, origin: LiveOrigin, plan: Pl
   try {
     const doc = connection.document!;
     const step = await docQueue(documentId)(async () => {
-      const refusal = plan.guard ? await plan.guard() : null;
+      const refusal = plan.guard ? await plan.guard(doc) : null;
       if (refusal) {
         const outcomes: EditOutcome[] = plan.edits.map((edit, index) => ({
           index,
@@ -121,6 +122,11 @@ export async function applyPlan(documentId: string, origin: LiveOrigin, plan: Pl
   } finally {
     await connection.disconnect({ unloadImmediately: false });
   }
+}
+
+/** The live content of `target`'s fragment, as a ProseMirror doc. */
+export function liveFragment(doc: Y.Doc, target: Target): PmNode {
+  return toPmDoc(doc.getXmlFragment(fragmentName(target)));
 }
 
 /** Synchronous: locate, check, build and capture inverses for every edit. */

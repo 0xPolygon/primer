@@ -309,11 +309,12 @@ export async function approveRun(user: AuthUser, runId: string, body: { planHash
 /**
  * Run support for a batch of ops (live/ops.ts): the run must be this agent's
  * and this document's. The guard runs on the document queue: one conditional
- * UPDATE reserves the batch's work (its op count, and its deletes plus
- * replaced blocks as an upper bound of removals) if the run is still active
- * and stays under the large-edit threshold or has an approved plan; otherwise
- * the batch is refused (`run_cancelled` or `approval_required`). The
- * reservation is not refunded for ops that end as conflicts.
+ * UPDATE reserves the batch's work (edits: one per op, or per block written
+ * for add and replaceRange; removals: every block in the subtrees the batch
+ * deletes or replaces, counted from the live document) if the run is still
+ * active and stays under the large-edit threshold or has an approved plan;
+ * otherwise the batch is refused (`run_cancelled` or `approval_required`).
+ * The reservation is not refunded for ops that end as conflicts.
  */
 export async function runHooks(documentId: string, actor: AuthUser, runId: string) {
   const run = await loadRun(runId);
@@ -353,7 +354,10 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
       return {
         code: 'approval_required',
         message: `This run would pass ${LARGE_RUN_EDITS} edits or ${LARGE_RUN_REMOVALS} removed blocks; nothing was applied.`,
-        fix: 'Post your plan with primer_update_run (action "status", plan) and wait until a person approves it, then send the ops again.',
+        fix:
+          run.request.kind === 'direct'
+            ? 'An edit this large needs a run a person asked for: ask them to request one, then post your plan on it with primer_update_run and wait for their approval.'
+            : 'Post your plan with primer_update_run (action "status", plan) and wait until a person approves it, then send the ops again.',
         details: { editsApplied: now.editsApplied, blocksRemoved: now.blocksRemoved },
       };
     },
@@ -378,6 +382,37 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
       });
     },
   };
+}
+
+/** The agent's queued or running runs a person asked for on the document. */
+export async function activeRequestedRunIds(documentId: string, agentId: string): Promise<string[]> {
+  const rows = (await db.execute(sql`
+    SELECT id FROM agent_runs
+     WHERE document_id = ${documentId} AND agent_id = ${agentId} AND status IN ('queued', 'running')
+       AND request->>'kind' <> 'direct'
+     ORDER BY created_at
+  `)) as unknown as { id: string }[];
+  return rows.map((r) => r.id);
+}
+
+/** The run an agent's write without a runId goes under: running from the
+ *  start, asked by the agent itself, so its edits have inverses (undo), a
+ *  budget and attribution like any run. Finish it with `finishDirectRun`. */
+export async function startDirectRun(documentId: string, agent: AuthUser): Promise<string> {
+  const id = uuidv7();
+  const request: AgentRunRequest = { kind: 'direct', prompt: '', viewer: { tabId: '', selectedBlockIds: [], cursorBlockId: null } };
+  await db.execute(sql`
+    INSERT INTO agent_runs (id, document_id, agent_id, requested_by, status, request, dedupe_key, started_at)
+    VALUES (${id}, ${documentId}, ${agent.id}, ${agent.id}, 'running', ${JSON.stringify(request)}::jsonb, ${id}, now())
+  `);
+  return id;
+}
+
+export async function finishDirectRun(runId: string, error: string | null): Promise<void> {
+  await db.execute(sql`
+    UPDATE agent_runs SET ${error ? sql`status = 'failed', error = ${error}` : sql`status = 'done'`}, finished_at = now()
+     WHERE id = ${runId} AND status = 'running'
+  `);
 }
 
 /** The viewer context of a run, for the agent's reads. */

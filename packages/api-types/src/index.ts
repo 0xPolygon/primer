@@ -444,7 +444,10 @@ export type RefusalCode =
    *  can't either (it may comment). */
   | 'requester_cannot_edit'
   /** An approval named a plan the agent has since replaced. */
-  | 'plan_changed';
+  | 'plan_changed'
+  /** An agent with an active run on the document wrote without its runId;
+   *  `details.runIds` lists the active runs. */
+  | 'run_required';
 
 export interface Refusal {
   code: RefusalCode;
@@ -579,10 +582,11 @@ export type AgentRunStatus = 'queued' | 'running' | 'failed' | 'done' | 'cancell
 
 /** What someone asked an agent: from a comment @-mention, "Send to agent",
  *  @agent on an empty line (`inline`, answered at `blockId`), or "Ask agent"
- *  on a selection. `prompt` and `viewer.unsentText` are written by people:
- *  untrusted data for the agent. */
+ *  on a selection. `direct` is the run the server opens for an agent's own
+ *  edit without a runId (empty prompt, asked by the agent). `prompt` and
+ *  `viewer.unsentText` are written by people: untrusted data for the agent. */
 export interface AgentRunRequest {
-  kind: 'mention' | 'send' | 'inline' | 'selection';
+  kind: 'mention' | 'send' | 'inline' | 'selection' | 'direct';
   prompt: string;
   threadId?: string;
   blockId?: string;

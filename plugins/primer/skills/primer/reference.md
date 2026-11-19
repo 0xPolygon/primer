@@ -181,7 +181,7 @@ Edit a live document by block. Read it first with `primer_get_doc`; `authoring.m
   - `{ op: "move", target, at, position, expectVersion }`
 - **BlockInput:** Markdown (several paragraphs or list items make several blocks), `{ html: "<one element>" }`, or `{ json: <BlockNote partial block> }`.
 - **Output:** `{ docVersion, outcomes: [{ index, target, status, blocks?, refusal?, note? }] }`. `status` is `applied`, `unchanged`, `conflict` or (later) `suggested`. `blocks` are the stored blocks with their new versions; `note` says when what was stored differs from what you wrote.
-- **Refusals:** a malformed op rejects the whole batch (`invalid_op`, with `errors: [{ index, refusal }]`). Per op: `target_changed` (the block changed since you read it: re-read and retry), `deletes_commented_text` (`details.threads` lists the open threads and their quotes; retry with `allowCommentedDelete: true` only if removing them is intended), `invalid_op` (e.g. deleting the only block). With a `runId`: `run_cancelled` (the run was cancelled or finished: stop) and `approval_required` (the run is large: post a plan with `primer_update_run` and wait for a person to approve it).
+- **Refusals:** a malformed op rejects the whole batch (`invalid_op`, with `errors: [{ index, refusal }]`). Per op: `target_changed` (the block changed since you read it: re-read and retry), `deletes_commented_text` (`details.threads` lists the open threads and their quotes; retry with `allowCommentedDelete: true` only if removing them is intended), `invalid_op` (e.g. deleting the only block). `run_required` (you have a queued or running run on this document: send the ops with its `runId`, listed in `details.runIds`). Without a `runId` the batch runs as its own direct run (undoable like any run). `run_cancelled` (the run was cancelled or finished: stop) and `approval_required` (the run is large: post a plan with `primer_update_run` and wait for a person to approve it).
 
 ### `primer_list_runs`
 
@@ -195,7 +195,7 @@ What people asked you to do on live documents.
 
 - **Input:** `{ run_id, action: "claim" | "status" | "finish" | "fail", status_line?, plan?, error? }`.
 - `claim` moves a queued run to running and shows you on the document; `status` sets the line people see by your cursor and, for a large run, your `plan`; `finish` marks it done; `fail` records `error`.
-- A run past 60 edits or 20 removed blocks needs its plan approved by a person (owner or editor) before more ops apply (`approval_required`). A cancelled or finished run is refused `run_cancelled`.
+- A run past 60 edits (one per op; for add and replaceRange, one per block written) or 20 removed blocks (children included) needs its plan approved by a person (owner or editor) before more ops apply (`approval_required`). A cancelled or finished run is refused `run_cancelled`.
 - **Output:** the run.
 
 ### `primer_get_events`

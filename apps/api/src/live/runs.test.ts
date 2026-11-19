@@ -7,7 +7,20 @@ import { agentAwareness, agentClientId } from './awareness.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { applyOps } from './ops.ts';
 import { comment, createLiveDoc, makeAgent, markdownOf, ops, paragraph, seedBlocks, startTestHub, until, versions } from './live.testlib.ts';
-import { approveRun, cancelRun, claimRun, finishRun, LARGE_RUN_EDITS, listDocumentRuns, requestRun, retryRun, runViewer, updateRunStatus } from './runs.ts';
+import {
+  approveRun,
+  cancelRun,
+  claimRun,
+  finishRun,
+  LARGE_RUN_EDITS,
+  LARGE_RUN_REMOVALS,
+  listDocumentRuns,
+  requestRun,
+  retryRun,
+  runViewer,
+  updateRunStatus,
+} from './runs.ts';
+import { undoRun } from './undo.ts';
 
 const owner: AuthUser = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User', kind: 'person', viaUserId: null };
 const main = (blockId: string) => ({ tabId: 'main', blockId });
@@ -145,6 +158,31 @@ describe('agent runs', () => {
     expect(after.outcomes.every((o) => o.status === 'applied')).toBe(true);
   });
 
+  it('deleting one parent with 50 children trips approval at the threshold', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    const kids = (tag: string, n: number) => Array.from({ length: n }, (_, k) => paragraph(`${tag}${k}`, `${tag} child ${k}`));
+    await seedBlocks(id, [
+      paragraph('a', 'Alpha'),
+      { ...paragraph('p', 'Big parent'), children: kids('p', 50) },
+      { ...paragraph('q', 'Small parent'), children: kids('q', LARGE_RUN_REMOVALS - 1) },
+    ]);
+    const run = await startedRun(id, agent);
+    const v = await versions(id, agent);
+    const removed = async () =>
+      ((await db.execute(sql`SELECT blocks_removed AS n FROM agent_runs WHERE id = ${run.id}`)) as unknown as { n: number }[])[0]!.n;
+
+    const big = await ops(id, agent, { runId: run.id, ops: [{ op: 'delete', target: main('p'), expectVersion: v.p }] });
+    expect(big.outcomes[0]).toMatchObject({ status: 'conflict', refusal: { code: 'approval_required' } });
+    expect(await removed()).toBe(0);
+    expect((await markdownOf(id, agent)).length).toBe(1 + 51 + LARGE_RUN_REMOVALS);
+
+    // A parent and its children up to the threshold apply.
+    const small = await ops(id, agent, { runId: run.id, ops: [{ op: 'delete', target: main('q'), expectVersion: v.q }] });
+    expect(small.outcomes[0]!.status).toBe('applied');
+    expect(await removed()).toBe(LARGE_RUN_REMOVALS);
+  });
+
   it('ids planted from another document are refused and never touch it', async () => {
     const agent = await makeAgent();
     const a = await createLiveDoc();
@@ -199,6 +237,41 @@ describe('runs act for their requester', () => {
 
     const out = await applyOps(id, agent, { baseVersion: 0, runId: asked.value.id, ops: [addOne('Not allowed')] });
     expect(out).toMatchObject({ ok: false, status: 403, refusal: { code: 'requester_cannot_edit' } });
+    expect(await markdownOf(id, agent)).toEqual(['Alpha']);
+  });
+
+  it("an agent with a run requested by a commenter can't make a direct edit by omitting runId", async () => {
+    const { agent, id, commenter } = await commenterSetup();
+    const asked = await requestRun(commenter, id, { agentId: agent.id, request: ask() });
+    if (!asked.ok) throw new Error(asked.refusal.message);
+
+    // Queued or running, the run is the only way to write.
+    for (const step of ['queued', 'running']) {
+      if (step === 'running') await claimRun(agent, asked.value.id);
+      const out = await applyOps(id, agent, { baseVersion: 0, ops: [addOne('Sneaked in')] });
+      expect(out).toMatchObject({ ok: false, status: 409, refusal: { code: 'run_required', details: { runIds: [asked.value.id] } } });
+    }
+    expect(await markdownOf(id, agent)).toEqual(['Alpha']);
+  });
+
+  it('an unscoped agent write still gets an implicit run and is undoable', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('a', 'Alpha')]);
+    expect((await ops(id, agent, { ops: [addOne('Direct')] })).outcomes[0]!.status).toBe('applied');
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Direct']);
+
+    const runs = await listDocumentRuns(owner, id);
+    if (!runs.ok) throw new Error(runs.refusal.message);
+    expect(runs.value).toHaveLength(1);
+    const run = runs.value[0]!;
+    expect(run).toMatchObject({ agentId: agent.id, status: 'done', request: { kind: 'direct' }, editsApplied: 1 });
+    const updates = (await db.execute(sql`
+      SELECT count(*)::int AS n FROM doc_updates WHERE document_id = ${id} AND run_id = ${run.id}
+    `)) as unknown as { n: number }[];
+    expect(updates[0]!.n).toBe(1);
+
+    expect((await undoRun(run.id, owner)).ok).toBe(true);
     expect(await markdownOf(id, agent)).toEqual(['Alpha']);
   });
 
