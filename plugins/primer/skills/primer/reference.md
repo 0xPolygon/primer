@@ -39,15 +39,16 @@ Parse a Primer document URL into ids the other tools can use.
 
 Create a new document and upload its first version.
 
-- **Input:** `{ title: string, description?: string, content?: string, contentPath?: string, format: "html" | "markdown" }`. Exactly one of `content` (inline) or `contentPath` (absolute path; local stdio server only — see Disk round-tripping above).
+- **Input:** `{ title: string, description?: string, content?: string, contentPath?: string, format: "html" | "markdown" | "text" }`. Exactly one of `content` (inline) or `contentPath` (absolute path; local stdio server only — see Disk round-tripping above).
 - **Output:** `{ documentId, versionId, url }`.
 
 ### `primer_add_version`
 
 Upload a new version of an existing document.
 
-- **Input:** `{ documentId: string, content?: string, contentPath?: string, format: "html" | "markdown", versionNote?: string }`. Exactly one of `content` or `contentPath` (local stdio server only).
+- **Input:** `{ documentId: string, content?: string, contentPath?: string, format: "html" | "markdown" | "text", versionNote?: string, baseVersionNumber?: number }`. Exactly one of `content` or `contentPath` (local stdio server only).
 - **Output:** `{ versionId, versionNumber, url }`.
+- Pass `baseVersionNumber`: the version you read before editing. If someone published since, the call is refused (`stale_base`) with a fix naming the latest version: read it, merge your change into it, and publish again with that number. Never retry without the merge.
 
 ### `primer_get_document`
 

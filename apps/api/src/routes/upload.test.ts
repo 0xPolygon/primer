@@ -103,7 +103,7 @@ describe('POST /api/upload — error paths', () => {
     await withTmpStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
       const fd = new FormData();
-      fd.append('file', new Blob(['<html></html>'], { type: 'text/html' }), 'report.txt');
+      fd.append('file', new Blob(['<html></html>'], { type: 'text/html' }), 'report.pdf');
       fd.append('title', 't');
       const res = await app.request('/api/upload', { method: 'POST', headers: CSRF_HEADERS, body: fd });
       expect(res.status).toBe(400);

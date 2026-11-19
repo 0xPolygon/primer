@@ -43,6 +43,10 @@ export const versions = pgTable(
     storageKey: text('storage_key').notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
     versionNote: text('version_note'),
+    // The uploaded bytes, kept verbatim (`v1/<versionId>.orig`). Null for
+    // versions published before originals were kept.
+    originalKey: text('original_key'),
+    sourceFormat: text('source_format', { enum: ['html', 'markdown', 'text'] }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

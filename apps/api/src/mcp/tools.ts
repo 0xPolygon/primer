@@ -7,13 +7,10 @@ import { db } from '../db/client.ts';
 import { documents, versions, threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { replyToThread } from '../routes/comments.ts';
 import { resolveThread } from '../routes/threads.ts';
-import { markdownToHtml } from '../upload/markdown.ts';
-import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
-import { loadCarryOrigins } from '../lib/threadCarry.ts';
-import { insertPublishedVersion } from '../lib/publishVersion.ts';
+import { publishDocument } from '../lib/publish.ts';
 import { logger } from '../logger.ts';
-import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope } from '@polygonlabs/primer-api-types';
+import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope, PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 import {
   canRead, canEdit, effectiveRole, loadCollaboratorRole, type Visibility,
@@ -59,6 +56,16 @@ function ok(payload: unknown): ToolResult {
 }
 function err(code: PrimerErrorCode, message: string): ToolResult {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message }) }] };
+}
+/** A refusal as a tool error: its code, message and the fix to follow. */
+function refusalErr(refusal: Refusal): ToolResult {
+  const { code, message, fix } = refusal;
+  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message, fix }) }] };
+}
+
+const FORMAT_EXTENSION: Record<PublishFormat, string> = { html: 'html', markdown: 'md', text: 'txt' };
+function parseFormat(raw: unknown): PublishFormat {
+  return raw === 'markdown' || raw === 'text' ? raw : 'html';
 }
 
 // Inline port of apps/mcp/src/format.ts — avoids cross-package import.
@@ -480,179 +487,49 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
     },
 
     primer_create_document: async (args, user) => {
-      // Mirror POST /api/upload from routes/upload.ts, but with inline content.
-      const title = typeof args.title === 'string' ? args.title.trim() : '';
-      const description = typeof args.description === 'string' ? args.description.trim() || undefined : undefined;
+      const format = parseFormat(args.format);
       const content = typeof args.content === 'string' ? args.content : '';
-      const format = args.format === 'markdown' ? 'markdown' : 'html';
-
-      if (!title) return err('bad_request', 'title is required');
       if (!content) return err('bad_request', 'content is required');
-
-      let preparedHtml: string;
-      if (format === 'markdown') {
-        let mdResult;
-        try {
-          mdResult = markdownToHtml(content);
-        } catch (e) {
-          return err('bad_request', `Markdown conversion failed: ${(e as Error).message}`);
-        }
-        if (mdResult.bodyIsEmpty) {
-          return err('bad_request', 'Document body is empty.');
-        }
-        preparedHtml = mdResult.html;
-      } else {
-        preparedHtml = content;
-      }
-
-      const transformed = transformHtml(preparedHtml);
-      if (!transformed.ok) {
-        return err('bad_request', transformed.message);
-      }
-
-      const documentId = uuidv7();
-      const versionId = uuidv7();
-      // Storage key format must match upload.ts exactly: v1/<versionId>.html
-      const storageKey = `v1/${versionId}.html`;
-      const transformedBytes = new TextEncoder().encode(transformed.html);
-
-      await deps.storage.put(storageKey, transformedBytes);
-
-      try {
-        await transactionWithEvents(async (tx, emit) => {
-          await tx.insert(documents).values({
-            id: documentId,
-            title,
-            description: description ?? null,
-            uploaderId: user.id,
-          });
-          await tx.insert(versions).values({
-            id: versionId,
-            documentId,
-            versionNumber: 1,
-            storageKey,
-            sizeBytes: transformedBytes.byteLength,
-            versionNote: null,
-          });
-          emit({
-            documentId: documentId,
-            versionId: versionId,
-            actorId: user.id,
-            type: 'version.published',
-            payload: { document_id: documentId, version_id: versionId, number: 1, author_id: user.id },
-          });
-        });
-      } catch (e) {
-        try { await deps.storage.delete(storageKey); } catch {}
-        return err('bad_request', 'Failed to persist document.');
-      }
-
+      const result = await publishDocument(deps.storage, {
+        actor: user,
+        title: typeof args.title === 'string' ? args.title : '',
+        description: typeof args.description === 'string' ? args.description : null,
+        content: new TextEncoder().encode(content),
+        filename: `content.${FORMAT_EXTENSION[format]}`,
+        format,
+      });
+      if (!result.ok) return refusalErr(result.refusal);
       return ok({
-        documentId,
-        versionId,
-        versionNumber: 1,
-        url: `${deps.apiBaseUrl}/d/${documentId}`,
+        documentId: result.documentId,
+        versionId: result.versionId,
+        versionNumber: result.versionNumber,
+        url: `${deps.apiBaseUrl}/d/${result.documentId}`,
       });
     },
 
     primer_add_version: async (args, user) => {
-      // Mirror POST /api/documents/:docId/versions from routes/documents.ts.
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      const format = parseFormat(args.format);
       const content = typeof args.content === 'string' ? args.content : '';
-      const format = args.format === 'markdown' ? 'markdown' : 'html';
-      const versionNoteRaw = typeof args.versionNote === 'string' ? args.versionNote.trim() : null;
-
       if (!documentId) return err('bad_request', 'documentId is required');
       if (!content) return err('bad_request', 'content is required');
-
-      const [existingDoc] = await db
-        .select({
-          uploaderId: documents.uploaderId,
-          visibility: documents.visibility,
-          deletedAt: documents.deletedAt,
-        })
-        .from(documents)
-        .where(eq(documents.id, documentId));
-      if (!existingDoc) return err('not_found', 'document not found');
-      if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
-
-      const collabRole = await loadCollaboratorRole(documentId, user.id);
-      const eff = effectiveRole(existingDoc, user.id, collabRole);
-      if (!canRead(existingDoc.visibility as Visibility, eff)) {
-        return err('not_found', 'document not found');
+      const base = args.baseVersionNumber;
+      if (base !== undefined && (typeof base !== 'number' || !Number.isInteger(base) || base < 1)) {
+        return err('bad_request', 'baseVersionNumber must be a positive integer');
       }
-      if (!canEdit(eff)) {
-        return err('forbidden', 'only the document owner or editor collaborators can add versions');
-      }
-
-      let preparedHtml: string;
-      if (format === 'markdown') {
-        let mdResult;
-        try {
-          mdResult = markdownToHtml(content);
-        } catch (e) {
-          return err('bad_request', `Markdown conversion failed: ${(e as Error).message}`);
-        }
-        if (mdResult.bodyIsEmpty) {
-          return err('bad_request', 'Document body is empty.');
-        }
-        preparedHtml = mdResult.html;
-      } else {
-        preparedHtml = content;
-      }
-
-      const transformed = transformHtml(preparedHtml);
-      if (!transformed.ok) {
-        return err('bad_request', transformed.message);
-      }
-
-      let versionNote: string | null = null;
-      if (versionNoteRaw && versionNoteRaw.length > 0) {
-        if (versionNoteRaw.length > 500) {
-          return err('bad_request', 'versionNote must be ≤500 chars');
-        }
-        versionNote = versionNoteRaw;
-      }
-
-      const versionId = uuidv7();
-      const storageKey = `v1/${versionId}.html`;
-      const transformedBytes = new TextEncoder().encode(transformed.html);
-
-      const [maxRow] = (await db.execute(sql`
-        SELECT COALESCE(MAX(version_number), 0)::int AS max_n
-        FROM versions
-        WHERE document_id = ${documentId}
-      `)) as unknown as { max_n: number }[];
-      const nextNumber = (maxRow?.max_n ?? 0) + 1;
-
-      const origins = await loadCarryOrigins(deps.storage, documentId);
-
-      await deps.storage.put(storageKey, transformedBytes);
-
-      try {
-        await insertPublishedVersion(deps.storage, {
-          documentId,
-          versionId,
-          versionNumber: nextNumber,
-          storageKey,
-          sizeBytes: transformedBytes.byteLength,
-          versionNote,
-          html: transformed.html,
-          origins,
-          actorId: user.id,
-        });
-      } catch (e) {
-        try { await deps.storage.delete(storageKey); } catch {}
-        const pgErr = e as { code?: string };
-        if (pgErr.code === '23505') {
-          return err('bad_request', 'Concurrent version write; retry.');
-        }
-        return err('bad_request', 'Failed to persist version.');
-      }
-
+      const result = await publishDocument(deps.storage, {
+        actor: user,
+        documentId,
+        content: new TextEncoder().encode(content),
+        filename: `content.${FORMAT_EXTENSION[format]}`,
+        format,
+        versionNote: typeof args.versionNote === 'string' ? args.versionNote : null,
+        baseVersionNumber: base as number | undefined,
+      });
+      if (!result.ok) return refusalErr(result.refusal);
       return ok({
-        versionId,
-        versionNumber: nextNumber,
+        versionId: result.versionId,
+        versionNumber: result.versionNumber,
         url: `${deps.apiBaseUrl}/d/${documentId}`,
       });
     },
@@ -1267,16 +1144,18 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
       title: z.string(),
       description: z.string().optional(),
       content: z.string(),
-      format: z.enum(['html', 'markdown']),
+      format: z.enum(['html', 'markdown', 'text']),
     },
   },
   primer_add_version: {
-    description: 'Upload a new version of an existing Primer document.',
+    description:
+      'Upload a new version of an existing Primer document. Pass baseVersionNumber (the version you read) so a newer version published meanwhile is never overwritten: the call is then refused with code "stale_base" and a fix.',
     inputSchema: {
       documentId: z.string(),
       content: z.string(),
-      format: z.enum(['html', 'markdown']),
+      format: z.enum(['html', 'markdown', 'text']),
       versionNote: z.string().optional(),
+      baseVersionNumber: z.number().int().positive().optional(),
     },
   },
   primer_list_documents: {

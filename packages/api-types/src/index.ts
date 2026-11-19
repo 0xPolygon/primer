@@ -265,6 +265,22 @@ export interface AddVersionResponse {
   url: string;
 }
 
+/** Why the server refused a write, with a ready fix the caller (often an
+ *  agent) can follow. Codes grow per feature; branch on `code`, never on
+ *  message text. */
+export type RefusalCode = 'stale_base' | 'forbidden' | 'not_found' | 'bad_request';
+
+export interface Refusal {
+  code: RefusalCode;
+  message: string;
+  /** What to do instead, in one sentence. */
+  fix: string;
+  details?: Record<string, unknown>;
+}
+
+/** The formats a document version can be published from. */
+export type PublishFormat = 'html' | 'markdown' | 'text';
+
 export interface AdminStatsBucket {
   total: number;
   last7d: number;

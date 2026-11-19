@@ -1,21 +1,18 @@
 import type { Hono } from 'hono';
 import { eq, desc, sql } from 'drizzle-orm';
-import { v7 as uuidv7 } from 'uuid';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type { DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary } from '@polygonlabs/primer-api-types';
 import { documents, versions, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
-import { transformHtml } from '../upload/htmlPipeline.ts';
-import { markdownToHtml } from '../upload/markdown.ts';
 import {
   canRead, canEdit, canManage, effectiveRole, loadCollaboratorRole,
   type Visibility,
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
-import { loadCarryOrigins } from '../lib/threadCarry.ts';
-import { insertPublishedVersion } from '../lib/publishVersion.ts';
+import { publishDocument } from '../lib/publish.ts';
+import { refusalResponse } from './upload.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -354,25 +351,19 @@ export function registerDocumentRoutes(
 
   app.post('/api/documents/:docId/versions', async (c) => {
     const docId = c.req.param('docId');
-    const user = c.get('user');
-
-    const [existingDoc] = await db
-      .select({ uploaderId: documents.uploaderId, visibility: documents.visibility, deletedAt: documents.deletedAt })
-      .from(documents)
-      .where(eq(documents.id, docId));
-    if (!existingDoc) return c.json({ error: 'not_found' }, 404);
-    if (existingDoc.deletedAt !== null) return c.json({ error: 'not_found' }, 404);
-
-    const collabRole = await loadCollaboratorRole(docId, user.id);
-    const eff = effectiveRole(existingDoc, user.id, collabRole);
-    if (!canRead(existingDoc.visibility as Visibility, eff)) {
-      return c.json({ error: 'not_found' }, 404);
-    }
-    if (!canEdit(eff)) return c.json({ error: 'forbidden' }, 403);
 
     const form = await c.req.parseBody();
     const file = form['file'];
     const versionNoteRaw = form['versionNote'];
+    const baseRaw = form['baseVersionNumber'];
+
+    let baseVersionNumber: number | undefined;
+    if (typeof baseRaw === 'string' && baseRaw.trim().length > 0) {
+      baseVersionNumber = Number(baseRaw);
+      if (!Number.isInteger(baseVersionNumber) || baseVersionNumber < 1) {
+        return c.json({ error: 'invalid_body', message: 'baseVersionNumber must be a positive integer' }, 400);
+      }
+    }
 
     let bytes: Uint8Array | undefined;
     let filename = '';
@@ -392,91 +383,20 @@ export function registerDocumentRoutes(
       return c.json({ error: validated.error, message: validated.message }, 400);
     }
 
-    const text = new TextDecoder('utf-8').decode(validated.file.bytes);
-    const lowerName = validated.file.filename.toLowerCase();
-    const isMarkdown =
-      lowerName.endsWith('.md') || lowerName.endsWith('.markdown');
-
-    let preparedHtml: string;
-    if (isMarkdown) {
-      let mdResult;
-      try {
-        mdResult = markdownToHtml(text);
-      } catch (err) {
-        return c.json(
-          {
-            error: 'parse_failed',
-            message: `Markdown conversion failed: ${(err as Error).message}`,
-          },
-          400,
-        );
-      }
-      if (mdResult.bodyIsEmpty) {
-        return c.json(
-          { error: 'parse_failed', message: 'Document body is empty.' },
-          400,
-        );
-      }
-      preparedHtml = mdResult.html;
-    } else {
-      preparedHtml = text;
-    }
-
-    // Primer authored the HTML for Markdown uploads, so the parent app owns
-    // its theme; raw HTML uploads keep their own theme handling.
-    const transformed = transformHtml(preparedHtml, { themeManaged: isMarkdown });
-    if (!transformed.ok) {
-      return c.json({ error: transformed.error, message: transformed.message }, 400);
-    }
-
-    let versionNote: string | null = null;
-    if (typeof versionNoteRaw === 'string') {
-      const trimmed = versionNoteRaw.trim();
-      if (trimmed.length > 500) {
-        return c.json({ error: 'invalid_body', message: 'versionNote must be ≤500 chars' }, 400);
-      }
-      versionNote = trimmed.length === 0 ? null : trimmed;
-    }
-
-    const versionId = uuidv7();
-    const storageKey = `v1/${versionId}.html`;
-    const transformedBytes = new TextEncoder().encode(transformed.html);
-
-    const [maxRow] = (await db.execute(sql`
-      SELECT COALESCE(MAX(version_number), 0)::int AS max_n
-      FROM versions
-      WHERE document_id = ${docId}
-    `)) as unknown as { max_n: number }[];
-    const nextNumber = (maxRow?.max_n ?? 0) + 1;
-
-    const origins = await loadCarryOrigins(deps.storage, docId);
-
-    await deps.storage.put(storageKey, transformedBytes);
-
-    try {
-      await insertPublishedVersion(deps.storage, {
-        documentId: docId,
-        versionId,
-        versionNumber: nextNumber,
-        storageKey,
-        sizeBytes: transformedBytes.byteLength,
-        versionNote,
-        html: transformed.html,
-        origins,
-        actorId: c.get('user').id,
-      });
-    } catch (err) {
-      try { await deps.storage.delete(storageKey); } catch {}
-      const pgErr = err as { code?: string };
-      if (pgErr.code === '23505') {
-        return c.json({ error: 'version_race', message: 'Concurrent version write; retry.' }, 409);
-      }
-      throw err;
-    }
+    const result = await publishDocument(deps.storage, {
+      actor: c.get('user'),
+      documentId: docId,
+      content: validated.file.bytes,
+      filename: validated.file.filename,
+      format: validated.format,
+      versionNote: typeof versionNoteRaw === 'string' ? versionNoteRaw : null,
+      baseVersionNumber,
+    });
+    if (!result.ok) return refusalResponse(c, result);
 
     const response: AddVersionResponse = {
-      versionId,
-      versionNumber: nextNumber,
+      versionId: result.versionId,
+      versionNumber: result.versionNumber,
       url: `/d/${docId}`,
     };
     return c.json(response, 201);

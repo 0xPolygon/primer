@@ -31,21 +31,22 @@ export async function purgeExpiredDocuments(deps: { storage: Storage }): Promise
 
   for (const { id: docId } of candidates) {
     const versionRows = await db
-      .select({ id: versions.id, storageKey: versions.storageKey })
+      .select({ storageKey: versions.storageKey, originalKey: versions.originalKey })
       .from(versions)
       .where(eq(versions.documentId, docId));
+    const keys = versionRows.flatMap((v) => (v.originalKey ? [v.storageKey, v.originalKey] : [v.storageKey]));
 
     // Delete storage files first.
-    for (const v of versionRows) {
+    for (const key of keys) {
       try {
-        await deps.storage.delete(v.storageKey);
-        report.purgedStorageKeys.push(v.storageKey);
+        await deps.storage.delete(key);
+        report.purgedStorageKeys.push(key);
       } catch (err) {
         report.failedStorageKeys.push({
-          key: v.storageKey,
+          key,
           error: (err as Error).message,
         });
-        logger.warn({ docId, storageKey: v.storageKey, err }, 'purge: storage delete failed');
+        logger.warn({ docId, storageKey: key, err }, 'purge: storage delete failed');
       }
     }
 
