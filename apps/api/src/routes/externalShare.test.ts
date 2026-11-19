@@ -25,7 +25,6 @@ import { applyPlan } from '../live/pipeline.ts';
 import { applyOps } from '../live/ops.ts';
 import { recordsApi } from '../records/store.ts';
 import { flushDataChanged } from '../records/changed.ts';
-import type { RecordsSnapshot } from '@polygonlabs/primer-api-types';
 
 class CaptureNotifier extends NoopNotifier {
   override readonly emailEnabled = true;
@@ -288,12 +287,13 @@ describe('external share public routes', () => {
       // A record-reading page reads the same frozen records, under the records lockdown.
       const page = await publishDocument(storage, {
         actor: MOCK_USER, title: 'Board', filename: 'b.html', format: 'html',
-        content: new TextEncoder().encode('<!doctype html><html><head><meta name="primer-records" content="read"><title>Board</title></head><body><h1>Board</h1></body></html>'),
+        content: new TextEncoder().encode('<!doctype html><html><head><meta name="primer-records" content="read"><meta name="primer-records-collections" content="votes"><title>Board</title></head><body><h1>Board</h1></body></html>'),
       });
       if (!page.ok) throw new Error('publish refused');
       const pageRecords = recordsApi(MOCK_USER, page.documentId);
       await pageRecords.set({ collection: 'votes', scope: 'shared', recordId: 'a', data: { note: '</script><script>alert(1)</script>' } });
       await pageRecords.set({ collection: 'mine', scope: 'personal', recordId: 'p', data: { secret: 'personal-only' } });
+      await pageRecords.set({ collection: 'salaries', scope: 'shared', recordId: 's', data: { amount: 'unbound-collection' } });
       const pageCheckpoint = await f.app.request(`/api/documents/${page.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
       const pageVersion = ((await pageCheckpoint.json()) as { versionId: string }).versionId;
       await pageRecords.set({ collection: 'votes', scope: 'shared', recordId: 'b', data: { note: 'after publish' } });
@@ -303,9 +303,11 @@ describe('external share public routes', () => {
       const html = await res.text();
       const frozen = /<script type="application\/json" id="primer-records-frozen">(.*?)<\/script>/s.exec(html);
       expect(frozen).not.toBeNull();
-      const snapshot = JSON.parse(frozen![1]!) as RecordsSnapshot;
-      expect(Object.keys(snapshot.collections)).toEqual(['votes']);
-      expect(snapshot.collections.votes!.map((r) => [r.recordId, r.data.note])).toEqual([['a', '</script><script>alert(1)</script>']]);
+      // Only the collection the page declares, each record only its id and data.
+      expect(JSON.parse(frozen![1]!)).toEqual({ collections: { votes: [{ recordId: 'a', data: { note: '</script><script>alert(1)</script>' } }] } });
+      expect(html).not.toContain('unbound-collection');
+      expect(html).not.toContain('writtenBy');
+      expect(html).not.toContain('mock-user-1');
       expect(html).not.toContain('after publish');
       expect(html).not.toContain('personal-only');
       await flushDataChanged();

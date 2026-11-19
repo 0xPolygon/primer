@@ -1,5 +1,3 @@
-import { pagePolicyOf, withFrozenRecords } from '../records/page.ts';
-import { readFrozenRecords } from '../records/snapshot.ts';
 import type { Hono, Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
@@ -13,6 +11,8 @@ import {
   createViewerSession, lookupViewerSession,
   VIEWER_COOKIE_NAME, VIEWER_SESSION_TTL_MS,
 } from '../external/session.ts';
+import { frozenForShare, pagePolicyOf, withFrozenRecords } from '../records/page.ts';
+import { readFrozenRecords } from '../records/snapshot.ts';
 import { artifactCsp } from '../lib/pagePolicy.ts';
 import { logger } from '../logger.ts';
 
@@ -201,7 +201,9 @@ export function registerExternalShareRoutes(
     // A checkpoint's record-reading page reads the records frozen at publish
     // (records.json), never live ones, under the records outbound lockdown.
     const stored = await new Response(await deps.storage.get(version.storageKey)).text();
-    const html = version.bundleKey ? withFrozenRecords(stored, await readFrozenRecords(deps.storage, version.bundleKey)) : stored;
+    // Only the collections the page declares, with no identities or metadata.
+    const frozen = version.bundleKey ? await readFrozenRecords(deps.storage, version.bundleKey) : null;
+    const html = withFrozenRecords(stored, frozen && frozenForShare(frozen, stored));
     return new Response(html, {
       status: 200,
       headers: {
