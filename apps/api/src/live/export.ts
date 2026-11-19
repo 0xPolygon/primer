@@ -1,40 +1,118 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as Y from 'yjs';
+import { optionLabel } from '@primer/blocks';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
-import { MAIN_TAB, tabFragmentName } from './reach.ts';
+import { MAIN_TAB, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { sourcePreview } from './import.ts';
 import { groupVersion, pmDocOf, trustedMeta, trustedSources } from './sources.ts';
 
 /**
  * The document as Markdown (M2b.2): untouched groups are their source lines,
  * byte for byte; only changed or new blocks are serialised. An untouched
- * document exports exactly the uploaded file.
+ * document exports exactly the uploaded file. Tabs after `main` follow in
+ * order, each under a `# <title>` heading.
  */
-export async function exportMarkdown(doc: Y.Doc, documentId: string): Promise<string> {
-  const parts = planTab(doc, documentId, MAIN_TAB);
-  const texts = await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(p.run) : null)));
-  return assemble(parts, texts);
+/** `decisions`: the server's recorded decisions (none shown without them). */
+export async function exportMarkdown(doc: Y.Doc, documentId: string, decisions: ExportDecisions = new Map()): Promise<string> {
+  const tabs: string[] = [];
+  for (const tab of tabsOf(doc)) {
+    const parts = planTab(doc, documentId, tab.id);
+    tabs.push(
+      assemble(parts, await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(withDecisions(p.run, decisions)) : null)))),
+    );
+  }
+  return joinTabs(tabsOf(doc), tabs, (title) => `# ${title}`);
 }
 
-/** The document as plain text, by the same rule. */
+/** The document as plain text, by the same rule; tabs follow under their title. */
 export function exportText(doc: Y.Doc, documentId: string): string {
-  const parts = planTab(doc, documentId, MAIN_TAB);
-  return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
+  const tabs = tabsOf(doc).map((tab) => {
+    const parts = planTab(doc, documentId, tab.id);
+    return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
+  });
+  return joinTabs(tabsOf(doc), tabs, (title) => title);
+}
+
+/** Main's text, then each later tab under its heading, a blank line between. */
+function joinTabs(tabs: Tab[], texts: string[], heading: (title: string) => string): string {
+  let out = texts[0] ?? '';
+  tabs.slice(1).forEach((tab, k) => {
+    if (out.length > 0) out = out.replace(/\n*$/, '\n\n');
+    const body = texts[k + 1]!.replace(/\n+$/, '');
+    out += heading(oneLine(tab.title) || 'Untitled') + '\n' + (body ? `\n${body}\n` : '');
+  });
+  return out;
+}
+
+function oneLine(title: string): string {
+  return title.replace(/\s+/g, ' ').trim();
 }
 
 /**
  * The static rendering (C11 `static.html`): BlockNote's full HTML inside its
  * own container, with its stylesheet inlined. Source blocks show a preview
- * rendered again from their Markdown (the stored preview is editor-writable). Shares, previews, print and email all use this.
+ * rendered again from their Markdown (the stored preview is editor-writable).
+ * Tabs after `main` follow under their titles. Shares, previews, print and
+ * email all use this.
  */
-export async function exportHtml(doc: Y.Doc, title = ''): Promise<string> {
-  const body = await htmlOf(readBlocks(doc, MAIN_TAB));
+export async function exportHtml(doc: Y.Doc, title = '', decisions: ExportDecisions = new Map()): Promise<string> {
+  let body = '';
+  for (const tab of tabsOf(doc)) {
+    if (tab.id !== MAIN_TAB) body += `<h1 class="primer-tab-title">${escapeHtml(oneLine(tab.title) || 'Untitled')}</h1>`;
+    body += await htmlOf(withDecisions(readBlocks(doc, tab.id), decisions));
+  }
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
-    `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style></head>` +
+    `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style><style>${STATIC_CSS}</style></head>` +
     `<body><div class="bn-root bn-container"><div class="bn-default-styles">${body}</div></div></body></html>`
   );
+}
+
+/** A choice's recorded decision, as exports show it. */
+export type ExportDecision = {
+  decisionId: string;
+  optionId: string;
+  question: string;
+  label: string;
+  rationale: string;
+  decidedByName: string;
+};
+/** Recorded decisions by choice block id (`exportDecisions` in live/choices.ts). */
+export type ExportDecisions = Map<string, ExportDecision>;
+
+/** The choice's render-only decision props (the server fills them here). */
+const DECISION_PROPS = ['decidedOptionId', 'decidedLabel', 'decidedQuestion', 'decisionChanged', 'rationale', 'decidedByName'];
+
+/**
+ * Choice blocks with their decision props filled from the server's record
+ * and nothing else: whatever the (client-writable) document holds there is
+ * dropped, so a forged decision never reaches an export or a static render.
+ */
+function withDecisions(blocks: PrimerBlock[], decisions: ExportDecisions): PrimerBlock[] {
+  return blocks.map((block) => {
+    const children = withDecisions(block.children as PrimerBlock[], decisions);
+    if (block.type !== 'choice') return children === block.children ? block : ({ ...block, children } as PrimerBlock);
+    const props: Record<string, unknown> = { ...block.props };
+    for (const key of DECISION_PROPS) props[key] = '';
+    // A decision applies only to the block carrying its nonce, with the option still there.
+    const d = decisions.get(block.id);
+    const option = d && block.props.decisionId === d.decisionId
+      ? (block.children as PrimerBlock[]).find((o) => o.id === d.optionId)
+      : undefined;
+    if (d && option) {
+      const changed = d.question !== String(block.props.question ?? '') || d.label !== optionLabel(option as never);
+      Object.assign(props, {
+        decidedOptionId: d.optionId,
+        decidedLabel: d.label,
+        decidedQuestion: d.question,
+        decisionChanged: changed ? 'true' : '',
+        rationale: d.rationale,
+        decidedByName: d.decidedByName,
+      });
+    }
+    return { ...block, props, children } as PrimerBlock;
+  });
 }
 
 type Part =
@@ -162,13 +240,47 @@ export function plainText(block: PrimerBlock): string {
       }
       return '';
     }
-    return (content as { type: string; text?: string; content?: unknown }[])
-      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : ''))
+    return (content as { type: string; text?: string; content?: unknown; props?: Record<string, string> }[])
+      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : chipText(n)))
       .join('');
   };
   const own = isSource(block) ? String((block.props as { markdown: string }).markdown).replace(/\n+$/, '') : inline(block.content);
   const children = (block.children as PrimerBlock[]).map(plainText).filter((t) => t.length > 0);
   return [own, ...children].filter((t) => t.length > 0).join('\n');
+}
+
+/**
+ * What the static rendering needs beyond BlockNote's structural stylesheet,
+ * which ships no colours: a readable page, and light or dark to match
+ * wherever it is shown. In Primer the companion sets `data-theme` on `<html>`;
+ * a share opened on its own follows the viewer's colour scheme.
+ */
+const STATIC_CSS = `
+body{margin:0;padding:24px 16px;background:#fff;color:#171717;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+.bn-container{max-width:760px;margin:0 auto}
+.primer-tab-title{margin:2.2em 0 .6em}
+a{color:#6d28d9}
+pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+table{border-collapse:collapse}td,th{border:1px solid #d4d4d4;padding:4px 8px}
+img,video{max-width:100%}
+.primer-chip{border-radius:4px;background:#ede9fe;color:#4c1d95;padding:0 4px}
+html[data-theme="dark"] body{background:#0a0a0a;color:#e5e5e5}
+html[data-theme="dark"] a{color:#c4b5fd}
+html[data-theme="dark"] td,html[data-theme="dark"] th{border-color:#404040}
+html[data-theme="dark"] .primer-chip{background:#3b2a6b;color:#ddd6fe}
+@media (prefers-color-scheme: dark){
+html:not([data-theme]) body{background:#0a0a0a;color:#e5e5e5}
+html:not([data-theme]) a{color:#c4b5fd}
+html:not([data-theme]) td,html:not([data-theme]) th{border-color:#404040}
+html:not([data-theme]) .primer-chip{background:#3b2a6b;color:#ddd6fe}
+}`;
+
+/** What a chip reads as in text: `@name`, the date, the chosen value. */
+function chipText(node: { type: string; props?: Record<string, string> }): string {
+  if (node.type === 'mention') return `@${node.props?.name ?? ''}`;
+  if (node.type === 'date') return node.props?.date ?? '';
+  if (node.type === 'dropdown') return node.props?.value ?? '';
+  return '';
 }
 
 let css: string | null = null;

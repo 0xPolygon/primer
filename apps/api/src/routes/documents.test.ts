@@ -337,6 +337,7 @@ describe('DELETE /api/documents/:docId', () => {
 });
 
 import type { AddVersionResponse, VersionsListResponse } from '@polygonlabs/primer-api-types';
+import { createLegacyDocument } from '../testing/legacy.ts';
 
 function buildVersionFormData(html: string, versionNote?: string): FormData {
   const fd = new FormData();
@@ -456,7 +457,7 @@ describe('POST /api/documents/:docId/versions', () => {
     try {
       const storage = new FilesystemStorage(root);
       const app = createApp({ storage, notifier: new NoopNotifier() });
-      const upload = await uploadFixture(app);
+      const upload = await createLegacyDocument(storage, '<html><body><p>x</p></body></html>');
 
       const md = '---\ntitle: ignored\n---\n\n# v2\n\nNew content.';
       const fd = new FormData();
@@ -474,7 +475,7 @@ describe('POST /api/documents/:docId/versions', () => {
       const versionRows = await db
         .select()
         .from(versions)
-        .where(eq(versions.id, out.versionId));
+        .where(eq(versions.id, out.versionId!));
       expect(versionRows).toHaveLength(1);
 
       const stream = await storage.get(versionRows[0].storageKey);

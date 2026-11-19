@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useEffect, useState, type FormEvent } from 'react';
 import type { AnchorData } from '@polygonlabs/primer-api-types';
 import { MentionTextarea } from './MentionTextarea.tsx';
@@ -74,7 +75,7 @@ export function NewThreadComposer({
       className="border-b border-yellow-200 dark:border-amber-800 bg-yellow-50 dark:bg-amber-900/20 px-3 py-2 text-xs"
     >
       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-        New comment
+        {t('newThreadComposer.newComment')}
       </div>
       <div className="mb-2 border-l-2 border-yellow-300 dark:border-amber-700 pl-2 italic text-neutral-600 dark:text-neutral-400">
         {anchorPreview(anchor)}
@@ -83,7 +84,7 @@ export function NewThreadComposer({
         value={body}
         onChange={setBody}
         onMentionsChange={setMentions}
-        placeholder="Write a comment…"
+        placeholder={t('newThreadComposer.writeComment')}
         rows={3}
         autoFocus={autoFocus}
       />
@@ -94,7 +95,7 @@ export function NewThreadComposer({
         >
           <p>
             {errorIsNonLatestVersion
-              ? 'Comments can only be added on the latest version. Someone published a newer version while this was open. Switching discards this draft, so copy it first if you want to keep it.'
+              ? t('newThreadComposer.notLatestVersion')
               : error}
           </p>
           {errorIsNonLatestVersion && onGoToLatest && (
@@ -103,7 +104,7 @@ export function NewThreadComposer({
               onClick={onGoToLatest}
               className="mt-1 rounded border border-red-400 px-1.5 py-0.5 text-red-800 hover:bg-red-100 dark:border-red-600 dark:text-red-300 dark:hover:bg-red-900/30"
             >
-              Switch to latest version
+              {t('newThreadComposer.switchToLatest')}
             </button>
           )}
         </div>
@@ -114,14 +115,14 @@ export function NewThreadComposer({
           onClick={onCancel}
           className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-1 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
-          Cancel
+          {t('newThreadComposer.cancel')}
         </button>
         <button
           type="submit"
           disabled={submitting || body.trim().length === 0}
           className="rounded bg-neutral-900 px-3 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
         >
-          {submitting ? 'Saving…' : 'Comment'}
+          {submitting ? t('newThreadComposer.saving') : t('newThreadComposer.comment')}
         </button>
       </div>
     </form>

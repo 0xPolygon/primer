@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useState } from 'react';
 import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { normalizeFolderNameClient } from '../lib/library.ts';
@@ -18,7 +19,7 @@ export function FolderPickerMenu(props: FolderPickerMenuProps) {
   const submitNew = () => {
     const normalized = normalizeFolderNameClient(draft);
     if (!normalized.ok) {
-      setError(normalized.reason === 'empty' ? 'Name required' : 'Too long (max 60)');
+      setError(normalized.reason === 'empty' ? t('folderPickerMenu.nameRequired') : t('folderPickerMenu.tooLong'));
       return;
     }
     props.onCreateAndPick(normalized.name);
@@ -38,7 +39,7 @@ export function FolderPickerMenu(props: FolderPickerMenuProps) {
           (props.currentFolderId === null ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800')
         }
       >
-        <span>None (Uncategorized)</span>
+        <span>{t('folderPickerMenu.noneUncategorized')}</span>
         {props.currentFolderId === null && <span aria-hidden>✓</span>}
       </button>
       {props.folders.map((f) => (
@@ -74,7 +75,7 @@ export function FolderPickerMenu(props: FolderPickerMenuProps) {
               setDraft(e.target.value);
               setError(null);
             }}
-            placeholder="New folder name"
+            placeholder={t('folderPickerMenu.newFolderName')}
             className="rounded border border-neutral-300 px-2 py-0.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
           />
           {error && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
@@ -85,7 +86,7 @@ export function FolderPickerMenu(props: FolderPickerMenuProps) {
           onClick={() => setCreating(true)}
           className="w-full rounded px-2 py-1 text-left text-sm text-neutral-600 hover:bg-neutral-50 dark:text-neutral-400 dark:hover:bg-neutral-800"
         >
-          + New folder…
+          {t('folderPickerMenu.newFolder')}
         </button>
       )}
     </div>

@@ -15,11 +15,12 @@ import type { Storage } from '../storage/types.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
 import { readBundleFile, type BundleThread } from './bundle.ts';
 import { captureState, writeCheckpoint } from './checkpoint.ts';
-import { readBlocks } from './editor.ts';
+import { readBlocks, serverEditor } from './editor.ts';
 import { exportMarkdown } from './export.ts';
 import { withLiveDoc } from './live.testlib.ts';
 import { originFor } from './origin.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
+import { createLegacyDocument } from '../testing/legacy.ts';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -113,7 +114,7 @@ describe('checkpoints', () => {
   it('checkpoint view keeps its discussion context', async () => {
     await withStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
-      const legacy = await publish(storage, { content: '<!doctype html><html><body><p>Ship the editor first.</p></body></html>', format: 'html' });
+      const legacy = await createLegacyDocument(storage, '<!doctype html><html><body><p>Ship the editor first.</p></body></html>');
       const created = await app.request(`/api/versions/${legacy.versionId}/threads`, {
         method: 'POST',
         headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
@@ -136,6 +137,47 @@ describe('checkpoints', () => {
       const listed = await app.request(`/api/versions/${checkpoint.versionId}/threads`);
       const body = (await listed.json()) as { threads: { id: string; contextChanged: boolean }[] };
       expect(body.threads).toEqual([expect.objectContaining({ id: thread.id, contextChanged: false })]);
+    });
+  });
+
+  it('versions from before the document went live are listed as not bundled', async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const legacy = await createLegacyDocument(storage, '<!doctype html><html><body><p>Before live.</p></body></html>');
+      const live = await publish(storage, { content: SOURCE, format: 'markdown', documentId: legacy.documentId });
+      const list = (await (await app.request(`/api/documents/${legacy.documentId}/versions`)).json()) as {
+        versions: { id: string; versionNumber: number; bundled?: boolean }[];
+      };
+      const byNumber = new Map(list.versions.map((v) => [v.versionNumber, v]));
+      expect(byNumber.get(legacy.versionNumber)!.bundled).toBe(false);
+      expect(byNumber.get(live.versionNumber!)!.bundled).toBe(true);
+      // The old version has no Y.Doc to preview, but its HTML still renders.
+      expect((await app.request(`/api/versions/${legacy.versionId}/ydoc`)).status).toBe(404);
+      const html = await app.request(`/api/versions/${legacy.versionId}/content`);
+      expect(await html.text()).toContain('Before live.');
+    });
+  });
+
+  it('print renders the checkpoint or the live state, light and sandboxed', async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const { documentId } = await publish(storage, { content: SOURCE, format: 'markdown' });
+      const checkpoint = (await (await app.request(`/api/documents/${documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS })).json()) as CheckpointResponse;
+      await setText(documentId, 'Then tabs.', 'Then tabs, and comments.');
+
+      const frozen = await app.request(`/api/documents/${documentId}/print?version=${checkpoint.versionNumber}`);
+      expect(frozen.status).toBe(200);
+      const frozenHtml = await frozen.text();
+      expect(frozenHtml).toContain('Then tabs.');
+      expect(frozenHtml).not.toContain('and comments');
+      expect(frozenHtml).toContain('window.print()');
+      expect(frozenHtml).toContain('@page');
+      expect(frozen.headers.get('content-security-policy')).toContain("connect-src 'none'");
+
+      const live = await (await app.request(`/api/documents/${documentId}/print`)).text();
+      expect(live).toContain('Then tabs, and comments.');
+
+      expect((await app.request(`/api/documents/${documentId}/print?version=99`)).status).toBe(404);
     });
   });
 
@@ -173,14 +215,53 @@ describe('checkpoints', () => {
       };
       const png = await upload('a.png', 'image/png', 'png-bytes');
       expect(png.url).toBe(`primer-blob://${png.fileId}`);
-      const image = await app.request(`/api/files/${png.fileId}`);
+      const image = await app.request(`/api/files/${png.fileId}?doc=${documentId}`);
       expect(image.headers.get('content-type')).toBe('image/png');
       expect(image.headers.get('content-security-policy')).toContain('sandbox');
       const page = await upload('x.html', 'text/html', '<script>alert(1)</script>');
-      const served = await app.request(`/api/files/${page.fileId}`);
+      const served = await app.request(`/api/files/${page.fileId}?doc=${documentId}`);
       expect(served.headers.get('content-type')).toBe('application/octet-stream');
       expect(served.headers.get('content-disposition')).toBe('attachment');
       expect(served.headers.get('x-content-type-options')).toBe('nosniff');
+    });
+  });
+
+  it("a file id from another document is neither served nor bundled", async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const a = await publish(storage, { content: SOURCE, format: 'markdown' });
+      const b = await publish(storage, { content: SOURCE, format: 'markdown' });
+      const upload = async (documentId: string) => {
+        const fd = new FormData();
+        fd.append('file', new Blob(['png'], { type: 'image/png' }), 'a.png');
+        const res = await app.request(`/api/documents/${documentId}/files`, { method: 'POST', headers: CSRF_HEADERS, body: fd });
+        return (await res.json()) as { fileId: string; url: string };
+      };
+      const own = await upload(a.documentId);
+      const foreign = await upload(b.documentId);
+
+      // An editor of A plants both ids in A's content (block props are theirs to write).
+      const image = (id: string, url: string) => ({ id, type: 'image', props: { url } });
+      await applyPlan(a.documentId, originFor(MOCK_USER), {
+        onConflict: 'refuse',
+        edits: [{
+          target: { tabId: 'main', blockId: '' },
+          inverse: false,
+          build: (tr) => {
+            const nodes = serverEditor()._blocksToProsemirrorNode([image('img-own', own.url), image('img-foreign', foreign.url)] as never);
+            tr.insert(tr.doc.content.size - 1, nodes.content);
+          },
+        }],
+      });
+
+      expect((await app.request(`/api/files/${own.fileId}?doc=${a.documentId}`)).status).toBe(200);
+      expect((await app.request(`/api/files/${foreign.fileId}?doc=${a.documentId}`)).status).toBe(404);
+      expect((await app.request(`/api/files/${foreign.fileId}`)).status).toBe(404);
+
+      const res = await app.request(`/api/documents/${a.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const checkpoint = (await res.json()) as CheckpointResponse;
+      const files = JSON.parse(dec(await readBundleFile(storage, await bundleOf(checkpoint.versionId), 'files.json'))) as string[];
+      expect(files).toEqual([own.fileId]);
     });
   });
 });

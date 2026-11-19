@@ -1,13 +1,15 @@
 import * as Y from 'yjs';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { comments, threads } from '../db/schema.ts';
+import { comments, docFiles, threads } from '../db/schema.ts';
 import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { readBlocks } from './editor.ts';
-import { exportHtml, exportMarkdown, exportText } from './export.ts';
+import { exportHtml, exportMarkdown, exportText, type ExportDecisions } from './export.ts';
+import { exportDecisions } from './choices.ts';
 import { tabsOf } from './reach.ts';
 import { trustedMeta } from './sources.ts';
+import { currentPageHtml } from '../page/publish.ts';
 import { bundleWidgets } from '../widgets/bundle.ts';
 
 /**
@@ -16,7 +18,8 @@ import { bundleWidgets } from '../widgets/bundle.ts';
  * never changed. Stored under `bundles/<versionId>/`.
  *
  * - `state.ydoc`: the Y.Doc state the bundle was rendered from;
- * - `export.md` or `export.txt` (the document's own format) and `export.html`;
+ * - `export.md` or `export.txt` (the document's own format) and `export.html`
+ *   (for a page document, its HTML with people's text spliced in);
  * - `static.html`: the static rendering, served like any version's content;
  * - `threads.json`: the open threads at capture with their quotes and comment
  *   counts, so the checkpoint keeps its discussion context;
@@ -25,7 +28,9 @@ import { bundleWidgets } from '../widgets/bundle.ts';
  * - `widgets/<id>.light.svg`, `.dark.svg` and `.json`: each published widget
  *   as it looked, and what restore republishes it from (widgets/bundle.ts).
  *
- * Later milestones add `pages/` and `records.json`.
+ * A page document's stamped source is stored once with the checkpoint that
+ * published it (page/publish.ts `sourceKeyOf`), not copied into each bundle.
+ * Later milestones add `records.json`.
  */
 export type BundleManifest = { versionId: string; format: string; files: string[] };
 
@@ -42,8 +47,49 @@ export function bundleKeyOf(versionId: string): string {
 }
 
 /** The export file a document format keeps in its bundle. */
-export function exportFileOf(format: string): 'export.md' | 'export.txt' {
-  return format === 'text' ? 'export.txt' : 'export.md';
+export function exportFileOf(format: string): 'export.md' | 'export.txt' | 'export.html' {
+  return format === 'text' ? 'export.txt' : format === 'html' ? 'export.html' : 'export.md';
+}
+
+/**
+ * The static rendering of a document state, served like any version's
+ * content. A page document (`page`: its HTML now, from `currentPageHtml`) is
+ * its own page, served as uploaded pages are; anything else is BlockNote's
+ * rendering, themed by Primer.
+ */
+export async function renderStatic(
+  doc: Y.Doc,
+  title: string,
+  decisions: ExportDecisions = new Map(),
+  page: string | null = null,
+  /** Puts each widget's SVG in place of its block (widgets/bundle.ts `bundleWidgets`). */
+  embedWidgets: (html: string) => string = (html) => html,
+): Promise<{ html: string; served: string }> {
+  const html = page ?? embedWidgets(await exportHtml(doc, title, decisions));
+  const served = transformHtml(html, { themeManaged: page === null });
+  if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
+  return { html, served: served.html };
+}
+
+const PRINT_CSS =
+  '@page{margin:16mm}html,body{background:#fff!important;color:#000!important}a{color:inherit}' +
+  'h1,h2,h3,h4{break-after:avoid}img,table,pre,blockquote{break-inside:avoid}';
+
+// Runs in the sandboxed frame (the only place a served page can open the print
+// dialog): once loaded, and again whenever the host asks.
+const PRINT_JS =
+  "(function(){var go=function(){setTimeout(function(){window.print()},150)};" +
+  "if(document.readyState==='complete')go();else addEventListener('load',go);" +
+  "addEventListener('message',function(e){if(e.source===parent&&e.data==='primer:print')window.print()})})();";
+
+/** A static rendering made printable: light colours, page margins, and a script that opens the print dialog. */
+export function printable(staticHtml: string): string {
+  const head = staticHtml.lastIndexOf('</head>');
+  const body = staticHtml.lastIndexOf('</body>');
+  if (head < 0 || body < 0) throw new Error('static rendering has no head or body');
+  return (
+    staticHtml.slice(0, head) + `<style>${PRINT_CSS}</style>` + staticHtml.slice(head, body) + `<script>${PRINT_JS}</script>` + staticHtml.slice(body)
+  );
 }
 
 export async function renderBundle(
@@ -54,18 +100,20 @@ export async function renderBundle(
   Y.applyUpdate(doc, opts.state);
   try {
     const { format } = trustedMeta(doc, opts.documentId);
+    const decisions = await exportDecisions(opts.documentId);
+    const page = format === 'html' ? await currentPageHtml(storage, opts.documentId, doc) : null;
+    if (format === 'html' && page === null) throw new Error('page document has no readable page');
     const widgets = await bundleWidgets(doc, opts.documentId);
-    const html = widgets.embed(await exportHtml(doc, opts.title));
-    const served = transformHtml(html, { themeManaged: true });
-    if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
-    const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId);
+    const { html, served } = await renderStatic(doc, opts.title, decisions, page, widgets.embed);
+    const exported =
+      format === 'html' ? html : format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
       [exportFileOf(format)]: exported,
       'export.html': html,
-      'static.html': served.html,
+      'static.html': served,
       'threads.json': JSON.stringify(await openThreads(opts.documentId)),
-      'files.json': JSON.stringify(referencedFiles(doc)),
+      'files.json': JSON.stringify(await referencedFiles(doc, opts.documentId)),
       ...widgets.files,
     };
     const manifest: BundleManifest = { versionId: opts.versionId, format, files: Object.keys(files) };
@@ -79,7 +127,7 @@ export async function renderBundle(
       if (name === 'static.html') staticBytes = bytes.byteLength;
       await storage.put(key + name, bytes);
     }
-    return { bundleKey: key, staticKey: `${key}static.html`, staticBytes, staticHtml: served.html };
+    return { bundleKey: key, staticKey: `${key}static.html`, staticBytes, staticHtml: served };
   } finally {
     doc.destroy();
   }
@@ -96,13 +144,25 @@ export async function loadBundleDoc(storage: Storage, bundleKey: string): Promis
   return doc;
 }
 
-/** Deletes what `renderBundle` stored (a checkpoint that failed to commit). */
-export async function deleteBundle(storage: Storage, bundleKey: string): Promise<void> {
+/** Every storage key a bundle can hold (missing ones are skipped on delete). */
+export function bundleFileKeys(bundleKey: string): string[] {
+  const names = ['manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json'];
+  return names.map((name) => bundleKey + name);
+}
+
+/** Every storage key of a bundle: the files its manifest lists (widgets
+ *  included) and the fixed names, for a bundle whose manifest never landed. */
+export async function bundleStorageKeys(storage: Storage, bundleKey: string): Promise<string[]> {
   const listed = await readBundleFile(storage, bundleKey, 'manifest.json')
     .then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as BundleManifest).files)
-    .catch(() => []);
-  const names = [...listed, 'manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json'];
-  for (const name of names) await storage.delete(bundleKey + name).catch(() => undefined);
+    .catch(() => [] as string[]);
+  const safe = listed.filter((name) => /^[A-Za-z0-9_./-]+$/.test(name) && !name.split('/').includes('..'));
+  return [...new Set([...bundleFileKeys(bundleKey), ...safe.map((name) => bundleKey + name)])];
+}
+
+/** Deletes what `renderBundle` stored (a checkpoint that failed to commit). */
+export async function deleteBundle(storage: Storage, bundleKey: string): Promise<void> {
+  for (const key of await bundleStorageKeys(storage, bundleKey)) await storage.delete(key).catch(() => undefined);
 }
 
 async function openThreads(documentId: string): Promise<BundleThread[]> {
@@ -133,11 +193,20 @@ export function quoteOf(anchor: { type: string; selectorText?: string; innerText
 
 const BLOB = /primer-blob:\/\/([0-9a-f-]{36})/g;
 
-/** File ids (`primer-blob://<id>`) referenced anywhere in reachable content. */
-function referencedFiles(doc: Y.Doc): string[] {
+/**
+ * Ids of this document's files (`primer-blob://<id>`) referenced in its tabs.
+ * Block props are editor-writable, so an id that belongs to another document
+ * is left out.
+ */
+async function referencedFiles(doc: Y.Doc, documentId: string): Promise<string[]> {
   const ids = new Set<string>();
   for (const tab of tabsOf(doc)) {
     for (const match of JSON.stringify(readBlocks(doc, tab.id)).matchAll(BLOB)) ids.add(match[1]!);
   }
-  return [...ids];
+  if (ids.size === 0) return [];
+  const own = await db
+    .select({ id: docFiles.id })
+    .from(docFiles)
+    .where(and(eq(docFiles.documentId, documentId), inArray(docFiles.id, [...ids])));
+  return own.map((f) => f.id);
 }

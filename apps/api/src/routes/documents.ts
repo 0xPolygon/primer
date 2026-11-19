@@ -1,21 +1,25 @@
 import type { Hono } from 'hono';
-import { eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type { Context } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
 import type {
+  AgentMode,
   DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary,
   CheckpointResponse, DocFileUploadResponse, ExportFormat, Refusal, RestoreCheckpointResponse,
 } from '@polygonlabs/primer-api-types';
 import { docFiles, documents, versions, users } from '../db/schema.ts';
-import { exportFileOf, readBundleFile } from '../live/bundle.ts';
+import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/bundle.ts';
+import { currentPageHtml } from '../page/publish.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
+import { exportDecisions } from '../live/choices.ts';
 import { withLiveDocument } from '../live/instance.ts';
 import { ensureSigningKey } from '../live/signing.ts';
 import { MAX_BYTES } from '../upload/validate.ts';
 import { db } from '../db/client.ts';
 import { actorName } from '../lib/actors.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import {
@@ -26,6 +30,7 @@ import { tokenScopes } from '../auth/scopes.ts';
 import { publishDocument } from '../lib/publish.ts';
 import { recheckAccess } from '../auth/revocation.ts';
 import { refusalResponse } from './upload.ts';
+import { bundleWidgets } from '../widgets/bundle.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -44,6 +49,7 @@ export function registerDocumentRoutes(
         createdAt: documents.createdAt,
         deletedAt: documents.deletedAt,
         format: documents.format,
+        agentMode: documents.agentMode,
         uploaderDisplayName: actorName,
       })
       .from(documents)
@@ -97,6 +103,7 @@ export function registerDocumentRoutes(
         createdAt: doc.createdAt.toISOString(),
         externallyShared: Boolean(ext?.externallyShared),
         format: doc.format,
+        agentMode: doc.agentMode,
       } satisfies DocumentDetail,
       latestVersion: {
         id: v.id,
@@ -124,9 +131,9 @@ export function registerDocumentRoutes(
     const docId = c.req.param('docId');
     const user = c.get('user');
 
-    let payload: { title?: unknown; description?: unknown; visibility?: unknown };
+    let payload: { title?: unknown; description?: unknown; visibility?: unknown; agentMode?: unknown };
     try {
-      payload = (await c.req.json()) as { title?: unknown; description?: unknown; visibility?: unknown };
+      payload = (await c.req.json()) as { title?: unknown; description?: unknown; visibility?: unknown; agentMode?: unknown };
     } catch {
       return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
     }
@@ -134,7 +141,7 @@ export function registerDocumentRoutes(
     const hasTitle = Object.prototype.hasOwnProperty.call(payload, 'title');
     const hasDescription = Object.prototype.hasOwnProperty.call(payload, 'description');
 
-    const updates: { title?: string; description?: string | null; visibility?: 'org' | 'private' } = {};
+    const updates: { title?: string; description?: string | null; visibility?: 'org' | 'private'; agentMode?: AgentMode } = {};
 
     if (hasTitle) {
       if (typeof payload.title !== 'string') {
@@ -181,8 +188,21 @@ export function registerDocumentRoutes(
       }
     }
 
-    if (!hasTitle && !hasDescription && !hasVisibility) {
-      return c.json({ error: 'invalid_body', message: 'Provide title, description, or visibility.' }, 400);
+    // Whether agents edit or suggest here: the owner's call, made by a
+    // person in a session (never by an agent, nor through a scoped token).
+    const hasAgentMode = Object.prototype.hasOwnProperty.call(payload, 'agentMode');
+    if (hasAgentMode) {
+      if (payload.agentMode !== 'auto' && payload.agentMode !== 'edit' && payload.agentMode !== 'suggest') {
+        return c.json({ error: 'invalid_body', message: "agentMode must be 'auto', 'edit' or 'suggest'" }, 400);
+      }
+      if (user.kind !== 'person' || tokenScopes(c) !== null) {
+        return c.json({ error: 'forbidden', message: 'Only the owner, as a person, can change the agent mode.' }, 403);
+      }
+      updates.agentMode = payload.agentMode;
+    }
+
+    if (!hasTitle && !hasDescription && !hasVisibility && !hasAgentMode) {
+      return c.json({ error: 'invalid_body', message: 'Provide title, description, visibility or agentMode.' }, 400);
     }
 
     const [existing] = await db
@@ -198,7 +218,7 @@ export function registerDocumentRoutes(
     }
     // Sub 1 wired this to canEdit. Sub 2: if the body includes any manage-only
     // field, require canManage instead.
-    const requiresManage = hasVisibility;
+    const requiresManage = hasVisibility || hasAgentMode;
     if (requiresManage) {
       if (!canManage(eff)) return c.json({ error: 'forbidden' }, 403);
     } else {
@@ -216,6 +236,7 @@ export function registerDocumentRoutes(
         uploaderId: documents.uploaderId,
         visibility: documents.visibility,
         createdAt: documents.createdAt,
+        agentMode: documents.agentMode,
       })
       .from(documents)
       .where(eq(documents.id, docId));
@@ -234,6 +255,7 @@ export function registerDocumentRoutes(
         uploaderDisplayName: uploader?.displayName ?? '',
         visibility: updated.visibility as 'org' | 'private',
         createdAt: updated.createdAt.toISOString(),
+        agentMode: updated.agentMode,
       },
       200
     );
@@ -342,6 +364,7 @@ export function registerDocumentRoutes(
         versionNote: versions.versionNote,
         sizeBytes: versions.sizeBytes,
         createdAt: versions.createdAt,
+        bundleKey: versions.bundleKey,
       })
       .from(versions)
       .where(eq(versions.documentId, docId))
@@ -355,6 +378,7 @@ export function registerDocumentRoutes(
           versionNote: r.versionNote,
           sizeBytes: r.sizeBytes,
           createdAt: r.createdAt.toISOString(),
+          bundled: r.bundleKey !== null,
         })),
       },
       200
@@ -406,10 +430,15 @@ export function registerDocumentRoutes(
     });
     if (!result.ok) return refusalResponse(c, result);
 
+    if (result.versionId === undefined) {
+      const suggested: AddVersionResponse = { url: `/d/${docId}`, reconciliation: result.reconciliation };
+      return c.json(suggested, 200);
+    }
     const response: AddVersionResponse = {
       versionId: result.versionId,
       versionNumber: result.versionNumber,
       url: `/d/${docId}`,
+      ...(result.reconciliation ? { reconciliation: result.reconciliation } : {}),
     };
     return c.json(response, 201);
   });
@@ -470,9 +499,12 @@ export function registerDocumentRoutes(
     const access = await docAccess(docId, c.get('user'));
     if (!access) return c.json({ error: 'not_found' }, 404);
     if (!access.format) return notLive(c);
-    const format = (c.req.query('format') ?? (access.format === 'text' ? 'text' : 'markdown')) as ExportFormat;
+    const format = (c.req.query('format') ?? (access.format === 'markdown' ? 'markdown' : access.format)) as ExportFormat;
     if (format !== 'markdown' && format !== 'text' && format !== 'html') {
       return c.json({ error: 'invalid_query', message: 'format must be markdown, text or html' }, 400);
+    }
+    if (access.format === 'html' && format !== 'html') {
+      return c.json({ error: 'invalid_query', message: 'a page exports as html' }, 400);
     }
     const versionParam = c.req.query('version');
     let body: string | Uint8Array<ArrayBuffer>;
@@ -493,8 +525,15 @@ export function registerDocumentRoutes(
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
       await ensureSigningKey(deps.storage);
-      body = await withLiveDocument(docId, (doc) =>
-        format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
+      const decisions = await exportDecisions(docId);
+      body = await withLiveDocument(docId, async (doc) =>
+        access.format === 'html'
+          ? ((await currentPageHtml(deps.storage, docId, doc)) ?? '')
+          : format === 'html'
+          ? exportHtml(doc, access.title, decisions)
+          : format === 'text'
+            ? exportText(doc, docId)
+            : exportMarkdown(doc, docId, decisions),
       );
     }
     const ext = format === 'html' ? 'html' : format === 'text' ? 'txt' : 'md';
@@ -505,6 +544,55 @@ export function registerDocumentRoutes(
         'content-type': `${type}; charset=utf-8`,
         'content-disposition': `attachment; filename="${fileName(access.title)}.${ext}"`,
         'x-content-type-options': 'nosniff',
+        'cache-control': 'private, no-store',
+      },
+    });
+  });
+
+  // The page behind "Print / PDF" (M10d): the static rendering, made printable
+  // and served like any version's content (sandboxed frame, artifact CSP).
+  // Without `?version=<n>` it renders the live state now, by the same code that
+  // renders a checkpoint's `static.html`; with it, that checkpoint's bundle.
+  app.get('/api/documents/:docId/print', async (c) => {
+    const docId = c.req.param('docId');
+    const access = await docAccess(docId, c.get('user'));
+    if (!access) return c.json({ error: 'not_found' }, 404);
+    if (!access.format) return notLive(c);
+    const versionParam = c.req.query('version');
+    let html: string;
+    if (versionParam !== undefined) {
+      const number = Number(versionParam);
+      const [version] = Number.isInteger(number)
+        ? await db
+            .select({ bundleKey: versions.bundleKey })
+            .from(versions)
+            .where(and(eq(versions.documentId, docId), eq(versions.versionNumber, number)))
+        : [];
+      if (!version?.bundleKey) return c.json({ error: 'not_found' }, 404);
+      html = new TextDecoder().decode(await readBundleFile(deps.storage, version.bundleKey, 'static.html'));
+    } else {
+      await ensureSigningKey(deps.storage);
+      const decisions = await exportDecisions(docId);
+      html = (
+        await withLiveDocument(docId, async (doc) =>
+          renderStatic(
+            doc,
+            access.title,
+            decisions,
+            access.format === 'html' ? await currentPageHtml(deps.storage, docId, doc) : null,
+            (await bundleWidgets(doc, docId)).embed,
+          ),
+        )
+      ).served;
+    }
+    return new Response(printable(html), {
+      status: 200,
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': artifactCsp('standard'),
+        'x-frame-options': 'SAMEORIGIN',
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'no-referrer',
         'cache-control': 'private, no-store',
       },
     });
@@ -541,8 +629,18 @@ export function registerDocumentRoutes(
   // Served from the app's origin with the viewer's session, so nothing here
   // may run: a sandboxing CSP and nosniff always, and inline display only for
   // media types a browser shows passively.
+  //
+  // `?doc=` names the document whose content references the file, and the
+  // file must belong to it: ids come from block props, which any editor can
+  // write, so a file id copied from another document is never served here.
   app.get('/api/files/:fileId', async (c) => {
-    const [file] = await db.select().from(docFiles).where(eq(docFiles.id, c.req.param('fileId')));
+    const docId = c.req.query('doc') ?? '';
+    const fileId = c.req.param('fileId');
+    if (!UUID.test(docId) || !UUID.test(fileId)) return c.json({ error: 'not_found' }, 404);
+    const [file] = await db
+      .select()
+      .from(docFiles)
+      .where(and(eq(docFiles.id, fileId), eq(docFiles.documentId, docId)));
     if (!file) return c.json({ error: 'not_found' }, 404);
     if (!(await docAccess(file.documentId, c.get('user')))) return c.json({ error: 'not_found' }, 404);
     const inline = INLINE_TYPES.has(file.contentType);
@@ -558,6 +656,8 @@ export function registerDocumentRoutes(
     });
   });
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const INLINE_TYPES = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml',

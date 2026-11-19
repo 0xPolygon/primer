@@ -1,13 +1,30 @@
 import type {
+  Target,
+  AgentRunDTO,
+  ApplyOpsRequest,
+  Reconciliation,
+  LiveDocDTO,
+  LiveReadFormat,
+  AddChoiceRequest,
+  AddChoiceResponse,
+  AddTaskRequest,
+  AddTaskResponse,
   AddVersionResponse,
+  DecisionsResponse,
+  ProposePickRequest,
+  TasksResponse,
+  UpdateTaskRequest,
   CollaboratorRole,
   CommentDTO,
   DocumentDetailResponse,
   EventInput,
-  DocumentStatusResponse,
-  DocumentStatusState,
   EventsListResponse,
+  PurgePersonalRecordsResponse,
+  RecordChangesResponse,
+  RecordVerb,
+  RecordVerbResults,
   SendEventsResponse,
+  SuggestionsResponse,
   ThreadDTO,
   ThreadsListResponse,
   UploadResponse,
@@ -35,17 +52,25 @@ export type PrimerErrorCode =
   | 'rate_limited'
   | 'network'
   | 'login_denied'
-  | 'login_expired';
+  | 'login_expired'
+  /** Server refusals passed through by code (see api-types RefusalCode). */
+  | 'stale_base'
+  | 'record_conflict'
+  | 'records_cap'
+  | 'choice_decided';
 
 export class PrimerApiError extends Error {
   readonly code: PrimerErrorCode;
   readonly status?: number;
+  /** The server's JSON error body (refusal, per-op errors), when it sent one. */
+  readonly body?: unknown;
 
-  constructor(code: PrimerErrorCode, message: string, status?: number) {
+  constructor(code: PrimerErrorCode, message: string, status?: number, body?: unknown) {
     super(message);
     this.name = 'PrimerApiError';
     this.code = code;
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -78,7 +103,7 @@ export interface AddVersionInput {
 }
 
 interface RequestOptions {
-  method: 'GET' | 'POST' | 'DELETE';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string;
   body?: FormData;
   /** JSON request body — serialized with the content-type header set.
@@ -90,9 +115,12 @@ interface RequestOptions {
 interface ApiErrorBody {
   error?: string;
   message?: string;
-  /** Present on publish refusals: what to do instead. */
-  refusal?: { fix?: string };
+  /** Present on refusals: its code and what to do instead. */
+  refusal?: { code?: string; fix?: string };
 }
+
+/** Refusal codes the tool layer branches on, kept as the server sent them. */
+const PASSED_THROUGH = new Set<string>(['stale_base', 'record_conflict', 'records_cap', 'choice_decided']);
 
 function statusToCode(status: number): PrimerErrorCode {
   if (status === 401) return 'not_authenticated';
@@ -176,6 +204,98 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/threads/${encodeURIComponent(threadId)}/comments`,
       json: { body },
+    });
+  }
+
+  /** Reads a live document's blocks (see primer_get_doc). */
+  getLiveDoc(
+    documentId: string,
+    opts: { format?: LiveReadFormat; tabId?: string; since?: number; range?: { from: Target; to: Target }; runId?: string } = {},
+  ): Promise<LiveDocDTO> {
+    const q = new URLSearchParams();
+    if (opts.format) q.set('format', opts.format);
+    if (opts.tabId) q.set('tabId', opts.tabId);
+    if (opts.since !== undefined) q.set('since', String(opts.since));
+    if (opts.runId) q.set('runId', opts.runId);
+    if (opts.range) {
+      q.set('from', opts.range.from.blockId);
+      q.set('to', opts.range.to.blockId);
+    }
+    const qs = q.toString();
+    return this.request<LiveDocDTO>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/live${qs ? `?${qs}` : ''}`,
+    });
+  }
+
+  /** The caller's (an agent's) runs; active ones by default. */
+  listRuns(opts: { documentId?: string; status?: string } = {}): Promise<{ runs: AgentRunDTO[] }> {
+    const q = new URLSearchParams();
+    if (opts.documentId) q.set('documentId', opts.documentId);
+    if (opts.status) q.set('status', opts.status);
+    const qs = q.toString();
+    return this.request<{ runs: AgentRunDTO[] }>({ method: 'GET', path: `/api/runs${qs ? `?${qs}` : ''}` });
+  }
+
+  /** Claims, updates, finishes or fails one of the caller's runs. */
+  updateRun(
+    runId: string,
+    action: 'claim' | 'status' | 'finish' | 'fail',
+    input: { statusLine?: string; plan?: string; error?: string } = {},
+  ): Promise<AgentRunDTO> {
+    const id = encodeURIComponent(runId);
+    if (action === 'claim') return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/claim`, json: {} });
+    if (action === 'status') {
+      return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/status`, json: { statusLine: input.statusLine, plan: input.plan } });
+    }
+    const json = action === 'fail' ? { error: input.error ?? 'failed' } : {};
+    return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/finish`, json });
+  }
+
+  /** The open suggestions on a live document (fenced for agents). */
+  listSuggestions(documentId: string): Promise<SuggestionsResponse> {
+    return this.request<SuggestionsResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/suggestions`,
+    });
+  }
+
+  /** Withdraws one of the caller's own suggestions. */
+  withdrawSuggestion(suggestionId: string): Promise<Reconciliation> {
+    return this.request<Reconciliation>({
+      method: 'POST',
+      path: `/api/suggestions/${encodeURIComponent(suggestionId)}/withdraw`,
+      json: {},
+    });
+  }
+
+  /** Edits a live document by block (see primer_apply_ops). */
+  applyOps(documentId: string, req: ApplyOpsRequest): Promise<Reconciliation> {
+    return this.request<Reconciliation>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/ops`,
+      json: req,
+    });
+  }
+
+  /** Comments on a live document's text, quoted exactly from one block. */
+  createLiveThread(
+    documentId: string,
+    input: { target: Target; quote: string; body: string },
+  ): Promise<ThreadDTO & { commentId: string }> {
+    return this.request<ThreadDTO & { commentId: string }>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/threads`,
+      json: { anchor: { type: 'prose', target: input.target, quote: input.quote }, body: input.body },
+    });
+  }
+
+  /** Moves a live thread's comment onto quoted text. */
+  reanchorThread(threadId: string, input: { target: Target; quote: string }): Promise<ThreadDTO> {
+    return this.request<ThreadDTO>({
+      method: 'POST',
+      path: `/api/threads/${encodeURIComponent(threadId)}/reanchor`,
+      json: input,
     });
   }
 
@@ -299,13 +419,92 @@ export class PrimerClient {
     });
   }
 
-  /** Records the caller's working status on a document; returns who is
-   *  working on it now. */
-  setStatus(documentId: string, state: DocumentStatusState): Promise<DocumentStatusResponse> {
-    return this.request<DocumentStatusResponse>({
+  /** Calls one records verb (`POST /api/documents/:docId/records/<verb>`)
+   *  with its arguments; the server validates and authorises. */
+  records<V extends RecordVerb>(documentId: string, verb: V, args: Record<string, unknown>): Promise<RecordVerbResults[V]> {
+    return this.request<RecordVerbResults[V]>({
       method: 'POST',
-      path: `/api/documents/${encodeURIComponent(documentId)}/status`,
-      json: { state },
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/${verb}`,
+      json: args,
+    });
+  }
+
+  /** The records change log after `since`. */
+  recordChanges(documentId: string, opts: { since?: number; limit?: number } = {}): Promise<RecordChangesResponse> {
+    const params = new URLSearchParams();
+    if (opts.since !== undefined) params.set('since', String(opts.since));
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    const qs = params.size > 0 ? `?${params.toString()}` : '';
+    return this.request<RecordChangesResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/changes${qs}`,
+    });
+  }
+
+  revertRecordChange(changeId: number): Promise<{ changeId: number }> {
+    return this.request<{ changeId: number }>({
+      method: 'POST',
+      path: `/api/record-changes/${encodeURIComponent(String(changeId))}/revert`,
+    });
+  }
+
+  purgePersonalRecords(documentId: string, userId: string): Promise<PurgePersonalRecordsResponse> {
+    return this.request<PurgePersonalRecordsResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/purge-personal`,
+      json: { userId },
+    });
+  }
+
+  /** Adds a choice block (question and options) to a live document. */
+  addChoice(documentId: string, input: AddChoiceRequest): Promise<AddChoiceResponse> {
+    return this.request<AddChoiceResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/choices`,
+      json: input,
+    });
+  }
+
+  /** Recommends an option of an undecided choice; a person decides. */
+  proposePick(documentId: string, blockId: string, input: ProposePickRequest): Promise<{ docVersion: number }> {
+    return this.request<{ docVersion: number }>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/choices/${encodeURIComponent(blockId)}/propose`,
+      json: input,
+    });
+  }
+
+  /** The document's decision register. */
+  listDecisions(documentId: string): Promise<DecisionsResponse> {
+    return this.request<DecisionsResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/decisions`,
+    });
+  }
+
+  /** Adds a task block to a live document. */
+  addTask(documentId: string, input: AddTaskRequest): Promise<AddTaskResponse> {
+    return this.request<AddTaskResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/tasks`,
+      json: input,
+    });
+  }
+
+  /** Sets a task's status and/or progress line. */
+  updateTask(documentId: string, blockId: string, input: UpdateTaskRequest): Promise<{ docVersion: number }> {
+    return this.request<{ docVersion: number }>({
+      method: 'PATCH',
+      path: `/api/documents/${encodeURIComponent(documentId)}/tasks/${encodeURIComponent(blockId)}`,
+      json: input,
+    });
+  }
+
+  /** One document's tasks, or (without a document) the caller's own. */
+  listTasks(documentId?: string): Promise<TasksResponse> {
+    return this.request<TasksResponse>({
+      method: 'GET',
+      path: documentId ? `/api/documents/${encodeURIComponent(documentId)}/tasks` : '/api/tasks?assignee=me',
     });
   }
 
@@ -383,10 +582,11 @@ export class PrimerClient {
 
     if (!res.ok) {
       const body = await parseErrorBody(res);
-      const code = statusToCode(res.status);
+      const refused = body?.refusal?.code;
+      const code = refused !== undefined && PASSED_THROUGH.has(refused) ? (refused as PrimerErrorCode) : statusToCode(res.status);
       const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
       const message = body?.refusal?.fix ? `${base} ${body.refusal.fix}` : base;
-      throw new PrimerApiError(code, message, res.status);
+      throw new PrimerApiError(code, message, res.status, body ?? undefined);
     }
 
     return res;

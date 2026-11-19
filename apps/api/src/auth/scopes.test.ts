@@ -157,6 +157,13 @@ describe('route scope table', () => {
       'primer_whoami',
       'primer_create_document',
       'primer_add_version',
+      'primer_apply_ops',
+      'primer_update_run',
+      'primer_withdraw_suggestion',
+      'primer_add_choice',
+      'primer_propose_pick',
+      'primer_add_task',
+      'primer_update_task',
       'primer_widget_draft',
       'primer_widget_publish',
     ]);
@@ -265,6 +272,52 @@ describe('enforcing scopes', () => {
         expect({ method, path, status: res.status }).toEqual({ method, path, status: 403 });
         expect(((await res.json()) as { error: string }).error).toBe('insufficient_scope');
       }
+    });
+  });
+
+  it('records:write alone never purges other people\'s personal records', async () => {
+    await withApp(async (app) => {
+      const writer = await mintAgentToken(app, ['documents:write', 'records:write']);
+      const up = await upload(app, writer.token);
+      const docId = up.documentId!;
+      // The agent owns what it uploaded, so only the scope stands in the way.
+      const purge = () =>
+        app.request(`/api/documents/${docId}/records/purge-personal`, {
+          method: 'POST',
+          headers: bearer(writer.token),
+          body: JSON.stringify({ userId: HUMAN_ID }),
+        });
+      const refused = await purge();
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { error: string }).error).toBe('insufficient_scope');
+      expect(toolsForScopes(['records:write'])).not.toContain('primer_purge_personal_records');
+
+      // Even with records:manage, an agent never purges: it owns this
+      // document, and OAuth agents carry no scopes at all.
+      const agentManager = await mintAgentToken(app, ['records:manage']);
+      expect(toolsForScopes(['records:manage'])).toContain('primer_purge_personal_records');
+      const agentPurge = await app.request(`/api/documents/${docId}/records/purge-personal`, {
+        method: 'POST',
+        headers: bearer(agentManager.token),
+        body: JSON.stringify({ userId: HUMAN_ID }),
+      });
+      expect(agentPurge.status).toBe(403);
+      expect(((await agentPurge.json()) as { error: string }).error).toBe('forbidden');
+
+      // A person's token with records:manage purges on documents they own
+      // (their agent's upload included).
+      const personRes = await app.request('/api/tokens', {
+        method: 'POST',
+        headers: asUserJson(ADMIN_ID),
+        body: JSON.stringify({ name: 'manage', scopes: ['records:manage'] }),
+      });
+      const person = (await personRes.json()) as CreateTokenResponse;
+      const allowed = await app.request(`/api/documents/${docId}/records/purge-personal`, {
+        method: 'POST',
+        headers: bearer(person.token),
+        body: JSON.stringify({ userId: HUMAN_ID }),
+      });
+      expect(allowed.status).toBe(200);
     });
   });
 

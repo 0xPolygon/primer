@@ -15,12 +15,11 @@
 // the owner sets through the collaborators API (`routes/collaborators.ts`);
 // Primer never reads a role, grant or permission out of a payload, so no page
 // can widen its own or anyone's access by submitting one.
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from './actors.ts';
 import {
-  DOCUMENT_STATUS_TTL_MS,
   EVENT_NAMESPACE_RE,
   EVENT_TYPE_FILTER_RE,
   EVENT_TYPE_RE,
@@ -30,9 +29,7 @@ import {
   MAX_EVENT_PAYLOAD_BYTES,
   MAX_EVENTS_PER_BATCH,
   isEventAudience,
-  type DocumentStatusDTO,
   type EventAudience,
-  type DocumentStatusState,
   type EventRowDTO,
   type PrimerEventPayloads,
   type PrimerEventType,
@@ -537,6 +534,12 @@ export interface ListEventsPage {
   nextPageToken: string | null;
 }
 
+/** A reader is never handed the `data.changed` events it authored: its own
+ *  record writes must not wake it (records/changed.ts). */
+function notOwnDataChanged(authorColumn: SQL, readerId: string): SQL {
+  return sql`NOT (namespace = ${PRIMER_EVENT_NAMESPACE} AND type = 'data.changed' AND ${authorColumn} = ${readerId})`;
+}
+
 function filterConditions(filters: EventFilters) {
   const conditions = [];
   if (filters.namespace !== undefined) {
@@ -579,6 +582,8 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
     OR (audience IN ('collaborators', 'artifact') AND ${tierReadable})
   )`);
 
+  conditions.push(notOwnDataChanged(sql`author_id`, identity.userId));
+
   const where = sql.join(conditions, sql` AND `);
   // Fetch one extra row to learn whether another page exists.
   const rows = (await db.execute(sql`
@@ -604,13 +609,17 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
  *  once. Backs `GET /api/events/stream?scope=me`. */
 export async function listOwnedEvents(args: {
   userId: string;
+  /** Who reads (the agent itself, not its person): never handed its own
+   *  `data.changed`. */
+  readerId: string;
   filters: EventFilters;
   afterId: number;
   limit: number;
 }): Promise<ListEventsPage> {
-  const { userId, filters, afterId, limit } = args;
+  const { userId, readerId, filters, afterId, limit } = args;
   const conditions = [
     sql`e.id > ${afterId}`,
+    notOwnDataChanged(sql`e.author_id`, readerId),
     isSelfOrAgentOf(sql`d.uploader_id`, userId),
     sql`d.deleted_at IS NULL`,
     ...filterConditions(filters),
@@ -687,47 +696,4 @@ export function notifyEventsCommitted(touched: Touched): void {
     for (const wake of wakesByDoc.get(documentId) ?? []) wake();
     for (const wake of wakesByOwner.get(ownerId) ?? []) wake();
   }
-}
-
-// ───────────────────────── Working status ─────────────────────────
-
-/** Records `state` for `userId` on the document as a `primer.status` event.
- *  `working` lasts DOCUMENT_STATUS_TTL_MS unless refreshed; `idle` expires
- *  at once. Both fields are set here, never by the caller. */
-export async function setDocumentStatus(
-  documentId: string,
-  userId: string,
-  state: DocumentStatusState,
-  now: Date = new Date(),
-): Promise<void> {
-  const expiresAt = new Date(state === 'working' ? now.getTime() + DOCUMENT_STATUS_TTL_MS : now.getTime());
-  await transactionWithEvents(async (_tx, emit) => {
-    emit({
-      documentId,
-      actorId: userId,
-      type: 'status',
-      payload: { document_id: documentId, state, by: userId, expires_at: expiresAt.toISOString() },
-    });
-  });
-}
-
-/** Everyone whose latest status on the document is an unexpired `working`. */
-export async function activeDocumentStatuses(
-  documentId: string,
-  now: Date = new Date(),
-): Promise<DocumentStatusDTO[]> {
-  const rows = (await db.execute(sql`
-    SELECT latest.author_id AS "by", ${actorNameOf('u')} AS "displayName",
-           latest.payload->>'state' AS state, latest.payload->>'expires_at' AS "expiresAt"
-    FROM (
-      SELECT DISTINCT ON (author_id) author_id, payload
-      FROM events
-      WHERE document_id = ${documentId} AND namespace = ${PRIMER_EVENT_NAMESPACE} AND type = 'status'
-      ORDER BY author_id, id DESC
-    ) latest
-    JOIN users u ON u.id = latest.author_id
-  `)) as unknown as { by: string; displayName: string; state: string; expiresAt: string }[];
-  return rows
-    .filter((r) => r.state === 'working' && Date.parse(r.expiresAt) > now.getTime())
-    .map((r) => ({ by: r.by, displayName: r.displayName, state: 'working' as const, expiresAt: r.expiresAt }));
 }

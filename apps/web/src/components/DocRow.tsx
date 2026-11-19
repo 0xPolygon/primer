@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { Link } from 'react-router-dom';
 import type { LibraryDocument, FolderDTO } from '@polygonlabs/primer-api-types';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
@@ -15,7 +16,9 @@ export function DocRow({ doc, folders, selectedFolderId }: DocRowProps) {
   const subtitle =
     doc.ownership === 'mine'
       ? doc.description ?? ''
-      : `by ${doc.uploaderDisplayName}${doc.description ? ` · ${doc.description}` : ''}`;
+      : doc.description
+        ? t('docRow.byAuthorWithDescription', { name: doc.uploaderDisplayName, description: doc.description })
+        : t('docRow.byAuthor', { name: doc.uploaderDisplayName });
 
   const assignedFolder =
     doc.folderId !== null && doc.folderId !== selectedFolderId
@@ -33,15 +36,15 @@ export function DocRow({ doc, folders, selectedFolderId }: DocRowProps) {
             <span className="truncate">{doc.title}</span>
           </span>
           <span className="text-xs text-neutral-500 truncate">
-            {subtitle || <em className="text-neutral-400 dark:text-neutral-500">no description</em>}
+            {subtitle || <em className="text-neutral-400 dark:text-neutral-500">{t('docRow.noDescription')}</em>}
           </span>
         </div>
       </Link>
       <div className="flex shrink-0 items-center gap-3">
         <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">
           {doc.threadCount === 0
-            ? 'no threads yet'
-            : `${doc.activeThreadCount}/${doc.threadCount} active`}
+            ? t('docRow.noThreadsYet')
+            : t('docRow.activeThreads', { active: doc.activeThreadCount, total: doc.threadCount })}
         </span>
         <span className="hidden sm:inline w-20 text-right text-xs text-neutral-500">
           {relativeTime(doc.lastActivityAt)}

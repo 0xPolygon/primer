@@ -9,6 +9,7 @@ import type {
   NotifyCommentArgs,
   NotifyCollaboratorAddedArgs,
   NotifyExternalOtpArgs,
+  NotifyDocumentMentionArgs,
   NotifyExternalFirstViewArgs,
 } from './notifier.ts';
 
@@ -206,7 +207,8 @@ export class MailgunNotifier implements Notifier {
     const actor = rows.find((u) => u.id === args.actorUserId);
     const actorName = actor?.displayName ?? 'Someone';
 
-    const url = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}/v/${args.version.versionNumber}#thread-${args.thread.id}`;
+    const base = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}`;
+    const url = `${args.version ? `${base}/v/${args.version.versionNumber}` : base}#thread-${args.thread.id}`;
     const excerpt = truncate(args.comment.body, BODY_EXCERPT_LIMIT);
     const subject = renderSubject(actorName, args.doc.title);
 
@@ -273,6 +275,25 @@ export class MailgunNotifier implements Notifier {
 </table>
 </body></html>`;
     await this.send(args.toEmail, subject, text, html);
+  }
+
+  async notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void> {
+    if (args.mentionedUserId === args.actorUserId) return;
+    const rows = (await db
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email, kind: users.kind })
+      .from(users)
+      .where(inArray(users.id, [args.mentionedUserId, args.actorUserId]))) as UserRow[];
+    const recipient = rows.find((u) => u.id === args.mentionedUserId);
+    // Agents have no mailbox (auth/agents.ts).
+    if (!recipient || recipient.kind === 'agent') return;
+    const actorName = rows.find((u) => u.id === args.actorUserId)?.displayName ?? 'Someone';
+    const url = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}`;
+    const subject = `${actorName} mentioned you in '${truncate(args.doc.title, SUBJECT_TITLE_LIMIT)}'`;
+    const text = [`${actorName} mentioned you in '${args.doc.title}'.`, '', `Open the doc: ${url}`].join('\n');
+    const html = `<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#171717;">
+<p>${escapeHtml(actorName)} mentioned you in '<strong>${escapeHtml(args.doc.title)}</strong>'.</p>
+<p><a href="${url}">Open the doc</a></p></body></html>`;
+    await this.send(recipient.email, subject, text, html);
   }
 
   async notifyExternalFirstView(args: NotifyExternalFirstViewArgs): Promise<void> {

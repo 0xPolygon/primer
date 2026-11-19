@@ -11,10 +11,12 @@ import {
   uniqueIndex,
   primaryKey,
   index,
+  boolean,
+  date,
   customType,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
-import type { AnchorData } from '@polygonlabs/primer-api-types';
+import type { ThreadAnchor } from '@polygonlabs/primer-api-types';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),                                       // Okta sub (Phase 2) or "mock-user-1" (Phase 1)
@@ -84,18 +86,21 @@ export const threads = pgTable('threads', {
   documentId: uuid('document_id')
     .notNull()
     .references(() => documents.id, { onDelete: 'cascade' }),
-  versionId: uuid('version_id')
-    .notNull()
-    .references(() => versions.id, { onDelete: 'cascade' }),
-  anchor: jsonb('anchor').$type<AnchorData>().notNull(),
+  // Null for a thread on a live document: it belongs to the live content,
+  // anchored by a comment mark, not to a version.
+  versionId: uuid('version_id').references(() => versions.id, { onDelete: 'cascade' }),
+  anchor: jsonb('anchor').$type<ThreadAnchor>().notNull(),
+  // Set while a live thread's comment mark is gone from reachable content
+  // ("Text removed"); the thread stays open and keeps its quote.
+  orphanedAt: timestamp('orphaned_at', { withTimezone: true }),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   resolvedBy: text('resolved_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Where a thread shows on a version. The originating version gets a row when
-// the thread is created; publishing a version adds a row for every open thread
-// (lib/threadCarry.ts). `anchor` is null when the quoted text could not be
+// the thread is created; a legacy document's first live version adds a row
+// for every open thread (lib/publish.ts). `anchor` is null when the quoted text could not be
 // found on that version ("context changed"): the thread still shows there, in
 // the sidebar, without a highlight.
 export const threadPlacements = pgTable(
@@ -107,7 +112,7 @@ export const threadPlacements = pgTable(
     versionId: uuid('version_id')
       .notNull()
       .references(() => versions.id, { onDelete: 'cascade' }),
-    anchor: jsonb('anchor').$type<AnchorData>(),
+    anchor: jsonb('anchor').$type<ThreadAnchor>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -134,6 +139,22 @@ export const comments = pgTable(
     byThreadAlive: index('comments_thread_id_alive_idx')
       .on(t.threadId)
       .where(sql`${t.deletedAt} IS NULL`),
+  }),
+);
+
+// One emoji reaction per person per comment.
+export const commentReactions = pgTable(
+  'comment_reactions',
+  {
+    commentId: uuid('comment_id')
+      .notNull()
+      .references(() => comments.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => users.id),
+    emoji: text('emoji').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.commentId, t.userId, t.emoji] }),
   }),
 );
 
@@ -562,6 +583,250 @@ export const docFiles = pgTable(
   },
   (t) => ({
     byDoc: index('doc_files_document_id_idx').on(t.documentId),
+  }),
+);
+
+// An agent asked to work on a live document (live/runs.ts). Status moves
+// queued → running → done | failed, or to cancelled; every change runs on the
+// document's queue, so it never interleaves with an apply. `edits_applied`
+// and `blocks_removed` count the run's ops; past the large-edit threshold more
+// ops need `plan` approved by a person (`plan_approved_by`).
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    agentId: text('agent_id').notNull().references(() => users.id),
+    requestedBy: text('requested_by').notNull().references(() => users.id),
+    status: text('status', { enum: ['queued', 'running', 'failed', 'done', 'cancelled'] }).notNull().default('queued'),
+    request: jsonb('request').$type<Record<string, unknown>>().notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    statusLine: text('status_line'),
+    error: text('error'),
+    editsApplied: integer('edits_applied').notNull().default(0),
+    blocksRemoved: integer('blocks_removed').notNull().default(0),
+    plan: text('plan'),
+    // sha256 of `plan`: an approval names the plan it approves.
+    planHash: text('plan_hash'),
+    planApprovedBy: text('plan_approved_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => ({
+    active: uniqueIndex('agent_runs_active_dedupe')
+      .on(t.documentId, t.agentId, t.dedupeKey)
+      .where(sql`status in ('queued', 'running')`),
+    byDoc: index('agent_runs_document_id_idx').on(t.documentId, t.createdAt),
+    byAgent: index('agent_runs_agent_id_idx').on(t.agentId, t.status),
+  }),
+);
+
+// What one run's applied edits replaced, per block (live/pipeline.ts
+// BlockInverse), so the run can be undone durably (live/undo.ts).
+export const runInverses = pgTable(
+  'run_inverses',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    target: jsonb('target').$type<Record<string, unknown>>().notNull(),
+    // The block's subtree before the edit; null when the run created it.
+    prior: jsonb('prior').$type<Record<string, unknown>>(),
+    // The block's content version right after the edit; null when removed.
+    afterVersion: text('after_version'),
+    // Where the block was (parentId, prevId, nextId) when the edit removed or moved it.
+    place: jsonb('place').$type<Record<string, unknown>>(),
+    // A sub-fragment the run created (page text, embed, widget label).
+    createdFragment: text('created_fragment'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byRun: index('run_inverses_run_id_idx').on(t.runId, t.id),
+  }),
+);
+
+// A proposed change to a live document (live/suggest.ts): stored proposals,
+// not marks in the Y.Doc (y-prosemirror drops node marks, so block-level
+// suggestions can't live there). `edits` lists per-block edits (kind, target,
+// the proposed blockContainer JSON, the base version it expects, the place);
+// accepting replays them through the pipeline with those preconditions.
+// `conflict`: made from an edit that conflicted, rather than suggest mode.
+export const suggestions = pgTable(
+  'suggestions',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    authorId: text('author_id').notNull().references(() => users.id),
+    runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    changeSetId: uuid('change_set_id'),
+    status: text('status', { enum: ['open', 'accepted', 'rejected', 'withdrawn'] }).notNull().default('open'),
+    tabId: text('tab_id').notNull(),
+    targetIds: text('target_ids').array().notNull(),
+    edits: jsonb('edits').$type<Record<string, unknown>[]>().notNull(),
+    conflict: boolean('conflict').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    decidedBy: text('decided_by').references(() => users.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+  },
+  (t) => ({
+    byDoc: index('suggestions_document_id_idx').on(t.documentId, t.status, t.createdAt),
+  }),
+);
+
+// ── Shared records (per-document storage for pages and agents) ──────────
+// Not part of the Y.Doc and never tied to page versions: a republish or a
+// restore leaves them alone. `doc_record_changes` is the append-only audit and
+// undo log. Every write takes a per-document lock (records/store.ts), so change
+// ids follow commit order within a document.
+export const docRecords = pgTable(
+  'doc_records',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    collection: text('collection').notNull(),
+    recordId: text('record_id').notNull(),
+    scope: text('scope', { enum: ['shared', 'personal'] }).notNull(),
+    // Set for personal records (the viewer or agent they belong to); null for shared.
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    data: jsonb('data').notNull(),
+    // Everyone whose writes shaped the current data: a full set resets it to
+    // the writer, an update merge adds the writer, a revert carries the
+    // restored content's contributors plus the reverter. An agent reads the
+    // record as untrusted when anyone but itself is in it.
+    contributors: text('contributors').array().notNull(),
+    version: integer('version').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text('updated_by').notNull().references(() => users.id),
+  },
+  (t) => ({
+    key: uniqueIndex('doc_records_key').on(
+      t.documentId,
+      t.collection,
+      t.scope,
+      sql`coalesce(${t.ownerUserId}, '')`,
+      t.recordId,
+    ),
+  }),
+);
+
+export const docRecordChanges = pgTable(
+  'doc_record_changes',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    collection: text('collection').notNull(),
+    recordId: text('record_id').notNull(),
+    scope: text('scope', { enum: ['shared', 'personal'] }).notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    op: text('op', { enum: ['set', 'update', 'delete'] }).notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    // Contributors of the before and after data (see doc_records.contributors).
+    beforeContributors: text('before_contributors').array(),
+    afterContributors: text('after_contributors').array(),
+    actorId: text('actor_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDoc: index('doc_record_changes_doc_idx').on(t.documentId, t.id),
+  }),
+);
+
+/**
+ * Tracked tasks: an index of the task blocks in live documents, never written
+ * any other way. The live-update hook (live/tasks.ts) keeps it in sync from
+ * block props, and `rebuildTaskIndex` recreates it from the Y.Doc.
+ */
+export const docTasks = pgTable(
+  'doc_tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    tabId: text('tab_id').notNull(),
+    blockId: text('block_id').notNull(),
+    title: text('title').notNull(),
+    // Checked against users when indexed: the document is client-writable.
+    assigneeId: text('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+    dueDate: date('due_date', { mode: 'string' }),
+    status: text('status', { enum: ['open', 'done'] }).notNull(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    block: uniqueIndex('doc_tasks_block').on(t.documentId, t.blockId),
+    assignee: index('doc_tasks_assignee').on(t.assigneeId),
+  }),
+);
+
+/**
+ * Decisions on choice blocks, written only by the pick route after its
+ * edit-rights check (live/choices.ts). A row applies to a block only when the
+ * block's `decisionId` prop equals `decision_id`, a nonce the server minted at
+ * the pick: a block id used again never inherits a decision. Rows are never
+ * deleted because content changed: one whose block or option is gone is
+ * `archived_at` and comes back when an undo or restore brings the block back.
+ * Only clearing (a person with pick rights) removes one.
+ */
+export const docDecisions = pgTable(
+  'doc_decisions',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    blockId: text('block_id').notNull(),
+    decisionId: uuid('decision_id').notNull(),
+    optionId: text('option_id').notNull(),
+    // What was decided, as it read then: the block's text may change later.
+    question: text('question').notNull(),
+    optionLabel: text('option_label').notNull(),
+    rationale: text('rationale').notNull(),
+    evidence: jsonb('evidence').notNull(),
+    openQuestions: jsonb('open_questions').notNull(),
+    decidedBy: text('decided_by')
+      .notNull()
+      .references(() => users.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.documentId, t.blockId] }),
+  }),
+);
+
+/**
+ * Mentions already announced: one row per (block, person) a mention chip in a
+ * live document names. Kept from the document by live/mentions.ts so each
+ * mention notifies once; rebuildable, never authority.
+ */
+export const docMentions = pgTable(
+  'doc_mentions',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    blockId: text('block_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.documentId, t.blockId, t.userId] }),
   }),
 );
 

@@ -7,6 +7,7 @@ import { useVersionsQuery } from '../queries/versions.ts';
 import { copyText } from '../lib/clipboardCopy.ts';
 import { ViewActivityModal } from './ViewActivityModal.tsx';
 import { CopyIcon, CheckIcon } from './icons.tsx';
+import { t } from '../i18n';
 
 interface Props {
   docId: string;
@@ -61,15 +62,14 @@ export function ExternalSharePanel({ docId }: Props) {
 
   return (
     <section className="mt-6 border-t border-neutral-200 dark:border-neutral-800 pt-4">
-      <h3 className="text-sm font-semibold mb-1">External sharing</h3>
+      <h3 className="text-sm font-semibold mb-1">{t('externalSharePanel.title')}</h3>
       <p className="text-xs text-neutral-500 mb-3">
-        Share a published version with people outside Polygon. They verify with an emailed code.
+        {t('externalSharePanel.intro')}
       </p>
 
       {data && !data.emailEnabled && (
         <p className="mb-3 rounded border border-amber-300 bg-amber-50 dark:bg-amber-900/30 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300">
-          Email delivery is not configured on this server — external recipients cannot receive
-          verification codes, so external sharing is currently non-functional.
+          {t('externalSharePanel.emailNotConfigured')}
         </p>
       )}
 
@@ -80,7 +80,7 @@ export function ExternalSharePanel({ docId }: Props) {
           disabled={create.isPending}
           className="rounded border border-neutral-300 dark:border-neutral-700 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
-          {create.isPending ? 'Creating…' : 'Enable external sharing'}
+          {create.isPending ? t('externalSharePanel.creating') : t('externalSharePanel.enable')}
         </button>
       )}
 
@@ -95,8 +95,8 @@ export function ExternalSharePanel({ docId }: Props) {
             />
             <button
               type="button"
-              title={copied ? 'Copied' : 'Copy link'}
-              aria-label={copied ? 'Copied' : 'Copy link'}
+              title={copied ? t('externalSharePanel.copied') : t('externalSharePanel.copyLink')}
+              aria-label={copied ? t('externalSharePanel.copied') : t('externalSharePanel.copyLink')}
               className={`rounded border border-neutral-300 dark:border-neutral-700 p-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 ${copied ? 'text-green-600 dark:text-green-400' : ''}`}
               onClick={() => void copyShareLink(`${window.location.origin}/share/${data.share!.shareToken}`)}
             >
@@ -107,15 +107,15 @@ export function ExternalSharePanel({ docId }: Props) {
           <div className="text-xs">
             {data.share.publishedVersionNumber === null ? (
               <p className="text-amber-600 font-medium">
-                Nothing is published yet — external recipients can't see anything until you publish a version.
+                {t('externalSharePanel.nothingPublished')}
               </p>
             ) : (
               <p className="text-neutral-500">
-                Externals see <strong>v{data.share.publishedVersionNumber}</strong>
+                {t('externalSharePanel.externalsSee')} <strong>{t('externalSharePanel.versionNumber', { number: data.share.publishedVersionNumber })}</strong>
                 {latestVersionNumber !== null && data.share.publishedVersionNumber !== latestVersionNumber && (
-                  <span className="text-amber-600"> — latest internal is v{latestVersionNumber}</span>
+                  <span className="text-amber-600"> {t('externalSharePanel.latestInternal', { number: latestVersionNumber })}</span>
                 )}
-                . New uploads change nothing externally until re-published.
+                {t('externalSharePanel.newUploadsNote')}
               </p>
             )}
             <div className="mt-2 flex items-center gap-2">
@@ -124,9 +124,9 @@ export function ExternalSharePanel({ docId }: Props) {
                 onChange={(e) => setPublishTarget(e.target.value)}
                 className="rounded border border-neutral-300 dark:border-neutral-700 bg-transparent px-2 py-1 text-xs"
               >
-                <option value="">Choose version…</option>
+                <option value="">{t('externalSharePanel.chooseVersion')}</option>
                 {versions.map((v) => (
-                  <option key={v.id} value={v.id}>v{v.versionNumber}</option>
+                  <option key={v.id} value={v.id}>{t('externalSharePanel.versionNumber', { number: v.versionNumber })}</option>
                 ))}
               </select>
               <button
@@ -135,7 +135,7 @@ export function ExternalSharePanel({ docId }: Props) {
                 onClick={() => { publish.mutate({ versionId: publishTarget }); setPublishTarget(''); }}
                 className="rounded bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 px-3 py-1 text-xs font-medium disabled:opacity-40"
               >
-                Publish to external
+                {t('externalSharePanel.publish')}
               </button>
             </div>
           </div>
@@ -158,15 +158,15 @@ export function ExternalSharePanel({ docId }: Props) {
             <button
               type="submit"
               disabled={addRecipient.isPending}
-              title="Add recipient"
-              aria-label="Add recipient"
+              title={t('externalSharePanel.addRecipient')}
+              aria-label={t('externalSharePanel.addRecipient')}
               className="rounded border border-neutral-300 dark:border-neutral-700 p-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 disabled:opacity-40"
             >
               <PlusIcon />
             </button>
           </form>
           {addRecipient.isError && (
-            <p className="text-xs text-red-600">{(addRecipient.error as Error).message === 'recipient_exists' ? 'That email already has access.' : 'Could not add recipient.'}</p>
+            <p className="text-xs text-red-600">{(addRecipient.error as Error).message === 'recipient_exists' ? t('externalSharePanel.recipientExists') : t('externalSharePanel.addRecipientFailed')}</p>
           )}
 
           <ul className="space-y-1">
@@ -176,9 +176,9 @@ export function ExternalSharePanel({ docId }: Props) {
                   {r.email}
                   <span className="text-neutral-400 ml-2">
                     {r.firstViewedAt === null
-                      ? 'never viewed'
-                      : `${r.viewCount} view${r.viewCount === 1 ? '' : 's'}, last ${new Date(r.lastViewedAt!).toLocaleDateString()}`}
-                    {' · expires '}{new Date(r.expiresAt).toLocaleDateString()}
+                      ? t('externalSharePanel.neverViewed')
+                      : t(r.viewCount === 1 ? 'externalSharePanel.viewedOne' : 'externalSharePanel.viewedMany', { count: r.viewCount, date: new Date(r.lastViewedAt!).toLocaleDateString() })}
+                    {t('externalSharePanel.expires', { date: new Date(r.expiresAt).toLocaleDateString() })}
                   </span>
                 </span>
                 <button
@@ -186,7 +186,7 @@ export function ExternalSharePanel({ docId }: Props) {
                   onClick={() => revokeRecipient.mutate({ recipientId: r.id })}
                   className="text-red-600 underline"
                 >
-                  Revoke
+                  {t('externalSharePanel.revoke')}
                 </button>
               </li>
             ))}
@@ -198,19 +198,19 @@ export function ExternalSharePanel({ docId }: Props) {
               onClick={() => setActivityOpen(true)}
               className="text-xs text-neutral-600 dark:text-neutral-300 underline"
             >
-              View activity
+              {t('externalSharePanel.viewActivity')}
             </button>
             {!confirmRevoke ? (
               <button type="button" onClick={() => setConfirmRevoke(true)} className="text-xs text-red-600 underline">
-                Revoke all external access
+                {t('externalSharePanel.revokeAll')}
               </button>
             ) : (
               <div className="flex items-center gap-3 text-xs">
-                <span className="text-red-600">Ends all recipient access immediately. Sure?</span>
+                <span className="text-red-600">{t('externalSharePanel.revokeAllConfirm')}</span>
                 <button type="button" onClick={() => { revokeShare.mutate(); setConfirmRevoke(false); }} className="text-red-600 font-semibold underline">
-                  Yes, revoke
+                  {t('externalSharePanel.yesRevoke')}
                 </button>
-                <button type="button" onClick={() => setConfirmRevoke(false)} className="underline">Cancel</button>
+                <button type="button" onClick={() => setConfirmRevoke(false)} className="underline">{t('externalSharePanel.cancel')}</button>
               </div>
             )}
           </div>

@@ -6,6 +6,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
+import { effectiveAgentMode } from '../lib/permissions.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -13,7 +14,7 @@ import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
-import { isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment } from './reach.ts';
+import { isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
 import { restoreWidgets } from '../widgets/bundle.ts';
 import { pmDocOf } from './sources.ts';
 
@@ -60,9 +61,11 @@ export async function writeCheckpoint(
   actor: AuthUser,
   note: string | null,
   captured: CapturedState,
+  /** A republish: the uploaded file, kept with the version. */
+  original?: { versionId: string; originalKey: string; sourceFormat: 'markdown' | 'text' | 'html' },
 ): Promise<CheckpointResponse> {
   const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
-  const versionId = uuidv7();
+  const versionId = original?.versionId ?? uuidv7();
   const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
   const marked = markedThreads(captured.state);
   try {
@@ -81,6 +84,7 @@ export async function writeCheckpoint(
         versionNote: note,
         bundleKey: bundle.bundleKey,
         docVersion: captured.docVersion,
+        ...(original ? { originalKey: original.originalKey, sourceFormat: original.sourceFormat } : {}),
       });
       // Open threads stay listed on the checkpoint: anchored where their
       // comment mark is in the captured content, orphaned elsewhere.
@@ -111,7 +115,9 @@ export async function writeCheckpoint(
  * Restores a checkpoint as a new edit by `actor` (C12 restore column): every
  * tab's content is replaced by the bundle's through the pipeline, which
  * writes only what differs, so untouched blocks keep their Yjs identity and
- * marks. Later history stays: the restore is one more update.
+ * marks. Later history stays: the restore is one more update. The tab list
+ * is restored first (a tab deleted since comes back, one added since goes),
+ * as an edit by the same person.
  */
 export async function restoreCheckpoint(
   storage: Storage,
@@ -120,6 +126,12 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
+    // The tab list is no block edit, so it can't be suggested: an agent that
+    // only suggests (the pipeline turns its edits below into suggestions)
+    // leaves it as it is.
+    if ((await effectiveAgentMode(checkpoint.documentId, actor.id)) === 'edit') {
+      await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    }
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {
@@ -156,4 +168,23 @@ export function markedThreads(state: Uint8Array): Set<string> {
   }
   doc.destroy();
   return ids;
+}
+
+/** Sets the live tab list to `tabs` when it differs. The pipeline writes
+ *  fragments only, so the list is written in its own transaction. */
+async function restoreTabs(documentId: string, tabs: Tab[], actor: AuthUser): Promise<void> {
+  const connection = await liveInstance().openDirectConnection(liveDocName(documentId), originFor(actor));
+  try {
+    const doc = connection.document!;
+    if (JSON.stringify(tabsOf(doc)) === JSON.stringify(tabs)) return;
+    await docQueue(documentId)(() =>
+      connection.transact(() => {
+        const array = doc.getArray<Tab>('tabs');
+        array.delete(0, array.length);
+        array.push(tabs);
+      }),
+    );
+  } finally {
+    await connection.disconnect({ unloadImmediately: false });
+  }
 }
