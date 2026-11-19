@@ -8,7 +8,6 @@ import type {
   UserLookupResponse,
   UserSearchResponse,
 } from '@polygonlabs/primer-api-types';
-import { SERVICE_USER_ID } from '../auth/admin.ts';
 
 const TYPEAHEAD_LIMIT = 20;
 
@@ -18,8 +17,8 @@ export function registerUserRoutes(app: Hono<{ Variables: AppVariables }>): void
     const rows = await db
       .select({ id: users.id, displayName: users.displayName, email: users.email })
       .from(users)
-      // Service accounts (Claude) can't be mentioned — they only act via API tokens.
-      .where(and(ne(users.id, me.id), ne(users.id, SERVICE_USER_ID)));
+      // Agents can't be mentioned — they act only through tokens.
+      .where(and(ne(users.id, me.id), eq(users.kind, 'person')));
     const body: MentionableUsersResponse = { users: rows };
     return c.json(body, 200);
   });
@@ -55,8 +54,9 @@ export function registerUserRoutes(app: Hono<{ Variables: AppVariables }>): void
 
     const docId = c.req.query('docId') ?? null;
 
-    // Excluded ids: caller + service account + (optionally) owner + existing collaborators.
-    const excluded = new Set<string>([c.get('user').id, SERVICE_USER_ID]);
+    // Excluded ids: caller + (optionally) owner + existing collaborators.
+    // Agents are never offered (people only, below).
+    const excluded = new Set<string>([c.get('user').id]);
     if (docId) {
       const [doc] = await db
         .select({ uploaderId: documents.uploaderId })
@@ -78,6 +78,7 @@ export function registerUserRoutes(app: Hono<{ Variables: AppVariables }>): void
       .where(
         and(
           ilike(users.displayName, `${q}%`),
+          eq(users.kind, 'person'),
           notInArray(users.id, Array.from(excluded)),
         ),
       )

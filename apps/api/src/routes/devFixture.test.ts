@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
-import { ARTIFACT_CSP } from './versionContent.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 
@@ -28,7 +28,7 @@ describe('GET /dev/fixtures/anchoring.html', () => {
     const res = await app.request('/dev/fixtures/anchoring.html');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
-    expect(res.headers.get('content-security-policy')).toBe(ARTIFACT_CSP);
+    expect(res.headers.get('content-security-policy')).toBe(artifactCsp('standard'));
     expect(res.headers.get('x-frame-options')).toBe('SAMEORIGIN');
 
     const body = await res.text();

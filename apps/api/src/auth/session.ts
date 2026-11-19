@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { sessions, users } from '../db/schema.ts';
+import type { AuthUser } from '../app.ts';
 
 export const SESSION_TTL_MS = Number(process.env.SESSION_TTL_DAYS ?? '14') * 24 * 60 * 60 * 1000;
 
@@ -18,7 +19,7 @@ export interface SessionCreated {
 }
 
 export interface SessionLookup {
-  user: { id: string; email: string; displayName: string };
+  user: AuthUser;
   session: { id: string; expiresAt: Date };
 }
 
@@ -45,7 +46,9 @@ export async function lookupSession(id: string): Promise<SessionLookup | null> {
       s.expires_at  AS s_expires_at,
       u.id          AS u_id,
       u.email       AS u_email,
-      u.display_name AS u_display_name
+      u.display_name AS u_display_name,
+      u.kind        AS u_kind,
+      u.via_user_id AS u_via_user_id
     FROM sessions s
     INNER JOIN users u ON u.id = s.user_id
     WHERE s.id = ${id}
@@ -57,10 +60,18 @@ export async function lookupSession(id: string): Promise<SessionLookup | null> {
     u_id: string;
     u_email: string;
     u_display_name: string;
+    u_kind: AuthUser['kind'];
+    u_via_user_id: string | null;
   }>;
   if (!row) return null;
   return {
-    user: { id: row.u_id, email: row.u_email, displayName: row.u_display_name },
+    user: {
+      id: row.u_id,
+      email: row.u_email,
+      displayName: row.u_display_name,
+      kind: row.u_kind,
+      viaUserId: row.u_via_user_id,
+    },
     session: {
       id: row.s_id,
       expiresAt: row.s_expires_at instanceof Date ? row.s_expires_at : new Date(row.s_expires_at),

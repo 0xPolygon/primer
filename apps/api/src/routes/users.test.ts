@@ -13,7 +13,6 @@ import type { MentionableUsersResponse } from '@polygonlabs/primer-api-types';
 import type { UserSearchResponse } from '@polygonlabs/primer-api-types';
 import { asUser } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
-import { SERVICE_USER_ID } from '../auth/admin.ts';
 
 async function withApp<T>(
   fn: (app: ReturnType<typeof createApp>) => Promise<T>,
@@ -98,9 +97,10 @@ describe('GET /api/users/mentionable', () => {
         .values([
           { id: 'mock-user-2', email: 'two@p.t', displayName: 'User Two' },
           {
-            id: SERVICE_USER_ID,
-            email: 'claude-service@polygon.technology',
+            id: 'agent_users-test',
+            email: 'agent@agents.primer.invalid',
             displayName: 'Claude',
+            kind: 'agent',
           },
         ])
         .onConflictDoNothing();
@@ -108,7 +108,7 @@ describe('GET /api/users/mentionable', () => {
       const body = (await res.json()) as MentionableUsersResponse;
       const ids = body.users.map((u) => u.id);
       expect(ids).toContain('mock-user-2');
-      expect(ids).not.toContain(SERVICE_USER_ID);
+      expect(ids).not.toContain('agent_users-test');
     });
   });
 
@@ -179,15 +179,16 @@ describe('GET /api/users (typeahead)', () => {
       await db
         .insert(users)
         .values({
-          id: SERVICE_USER_ID,
-          email: 'claude-service@polygon.technology',
+          id: 'agent_users-test',
+          email: 'agent@agents.primer.invalid',
           displayName: 'Claude',
+          kind: 'agent',
         })
         .onConflictDoNothing();
       const res = await app.request('/api/users?q=Cla', { headers: asUser('mock-user-1') });
       expect(res.status).toBe(200);
       const body = (await res.json()) as UserSearchResponse;
-      expect(body.users.map((u) => u.id)).not.toContain(SERVICE_USER_ID);
+      expect(body.users.map((u) => u.id)).not.toContain('agent_users-test');
     });
   });
 

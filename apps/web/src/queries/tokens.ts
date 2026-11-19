@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AgentsListResponse,
   ApiTokensListResponse,
+  CreateAgentRequest,
+  CreateAgentResponse,
   CreateTokenRequest,
   CreateTokenResponse,
 } from '@polygonlabs/primer-api-types';
@@ -59,37 +62,59 @@ export function useRevokeToken() {
   });
 }
 
-// Service-account (Claude) tokens — admin only. Pass `enabled: me.isAdmin`
-// so non-admins never fire a request that would 403.
-export function useServiceTokens(enabled: boolean) {
+// Agents: identities the signed-in person creates; each acts via them with
+// its own scoped tokens (GET/POST /api/agents, /api/agents/:id/tokens).
+export function useAgents() {
   return useQuery({
-    queryKey: ['service-tokens'],
-    queryFn: async (): Promise<ApiTokensListResponse> => {
-      const res = await api('/api/service-tokens');
-      if (!res.ok) throw new Error(`service tokens fetch failed: ${res.status}`);
-      return (await res.json()) as ApiTokensListResponse;
+    queryKey: ['agents'],
+    queryFn: async (): Promise<AgentsListResponse> => {
+      const res = await api('/api/agents');
+      if (!res.ok) throw new Error(`agents fetch failed: ${res.status}`);
+      return (await res.json()) as AgentsListResponse;
     },
-    enabled,
     refetchOnWindowFocus: false,
   });
 }
 
-export function useCreateServiceToken() {
+export function useCreateAgent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (req: CreateTokenRequest) => createToken('/api/service-tokens', req),
+    mutationFn: async (req: CreateAgentRequest): Promise<CreateAgentResponse> => {
+      const res = await api('/api/agents', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(req),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`create failed: ${res.status} ${text}`);
+      }
+      return (await res.json()) as CreateAgentResponse;
+    },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['service-tokens'] });
+      qc.invalidateQueries({ queryKey: ['agents'] });
     },
   });
 }
 
-export function useRevokeServiceToken() {
+export function useCreateAgentToken(agentId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => revokeToken(`/api/service-tokens/${encodeURIComponent(id)}`),
+    mutationFn: (req: CreateTokenRequest) =>
+      createToken(`/api/agents/${encodeURIComponent(agentId)}/tokens`, req),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['service-tokens'] });
+      qc.invalidateQueries({ queryKey: ['agents'] });
+    },
+  });
+}
+
+export function useRevokeAgentToken(agentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (tokenId: string) =>
+      revokeToken(`/api/agents/${encodeURIComponent(agentId)}/tokens/${encodeURIComponent(tokenId)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agents'] });
     },
   });
 }

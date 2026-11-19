@@ -12,7 +12,7 @@ import { buildMcpToolHandlers } from '../mcp/tools.ts';
 import { asUserJson } from '../test/harness.ts';
 import { bodyText, placeTextRange } from './threadCarry.ts';
 
-const user = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User' };
+const user = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User', kind: 'person' as const, viaUserId: null };
 
 async function withPrimer<T>(
   fn: (p: {

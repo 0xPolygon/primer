@@ -159,7 +159,7 @@ them from `.env`. [`.env.example`](.env.example) lists every option with notes.
 | `OKTA_ISSUER`, `OKTA_CLIENT_ID`, `OKTA_CLIENT_SECRET` | none | OpenID Connect client, required when `AUTH_MODE=okta` |
 | `AUTH_BASE_URL` | none | The public URL of your instance. Required when `AUTH_MODE=okta`; also used for sign-in redirects, links in emails, and secure cookies |
 | `OAUTH_ISSUER` | `AUTH_BASE_URL` | Issuer advertised to remote MCP clients |
-| `ADMIN_EMAILS` | none | Comma-separated admin emails. Admins can create service tokens, which act as a shared service account |
+| `ADMIN_EMAILS` | none | Comma-separated admin emails. Admins can read usage stats |
 | `SESSION_TTL_DAYS` | `14` | How long a browser session lasts |
 | `SESSION_COOKIE_NAME` | `primer_sid` | Session cookie name |
 | `COOKIE_SECURE` | from `AUTH_BASE_URL` | Force the cookie `Secure` flag |
@@ -190,7 +190,7 @@ To run it, you need:
   against Okta; other OIDC providers aren't tested.
 - `NODE_ENV=production`, set in the image, which rejects `AUTH_MODE=mock`.
 
-Optionally, set `ADMIN_EMAILS` to let admins create service tokens, and the
+Optionally, set `ADMIN_EMAILS` to let admins read usage stats, and the
 Mailgun variables to send notification emails. `/api/health` and `/api/ready` are the
 liveness and readiness checks.
 

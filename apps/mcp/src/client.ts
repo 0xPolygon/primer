@@ -54,7 +54,7 @@ export interface PrimerClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-export type DocumentFormat = 'markdown' | 'html';
+export type DocumentFormat = 'markdown' | 'html' | 'text';
 
 export interface CreateDocumentInput {
   title: string;
@@ -68,6 +68,8 @@ export interface AddVersionInput {
   content: string;
   format: DocumentFormat;
   versionNote?: string;
+  /** The version the caller read; a newer one refuses the publish (409 stale_base). */
+  baseVersionNumber?: number;
 }
 
 interface RequestOptions {
@@ -83,6 +85,8 @@ interface RequestOptions {
 interface ApiErrorBody {
   error?: string;
   message?: string;
+  /** Present on publish refusals: what to do instead. */
+  refusal?: { fix?: string };
 }
 
 function statusToCode(status: number): PrimerErrorCode {
@@ -197,6 +201,9 @@ export class PrimerClient {
     fd.append('file', buildFileBlob(input.content, input.format), filenameFor(input.format));
     if (input.versionNote !== undefined) {
       fd.append('versionNote', input.versionNote);
+    }
+    if (input.baseVersionNumber !== undefined) {
+      fd.append('baseVersionNumber', String(input.baseVersionNumber));
     }
     return this.request<AddVersionResponse>({
       method: 'POST',
@@ -334,7 +341,8 @@ export class PrimerClient {
     if (!res.ok) {
       const body = await parseErrorBody(res);
       const code = statusToCode(res.status);
-      const message = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
+      const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
+      const message = body?.refusal?.fix ? `${base} ${body.refusal.fix}` : base;
       throw new PrimerApiError(code, message, res.status);
     }
 
@@ -343,11 +351,11 @@ export class PrimerClient {
 }
 
 function filenameFor(format: DocumentFormat): string {
-  return format === 'markdown' ? 'doc.md' : 'doc.html';
+  return format === 'markdown' ? 'doc.md' : format === 'text' ? 'doc.txt' : 'doc.html';
 }
 
 function contentTypeFor(format: DocumentFormat): string {
-  return format === 'markdown' ? 'text/markdown' : 'text/html';
+  return format === 'markdown' ? 'text/markdown' : format === 'text' ? 'text/plain' : 'text/html';
 }
 
 function buildFileBlob(content: string, format: DocumentFormat): Blob {

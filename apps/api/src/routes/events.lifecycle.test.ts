@@ -35,8 +35,8 @@ async function withApp<T>(fn: (app: App, storage: FilesystemStorage) => Promise<
     await db
       .insert(users)
       .values([
-        { id: OWNER, email: 'one@example.com', displayName: 'User One' },
-        { id: READER, email: 'two@example.com', displayName: 'User Two' },
+        { id: OWNER, email: 'one@example.com', displayName: 'User One', kind: 'person' as const, viaUserId: null },
+        { id: READER, email: 'two@example.com', displayName: 'User Two', kind: 'person' as const, viaUserId: null },
       ])
       .onConflictDoNothing();
     return await fn(app, storage);
@@ -140,7 +140,7 @@ describe('lifecycle events', () => {
 });
 
 describe('lifecycle events with threads across versions', () => {
-  const owner = { id: OWNER, email: 'one@example.com', displayName: 'User One' };
+  const owner = { id: OWNER, email: 'one@example.com', displayName: 'User One', kind: 'person' as const, viaUserId: null };
 
   it('MCP reply and resolve write the same rows as the REST routes', async () => {
     await withApp(async (app, storage) => {

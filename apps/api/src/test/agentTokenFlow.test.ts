@@ -10,17 +10,16 @@ import { composeResolvers, makeBearerResolver } from '../auth/bearer.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
 import { apiTokens, comments, documents, users } from '../db/schema.ts';
-import { SERVICE_USER_ID } from '../auth/admin.ts';
 import { asUserJson } from './harness.ts';
 import { uploadFixture } from '../routes/upload.testlib.ts';
 import { API_TOKEN_SCOPES } from '@polygonlabs/primer-api-types';
 import type { CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 /**
- * End-to-end flow for the Claude service account: an admin mints a token,
- * then EVERYTHING the token does — MCP tool calls (whoami, create, query)
- * and REST commenting — is authenticated purely by the bearer and attributed
- * to the service user. Finally the token is revoked and access dies.
+ * End-to-end flow for an agent: a person creates an agent and mints its
+ * token, then EVERYTHING the token does — MCP tool calls (whoami, create,
+ * query) and REST commenting — is authenticated purely by the bearer and
+ * attributed to the agent. Finally the token is revoked and access dies.
  */
 
 const ADMIN_ID = 'admin-user';
@@ -30,7 +29,7 @@ const ADMIN_EMAIL = `${ADMIN_ID}@polygon.technology`;
 const BASE_URL = 'http://localhost:5173';
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
-  const root = await mkdtemp(join(tmpdir(), 'primer-service-flow-'));
+  const root = await mkdtemp(join(tmpdir(), 'primer-agent-flow-'));
   try {
     const app = createApp({
       storage: new FilesystemStorage(root),
@@ -49,7 +48,7 @@ async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>)
 async function withBearerOnlyApp<T>(
   fn: (app: ReturnType<typeof createApp>) => Promise<T>
 ): Promise<T> {
-  const root = await mkdtemp(join(tmpdir(), 'primer-service-flow-bearer-'));
+  const root = await mkdtemp(join(tmpdir(), 'primer-agent-flow-bearer-'));
   try {
     const app = createApp({
       storage: new FilesystemStorage(root),
@@ -107,8 +106,17 @@ async function mcpToolCall(
   };
 }
 
-async function mintServiceToken(app: ReturnType<typeof createApp>): Promise<CreateTokenResponse> {
-  const res = await app.request('/api/service-tokens', {
+let AGENT_ID = '';
+
+async function mintAgentToken(app: ReturnType<typeof createApp>): Promise<CreateTokenResponse> {
+  const created = await app.request('/api/agents', {
+    method: 'POST',
+    headers: asUserJson(ADMIN_ID),
+    body: JSON.stringify({ displayName: 'Claude' }),
+  });
+  expect(created.status).toBe(201);
+  AGENT_ID = ((await created.json()) as { id: string }).id;
+  const res = await app.request(`/api/agents/${AGENT_ID}/tokens`, {
     method: 'POST',
     headers: asUserJson(ADMIN_ID),
     body: JSON.stringify({ name: 'e2e-flow', scopes: API_TOKEN_SCOPES }),
@@ -129,34 +137,27 @@ beforeEach(async () => {
   await db.delete(apiTokens);
   await db
     .insert(users)
-    .values([
-      {
-        id: SERVICE_USER_ID,
-        email: 'claude-service@polygon.technology',
-        displayName: 'Claude',
-      },
-      { id: ADMIN_ID, email: ADMIN_EMAIL, displayName: ADMIN_ID },
-    ])
+    .values([{ id: ADMIN_ID, email: ADMIN_EMAIL, displayName: ADMIN_ID }])
     .onConflictDoNothing();
 });
 
-describe('service token end-to-end flow', () => {
-  it('mint → whoami → create document → query it back → comment on a human doc, all as Claude', async () => {
+describe('agent token end-to-end flow', () => {
+  it('mint → whoami → create document → query it back → comment on a human doc, all as the agent', async () => {
     await withApp(async (app) => {
-      const minted = await mintServiceToken(app);
+      const minted = await mintAgentToken(app);
       const token = minted.token;
 
-      // 1. whoami over MCP identifies the service user, not the admin.
+      // 1. whoami over MCP identifies the agent, acting via the admin.
       const who = await mcpToolCall(app, token, 'primer_whoami', {});
       expect(who.status).toBe(200);
       expect(who.isError).toBeFalsy();
-      expect(who.payload?.id).toBe(SERVICE_USER_ID);
-      expect(who.payload?.displayName).toBe('Claude');
+      expect(who.payload?.id).toBe(AGENT_ID);
+      expect(who.payload?.displayName).toBe('Claude (via admin-user)');
 
-      // 2. Create a document over MCP; ownership lands on the service user.
+      // 2. Create a document over MCP; ownership lands on the agent.
       const created = await mcpToolCall(app, token, 'primer_create_document', {
         title: 'Claude flow test doc',
-        content: '# Hello\n\nWritten by the service account.',
+        content: '# Hello\n\nWritten by an agent.',
         format: 'markdown',
       });
       expect(created.status).toBe(200);
@@ -165,7 +166,7 @@ describe('service token end-to-end flow', () => {
       expect(documentId).toBeTruthy();
 
       const [docRow] = await db.select().from(documents).where(eq(documents.id, documentId));
-      expect(docRow.uploaderId).toBe(SERVICE_USER_ID);
+      expect(docRow.uploaderId).toBe(AGENT_ID);
 
       // 3. Query it back over MCP.
       const fetched = await mcpToolCall(app, token, 'primer_get_document', { documentId });
@@ -173,7 +174,7 @@ describe('service token end-to-end flow', () => {
       expect(fetched.isError).toBeFalsy();
       expect(JSON.stringify(fetched.payload)).toContain('Claude flow test doc');
 
-      // 4. It shows up in the service user's own document list.
+      // 4. It shows up in the agent's own document list.
       const listed = await mcpToolCall(app, token, 'primer_list_documents', { scope: 'mine' });
       expect(listed.status).toBe(200);
       expect(JSON.stringify(listed.payload)).toContain(documentId);
@@ -187,7 +188,7 @@ describe('service token end-to-end flow', () => {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ anchor: ANCHOR, body: 'Comment from the service account.' }),
+        body: JSON.stringify({ anchor: ANCHOR, body: 'Comment from an agent.' }),
       });
       expect(threadRes.status).toBe(201);
       const thread = (await threadRes.json()) as { id: string; commentId: string };
@@ -196,7 +197,7 @@ describe('service token end-to-end flow', () => {
         .select()
         .from(comments)
         .where(eq(comments.id, thread.commentId));
-      expect(commentRow.authorId).toBe(SERVICE_USER_ID);
+      expect(commentRow.authorId).toBe(AGENT_ID);
 
       // 6. Claude replies on the same thread.
       const replyRes = await app.request(`/api/threads/${thread.id}/comments`, {
@@ -205,16 +206,16 @@ describe('service token end-to-end flow', () => {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ body: 'Follow-up from the service account.' }),
+        body: JSON.stringify({ body: 'Follow-up from an agent.' }),
       });
       expect(replyRes.status).toBe(201);
       const reply = (await replyRes.json()) as { comment: { id: string; authorId: string } };
-      expect(reply.comment.authorId).toBe(SERVICE_USER_ID);
+      expect(reply.comment.authorId).toBe(AGENT_ID);
       const [replyRow] = await db
         .select()
         .from(comments)
         .where(eq(comments.id, reply.comment.id));
-      expect(replyRow.authorId).toBe(SERVICE_USER_ID);
+      expect(replyRow.authorId).toBe(AGENT_ID);
     });
   });
 
@@ -223,7 +224,7 @@ describe('service token end-to-end flow', () => {
     let tokenId = '';
 
     await withApp(async (app) => {
-      const minted = await mintServiceToken(app);
+      const minted = await mintAgentToken(app);
       token = minted.token;
       tokenId = minted.summary.id;
     });
@@ -232,12 +233,12 @@ describe('service token end-to-end flow', () => {
     await withBearerOnlyApp(async (app) => {
       const who = await mcpToolCall(app, token, 'primer_whoami', {});
       expect(who.status).toBe(200);
-      expect(who.payload?.id).toBe(SERVICE_USER_ID);
+      expect(who.payload?.id).toBe(AGENT_ID);
     });
 
     // Admin revokes.
     await withApp(async (app) => {
-      const res = await app.request(`/api/service-tokens/${tokenId}`, {
+      const res = await app.request(`/api/agents/${AGENT_ID}/tokens/${tokenId}`, {
         method: 'DELETE',
         headers: asUserJson(ADMIN_ID),
       });

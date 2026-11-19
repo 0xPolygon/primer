@@ -27,6 +27,8 @@ describe('GET /api/me', () => {
         email: 'mock@polygon.technology',
         displayName: 'Mock User',
         isAdmin: false,
+        kind: 'person',
+        viaUserId: null,
       });
     } finally {
       await rm(root, { recursive: true, force: true });

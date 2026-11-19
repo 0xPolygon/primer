@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { AppVariables } from '../app.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
-import { ARTIFACT_CSP } from './versionContent.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = join(HERE, '..', 'companion', 'fixtures', 'anchoring.html');
@@ -20,7 +20,7 @@ export function registerDevFixtureRoute(app: Hono<{ Variables: AppVariables }>):
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': ARTIFACT_CSP,
+        'content-security-policy': artifactCsp('standard'),
         'x-frame-options': 'SAMEORIGIN',
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer',

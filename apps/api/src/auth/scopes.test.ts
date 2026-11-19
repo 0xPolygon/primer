@@ -10,7 +10,6 @@ import { mockMultiResolver } from './resolver.ts';
 import { PUBLIC_PATHS } from '../middleware/auth.ts';
 import { db } from '../db/client.ts';
 import { apiTokens, users } from '../db/schema.ts';
-import { SERVICE_USER_ID } from './admin.ts';
 import { asUser, asUserJson } from '../test/harness.ts';
 import { NOT_GRANTABLE, ROUTE_SCOPES, findScopedRoute, parseRequestedScopes } from './scopes.ts';
 import { TOOL_NAMES, toolsForScopes } from '../mcp/tools.ts';
@@ -19,6 +18,8 @@ import type { ApiTokenScope, CreateTokenResponse } from '@polygonlabs/primer-api
 const ADMIN_ID = 'admin-user';
 const ADMIN_EMAIL = `${ADMIN_ID}@polygon.technology`;
 const HUMAN_ID = 'human-1';
+/** An agent acting via ADMIN_ID. */
+const AGENT_ID = 'agent_scopes-test';
 
 type App = ReturnType<typeof createApp>;
 
@@ -39,8 +40,8 @@ async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
   }
 }
 
-async function mintServiceToken(app: App, scopes: ApiTokenScope[]): Promise<CreateTokenResponse> {
-  const res = await app.request('/api/service-tokens', {
+async function mintAgentToken(app: App, scopes: ApiTokenScope[]): Promise<CreateTokenResponse> {
+  const res = await app.request(`/api/agents/${AGENT_ID}/tokens`, {
     method: 'POST',
     headers: asUserJson(ADMIN_ID),
     body: JSON.stringify({ name: 'scoped', scopes }),
@@ -92,10 +93,13 @@ beforeEach(async () => {
   await db
     .insert(users)
     .values([
-      { id: SERVICE_USER_ID, email: 'claude-service@polygon.technology', displayName: 'Claude' },
       { id: ADMIN_ID, email: ADMIN_EMAIL, displayName: ADMIN_ID },
       { id: HUMAN_ID, email: `${HUMAN_ID}@polygon.technology`, displayName: 'Human' },
     ])
+    .onConflictDoNothing();
+  await db
+    .insert(users)
+    .values({ id: AGENT_ID, email: 'agent@agents.primer.invalid', displayName: 'Claude', kind: 'agent', viaUserId: ADMIN_ID })
     .onConflictDoNothing();
 });
 
@@ -176,13 +180,13 @@ describe('parseRequestedScopes', () => {
 describe('minting scoped tokens', () => {
   it('stores and returns scopes; rejects invalid ones with invalid_scopes', async () => {
     await withApp(async (app) => {
-      const { summary } = await mintServiceToken(app, ['users:read', 'documents:read']);
+      const { summary } = await mintAgentToken(app, ['users:read', 'documents:read']);
       expect(summary.scopes).toEqual(['documents:read', 'users:read']);
 
       const unrestricted = await mintUnrestrictedToken(app);
       expect(unrestricted.summary.scopes).toBeNull();
 
-      const unscopedService = await app.request('/api/service-tokens', {
+      const unscopedService = await app.request(`/api/agents/${AGENT_ID}/tokens`, {
         method: 'POST',
         headers: asUserJson(ADMIN_ID),
         body: JSON.stringify({ name: 'no-scopes' }),
@@ -190,11 +194,12 @@ describe('minting scoped tokens', () => {
       expect(unscopedService.status).toBe(400);
       expect(((await unscopedService.json()) as { error: string }).error).toBe('scopes_required');
 
-      const list = await app.request('/api/service-tokens', { headers: asUserJson(ADMIN_ID) });
-      const { tokens } = (await list.json()) as { tokens: { id: string; scopes: unknown }[] };
+      const list = await app.request('/api/agents', { headers: asUserJson(ADMIN_ID) });
+      const { agents } = (await list.json()) as { agents: { id: string; tokens: { id: string; scopes: unknown }[] }[] };
+      const tokens = agents.find((a) => a.id === AGENT_ID)!.tokens;
       expect(tokens.find((t) => t.id === summary.id)?.scopes).toEqual(['documents:read', 'users:read']);
 
-      for (const path of ['/api/service-tokens', '/api/tokens']) {
+      for (const path of [`/api/agents/${AGENT_ID}/tokens`, '/api/tokens']) {
         const bad = await app.request(path, {
           method: 'POST',
           headers: asUserJson(ADMIN_ID),
@@ -210,7 +215,7 @@ describe('minting scoped tokens', () => {
 describe('enforcing scopes', () => {
   it('lets a scoped token do exactly what its scopes grant', async () => {
     await withApp(async (app) => {
-      const { token } = await mintServiceToken(app, ['documents:write', 'collaborators:manage', 'users:read']);
+      const { token } = await mintAgentToken(app, ['documents:write', 'collaborators:manage', 'users:read']);
 
       const up = await upload(app, token);
       expect(up.status).toBe(200);
@@ -279,7 +284,7 @@ describe('enforcing scopes', () => {
 
   it('only registers the MCP tools a scoped token may use', async () => {
     await withApp(async (app) => {
-      const readOnly = await mintServiceToken(app, ['documents:read']);
+      const readOnly = await mintAgentToken(app, ['documents:read']);
       const tools = await mcpToolsList(app, readOnly.token);
       expect(tools).toContain('primer_get_document');
       expect(tools).not.toContain('primer_create_document');
@@ -353,7 +358,7 @@ async function mcpCall(app: App, token: string, name: string, args: Record<strin
 describe('visibility with a scoped token', () => {
   it('may narrow a document it can manage to private, but never widen it to org', async () => {
     await withApp(async (app) => {
-      const { token } = await mintServiceToken(app, ['documents:read', 'documents:write']);
+      const { token } = await mintAgentToken(app, ['documents:read', 'documents:write']);
       const docId = (await upload(app, token)).documentId!;
 
       const narrow = await setVisibility(app, token, docId, 'private');
@@ -374,8 +379,8 @@ describe('visibility with a scoped token', () => {
   it('still needs the user to manage the document', async () => {
     await withApp(async (app) => {
       const docId = await uploadAs(app, HUMAN_ID);
-      await addCollaborator(app, HUMAN_ID, docId, SERVICE_USER_ID, 'editor');
-      const { token } = await mintServiceToken(app, ['documents:write']);
+      await addCollaborator(app, HUMAN_ID, docId, AGENT_ID, 'editor');
+      const { token } = await mintAgentToken(app, ['documents:write']);
 
       const res = await setVisibility(app, token, docId, 'private');
       expect(res.status).toBe(403);
@@ -388,7 +393,7 @@ describe('a scope only narrows the document role', () => {
   it('denies events:write to a user who is only an org reader', async () => {
     await withApp(async (app) => {
       const docId = await uploadAs(app, HUMAN_ID);
-      const { token } = await mintServiceToken(app, ['documents:read', 'events:write']);
+      const { token } = await mintAgentToken(app, ['documents:read', 'events:write']);
 
       const rest = await sendEvents(app, token, docId);
       expect(rest.status).toBe(403);
@@ -406,8 +411,8 @@ describe('a scope only narrows the document role', () => {
   it('denies an editor whose token lacks events:write', async () => {
     await withApp(async (app) => {
       const docId = await uploadAs(app, HUMAN_ID);
-      await addCollaborator(app, HUMAN_ID, docId, SERVICE_USER_ID, 'editor');
-      const { token } = await mintServiceToken(app, ['documents:read', 'documents:write']);
+      await addCollaborator(app, HUMAN_ID, docId, AGENT_ID, 'editor');
+      const { token } = await mintAgentToken(app, ['documents:read', 'documents:write']);
 
       const rest = await sendEvents(app, token, docId);
       expect(rest.status).toBe(403);
@@ -416,7 +421,7 @@ describe('a scope only narrows the document role', () => {
       expect(await mcpToolsList(app, token)).not.toContain('primer_send_events');
 
       // The same editor with the scope gets through: the role allowed it all along.
-      const scoped = await mintServiceToken(app, ['events:write']);
+      const scoped = await mintAgentToken(app, ['events:write']);
       expect((await sendEvents(app, scoped.token, docId)).status).toBe(201);
     });
   });
