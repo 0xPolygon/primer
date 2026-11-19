@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
+import { actorNameOf } from '../lib/actors.ts';
 import { hashToken, TOKEN_PREFIX } from './tokens.ts';
 import type { UserResolver } from './resolver.ts';
 import { parseStoredScopes } from './scopes.ts';
@@ -53,7 +54,7 @@ export function makeBearerResolver(): UserResolver {
 
     const tokenHash = hashToken(token);
     const rows = (await db.execute(sql`
-      SELECT u.id, u.email, u.display_name, u.kind, u.via_user_id, t.id AS token_id, t.scopes
+      SELECT u.id, u.email, ${actorNameOf('u')} AS display_name, u.kind, u.via_user_id, t.id AS token_id, t.scopes
       FROM api_tokens t
       INNER JOIN users u ON u.id = t.user_id
       WHERE t.token_hash = ${tokenHash}

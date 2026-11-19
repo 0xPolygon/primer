@@ -11,6 +11,7 @@ import {
 } from '@polygonlabs/primer-api-types';
 import { documents, documentCollaborators, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
+import { actorName } from '../lib/actors.ts';
 import { logger } from '../logger.ts';
 import {
   canManage,
@@ -70,7 +71,7 @@ export function registerCollaboratorRoutes(
         role: documentCollaborators.role,
         grantedBy: documentCollaborators.grantedBy,
         createdAt: documentCollaborators.createdAt,
-        displayName: users.displayName,
+        displayName: actorName,
       })
       .from(documentCollaborators)
       .innerJoin(users, eq(users.id, documentCollaborators.userId))
@@ -118,7 +119,7 @@ export function registerCollaboratorRoutes(
       );
     }
     const [target] = await db
-      .select({ id: users.id, displayName: users.displayName })
+      .select({ id: users.id, displayName: actorName })
       .from(users)
       .where(eq(users.id, targetUserId));
     if (!target) return c.json({ error: 'user_not_found', message: 'target user does not exist' }, 400);
@@ -205,7 +206,7 @@ export function registerCollaboratorRoutes(
         role: documentCollaborators.role,
         grantedBy: documentCollaborators.grantedBy,
         createdAt: documentCollaborators.createdAt,
-        displayName: users.displayName,
+        displayName: actorName,
       })
       .from(documentCollaborators)
       .innerJoin(users, eq(users.id, documentCollaborators.userId))

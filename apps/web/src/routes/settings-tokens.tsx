@@ -398,7 +398,7 @@ function AgentsSection() {
         <input
           type="text"
           value={name}
-          maxLength={MAX_NAME_LENGTH}
+          maxLength={64}
           onChange={(e) => setName(e.target.value)}
           placeholder="Agent name, e.g. Claude"
           className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"

@@ -7,9 +7,8 @@ import { agentEmail } from '../auth/agents.ts';
 import { sessionOnly } from '../auth/sessionOnly.ts';
 import { db } from '../db/client.ts';
 import { users } from '../db/schema.ts';
+import { MAX_AGENT_NAME, sanitizeAgentName } from '../lib/actors.ts';
 import { listTokensForUser, mintTokenForUser, parseCreateTokenBody, revokeTokenForUser } from './tokenSummary.ts';
-
-const MAX_AGENT_NAME = 100;
 
 /**
  * A person's agents: identities of their own (attribution, ownership) that
@@ -57,8 +56,8 @@ export function registerAgentRoutes(app: Hono<{ Variables: AppVariables }>): voi
     } catch {
       return c.json({ error: 'invalid_body' }, 400);
     }
-    const displayName = typeof raw?.displayName === 'string' ? raw.displayName.trim() : '';
-    if (displayName.length === 0 || displayName.length > MAX_AGENT_NAME) {
+    const displayName = typeof raw?.displayName === 'string' ? sanitizeAgentName(raw.displayName) : '';
+    if (displayName.length === 0) {
       return c.json({ error: 'invalid_body', message: `displayName must be 1–${MAX_AGENT_NAME} characters` }, 400);
     }
     const id = `agent_${uuidv7()}`;

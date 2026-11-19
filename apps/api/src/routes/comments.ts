@@ -8,7 +8,7 @@ import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@polygonlabs/pri
 import { COMMENT_UNDO_WINDOW_MS } from '@polygonlabs/primer-api-types';
 import { threads, versions, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
-import { authorColumns } from '../lib/actors.ts';
+import { actorName, authorColumns } from '../lib/actors.ts';
 import { transactionWithEvents, type LifecycleEvent } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import {
@@ -152,7 +152,7 @@ async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
       anchor: threads.anchor,
       resolvedAt: threads.resolvedAt,
       resolvedBy: threads.resolvedBy,
-      resolvedByDisplayName: users.displayName,
+      resolvedByDisplayName: actorName,
       createdAt: threads.createdAt,
     })
     .from(threads)

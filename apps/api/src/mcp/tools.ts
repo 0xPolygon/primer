@@ -5,7 +5,7 @@ import type { Storage } from '../storage/types.ts';
 import type { AuthUser } from '../app.ts';
 import type { Notifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { authorColumns } from '../lib/actors.ts';
+import { actorName, actorNameOf, authorColumns } from '../lib/actors.ts';
 import { documents, versions, threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { replyToThread } from '../routes/comments.ts';
 import { resolveThread } from '../routes/threads.ts';
@@ -13,7 +13,7 @@ import { parsePrimerUrl } from './urlResolve.ts';
 import { publishDocument } from '../lib/publish.ts';
 import { logger } from '../logger.ts';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope, PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
-import { actorLabel, isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
+import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 import {
   canRead, isSelfOrAgentOf, libraryOwnerId, loadEffectiveRole, type Visibility,
 } from '../lib/permissions.ts';
@@ -101,7 +101,7 @@ function formatCommentsMarkdown(
     const placement = thread.contextChanged ? ' (context changed)' : '';
     const commentLines = thread.comments.map((c: CommentDTO) => {
       if (c.deletedAt !== null) return '(deleted)';
-      return `**${actorLabel({ displayName: c.authorDisplayName, kind: c.authorKind, via: c.authorVia })}** — ${c.body} (${c.createdAt})`;
+      return `**${c.authorDisplayName}** — ${c.body} (${c.createdAt})`;
     });
     return [`> ${quote}`, `${badge} thread ${thread.id}${placement}`, ...commentLines, ''].join('\n');
   });
@@ -227,7 +227,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           visibility: documents.visibility,
           createdAt: documents.createdAt,
           deletedAt: documents.deletedAt,
-          uploaderDisplayName: users.displayName,
+          uploaderDisplayName: actorName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
@@ -574,7 +574,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           uploaderId: documents.uploaderId,
           visibility: documents.visibility,
           createdAt: documents.createdAt,
-          uploaderDisplayName: users.displayName,
+          uploaderDisplayName: actorName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
@@ -646,7 +646,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           uploaderId: documents.uploaderId,
           visibility: documents.visibility,
           createdAt: documents.createdAt,
-          uploaderDisplayName: users.displayName,
+          uploaderDisplayName: actorName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
@@ -804,7 +804,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
                v.document_id AS "documentId",
                d.title AS "documentTitle",
                c.author_id AS "authorId",
-               u.display_name AS "authorDisplayName",
+               ${actorNameOf('u')} AS "authorDisplayName",
                c.body AS "body",
                c.mentions AS "mentions",
                c.created_at AS "createdAt",
@@ -998,7 +998,7 @@ async function loadThreads(
     anchor: threads.anchor,
     resolvedAt: threads.resolvedAt,
     resolvedBy: threads.resolvedBy,
-    resolvedByDisplayName: users.displayName,
+    resolvedByDisplayName: actorName,
     createdAt: threads.createdAt,
   };
   const threadRows = (
@@ -1095,7 +1095,7 @@ function commentRecords(list: ThreadDTO[]) {
         thread_id: t.id,
         comment_id: c.id,
         author_id: c.authorId,
-        author_name: actorLabel({ displayName: c.authorDisplayName, kind: c.authorKind, via: c.authorVia }),
+        author_name: c.authorDisplayName,
         body: c.body,
         created_at: c.createdAt,
         anchor_text: anchorText(t.anchor),

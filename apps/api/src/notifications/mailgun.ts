@@ -1,6 +1,7 @@
 import { inArray } from 'drizzle-orm';
 import type { CollaboratorRole } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
+import { actorName as actorNameColumn } from '../lib/actors.ts';
 import { users } from '../db/schema.ts';
 import { logger } from '../logger.ts';
 import type {
@@ -199,7 +200,7 @@ export class MailgunNotifier implements Notifier {
     if (recipientIds.size === 0) return;
 
     const rows = (await db
-      .select({ id: users.id, displayName: users.displayName, email: users.email, kind: users.kind })
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email, kind: users.kind })
       .from(users)
       .where(inArray(users.id, [...recipientIds, args.actorUserId]))) as UserRow[];
     const actor = rows.find((u) => u.id === args.actorUserId);
@@ -230,7 +231,7 @@ export class MailgunNotifier implements Notifier {
     if (args.addedUserId === args.addedByUserId) return;
 
     const rows = (await db
-      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email })
       .from(users)
       .where(inArray(users.id, [args.addedUserId, args.addedByUserId]))) as UserRow[];
     const recipient = rows.find((u) => u.id === args.addedUserId);
@@ -276,7 +277,7 @@ export class MailgunNotifier implements Notifier {
 
   async notifyExternalFirstView(args: NotifyExternalFirstViewArgs): Promise<void> {
     const rows = (await db
-      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email })
       .from(users)
       .where(inArray(users.id, [args.sharerUserId]))) as UserRow[];
     const sharer = rows[0];

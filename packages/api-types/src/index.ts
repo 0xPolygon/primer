@@ -140,12 +140,6 @@ export interface MeResponse extends UserDTO {
   viaUserId: string | null;
 }
 
-/** How to name an actor in the UI: an agent shows with its person, e.g.
- *  "Claude (via Mudit)". */
-export function actorLabel(actor: { displayName: string; kind: ActorKind; via: string | null }): string {
-  return actor.kind === 'agent' && actor.via ? `${actor.displayName} (via ${actor.via})` : actor.displayName;
-}
-
 /** One of the caller's agents (GET /api/agents). */
 export interface AgentDTO {
   id: string;
@@ -199,6 +193,8 @@ export interface CommentDTO {
   id: string;
   threadId: string;
   authorId: string;
+  /** For an agent, already labelled "<name> (via <person>)" by the server,
+   *  as every display name of an actor is. */
   authorDisplayName: string;
   authorKind: ActorKind;
   /** Display name of the person an agent author acts via; null for people. */

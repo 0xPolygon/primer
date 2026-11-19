@@ -8,7 +8,7 @@ import { logger } from '../logger.ts';
 import type { CommentDTO, CreateThreadRequest, ThreadDTO, ThreadsListResponse } from '@polygonlabs/primer-api-types';
 import { threads, threadPlacements, versions, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
-import { authorColumns } from '../lib/actors.ts';
+import { actorName, authorColumns } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import type { Visibility } from '../lib/permissions.ts';
@@ -172,7 +172,7 @@ async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
       anchor: threads.anchor,
       resolvedAt: threads.resolvedAt,
       resolvedBy: threads.resolvedBy,
-      resolvedByDisplayName: users.displayName,
+      resolvedByDisplayName: actorName,
       createdAt: threads.createdAt,
     })
     .from(threads)
@@ -259,7 +259,7 @@ export function registerThreadRoutes(
         anchor: threads.anchor,
         resolvedAt: threads.resolvedAt,
         resolvedBy: threads.resolvedBy,
-        resolvedByDisplayName: users.displayName,
+        resolvedByDisplayName: actorName,
         createdAt: threads.createdAt,
         placementAnchor: threadPlacements.anchor,
       })

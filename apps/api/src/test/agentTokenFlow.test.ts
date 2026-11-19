@@ -152,7 +152,7 @@ describe('agent token end-to-end flow', () => {
       expect(who.status).toBe(200);
       expect(who.isError).toBeFalsy();
       expect(who.payload?.id).toBe(AGENT_ID);
-      expect(who.payload?.displayName).toBe('Claude');
+      expect(who.payload?.displayName).toBe('Claude (via admin-user)');
 
       // 2. Create a document over MCP; ownership lands on the agent.
       const created = await mcpToolCall(app, token, 'primer_create_document', {

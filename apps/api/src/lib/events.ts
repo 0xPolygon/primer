@@ -18,6 +18,7 @@
 import { sql } from 'drizzle-orm';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
+import { actorNameOf } from './actors.ts';
 import {
   DOCUMENT_STATUS_TTL_MS,
   EVENT_NAMESPACE_RE,
@@ -700,7 +701,7 @@ export async function activeDocumentStatuses(
   now: Date = new Date(),
 ): Promise<DocumentStatusDTO[]> {
   const rows = (await db.execute(sql`
-    SELECT latest.author_id AS "by", u.display_name AS "displayName",
+    SELECT latest.author_id AS "by", ${actorNameOf('u')} AS "displayName",
            latest.payload->>'state' AS state, latest.payload->>'expires_at' AS "expiresAt"
     FROM (
       SELECT DISTINCT ON (author_id) author_id, payload

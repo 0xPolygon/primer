@@ -4,6 +4,7 @@ import { db } from '../../db/client.ts';
 import type { AuthUser } from '../../app.ts';
 import type { UserResolver } from '../resolver.ts';
 import { agentEmail } from '../agents.ts';
+import { actorNameOf, sanitizeAgentName } from '../../lib/actors.ts';
 import { ACCESS_TOKEN_PREFIX, hashHex } from './tokens.ts';
 
 interface OAuthBearerRow {
@@ -14,18 +15,23 @@ interface OAuthBearerRow {
 
 /**
  * The agent an OAuth MCP client acts as for one person: one per (client,
- * person), named after the client, acting via the person. Created on first
- * use; the client's later name changes follow.
+ * person), named after the client (sanitized), acting via the person.
+ * Created on first use; the client's later name changes follow. The returned
+ * displayName carries the "(via <person>)" label (lib/actors.ts).
  */
 export async function ensureOAuthAgent(clientId: string, clientName: string, userId: string): Promise<AuthUser> {
   const id = `agent_oauth_${createHash('sha256').update(`${clientId}:${userId}`).digest('hex').slice(0, 24)}`;
+  const name = sanitizeAgentName(clientName) || 'MCP client';
   await db.execute(sql`
     INSERT INTO users (id, email, display_name, kind, via_user_id)
-    VALUES (${id}, ${agentEmail(id)}, ${clientName}, 'agent', ${userId})
+    VALUES (${id}, ${agentEmail(id)}, ${name}, 'agent', ${userId})
     ON CONFLICT (id) DO UPDATE SET display_name = excluded.display_name
       WHERE users.display_name IS DISTINCT FROM excluded.display_name
   `);
-  return { id, email: agentEmail(id), displayName: clientName, kind: 'agent', viaUserId: userId };
+  const [row] = (await db.execute(sql`
+    SELECT ${actorNameOf('u')} AS "displayName" FROM users u WHERE u.id = ${id}
+  `)) as unknown as { displayName: string }[];
+  return { id, email: agentEmail(id), displayName: row.displayName, kind: 'agent', viaUserId: userId };
 }
 
 /**

@@ -4,6 +4,7 @@ import type { AppVariables, AppDeps } from '../app.ts';
 import type { DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary } from '@polygonlabs/primer-api-types';
 import { documents, versions, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
+import { actorName } from '../lib/actors.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import {
@@ -30,7 +31,7 @@ export function registerDocumentRoutes(
         visibility: documents.visibility,
         createdAt: documents.createdAt,
         deletedAt: documents.deletedAt,
-        uploaderDisplayName: users.displayName,
+        uploaderDisplayName: actorName,
       })
       .from(documents)
       .innerJoin(users, eq(users.id, documents.uploaderId))
@@ -205,7 +206,7 @@ export function registerDocumentRoutes(
       .where(eq(documents.id, docId));
 
     const [uploader] = await db
-      .select({ displayName: users.displayName })
+      .select({ displayName: actorName })
       .from(users)
       .where(eq(users.id, updated.uploaderId));
 
@@ -284,7 +285,7 @@ export function registerDocumentRoutes(
     }
 
     const [uploader] = await db
-      .select({ displayName: users.displayName })
+      .select({ displayName: actorName })
       .from(users)
       .where(eq(users.id, existing.uploaderId));
 

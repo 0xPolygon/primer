@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import type { AppVariables } from '../app.ts';
 import type { LibraryResponse, LibraryDocument, FolderDTO, DeletedDocumentEntry } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
+import { actorNameOf } from '../lib/actors.ts';
 import { isSelfOrAgentOf, libraryOwnerId } from '../lib/permissions.ts';
 
 interface DocRow {
@@ -67,7 +68,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
         d.description,
         d.uploader_id       AS "uploaderId",
         d.visibility,
-        u.display_name      AS "uploaderDisplayName",
+        ${actorNameOf('u')} AS "uploaderDisplayName",
         CASE
           WHEN ${isSelfOrAgentOf(sql`d.uploader_id`, userId)} THEN 'mine'
           WHEN EXISTS (SELECT 1 FROM document_collaborators dc
@@ -101,7 +102,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
                 SELECT 1 FROM document_views dv
                  WHERE dv.document_id = d.id AND dv.user_id = ${userId}))
         )
-      GROUP BY d.id, d.title, d.description, d.uploader_id, d.visibility, u.display_name, d.created_at, df.folder_id
+      GROUP BY d.id, d.title, d.description, d.uploader_id, d.visibility, u.id, d.created_at, df.folder_id
       ORDER BY "lastActivityAt" DESC
     `)) as unknown as DocRow[];
 
