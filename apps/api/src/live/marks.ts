@@ -105,7 +105,7 @@ export function quoteMarkEdit(threadId: string, target: Target, quote: string): 
     target,
     inverse: false,
     build: (tr) => {
-      const range = findQuote(tr.doc, target.blockId, quote);
+      const range = findQuote(tr.doc, blockScope(target), quote);
       if (!range) throw new AnchorMissingError(`"${quote}" was not found in the target.`);
       addComment(tr.doc, range, threadId, () => undefined, (from, to, mark) => tr.addMark(from, to, mark));
     },
@@ -160,9 +160,15 @@ function textRange(node: PmNode, start: number, index: number, length: number): 
   return { from, to };
 }
 
+/** The block to search for a target's quote: a sub-fragment (page text,
+ *  embed, widget label) is searched whole. */
+function blockScope(target: Target): string {
+  return target.pid || target.textId || target.embedId ? '' : target.blockId;
+}
+
 /** `findQuote` against the live content of the target's fragment. */
 export function findMarkedQuote(doc: Y.Doc, target: Target, quote: string): { from: number; to: number } | null {
-  return findQuote(fragmentDoc(doc.getXmlFragment(fragmentName(target))), target.blockId, quote);
+  return findQuote(fragmentDoc(doc.getXmlFragment(fragmentName(target))), blockScope(target), quote);
 }
 
 /** Thread ids of every comment mark in `node`. */
