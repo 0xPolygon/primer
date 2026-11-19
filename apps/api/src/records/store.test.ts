@@ -1,0 +1,134 @@
+import { describe, expect, it } from 'vitest';
+import { listRecordChanges, recordsApi, revertChange } from './store.ts';
+import { flushDataChanged } from './changed.ts';
+import { OWNER, READER, VIEWER, seedRecordsDoc } from './records.testlib.ts';
+
+const big = (n: number) => ({ blob: 'x'.repeat(n) });
+
+describe('records store', () => {
+  it('batch is all or nothing', async () => {
+    const doc = await seedRecordsDoc();
+    const api = recordsApi(OWNER, doc);
+    const out = await api.batch({
+      ops: [
+        { verb: 'set', collection: 'votes', scope: 'shared', recordId: 'a', data: { optionId: 'x' } },
+        { verb: 'update', collection: 'votes', scope: 'shared', recordId: 'missing', data: { optionId: 'y' } },
+      ],
+    });
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.refusal.code).toBe('not_found');
+    const list = await api.list({ collection: 'votes', scope: 'shared' });
+    expect(list.ok && list.value.records).toEqual([]);
+    const changes = await listRecordChanges(OWNER, doc, {});
+    expect(changes.ok && changes.value.changes).toEqual([]);
+    await flushDataChanged();
+  });
+
+  it('stale expectVersion conflicts', async () => {
+    const doc = await seedRecordsDoc();
+    const api = recordsApi(OWNER, doc);
+    const first = await api.set({ collection: 'notes', scope: 'shared', recordId: 'n1', data: { text: 'a' }, expectVersion: 0 });
+    expect(first.ok && first.value.record.version).toBe(1);
+    const merged = await api.update({ collection: 'notes', scope: 'shared', recordId: 'n1', data: { done: true }, expectVersion: 1 });
+    expect(merged.ok && merged.value.record).toMatchObject({ version: 2, data: { text: 'a', done: true } });
+    const stale = await api.set({ collection: 'notes', scope: 'shared', recordId: 'n1', data: { text: 'b' }, expectVersion: 1 });
+    expect(stale.ok).toBe(false);
+    if (!stale.ok) expect(stale.refusal).toMatchObject({ code: 'record_conflict', details: { version: 2 } });
+    const again = await api.set({ collection: 'notes', scope: 'shared', recordId: 'n1', data: { text: 'c' }, expectVersion: 0 });
+    expect(again.ok).toBe(false);
+    await flushDataChanged();
+  });
+
+  it('caps refuse the write that crosses them', async () => {
+    const doc = await seedRecordsDoc();
+    const api = recordsApi(OWNER, doc);
+    const tooBig = await api.set({ collection: 'c', scope: 'shared', recordId: 'r', data: big(64 * 1024) });
+    expect(!tooBig.ok && tooBig.refusal.code).toBe('records_cap');
+    // 160 records of ~60 KB stay under 10 MB; the next 20 cross it.
+    for (let b = 0; b < 2; b++) {
+      const ok = await api.batch({
+        ops: Array.from({ length: 80 }, (_, i) => ({
+          verb: 'set' as const, collection: 'c', scope: 'shared' as const, recordId: `r${b}-${i}`, data: big(60_000),
+        })),
+      });
+      expect(ok.ok).toBe(true);
+    }
+    const crossing = await api.batch({
+      ops: Array.from({ length: 20 }, (_, i) => ({
+        verb: 'set' as const, collection: 'c', scope: 'shared' as const, recordId: `over-${i}`, data: big(60_000),
+      })),
+    });
+    expect(!crossing.ok && crossing.refusal.code).toBe('records_cap');
+    const page = await api.list({ collection: 'c', scope: 'shared', limit: 200 });
+    expect(page.ok && page.value.records.length).toBe(160);
+    await flushDataChanged();
+  });
+
+  it('personal records are invisible to others', async () => {
+    const doc = await seedRecordsDoc();
+    const mine = await recordsApi(VIEWER, doc).set({ collection: 'draft', scope: 'personal', recordId: 'd', data: { secret: 1 } });
+    expect(mine.ok).toBe(true);
+    for (const other of [OWNER, READER]) {
+      const api = recordsApi(other, doc);
+      const got = await api.get({ collection: 'draft', scope: 'personal', recordId: 'd' });
+      expect(got.ok && got.value.record).toBeNull();
+      const listed = await api.list({ collection: 'draft', scope: 'personal' });
+      expect(listed.ok && listed.value.records).toEqual([]);
+      const changes = await listRecordChanges(other, doc, {});
+      expect(changes.ok && changes.value.changes).toEqual([]);
+    }
+    const own = await listRecordChanges(VIEWER, doc, {});
+    expect(own.ok && own.value.changes).toHaveLength(1);
+    // The owner can't revert someone's personal change either.
+    const id = own.ok ? own.value.changes[0].id : 0;
+    const revert = await revertChange(id, OWNER);
+    expect(!revert.ok && revert.refusal.code).toBe('not_found');
+    // A commenter reads shared records but cannot write any.
+    const denied = await recordsApi(READER, doc).set({ collection: 'draft', scope: 'personal', recordId: 'r', data: {} });
+    expect(!denied.ok && denied.refusal.code).toBe('forbidden');
+  });
+
+  it('revert restores the before image', async () => {
+    const doc = await seedRecordsDoc();
+    const api = recordsApi(VIEWER, doc);
+    await api.set({ collection: 'votes', scope: 'shared', recordId: 'v', data: { optionId: 'a' } });
+    await api.set({ collection: 'votes', scope: 'shared', recordId: 'v', data: { optionId: 'b' } });
+    await api.set({ collection: 'votes', scope: 'shared', recordId: 'new', data: { optionId: 'c' } });
+    const log = await listRecordChanges(OWNER, doc, {});
+    if (!log.ok) throw new Error('no log');
+    const [, second, third] = log.value.changes;
+    expect(second).toMatchObject({ before: { optionId: 'a' }, after: { optionId: 'b' }, actorName: 'Bea' });
+
+    // A responder can't revert; the owner can.
+    expect((await revertChange(second.id, VIEWER)).ok).toBe(false);
+    expect((await revertChange(second.id, OWNER)).ok).toBe(true);
+    expect((await revertChange(third.id, OWNER)).ok).toBe(true);
+    const owner = recordsApi(OWNER, doc);
+    const v = await owner.get({ collection: 'votes', scope: 'shared', recordId: 'v' });
+    expect(v.ok && v.value.record).toMatchObject({ data: { optionId: 'a' }, version: 3 });
+    const gone = await owner.get({ collection: 'votes', scope: 'shared', recordId: 'new' });
+    expect(gone.ok && gone.value.record).toBeNull();
+    const after = await listRecordChanges(OWNER, doc, { since: third.id });
+    expect(after.ok && after.value.changes.map((c) => c.op)).toEqual(['set', 'delete']);
+    await flushDataChanged();
+  });
+
+  it('query filters, orders and pages', async () => {
+    const doc = await seedRecordsDoc();
+    const api = recordsApi(OWNER, doc);
+    await api.batch({
+      ops: [3, 1, 2, 4].map((n) => ({
+        verb: 'set' as const, collection: 'q', scope: 'shared' as const, recordId: `r${n}`, data: { n, even: n % 2 === 0 },
+      })),
+    });
+    const first = await api.query({ collection: 'q', scope: 'shared', where: { even: true }, orderBy: { key: 'n', dir: 'desc' }, limit: 1 });
+    if (!first.ok) throw new Error(first.refusal.message);
+    expect(first.value.records.map((r) => r.data.n)).toEqual([4]);
+    const second = await api.query({
+      collection: 'q', scope: 'shared', where: { even: true }, orderBy: { key: 'n', dir: 'desc' }, limit: 1, cursor: first.value.nextCursor!,
+    });
+    expect(second.ok && second.value.records.map((r) => r.data.n)).toEqual([2]);
+    expect(second.ok && second.value.nextCursor).toBeNull();
+    await flushDataChanged();
+  });
+});

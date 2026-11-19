@@ -564,3 +564,57 @@ export const docFiles = pgTable(
     byDoc: index('doc_files_document_id_idx').on(t.documentId),
   }),
 );
+
+// ── Shared records (per-document storage for pages and agents) ──────────
+// Not part of the Y.Doc and never tied to page versions: a republish or a
+// restore leaves them alone. `doc_record_changes` is the append-only audit and
+// undo log. Every write takes a per-document lock (records/store.ts), so change
+// ids follow commit order within a document.
+export const docRecords = pgTable(
+  'doc_records',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    collection: text('collection').notNull(),
+    recordId: text('record_id').notNull(),
+    scope: text('scope', { enum: ['shared', 'personal'] }).notNull(),
+    // Set for personal records (the viewer or agent they belong to); null for shared.
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    data: jsonb('data').notNull(),
+    version: integer('version').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text('updated_by').notNull().references(() => users.id),
+  },
+  (t) => ({
+    key: uniqueIndex('doc_records_key').on(
+      t.documentId,
+      t.collection,
+      t.scope,
+      sql`coalesce(${t.ownerUserId}, '')`,
+      t.recordId,
+    ),
+  }),
+);
+
+export const docRecordChanges = pgTable(
+  'doc_record_changes',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    collection: text('collection').notNull(),
+    recordId: text('record_id').notNull(),
+    scope: text('scope', { enum: ['shared', 'personal'] }).notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    op: text('op', { enum: ['set', 'update', 'delete'] }).notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    actorId: text('actor_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDoc: index('doc_record_changes_doc_idx').on(t.documentId, t.id),
+  }),
+);
