@@ -499,3 +499,43 @@ describe('DELETE /api/documents/:docId/collaborators/:userId', () => {
     });
   });
 });
+
+describe('agents and collaborators', () => {
+  const AGENT = {
+    id: 'agent_collab-test',
+    email: 'agent@agents.primer.invalid',
+    displayName: 'Claude (via User One)',
+    kind: 'agent' as const,
+    viaUserId: 'mock-user-1',
+  };
+
+  it("an agent's person is an owner of the agent's document and can revoke what the agent added", async () => {
+    await withMultiUserApp(async (_app, notifier) => {
+      await db.insert(users).values({ ...AGENT }).onConflictDoNothing();
+      const docId = uuidv7();
+      await db.insert(documents).values({ id: docId, title: 'T', uploaderId: AGENT.id });
+      const root = await mkdtemp(join(tmpdir(), 'primer-collab-agent-'));
+      try {
+        const agentApp = createApp({ storage: new FilesystemStorage(root), notifier, userResolver: async () => AGENT });
+        const add = await agentApp.request(`/api/documents/${docId}/collaborators`, {
+          method: 'POST',
+          headers: asUserJson('ignored'),
+          body: JSON.stringify({ userId: 'mock-user-2', role: 'editor' }),
+        });
+        expect(add.status).toBe(201);
+        expect(((await add.json()) as Collaborator).grantedBy).toBe(AGENT.id);
+
+        const personApp = createApp({ storage: new FilesystemStorage(root), notifier, userResolver: mockMultiResolver });
+        const del = await personApp.request(`/api/documents/${docId}/collaborators/mock-user-2`, {
+          method: 'DELETE',
+          headers: asUser('mock-user-1'),
+        });
+        expect(del.status).toBe(204);
+        const rows = await db.select().from(documentCollaborators).where(eq(documentCollaborators.documentId, docId));
+        expect(rows).toHaveLength(0);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+});
