@@ -417,7 +417,8 @@ function countBlocks(nodes: readonly PmNode[]): number {
 
 /** Blocks the batch's deletes and replacements would remove, subtrees
  *  included, counted on the live document (a missing target or bad range
- *  counts 0: that op conflicts). */
+ *  counts 0: that op conflicts). A subtree moved earlier in the batch may
+ *  sit inside a later removal, so it counts with the next one. */
 function removals(doc: Y.Doc, prepared: Prepared[]): number {
   const fragments = new Map<string, PmNode>();
   const live = (target: Target) => {
@@ -425,15 +426,21 @@ function removals(doc: Y.Doc, prepared: Prepared[]): number {
     return fragments.get(target.tabId)!;
   };
   let n = 0;
+  let moved = 0;
   for (const p of prepared) {
-    if (p.op === 'delete') {
+    if (p.op === 'move') {
       const at = findBlock(live(p.target), p.target.blockId);
-      if (at) n += countBlocks([at.node]);
+      if (at) moved += countBlocks([at.node]);
+    } else if (p.op === 'delete') {
+      const at = findBlock(live(p.target), p.target.blockId);
+      if (at) n += countBlocks([at.node]) + moved;
+      moved = 0;
     } else if (p.op === 'replaceRange') {
       const root = live(p.from);
       const at = findBlock(root, p.from.blockId);
       const range = at ? rangeOf(root, at, p.to.blockId) : null;
-      if (range) n += countBlocks(range.blocks);
+      if (range) n += countBlocks(range.blocks) + moved;
+      moved = 0;
     }
   }
   return n;

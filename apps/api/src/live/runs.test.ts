@@ -183,6 +183,25 @@ describe('agent runs', () => {
     expect(await removed()).toBe(LARGE_RUN_REMOVALS);
   });
 
+  it('a subtree moved into a replaced range in the same batch still counts', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    const kids = Array.from({ length: 50 }, (_, k) => paragraph(`x${k}`, `child ${k}`));
+    await seedBlocks(id, [paragraph('f', 'From'), paragraph('t', 'To'), { ...paragraph('x', 'Moved'), children: kids }]);
+    const run = await startedRun(id, agent);
+    const v = await versions(id, agent);
+
+    const out = await ops(id, agent, {
+      runId: run.id,
+      ops: [
+        { op: 'move', target: main('x'), at: main('f'), position: 'after', expectVersion: v.x },
+        { op: 'replaceRange', from: main('f'), to: main('t'), expectVersions: { f: v.f, x: v.x, t: v.t }, blocks: ['Gone'] },
+      ],
+    });
+    expect(out.outcomes.every((o) => o.refusal?.code === 'approval_required')).toBe(true);
+    expect((await markdownOf(id, agent)).length).toBe(53);
+  });
+
   it('ids planted from another document are refused and never touch it', async () => {
     const agent = await makeAgent();
     const a = await createLiveDoc();
