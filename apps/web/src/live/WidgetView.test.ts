@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import { anchorAt, applyLabels, parseSafeSvg } from './WidgetView.tsx';
+import { HOSTILE_VALUES } from '../../../api/src/widgets/hostile.testlib.ts';
 
 const SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">' +
@@ -55,6 +56,16 @@ describe('WidgetView', () => {
       '<div>not svg</div>',
     ]) {
       expect(parseSafeSvg(bad), bad).toBeNull();
+    }
+  });
+
+  it('every hostile attribute value refuses the widget', () => {
+    // Escaped in full, so the checker sees each value exactly (entity spellings
+    // the XML parser decodes are covered by 'only drawing reaches the page').
+    const escape = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    for (const [name, value] of HOSTILE_VALUES) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect ${name}="${escape(value)}"/></svg>`;
+      expect(parseSafeSvg(svg), `${name}="${value}"`).toBeNull();
     }
   });
 });

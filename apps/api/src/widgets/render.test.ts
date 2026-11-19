@@ -5,6 +5,8 @@ import { renderWidget, WIDGET_TOKENS, type WidgetRow } from './render.ts';
 import { runWidget } from './run.ts';
 import { serializeSvg, withLabels } from './serialize.ts';
 import { validateWidget } from './validate.ts';
+import { isWidgetAttributeValue } from '@polygonlabs/primer-api-types';
+import { HOSTILE_VALUES } from './hostile.testlib.ts';
 
 const FLOW = `export default function render({ tokens }) {
   const box = (x, label) => <rect x={x} y="40" width="140" height="48" rx="8" fill="none" stroke={tokens.axis} strokeWidth="1.25" />;
@@ -186,5 +188,17 @@ export default function render({ tokens }) {
     expect(await run('return [typeof fetch, typeof require, typeof process, typeof console].join();')).toEqual({
       tree: 'undefined,undefined,undefined,undefined',
     });
+  });
+
+  it('every hostile attribute value is refused, and good ones pass', () => {
+    for (const [name, value] of HOSTILE_VALUES) {
+      expect(isWidgetAttributeValue(name, value), `${name}="${value}"`).toBe(false);
+      const out = serializeSvg({ t: 'svg', p: { viewBox: '0 0 1 1' }, c: [{ t: 'rect', p: { [name]: value }, c: [] }] }, { colours: new Set(), rows: new Map([['a\\62 c', { id: 'x' }]]), textIds: new Set(), idPrefix: '' });
+      // Refused, or dropped where the tag doesn't take the attribute at all.
+      expect('errors' in out || !out.svg.includes(` ${name}=`), `${name}="${value}"`).toBe(true);
+    }
+    for (const [name, value] of [['mask', 'url(#m)'], ['marker-end', 'none'], ['fill', '#1f2328'], ['transform', 'translate(10, 20) rotate(-45) scale(1.5e0)'], ['d', 'M0 0L10 10z']]) {
+      expect(isWidgetAttributeValue(name!, value!), `${name}="${value}"`).toBe(true);
+    }
   });
 });

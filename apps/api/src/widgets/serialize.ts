@@ -1,4 +1,5 @@
 import { SVG_PRESENTATION_ATTRS, SVG_TAG_ATTRS, SVG_TAGS } from '../upload/sanitize.ts';
+import { isWidgetAttributeValue } from '@polygonlabs/primer-api-types';
 import type { WidgetError } from './parse.ts';
 import { RUN_LIMITS, type WidgetNode } from './run.ts';
 import { isColourKeyword } from './validate.ts';
@@ -104,8 +105,8 @@ export function serializeSvg(tree: WidgetNode, ctx: SerializeContext): Serialize
         continue;
       }
       let value = rawValue === true ? '' : String(rawValue);
-      if (!safeValue(value)) {
-        errors.push(`${name} on <${tag}> has "${value}": only url(#id) references inside the widget, and no escapes.`);
+      if (!isWidgetAttributeValue(name, value)) {
+        errors.push(`${name} on <${tag}> has "${value}", which ${name} doesn't allow (references only as url(#id), no CSS functions or escapes).`);
         continue;
       }
       if (COLOUR_ATTRS.has(name) && !isColourKeyword(value) && !ctx.colours.has(value)) {
@@ -170,16 +171,6 @@ export function serializeSvg(tree: WidgetNode, ctx: SerializeContext): Serialize
 }
 
 class Bounds extends Error {}
-
-/**
- * An attribute value that can't reach outside the widget: no backslash (CSS
- * escapes like `\75 rl(`), no character reference (`&#117;rl(`), and a
- * `url(` in any spelling (`URL(`, `url (`) only as exactly `url(#id)`.
- */
-export function safeValue(value: string): boolean {
-  if (value.includes('\\') || /&#/.test(value)) return false;
-  return !/url\s*\(/i.test(value) || /^url\(#[A-Za-z0-9_-]+\)$/.test(value.trim());
-}
 
 function fail(messages: string[]): { errors: WidgetError[] } {
   return {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { yXmlFragmentToProsemirrorJSON } from 'y-prosemirror';
-import type { DataPointAnchor, Target, ThreadDTO, ThreadsListResponse, WidgetPartAnchor } from '@polygonlabs/primer-api-types';
+import { isWidgetAttributeValue, type DataPointAnchor, type Target, type ThreadDTO, type ThreadsListResponse, type WidgetPartAnchor } from '@polygonlabs/primer-api-types';
 import type { WidgetBlockProps } from '@primer/blocks';
 import { api } from '../lib/fetch.ts';
 import { t } from '../i18n/index.ts';
@@ -90,16 +90,6 @@ const TAG_ATTRS: Record<string, string[]> = {
   filter: ['x', 'y', 'width', 'height', 'filterUnits', 'primitiveUnits'],
 };
 
-const PAINT = new Set(['fill', 'stroke', 'stop-color']);
-
-/** The server's value rule (widgets/serialize.ts `safeValue`): no backslash
- *  or character reference, and `url(` in any spelling only as `url(#id)`.
- *  Values are checked after XML decoding, so an entity spelling is caught too. */
-export function safeValue(value: string): boolean {
-  if (value.includes('\\') || /&#/.test(value)) return false;
-  return !/url\s*\(/i.test(value) || /^url\(#[\w-]+\)$/.test(value.trim());
-}
-
 /**
  * The widget SVG as a checked element tree, or null. The server allowlists
  * every render (apps/api/src/widgets/serialize.ts); this second check keeps
@@ -125,8 +115,7 @@ export function parseSafeSvg(text: string): Element | null {
       if (a.name === 'xmlns' && el === root) continue;
       if (a.namespaceURI !== null || (!allowed.includes(a.name) && !PRESENTATION.includes(a.name))) return false;
       if (a.name === 'href' && !/^#[\w-]+$/.test(a.value)) return false;
-      if (!safeValue(a.value)) return false;
-      if (PAINT.has(a.name) && !/^(none|transparent|currentColor|#[0-9a-fA-F]{3,8}|url\(#[\w-]+\))$/.test(a.value.trim())) return false;
+      if (!isWidgetAttributeValue(a.name, a.value)) return false;
     }
     return [...el.childNodes].every(ok);
   };
@@ -168,7 +157,8 @@ export function WidgetView(props: PageViewContext & { blockId: string; props: Wi
     let live = true;
     void api(`/api/widgets/${encodeURIComponent(widgetId)}/image?theme=${theme}&v=${hash}`).then(async (res) => {
       if (!live) return;
-      const safe = res.ok ? parseSafeSvg(await res.text()) : null;
+      const raw = res.ok ? await res.text() : '';
+      const safe = res.ok ? parseSafeSvg(raw) : null;
       setFailed(safe === null);
       setSvg(safe);
     });

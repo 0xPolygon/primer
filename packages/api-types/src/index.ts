@@ -166,6 +166,39 @@ export function anchorLabel(anchor: ThreadAnchor): string {
   }
 }
 
+// ───────────────────── Widget SVG attribute values ─────────────────────
+// One positive grammar per attribute, used by the server's output check
+// (apps/api/src/widgets/serialize.ts) and the browser's check before a widget
+// enters the page (apps/web/src/live/WidgetView.tsx). A value either matches
+// its attribute's grammar or the widget is refused: no denylist of CSS
+// functions to keep up to date.
+
+const LOCAL_REF = 'url\\(#[A-Za-z0-9_-]+\\)';
+const NUMBER = '[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?';
+const TRANSFORM_FN = `(?:matrix|translate|scale|rotate|skewX|skewY)\\s*\\(\\s*(?:${NUMBER}(?:\\s*,?\\s*${NUMBER})*)?\\s*\\)`;
+
+const WIDGET_VALUE_GRAMMAR: Record<string, RegExp> = {
+  ...Object.fromEntries(
+    ['mask', 'clip-path', 'filter', 'marker-start', 'marker-mid', 'marker-end'].map((name) => [name, new RegExp(`^(?:none|${LOCAL_REF})$`)]),
+  ),
+  ...Object.fromEntries(
+    ['fill', 'stroke', 'stop-color'].map((name) => [name, new RegExp(`^(?:none|transparent|currentColor|#[0-9a-fA-F]{3,8}|${LOCAL_REF})$`)]),
+  ),
+  transform: new RegExp(`^\\s*(?:${TRANSFORM_FN}\\s*,?\\s*)*$`),
+};
+
+/**
+ * Whether a widget SVG attribute value is allowed: references only as
+ * `url(#id)` where an attribute takes one, paint as a colour, `none`,
+ * `currentColor` or `url(#id)`, transforms as numbers only; any other
+ * attribute holds no `(`, backslash or character reference at all.
+ */
+export function isWidgetAttributeValue(name: string, value: string): boolean {
+  const grammar = WIDGET_VALUE_GRAMMAR[name];
+  if (grammar) return grammar.test(value.trim());
+  return !/[(\\]|&#/.test(value);
+}
+
 /** Validates any thread anchor, legacy or live. */
 export function isValidAnchor(v: unknown): v is ThreadAnchor {
   return isTextRangeAnchor(v) || isElementPathAnchor(v) || isLiveAnchor(v);
