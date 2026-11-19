@@ -3,7 +3,6 @@ import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
 import { VersioningSidebar } from '@blocknote/react/versioning';
 import { BlockNoteView } from '@blocknote/ariakit';
 import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
-import * as locales from '@blocknote/core/locales';
 import { commentMarkExtension, primerSchema } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
@@ -11,6 +10,8 @@ import type { DocFileUploadResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
+import { editorDictionary } from '../i18n/index.ts';
+import { ChipMenus } from './ChipMenus.tsx';
 import { routeMarkdownPasteToServer } from './paste.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
 import { TabStrip, useTabs } from './TabStrip.tsx';
@@ -75,7 +76,7 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, onOpenL
         fragment: live.doc.getXmlFragment(tabFragmentName(tabId)),
         user: { name: userName, color: colorFor(userName) },
       },
-      dictionary: dictionaryFor(typeof navigator === 'undefined' ? 'en' : navigator.language),
+      dictionary: editorDictionary(),
       uploadFile: async (file: File) => {
         const form = new FormData();
         form.append('file', file);
@@ -104,7 +105,8 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, onOpenL
           History
         </button>
       </div>
-      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} className="flex min-h-0 flex-1">
+      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} slashMenu={false} className="flex min-h-0 flex-1">
+        <ChipMenus editor={editor} />
         <div className="min-w-0 flex-1 overflow-y-auto py-4">
           <BlockNoteViewEditor />
         </div>
@@ -124,9 +126,4 @@ function colorFor(name: string): string {
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return COLORS[Math.abs(hash) % COLORS.length]!;
-}
-
-function dictionaryFor(language: string) {
-  const all = locales as unknown as Record<string, typeof locales.en>;
-  return all[language.toLowerCase().split('-')[0] ?? 'en'] ?? locales.en;
 }

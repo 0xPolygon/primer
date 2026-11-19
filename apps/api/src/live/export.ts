@@ -190,8 +190,8 @@ export function plainText(block: PrimerBlock): string {
       }
       return '';
     }
-    return (content as { type: string; text?: string; content?: unknown }[])
-      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : ''))
+    return (content as { type: string; text?: string; content?: unknown; props?: Record<string, string> }[])
+      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : chipText(n)))
       .join('');
   };
   const own = isSource(block) ? String((block.props as { markdown: string }).markdown).replace(/\n+$/, '') : inline(block.content);
@@ -224,6 +224,14 @@ html:not([data-theme]) a{color:#c4b5fd}
 html:not([data-theme]) td,html:not([data-theme]) th{border-color:#404040}
 html:not([data-theme]) .primer-chip{background:#3b2a6b;color:#ddd6fe}
 }`;
+
+/** What a chip reads as in text: `@name`, the date, the chosen value. */
+function chipText(node: { type: string; props?: Record<string, string> }): string {
+  if (node.type === 'mention') return `@${node.props?.name ?? ''}`;
+  if (node.type === 'date') return node.props?.date ?? '';
+  if (node.type === 'dropdown') return node.props?.value ?? '';
+  return '';
+}
 
 let css: string | null = null;
 function blocknoteCss(): string {

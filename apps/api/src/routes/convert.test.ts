@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { _resetRateLimiterForTests } from '../lib/rateLimiter.ts';
 import type { ConvertMarkdownResponse } from '@polygonlabs/primer-api-types';
 import { createApp } from '../app.ts';
 import { importMarkdown, type ImportedBlock } from '../live/import.ts';
@@ -32,5 +33,25 @@ describe('POST /api/convert/markdown', () => {
     expect(blocks[0]).toMatchObject({ type: 'source', props: { markdown: '---\ntitle: X\n---\n' } });
     expect((await post({ markdown: 3 })).status).toBe(400);
     expect((await post({ markdown: 'x'.repeat(1_000_001) })).status).toBe(413);
+  });
+
+  it('an oversized body is refused before it is parsed', async () => {
+    const spy = vi.spyOn(Request.prototype, 'json');
+    const res = await app.request('/api/convert/markdown', {
+      method: 'POST',
+      headers: { ...CSRF_HEADERS, 'content-type': 'application/json', 'content-length': String(4_100_000) },
+      body: 'x'.repeat(4_100_000),
+    });
+    expect(res.status).toBe(413);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('is rate limited per user', async () => {
+    _resetRateLimiterForTests();
+    let last = 200;
+    for (let i = 0; i < 61; i++) last = (await post({ markdown: 'hi' })).status;
+    expect(last).toBe(429);
+    _resetRateLimiterForTests();
   });
 });

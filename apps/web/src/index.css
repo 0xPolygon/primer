@@ -3,3 +3,24 @@
 
 :root { color-scheme: light; }
 html.dark { color-scheme: dark; }
+
+/* Inline chips (mentions, dates, dropdowns) in the live editor. */
+.primer-chip {
+  display: inline-block;
+  border-radius: 4px;
+  background: #ede9fe;
+  color: #4c1d95;
+  padding: 0 4px;
+}
+.dark .primer-chip {
+  background: #3b2a6b;
+  color: #ddd6fe;
+}
+.primer-chip input,
+.primer-chip select {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  border: 0;
+  padding: 0;
+}

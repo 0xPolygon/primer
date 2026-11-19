@@ -1,0 +1,9 @@
+{
+  "chips.group": "Inline",
+  "chips.date": "Date",
+  "chips.dateHint": "Insert a date chip",
+  "chips.dropdown": "Dropdown",
+  "chips.dropdownHint": "Insert a value picked from a list",
+  "chips.optionsPrompt": "Options, separated by commas",
+  "chips.optionsDefault": "Todo, Doing, Done"
+}
