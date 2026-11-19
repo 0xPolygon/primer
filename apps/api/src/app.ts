@@ -122,7 +122,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerCompanionRoute(app);
   registerMermaidAssetRoute(app);
   registerThreadRoutes(app, deps);
-  registerLiveRoutes(app);
+  registerLiveRoutes(app, deps);
   registerRunRoutes(app);
   registerSuggestionRoutes(app);
   registerCommentRoutes(app, deps);

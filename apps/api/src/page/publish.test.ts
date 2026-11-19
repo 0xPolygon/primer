@@ -8,14 +8,13 @@ import { createApp } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, suggestions, versions } from '../db/schema.ts';
 import { publishDocument, type PublishInput } from '../lib/publish.ts';
-import { blockVersion, findBlock } from '../live/blocks.ts';
 import { makeAgent, withLiveDoc } from '../live/live.testlib.ts';
 import { applyOps } from '../live/ops.ts';
+import { getLiveDoc } from '../live/read.ts';
 import { originFor } from '../live/origin.ts';
 import { applyPlan } from '../live/pipeline.ts';
 import { fragmentFor, pageBlocks, reachableFragments } from '../live/reach.ts';
 import { serverEditor } from '../live/editor.ts';
-import { pmDocOf } from '../live/sources.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import type { Storage } from '../storage/types.ts';
@@ -175,10 +174,14 @@ describe('page documents', () => {
         annotation: true,
         edits: [{ target, inverse: false, build: (tr, at) => void tr.addMark(at!.pos + 2, at!.pos + 6, comment) }],
       });
-      const version = await withLiveDoc(r.documentId, (doc) => {
-        const at = findBlock(pmDocOf(fragmentFor(doc, target)), page.blockId);
-        return blockVersion(at!.node);
-      });
+      // The agent reads its page: the source with pids, and each pid's text (fenced) and version.
+      const read = await getLiveDoc(r.documentId, agent, { format: 'markdown', storage });
+      if (!read.ok) throw new Error(read.refusal.message);
+      const listed = read.value.pages![0]!;
+      expect(listed.source).toContain('<p data-pid="p2">Ship the editor in May.</p>');
+      const p2 = listed.texts.find((t) => t.target.pid === 'p2')!;
+      expect(p2.text).toMatch(/^<untrusted-pagetext-[0-9a-f]{16}>\nShip the editor in May.\n<\/untrusted-pagetext-[0-9a-f]{16}>$/);
+      const version = p2.version;
       const out = await applyOps(r.documentId, agent, { ops: [{ op: 'update', target, expectVersion: version, block: 'Ship the editor in early May.' }] });
       expect(out.ok && out.value.outcomes[0]!.status).toBe('applied');
       expect(await text(r.documentId, 'p2')).toBe('Ship the editor in early May.');

@@ -575,6 +575,17 @@ export interface LiveDocDTO {
   blocks: LiveBlockDTO[];
   deletedIds?: string[];
   viewer?: ViewerContext;
+  /** The tab's HTML pages: each page block's source (as published, with its
+   *  `data-pid`s: edit it and republish with the pids intact) and the current
+   *  text of each pid, people's text fenced as untrusted data, with the
+   *  version an `update` of that pid expects. */
+  pages?: LivePageDTO[];
+}
+
+export interface LivePageDTO {
+  target: Target;
+  source: string;
+  texts: { target: Target; text: string; version: string }[];
 }
 
 /** A block an agent writes: Markdown (several top-level nodes make several
