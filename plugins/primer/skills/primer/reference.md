@@ -209,7 +209,7 @@ Per-document storage for pages and agents (like Claude Artifacts storage). Recor
 
 #### Pages that read records
 
-A page opts in with `<meta name="primer-records" content="read">` in its `<head>`. It is then served with no remote scripts, styles, fonts or images (inline and `blob:` only), its links do not open outside Primer, and its script gets `window.primer.records`: `get`, `list`, `query`, `set`, `update`, `delete`, `batch` and `changesSince(changeId)`, each `(args, { signal }) => Promise`. The page names only `{ collection, scope, recordId?, data?, where?, orderBy?, limit?, cursor?, expectVersion? }`: the host binds the document and the viewer. `window.addEventListener('primer:records-changed', e => …)` fires with `{ collections, toChangeId }` when others change shared records.
+A page opts in with `<meta name="primer-records" content="read">` in its `<head>`. It is then served with no remote scripts, styles, fonts or images (inline and `blob:` only), its links do not open outside Primer, and its script gets `window.primer.records`: `get`, `list`, `query`, `set`, `update`, `delete`, `batch` and `changesSince(changeId)`, each `(args, { signal }) => Promise`. The page names only `{ collection, scope, recordId?, data?, where?, orderBy?, limit?, cursor?, expectVersion? }`: the host binds the document and the viewer. `window.primer.records` exists once Primer's deferred companion script has run, so call it from a `DOMContentLoaded` handler or later; calls made before the host's handshake wait for it. `window.addEventListener('primer:records-changed', e => …)` fires with `{ collections, toChangeId }` when others change shared records, and with empty `collections` when the page should re-read everything (after a reconnect).
 
 ## Auth model
 

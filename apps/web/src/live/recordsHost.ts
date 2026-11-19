@@ -66,6 +66,8 @@ export function createRecordsHost(binding: PageBinding, deps: RecordsHostDeps): 
   let post: ((msg: OutboundProtocolMessage) => void) | null = null;
   let stream: EventSourceLike | null = null;
   let loads = 0;
+  /** The last change id the page was told about, from the feed. */
+  let lastChangeId: number | null = null;
 
   const unavailable = (callId: string) =>
     post?.({
@@ -93,8 +95,34 @@ export function createRecordsHost(binding: PageBinding, deps: RecordsHostDeps): 
       post = p;
       if (!capability || capability.revoked || stream) return;
       // Others' shared-record writes arrive as coalesced primer.data.changed
-      // events (never our own viewer's). The page catches up after a gap
-      // with changesSince, so starting at the stream's head is enough.
+      // events (never our own viewer's). The stream starts at the server's
+      // head, so every (re)open closes the gap since: with a known change id
+      // the host reads the changes after it and reports any; before the first
+      // event it tells the page to re-read everything (`collections: []`).
+      const cap = capability;
+      const catchUp = async () => {
+        if (cap.revoked) return;
+        if (lastChangeId === null) {
+          post?.({ type: 'records_changed', collections: [], toChangeId: 0 });
+          return;
+        }
+        try {
+          const res = await deps.fetchImpl(
+            `/api/documents/${encodeURIComponent(cap.documentId)}/records/changes?since=${lastChangeId}&limit=200`,
+          );
+          if (!res.ok || cap.revoked) return;
+          const body = (await res.json()) as { changes: { collection: string }[]; toChangeId: number; hasMore: boolean };
+          if (body.changes.length === 0 && !body.hasMore) return;
+          lastChangeId = Math.max(lastChangeId, body.toChangeId);
+          post?.({
+            type: 'records_changed',
+            collections: body.hasMore ? [] : [...new Set(body.changes.map((c) => c.collection))].sort(),
+            toChangeId: body.toChangeId,
+          });
+        } catch {
+          // The next open tries again.
+        }
+      };
       stream = deps.eventSourceFactory(
         `/api/documents/${encodeURIComponent(capability.documentId)}/events/stream?namespace=${PRIMER_EVENT_NAMESPACE}&type=data.changed`,
       );
@@ -108,8 +136,10 @@ export function createRecordsHost(binding: PageBinding, deps: RecordsHostDeps): 
         }
         const payload = row.payload as PrimerDataChangedPayload;
         if (!Array.isArray(payload?.collections) || typeof payload.to_change_id !== 'number') return;
+        lastChangeId = Math.max(lastChangeId ?? 0, payload.to_change_id);
         post?.({ type: 'records_changed', collections: payload.collections, toChangeId: payload.to_change_id });
       };
+      stream.onopen = () => void catchUp();
     },
 
     handle(msg) {

@@ -119,8 +119,9 @@ export interface MsgRecordsResult {
   value?: unknown;
   refusal?: Refusal;
 }
-/** Others changed shared records (a `primer.data.changed` event). Pages
- *  catch up with `changesSince` after a reconnect. */
+/** Others changed shared records (a `primer.data.changed` event, or the
+ *  host's catch-up when its feed (re)connects). Empty `collections` means
+ *  anything may have changed: re-read what the page shows. */
 export interface MsgRecordsChanged {
   type: 'records_changed';
   collections: string[];

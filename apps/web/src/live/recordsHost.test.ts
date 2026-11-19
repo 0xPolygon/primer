@@ -16,7 +16,7 @@ function harness(binding: Parameters<typeof createRecordsHost>[0]) {
   const streams: (EventSourceLike & { url: string; closed: boolean })[] = [];
   const fetchImpl = vi.fn(async (url: string) => {
     fetched.push(url);
-    if (url.includes('/records/changes')) return json({ changes: [{ id: 7 }], toChangeId: 7, hasMore: false });
+    if (url.includes('/records/changes')) return json({ changes: [{ id: 7, collection: 'tally' }], toChangeId: 7, hasMore: false });
     return json({ records: [], nextCursor: null });
   });
   const host = createRecordsHost(binding, {
@@ -81,13 +81,25 @@ describe('records host', () => {
 
   it('records_changed after reconnect is caught up via changesSince', async () => {
     const h = harness(RECORDS);
-    expect(h.streams[0].url).toBe(`/api/documents/${DOC}/events/stream?namespace=primer&type=data.changed`);
-    h.streams[0].onmessage?.({ data: JSON.stringify({ id: 3, payload: { document_id: DOC, collections: ['votes'], from_change_id: 4, to_change_id: 5 } }) });
-    expect(h.posted).toEqual([{ type: 'records_changed', collections: ['votes'], toChangeId: 5 }]);
-    // After a gap the page asks for everything since the last change it saw.
+    const feed = h.streams[0];
+    expect(feed.url).toBe(`/api/documents/${DOC}/events/stream?namespace=primer&type=data.changed`);
+    // First open: nothing seen yet, so the page re-reads everything.
+    feed.onopen?.({});
+    expect(h.posted).toEqual([{ type: 'records_changed', collections: [], toChangeId: 0 }]);
+    feed.onmessage?.({ data: JSON.stringify({ id: 3, payload: { document_id: DOC, collections: ['votes'], from_change_id: 4, to_change_id: 5 } }) });
+    expect(h.posted[1]).toEqual({ type: 'records_changed', collections: ['votes'], toChangeId: 5 });
+
+    // The feed drops and reconnects: the host reads what changed meanwhile.
+    feed.onerror?.({});
+    feed.onopen?.({});
+    await vi.waitFor(() => expect(h.posted).toHaveLength(3));
+    expect(h.fetched).toEqual([`/api/documents/${DOC}/records/changes?since=5&limit=200`]);
+    expect(h.posted[2]).toEqual({ type: 'records_changed', collections: ['tally'], toChangeId: 7 });
+
+    // The page catches up itself through changesSince, bound to its document.
     h.call('c1', 'changesSince', { changeId: 5, documentId: 'other' });
-    await vi.waitFor(() => expect(h.posted).toHaveLength(2));
-    expect(h.fetched).toEqual([`/api/documents/${DOC}/records/changes?since=5`]);
-    expect(h.posted[1]).toMatchObject({ callId: 'c1', ok: true, value: { toChangeId: 7 } });
+    await vi.waitFor(() => expect(h.posted).toHaveLength(4));
+    expect(h.fetched[1]).toBe(`/api/documents/${DOC}/records/changes?since=5`);
+    expect(h.posted[3]).toMatchObject({ callId: 'c1', ok: true, value: { toChangeId: 7 } });
   });
 });
