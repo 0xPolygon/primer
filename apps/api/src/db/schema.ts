@@ -691,3 +691,25 @@ export const docDecisions = pgTable(
     pk: primaryKey({ columns: [t.documentId, t.blockId] }),
   }),
 );
+
+/**
+ * Mentions already announced: one row per (block, person) a mention chip in a
+ * live document names. Kept from the document by live/mentions.ts so each
+ * mention notifies once; rebuildable, never authority.
+ */
+export const docMentions = pgTable(
+  'doc_mentions',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    blockId: text('block_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.documentId, t.blockId, t.userId] }),
+  }),
+);

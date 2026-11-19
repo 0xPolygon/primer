@@ -1,5 +1,5 @@
 {
-  "id": "927817e6-2c3c-49e6-a1d4-669501c02588",
+  "id": "d948c26f-b5e0-43b3-b06f-0fc86446cfc6",
   "prevId": "7a9819db-fdfb-4b5f-8ec9-d6dd1333ff43",
   "version": "7",
   "dialect": "postgresql",
@@ -587,6 +587,80 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.doc_mentions": {
+      "name": "doc_mentions",
+      "schema": "",
+      "columns": {
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "block_id": {
+          "name": "block_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "doc_mentions_document_id_documents_id_fk": {
+          "name": "doc_mentions_document_id_documents_id_fk",
+          "tableFrom": "doc_mentions",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "doc_mentions_user_id_users_id_fk": {
+          "name": "doc_mentions_user_id_users_id_fk",
+          "tableFrom": "doc_mentions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "doc_mentions_document_id_block_id_user_id_pk": {
+          "name": "doc_mentions_document_id_block_id_user_id_pk",
+          "columns": [
+            "document_id",
+            "block_id",
+            "user_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
