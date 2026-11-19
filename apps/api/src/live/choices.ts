@@ -65,7 +65,8 @@ type Option = { id: string; label: string };
 
 function optionsOf(block: PrimerBlock): Option[] {
   return (block.children as unknown as PrimerBlockLike[])
-    .filter((c) => c.type === 'choiceOption')
+    // Ids come from the client-writable document; one that isn't a block id is no option.
+    .filter((c) => c.type === 'choiceOption' && validBlockId(c.id))
     .map((c) => ({ id: c.id, label: optionLabel(c as never) }));
 }
 
@@ -154,7 +155,10 @@ async function decisionFor(documentId: string, choiceId: string, choice: { props
 }
 
 /** The field names of the register's DTOs, and the fields whose string Primer
- *  built or validated itself. Everything else an agent reads from a decision
+ *  built or validated itself (a field is plain only if every producer
+ *  validates it: option and block ids are checked as block ids where they are
+ *  read from the document, tab ids as tab ids, `url` and `docId` in
+ *  `cleanEvidence`, the rest are built here or by the database). Everything else an agent reads from a decision
  *  (keys included) is fenced. */
 const DECISION_FIELDS = {
   keys: new Set([
@@ -388,7 +392,7 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
   if (!access.ok) return access;
   const choices = await withLiveDocument(documentId, (doc) =>
     [...liveBlocks(doc)]
-      .filter((e) => e.block.type === 'choice' && validBlockId(e.block.id))
+      .filter((e) => e.block.type === 'choice' && validBlockId(e.block.id) && /^[\w-]{1,64}$/.test(e.tabId))
       .map((e) => ({ tabId: e.tabId, id: e.block.id, props: e.block.props as Record<string, string>, options: optionsOf(e.block) })),
   );
   const recorded = await decisionsOf(documentId, choices.map((c) => c.id));
