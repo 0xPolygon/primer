@@ -4,13 +4,16 @@
 //   option's id is its block id. Choices live in the document.
 // - Votes are shared records in `primer.choice/<choiceId>`, one per voter,
 //   keyed by the voter's id. Only people vote, through `vote` here, which
-//   forces the record id to the caller. The generic records verbs could still
-//   write that collection, so a vote counts only when the record's last writer
-//   is the voter it is keyed by and it names a current option.
-// - The decision lives in the choice block's props, written only by `pick`,
-//   which admits people with edit rights, and announced as `decision.made`.
-//   Agents may `propose` a pick (the `proposed*` props), never make it.
-// - The register is a read-time projection over the choice blocks: no table.
+//   forces the record id to the caller; the general records verbs never write
+//   `primer.` collections. A vote counts only when its record was last written
+//   by the person it is keyed by and names a current option.
+// - The decision is a `doc_decisions` row, written only by `pick` (people with
+//   edit rights) in the same transaction as its `decision.made` event. The
+//   block's decision props are a display mirror for exports; nothing reads
+//   them back, since the document is client-writable. Agents may `propose` a
+//   pick (the `proposed*` props), never make it.
+// - The register is a read-time projection over the choice blocks, joined
+//   with their decisions: a choice deleted from the document leaves it.
 import {
   MAX_CHOICE_LIST,
   MAX_CHOICE_OPTIONS,
@@ -26,8 +29,12 @@ import {
   type ProposePickRequest,
   type Refusal,
 } from '@polygonlabs/primer-api-types';
-import { optionLabel, parseEvidence, parseOpenQuestions } from '@primer/blocks';
+import { optionLabel } from '@primer/blocks';
+import type { ChoiceDecisionDTO } from '@polygonlabs/primer-api-types';
+import { sql } from 'drizzle-orm';
 import type { AuthUser } from '../app.ts';
+import { db } from '../db/client.ts';
+import { actorNameOf } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { recordsApi } from '../records/store.ts';
 import {
@@ -70,27 +77,56 @@ async function readChoice(documentId: string, choiceId: string) {
 
 // ───────────────────────── Votes ─────────────────────────
 
-/** Votes per current option: a record counts only when its last writer is
- *  the voter it is keyed by (see the module comment). */
-async function countVotes(actor: AuthUser, documentId: string, choiceId: string, options: Option[]): Promise<Result<ChoiceTallyResponse>> {
-  const api = recordsApi(actor, documentId);
-  const valid = new Set(options.map((o) => o.id));
+/** Votes per current option: a record counts only when it was last written
+ *  by the person it is keyed by (see the module comment). */
+async function countVotes(actor: AuthUser, documentId: string, choiceId: string, options: Option[]): Promise<ChoiceTallyResponse> {
+  const rows = (await db.execute(sql`
+    SELECT r.record_id AS "voterId", r.data->>'optionId' AS "optionId"
+      FROM doc_records r JOIN users u ON u.id = r.updated_by
+     WHERE r.document_id = ${documentId} AND r.collection = ${choiceVotesCollection(choiceId)}
+       AND r.scope = 'shared' AND r.record_id = r.updated_by AND u.kind = 'person'
+  `)) as unknown as { voterId: string; optionId: string | null }[];
   const counts: Record<string, number> = Object.fromEntries(options.map((o) => [o.id, 0]));
   let mine: string | null = null;
-  let cursor: string | undefined;
-  for (let page = 0; page < 50; page++) {
-    const out = await api.list({ collection: choiceVotesCollection(choiceId), scope: 'shared', limit: 200, cursor });
-    if (!out.ok) return out;
-    for (const r of out.value.records) {
-      const optionId = r.data.optionId;
-      if (r.recordId !== r.updatedBy || typeof optionId !== 'string' || !valid.has(optionId)) continue;
-      counts[optionId] = (counts[optionId] ?? 0) + 1;
-      if (r.recordId === actor.id) mine = optionId;
-    }
-    if (!out.value.nextCursor) break;
-    cursor = out.value.nextCursor;
+  for (const r of rows) {
+    if (!r.optionId || !(r.optionId in counts)) continue;
+    counts[r.optionId]! += 1;
+    if (r.voterId === actor.id) mine = r.optionId;
   }
-  return { ok: true, value: { counts, mine } };
+  return { counts, mine, decision: null };
+}
+
+/** Decisions recorded for these choices, keyed by block id. */
+async function decisionsOf(documentId: string, choiceIds: string[]): Promise<Map<string, ChoiceDecisionDTO>> {
+  if (choiceIds.length === 0) return new Map();
+  const rows = (await db.execute(sql`
+    SELECT d.block_id AS "blockId", d.option_id AS "optionId", d.rationale, d.evidence, d.open_questions AS "openQuestions",
+           d.decided_by AS "decidedBy", ${actorNameOf('u')} AS "decidedByName", d.decided_at AS "decidedAt"
+      FROM doc_decisions d JOIN users u ON u.id = d.decided_by
+     WHERE d.document_id = ${documentId} AND d.block_id IN ${sql`(${sql.join(choiceIds.map((id) => sql`${id}`), sql`, `)})`}
+  `)) as unknown as (Omit<ChoiceDecisionDTO, 'label' | 'decidedAt'> & { blockId: string; decidedAt: Date | string })[];
+  return new Map(
+    rows.map((r) => [
+      r.blockId,
+      {
+        optionId: r.optionId,
+        label: '',
+        rationale: r.rationale,
+        evidence: r.evidence,
+        openQuestions: r.openQuestions,
+        decidedBy: r.decidedBy,
+        decidedByName: r.decidedByName,
+        decidedAt: (r.decidedAt instanceof Date ? r.decidedAt : new Date(r.decidedAt)).toISOString(),
+      },
+    ]),
+  );
+}
+
+/** A choice's decision, when its option is still one of the choice's options. */
+async function decisionFor(documentId: string, choiceId: string, options: Option[]): Promise<ChoiceDecisionDTO | null> {
+  const d = (await decisionsOf(documentId, [choiceId])).get(choiceId);
+  const option = d && options.find((o) => o.id === d.optionId);
+  return d && option ? { ...d, label: option.label } : null;
 }
 
 export async function choiceTally(actor: AuthUser, documentId: string, choiceId: string): Promise<Result<ChoiceTallyResponse>> {
@@ -99,7 +135,8 @@ export async function choiceTally(actor: AuthUser, documentId: string, choiceId:
   if (!access.ok) return access;
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
-  return countVotes(actor, documentId, choiceId, choice.options);
+  const tally = await countVotes(actor, documentId, choiceId, choice.options);
+  return { ok: true, value: { ...tally, decision: await decisionFor(documentId, choiceId, choice.options) } };
 }
 
 /** Records the caller's vote (`optionId: null` withdraws it). People only. */
@@ -113,15 +150,15 @@ export async function vote(actor: AuthUser, documentId: string, choiceId: string
   if (!access.ok) return access;
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
-  if (choice.props.decidedOptionId) return refuse('choice_decided', 'This choice is decided.');
+  if (await decisionFor(documentId, choiceId, choice.options)) return refuse('choice_decided', 'This choice is decided.');
   if (optionId !== null && !choice.options.some((o) => o.id === optionId)) {
     return refuse('bad_request', `Option ${optionId} is not an option of this choice.`);
   }
-  const api = recordsApi(actor, documentId);
+  const api = recordsApi(actor, documentId, { reserved: true });
   const target = { collection: choiceVotesCollection(choiceId), scope: 'shared' as const, recordId: actor.id };
   const out = optionId === null ? await api.delete(target) : await api.set({ ...target, data: { optionId } });
   if (!out.ok) return out;
-  return countVotes(actor, documentId, choiceId, choice.options);
+  return { ok: true, value: await countVotes(actor, documentId, choiceId, choice.options) };
 }
 
 // ───────────────────────── Pick and propose ─────────────────────────
@@ -151,12 +188,11 @@ function checkQuestions(raw: unknown): string | null {
 }
 
 /** The pipeline-side check of a choice: still a choice, the option still one
- *  of its options, and (unless re-picking) not decided. */
-function choiceCheck(optionId: string, allowDecided: boolean) {
-  return (block: { type: string; attrs: Record<string, unknown>; childIds: string[] }): Refusal | null => {
+ *  of its options. */
+function choiceCheck(optionId: string) {
+  return (block: { type: string; childIds: string[] }): Refusal | null => {
     if (block.type !== 'choice') return refuse('not_found', 'Choice not found.').refusal;
     if (!block.childIds.includes(optionId)) return refuse('bad_request', `Option ${optionId} is not an option of this choice.`).refusal;
-    if (!allowDecided && block.attrs.decidedOptionId) return refuse('choice_decided', 'This choice is decided.').refusal;
     return null;
   };
 }
@@ -191,7 +227,7 @@ export async function pick(actor: AuthUser, documentId: string, choiceId: string
     actor,
     documentId,
     { tabId: choice.tabId, blockId: choiceId },
-    choiceCheck(req.optionId, true),
+    choiceCheck(req.optionId),
     {
       decidedOptionId: req.optionId,
       rationale: req.rationale ?? '',
@@ -205,7 +241,15 @@ export async function pick(actor: AuthUser, documentId: string, choiceId: string
       proposalNote: '',
     },
     async () => {
-      await transactionWithEvents(async (_tx, emit) => {
+      await transactionWithEvents(async (tx, emit) => {
+        await tx.execute(sql`
+          INSERT INTO doc_decisions (document_id, block_id, option_id, rationale, evidence, open_questions, decided_by, decided_at)
+          VALUES (${documentId}, ${choiceId}, ${req.optionId}, ${req.rationale ?? ''}, ${JSON.stringify(evidence)}::jsonb,
+                  ${JSON.stringify(req.openQuestions ?? [])}::jsonb, ${actor.id}, now())
+          ON CONFLICT (document_id, block_id) DO UPDATE
+            SET option_id = EXCLUDED.option_id, rationale = EXCLUDED.rationale, evidence = EXCLUDED.evidence,
+                open_questions = EXCLUDED.open_questions, decided_by = EXCLUDED.decided_by, decided_at = now()
+        `);
         emit({
           documentId,
           actorId: actor.id,
@@ -231,11 +275,12 @@ export async function proposePick(
   if (!access.ok) return access;
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
+  if (await decisionFor(documentId, choiceId, choice.options)) return refuse('choice_decided', 'This choice is decided.');
   return setBlockProps(
     actor,
     documentId,
     { tabId: choice.tabId, blockId: choiceId },
-    choiceCheck(req.optionId, false),
+    choiceCheck(req.optionId),
     { proposedOptionId: req.optionId, proposedBy: label(actor), proposalNote: req.note ?? '' },
   );
 }
@@ -286,29 +331,20 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
       .filter((e) => e.block.type === 'choice' && validBlockId(e.block.id))
       .map((e) => ({ tabId: e.tabId, id: e.block.id, props: e.block.props as Record<string, string>, options: optionsOf(e.block) })),
   );
+  const recorded = await decisionsOf(documentId, choices.map((c) => c.id));
   const decisions: DecisionDTO[] = [];
   for (const c of choices) {
     const tally = await countVotes(actor, documentId, c.id, c.options);
-    if (!tally.ok) return tally;
-    const decided = c.options.find((o) => o.id === c.props.decidedOptionId);
+    const d = recorded.get(c.id);
+    const decidedOption = d && c.options.find((o) => o.id === d.optionId);
+    const decided = d && decidedOption ? { ...d, label: decidedOption.label } : null;
     const proposed = c.options.find((o) => o.id === c.props.proposedOptionId);
     const entry: DecisionDTO = {
       target: { tabId: c.tabId, blockId: c.id },
       question: c.props.question ?? '',
-      options: c.options.map((o) => ({ ...o, votes: tally.value.counts[o.id] ?? 0 })),
+      options: c.options.map((o) => ({ ...o, votes: tally.counts[o.id] ?? 0 })),
       status: decided ? 'decided' : 'open',
-      decided: decided
-        ? {
-            optionId: decided.id,
-            label: decided.label,
-            rationale: c.props.rationale ?? '',
-            evidence: parseEvidence(c.props.evidence),
-            openQuestions: parseOpenQuestions(c.props.openQuestions),
-            decidedBy: c.props.decidedBy ?? '',
-            decidedByName: c.props.decidedByName ?? '',
-            decidedAt: c.props.decidedAt ?? '',
-          }
-        : null,
+      decided,
       proposed: !decided && proposed
         ? { optionId: proposed.id, label: proposed.label, by: c.props.proposedBy ?? '', note: c.props.proposalNote ?? '' }
         : null,

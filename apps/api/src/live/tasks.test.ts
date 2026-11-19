@@ -82,20 +82,57 @@ describe('task blocks', () => {
     });
   });
 
-  it('the index is rebuilt from the document, checking what it reads', async () => {
+  it('a malformed task block does not stop the others from indexing', async () => {
     const doc = await liveDoc();
-    // Written straight into the (client-writable) document: an unknown
-    // assignee, a malformed date and a block id no storage key may hold.
+    // Written straight into the (client-writable) document, by the system.
     await seedBlocks(doc, [
-      { id: 'task-1', type: 'task', props: { assigneeId: 'ghost', due: '2026-13-45' }, content: 'Ghost task' } as never,
+      { id: 'task-1', type: 'task', props: { assigneeId: 'ghost', due: '2026-02-30' }, content: 'Bad\u0000title' } as never,
       { id: 'bad/../id', type: 'task', content: 'Skipped' } as never,
+      { id: 'task-2', type: 'task', props: { assigneeId: 'x\u0000y', due: '2026-12-31' }, content: 'Fine' } as never,
+      { id: 'task-3', type: 'task', props: { assigneeId: AGENT.id }, content: 'Assigned' } as never,
     ]);
     await flushTaskSync();
-    await db.delete(docTasks).where(eq(docTasks.documentId, doc));
+    const indexed = async () =>
+      (await db.select().from(docTasks).where(eq(docTasks.documentId, doc)))
+        .map((r) => [r.blockId, r.title, r.assigneeId, r.dueDate])
+        .sort();
+    const expected = [
+      ['task-1', 'Bad title', null, null],
+      ['task-2', 'Fine', null, '2026-12-31'],
+      ['task-3', 'Assigned', AGENT.id, null],
+    ];
+    expect(await indexed()).toEqual(expected);
+    // The system made the change: indexed, announced to nobody, pinned on nobody.
+    expect(await taskEvents(doc)).toEqual([]);
     await rebuildTaskIndex(doc);
-    const rows = await db.select().from(docTasks).where(and(eq(docTasks.documentId, doc)));
-    expect(rows.map((r) => [r.blockId, r.title, r.assigneeId, r.dueDate])).toEqual([['task-1', 'Ghost task', null, null]]);
-    // The first sync announced it, authored by the owner (the system made the change).
-    expect((await taskEvents(doc)).map((e) => [e.type, e.author])).toEqual([['task.created', OWNER.id]]);
+    expect(await indexed()).toEqual(expected);
+  });
+
+  it('changes by two actors in one window are each attributed to their own author', async () => {
+    const doc = await liveDoc();
+    const a = await addTask(OWNER, doc, { title: 'Owner task' });
+    const b = await addTask(AGENT, doc, { title: 'Agent task' });
+    if (!a.ok || !b.ok) throw new Error('add failed');
+    await flushTaskSync();
+    expect((await taskEvents(doc)).map((e) => [e.type, e.author, (e.payload as { block_id: string }).block_id]).sort()).toEqual(
+      [
+        ['task.created', AGENT.id, b.value.target.blockId],
+        ['task.created', OWNER.id, a.value.target.blockId],
+      ].sort(),
+    );
+    const rows = await db.select().from(docTasks).where(eq(docTasks.documentId, doc));
+    expect(Object.fromEntries(rows.map((r) => [r.blockId, r.createdBy]))).toEqual({
+      [a.value.target.blockId]: OWNER.id,
+      [b.value.target.blockId]: AGENT.id,
+    });
+
+    // Both change one task in the same window: one event from each.
+    await updateTask(OWNER, doc, a.value.target.blockId, { status: 'done' });
+    await updateTask(AGENT, doc, a.value.target.blockId, { progress: 'checked' });
+    await updateTask(AGENT, doc, a.value.target.blockId, { status: 'open' });
+    await updateTask(OWNER, doc, a.value.target.blockId, { status: 'done' });
+    await flushTaskSync();
+    const updated = (await taskEvents(doc)).filter((e) => e.type === 'task.updated');
+    expect(updated.map((e) => e.author).sort()).toEqual([AGENT.id, OWNER.id].sort());
   });
 });

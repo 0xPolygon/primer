@@ -1,6 +1,6 @@
 import * as Y from 'yjs';
 import { Hocuspocus } from '@hocuspocus/server';
-import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
+import { attachPersistence, loadYDoc, persistedUpTo, touchedOf } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
 import { SYSTEM_ORIGIN, originOf, type LiveOrigin } from './origin.ts';
@@ -25,11 +25,13 @@ export function onPersistenceFailure(handler: (documentId: string, doc: Y.Doc) =
   return () => failureHandlers.delete(handler);
 }
 
-const updateHandlers = new Set<(documentId: string, origin: LiveOrigin) => void>();
+type UpdateHandler = (documentId: string, origin: LiveOrigin, touched: string[]) => void;
+const updateHandlers = new Set<UpdateHandler>();
 
-/** Runs after every change to a loaded live document, with who made it
- *  (indexes kept from the document, such as tasks, schedule their sync). */
-export function onLiveUpdate(handler: (documentId: string, origin: LiveOrigin) => void): () => void {
+/** Runs after every change to a loaded live document, with who made it and
+ *  the block ids it touched (indexes kept from the document, such as tasks,
+ *  schedule their sync). */
+export function onLiveUpdate(handler: UpdateHandler): () => void {
   updateHandlers.add(handler);
   return () => updateHandlers.delete(handler);
 }
@@ -70,9 +72,10 @@ export function liveInstance(): Hocuspocus {
           for (const handler of failureHandlers) handler(documentId, document);
         },
       });
-      document.on('update', (_update: Uint8Array, origin: unknown) => {
+      document.on('update', (_update: Uint8Array, origin: unknown, _doc: Y.Doc, tr: Y.Transaction) => {
         const by = originOf(origin);
-        for (const handler of updateHandlers) handler(documentId, by);
+        const touched = touchedOf(tr);
+        for (const handler of updateHandlers) handler(documentId, by, touched);
       });
       // Detach only once the document is really gone: Hocuspocus keeps it
       // after beforeUnloadDocument when someone connected meanwhile.

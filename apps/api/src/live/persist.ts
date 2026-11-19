@@ -114,6 +114,12 @@ export function attachPersistence(
   };
 }
 
+/** The block ids (and non-tab root names) a stored transaction touched;
+ *  read in `update` handlers, which run after persistence collected them. */
+export function touchedOf(tr: Y.Transaction): string[] {
+  return (tr.meta.get(TOUCHED) as string[] | undefined) ?? [];
+}
+
 /** The docVersion once every update made so far to `doc` is stored. Rejects
  *  if persistence failed. */
 export function persistedUpTo(doc: Y.Doc): Promise<number> {
@@ -184,6 +190,20 @@ function touchedBy(doc: Y.Doc, tr: Y.Transaction): string[] {
     }
     const name = rootNames.get(root);
     if (name !== undefined && !isTabFragment(name)) touched.add(name);
+  }
+  // Blocks created in this transaction: their parent is in `changed`, but
+  // they are not. Items are ordered by clock, so scan each client's tail.
+  for (const [client, after] of tr.afterState) {
+    const before = tr.beforeState.get(client) ?? 0;
+    if (after <= before) continue;
+    const structs = (tr.doc.store as unknown as { clients: Map<number, (Y.Item | Y.GC)[]> }).clients.get(client) ?? [];
+    for (let i = structs.length - 1; i >= 0 && structs[i]!.id.clock + structs[i]!.length > before; i--) {
+      const struct = structs[i]!;
+      if (struct instanceof Y.Item && struct.content instanceof Y.ContentType) {
+        const id = blockIdOf(struct.content.type);
+        if (id) touched.add(id);
+      }
+    }
   }
   Y.iterateDeletedStructs(tr, tr.deleteSet, (struct) => {
     if (struct instanceof Y.Item && struct.content instanceof Y.ContentType) {

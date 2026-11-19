@@ -432,7 +432,17 @@ export type RecordsApi = {
 
 /** The records verbs for one caller on one document. Every verb checks
  *  access itself, so callers (REST, MCP, the bridge via REST) can't skip it. */
-export function recordsApi(actor: AuthUser, documentId: string): RecordsApi {
+/** Collections Primer's own features write (votes on choice blocks): the
+ *  general verbs read them but never write them. */
+export const RESERVED_COLLECTION_PREFIX = 'primer.';
+
+function reservedWrite(op: { collection?: unknown }): string | null {
+  return typeof op.collection === 'string' && op.collection.startsWith(RESERVED_COLLECTION_PREFIX)
+    ? `collections starting with "${RESERVED_COLLECTION_PREFIX}" are written only by Primer (votes go through the choice vote route)`
+    : null;
+}
+
+export function recordsApi(actor: AuthUser, documentId: string, opts: { reserved?: true } = {}): RecordsApi {
   const gate = async (write: boolean): Promise<RecordsResult<Access>> => {
     const a = await access(documentId, actor);
     if (!a) return refuse('not_found', 'Document not found.');
@@ -443,7 +453,7 @@ export function recordsApi(actor: AuthUser, documentId: string): RecordsApi {
   };
 
   const write = async (op: RecordBatchOp) => {
-    const bad = checkWrite(op);
+    const bad = checkWrite(op) ?? (opts.reserved ? null : reservedWrite(op));
     if (bad) return refuse('bad_request', bad);
     const g = await gate(true);
     if (!g.ok) return g;
@@ -487,7 +497,9 @@ export function recordsApi(actor: AuthUser, documentId: string): RecordsApi {
         return refuse('bad_request', `ops must hold 1–${MAX_RECORDS_BATCH} writes`);
       }
       for (let i = 0; i < ops.length; i++) {
-        const bad = isPlainObject(ops[i]) ? checkWrite(ops[i] as RecordBatchOp) : 'must be an object';
+        const bad = isPlainObject(ops[i])
+          ? (checkWrite(ops[i] as RecordBatchOp) ?? (opts.reserved ? null : reservedWrite(ops[i] as RecordBatchOp)))
+          : 'must be an object';
         if (bad) return refuse('bad_request', `ops[${i}]: ${bad}`, { index: i });
       }
       const g = await gate(true);
@@ -586,6 +598,8 @@ export async function revertChange(changeId: number, actor: AuthUser): Promise<R
   const notFound = refuse('not_found', 'Change not found.');
   if (!row) return notFound;
   if (row.scope === 'personal' && row.ownerUserId !== actor.id) return notFound;
+  const reserved = reservedWrite(row);
+  if (reserved) return refuse('bad_request', reserved);
   const a = await access(row.documentId, actor);
   if (!a) return notFound;
   if (row.scope === 'shared' ? !canEdit(a.role) : !a.canWrite) {

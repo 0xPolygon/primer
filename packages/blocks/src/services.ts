@@ -6,6 +6,14 @@ export type ChoiceTally = {
   counts: Record<string, number>;
   /** The option this viewer voted for, or null. */
   mine: string | null;
+  /** The recorded decision (from the API, never the document), or null. */
+  decision: {
+    optionId: string;
+    rationale: string;
+    evidence: Evidence[];
+    openQuestions: string[];
+    decidedByName: string;
+  } | null;
 };
 
 export type PickInput = {

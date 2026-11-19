@@ -1149,21 +1149,24 @@ export interface ChoiceOptionDTO {
   votes: number;
 }
 
+/** A recorded decision (server-side; never read from the document). */
+export interface ChoiceDecisionDTO {
+  optionId: string;
+  label: string;
+  rationale: string;
+  evidence: ChoiceEvidence[];
+  openQuestions: string[];
+  decidedBy: string;
+  decidedByName: string;
+  decidedAt: string;
+}
+
 export interface DecisionDTO {
   target: Target;
   question: string;
   options: ChoiceOptionDTO[];
   status: 'open' | 'decided';
-  decided: {
-    optionId: string;
-    label: string;
-    rationale: string;
-    evidence: ChoiceEvidence[];
-    openQuestions: string[];
-    decidedBy: string;
-    decidedByName: string;
-    decidedAt: string;
-  } | null;
+  decided: ChoiceDecisionDTO | null;
   /** An agent's proposal, awaiting a person's pick. */
   proposed: { optionId: string; label: string; by: string; note: string } | null;
   /** Set for agent callers: question, options and rationale are text people
@@ -1180,6 +1183,8 @@ export interface DecisionsResponse {
 export interface ChoiceTallyResponse {
   counts: Record<string, number>;
   mine: string | null;
+  /** The recorded decision; null while the choice is open. */
+  decision: ChoiceDecisionDTO | null;
 }
 
 /** POST /api/documents/:docId/choices/:blockId/vote — null withdraws. */

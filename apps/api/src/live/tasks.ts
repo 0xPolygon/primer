@@ -4,8 +4,11 @@
 // written any other way: every change to a loaded document schedules a
 // reconcile (debounced per document), which reads the task blocks from the
 // Y.Doc, brings the rows in line, and announces each difference as
-// `task.created`, `task.updated` or `task.deleted`, authored by whoever made
-// the change. `rebuildTaskIndex` recreates the rows from the document. Primer
+// `task.created`, `task.updated` or `task.deleted`. Attribution is per block:
+// each person or agent whose transactions touched that block in the window
+// authors one event. A change no person or agent made (the system, or drift
+// found later) updates the index and announces nothing: it is never pinned on
+// someone. `rebuildTaskIndex` recreates the rows from the document. Primer
 // runs no task system of its own: assignees (people or agents) act on the
 // events, and ticking the box is what closes a task.
 //
@@ -49,12 +52,37 @@ import type { LiveOrigin } from './origin.ts';
 export const TASK_SYNC_DELAY_MS = 500;
 const MAX_TASKS_PER_DOCUMENT = 1_000;
 const DUE = /^\d{4}-\d{2}-\d{2}$/;
+const TAB_ID = /^[\w-]{1,64}$/;
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/g;
 const TASKS_LOCK_KEY = 7_201_950;
 
 type BlockTask = { tabId: string; blockId: string; title: string; assigneeId: string | null; due: string | null; status: TaskStatus };
 
+/** A real calendar date: it must round-trip to the same YYYY-MM-DD. */
 function validDue(raw: unknown): raw is string {
-  return typeof raw === 'string' && DUE.test(raw) && !Number.isNaN(Date.parse(`${raw}T00:00:00Z`));
+  if (typeof raw !== 'string' || !DUE.test(raw)) return false;
+  const date = new Date(`${raw}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === raw;
+}
+
+/** One task block as indexed, or null when it can't be: everything here came
+ *  from the client-writable document, so it is checked before it reaches SQL. */
+function checkedTask(tabId: string, block: { id: string; content?: unknown; props: unknown }): BlockTask | null {
+  if (!validBlockId(block.id) || !TAB_ID.test(tabId)) return null;
+  const p = block.props as Record<string, unknown>;
+  const assignee = p.assigneeId;
+  return {
+    tabId,
+    blockId: block.id,
+    title: inlineText(block.content).replace(CONTROL, ' ').trim().slice(0, 500),
+    assigneeId:
+      typeof assignee === 'string' && assignee.length > 0 && assignee.length <= 200 && !/[\u0000-\u001f\u007f]/.test(assignee)
+        ? assignee
+        : null,
+    due: validDue(p.due) ? p.due : null,
+    status: (TASK_STATUSES as readonly string[]).includes(p.status as string) ? (p.status as TaskStatus) : 'open',
+  };
 }
 
 /** The task blocks of a document, as read (not yet checked against users). */
@@ -62,17 +90,11 @@ function tasksIn(doc: Parameters<Parameters<typeof withLiveDocument>[1]>[0]): Bl
   const out: BlockTask[] = [];
   const seen = new Set<string>();
   for (const { tabId, block } of liveBlocks(doc)) {
-    if (block.type !== 'task' || !validBlockId(block.id) || seen.has(block.id)) continue;
-    seen.add(block.id);
-    const p = block.props as Record<string, unknown>;
-    out.push({
-      tabId,
-      blockId: block.id,
-      title: inlineText(block.content).trim().slice(0, 500),
-      assigneeId: typeof p.assigneeId === 'string' && p.assigneeId.length > 0 && p.assigneeId.length <= 200 ? p.assigneeId : null,
-      due: validDue(p.due) ? p.due : null,
-      status: (TASK_STATUSES as readonly string[]).includes(p.status as string) ? (p.status as TaskStatus) : 'open',
-    });
+    if (block.type !== 'task' || seen.has(block.id)) continue;
+    const task = checkedTask(tabId, block);
+    if (!task) continue;
+    seen.add(task.blockId);
+    out.push(task);
     if (out.length >= MAX_TASKS_PER_DOCUMENT) break;
   }
   return out;
@@ -80,20 +102,29 @@ function tasksIn(doc: Parameters<Parameters<typeof withLiveDocument>[1]>[0]): Bl
 
 type Row = { id: string; tabId: string; blockId: string; title: string; assigneeId: string | null; due: string | null; status: TaskStatus };
 
+/** Who touched which block in a sync window: person and agent ids per block id. */
+export type BlockActors = Map<string, Set<string>>;
+
 /**
  * Brings `doc_tasks` in line with the document's task blocks. With `emit`,
- * each difference becomes a lifecycle event authored by `actorId` (the
- * document's owner when that is not a user, e.g. the system).
+ * each difference becomes one lifecycle event per person or agent in
+ * `actors` for that block, and none when nobody is known. `rebuild` first
+ * empties the document's rows, in the same transaction.
  */
-export async function reconcileTasks(documentId: string, opts: { actorId?: string | null; emit: boolean }): Promise<void> {
+export async function reconcileTasks(
+  documentId: string,
+  opts: { actors?: BlockActors; emit: boolean; rebuild?: boolean },
+): Promise<void> {
   await transactionWithEvents(async (tx, emit) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${TASKS_LOCK_KEY}, hashtext(${documentId}))`);
+    if (opts.rebuild) await tx.execute(sql`DELETE FROM doc_tasks WHERE document_id = ${documentId}`);
     const [doc] = (await tx.execute(sql`
       SELECT uploader_id AS "uploaderId", format, deleted_at AS "deletedAt" FROM documents WHERE id = ${documentId}
     `)) as unknown as { uploaderId: string; format: string | null; deletedAt: Date | null }[];
     if (!doc || !doc.format) return;
     const found = await withLiveDocument(documentId, (d) => tasksIn(d));
-    const ids = [...new Set([...found.map((t) => t.assigneeId), opts.actorId].filter((id): id is string => Boolean(id)))];
+    const touchedBy = [...(opts.actors?.values() ?? [])].flatMap((set) => [...set]);
+    const ids = [...new Set([...found.map((t) => t.assigneeId), ...touchedBy].filter((id): id is string => Boolean(id)))];
     const known = new Set(
       ids.length === 0
         ? []
@@ -102,7 +133,8 @@ export async function reconcileTasks(documentId: string, opts: { actorId?: strin
           ),
     );
     for (const t of found) if (t.assigneeId && !known.has(t.assigneeId)) t.assigneeId = null;
-    const actorId = opts.actorId && known.has(opts.actorId) ? opts.actorId : doc.uploaderId;
+    /** The people and agents who changed this block in the window. */
+    const actorsOf = (blockId: string) => [...(opts.actors?.get(blockId) ?? [])].filter((id) => known.has(id)).sort();
 
     const rows = (await tx.execute(sql`
       SELECT id, tab_id AS "tabId", block_id AS "blockId", title, assignee_id AS "assigneeId",
@@ -110,7 +142,15 @@ export async function reconcileTasks(documentId: string, opts: { actorId?: strin
         FROM doc_tasks WHERE document_id = ${documentId}
     `)) as unknown as Row[];
     const byBlock = new Map(rows.map((r) => [r.blockId, r]));
-    const announce: EmitLifecycle = opts.emit ? emit : () => undefined;
+    /** One event per actor who changed the block; none when nobody is known. */
+    const announce = <T extends 'task.created' | 'task.updated' | 'task.deleted'>(
+      blockId: string,
+      type: T,
+      payload: Parameters<EmitLifecycle>[0]['payload'] & object,
+    ) => {
+      if (!opts.emit) return;
+      for (const actorId of actorsOf(blockId)) emit({ documentId, actorId, type, payload } as never);
+    };
 
     for (const t of found) {
       const row = byBlock.get(t.blockId);
@@ -118,14 +158,12 @@ export async function reconcileTasks(documentId: string, opts: { actorId?: strin
       if (!row) {
         const [inserted] = (await tx.execute(sql`
           INSERT INTO doc_tasks (document_id, tab_id, block_id, title, assignee_id, due_date, status, created_by)
-          VALUES (${documentId}, ${t.tabId}, ${t.blockId}, ${t.title}, ${t.assigneeId}, ${t.due}::date, ${t.status}, ${actorId})
+          VALUES (${documentId}, ${t.tabId}, ${t.blockId}, ${t.title}, ${t.assigneeId}, ${t.due}::date, ${t.status},
+                  ${actorsOf(t.blockId).length === 1 ? actorsOf(t.blockId)[0] : null})
           RETURNING id
         `)) as unknown as { id: string }[];
-        announce({
-          documentId,
-          actorId,
-          type: 'task.created',
-          payload: { document_id: documentId, task_id: inserted!.id, block_id: t.blockId, assignee_id: t.assigneeId, status: t.status },
+        announce(t.blockId, 'task.created', {
+          document_id: documentId, task_id: inserted!.id, block_id: t.blockId, assignee_id: t.assigneeId, status: t.status,
         });
         continue;
       }
@@ -141,63 +179,61 @@ export async function reconcileTasks(documentId: string, opts: { actorId?: strin
          WHERE id = ${row.id}
       `);
       if (changed.length === 0) continue;
-      announce({
-        documentId,
-        actorId,
-        type: 'task.updated',
-        payload: { document_id: documentId, task_id: row.id, block_id: t.blockId, assignee_id: t.assigneeId, status: t.status, changed },
+      announce(t.blockId, 'task.updated', {
+        document_id: documentId, task_id: row.id, block_id: t.blockId, assignee_id: t.assigneeId, status: t.status, changed,
       });
     }
     for (const row of byBlock.values()) {
       await tx.execute(sql`DELETE FROM doc_tasks WHERE id = ${row.id}`);
-      announce({
-        documentId,
-        actorId,
-        type: 'task.deleted',
-        payload: { document_id: documentId, task_id: row.id, block_id: row.blockId, assignee_id: row.assigneeId },
+      announce(row.blockId, 'task.deleted', {
+        document_id: documentId, task_id: row.id, block_id: row.blockId, assignee_id: row.assigneeId,
       });
     }
   });
 }
 
-/** Recreates a document's task index from its Y.Doc, announcing nothing. */
+/** Recreates a document's task index from its Y.Doc in one transaction,
+ *  announcing nothing. */
 export async function rebuildTaskIndex(documentId: string): Promise<void> {
-  await db.execute(sql`DELETE FROM doc_tasks WHERE document_id = ${documentId}`);
-  await reconcileTasks(documentId, { emit: false });
+  await reconcileTasks(documentId, { emit: false, rebuild: true });
 }
 
 // ───────────────────────── The live-update hook ─────────────────────────
 
-type Pending = { actorId: string | null; timer: ReturnType<typeof setTimeout> };
+type Pending = { actors: BlockActors; timer: ReturnType<typeof setTimeout> };
 const pending = new Map<string, Pending>();
 const running = new Set<Promise<void>>();
 
-function run(documentId: string, actorId: string | null): void {
-  const job = reconcileTasks(documentId, { actorId, emit: true }).catch((err: unknown) => {
+function run(documentId: string, actors: BlockActors): void {
+  const job = reconcileTasks(documentId, { actors, emit: true }).catch((err: unknown) => {
     logger.warn({ documentId, error: String(err) }, 'tasks: index sync failed');
   });
   running.add(job);
   void job.finally(() => running.delete(job));
 }
 
-/** Schedules a reconcile of a document's tasks; the last person or agent to
- *  change it in the window authors the events. */
-export function scheduleTaskSync(documentId: string, origin: LiveOrigin): void {
-  const open = pending.get(documentId);
-  const actorId = origin.kind === 'system' ? null : origin.actorId;
-  if (open) {
-    if (actorId) open.actorId = actorId;
-    return;
+/** Schedules a reconcile of a document's tasks, remembering which person or
+ *  agent touched which blocks (system changes are remembered by nobody). */
+export function scheduleTaskSync(documentId: string, origin: LiveOrigin, touched: string[]): void {
+  let entry = pending.get(documentId);
+  if (!entry) {
+    const created: Pending = {
+      actors: new Map(),
+      timer: setTimeout(() => {
+        pending.delete(documentId);
+        run(documentId, created.actors);
+      }, TASK_SYNC_DELAY_MS),
+    };
+    created.timer.unref?.();
+    pending.set(documentId, created);
+    entry = created;
   }
-  const entry: Pending = {
-    actorId,
-    timer: setTimeout(() => {
-      pending.delete(documentId);
-      run(documentId, entry.actorId);
-    }, TASK_SYNC_DELAY_MS),
-  };
-  entry.timer.unref?.();
-  pending.set(documentId, entry);
+  if (origin.kind === 'system') return;
+  for (const blockId of touched) {
+    const set = entry.actors.get(blockId) ?? new Set<string>();
+    set.add(origin.actorId);
+    entry.actors.set(blockId, set);
+  }
 }
 
 /** Runs every scheduled sync now and waits for all of them (tests, shutdown). */
@@ -205,7 +241,7 @@ export async function flushTaskSync(): Promise<void> {
   for (const [documentId, entry] of [...pending]) {
     clearTimeout(entry.timer);
     pending.delete(documentId);
-    run(documentId, entry.actorId);
+    run(documentId, entry.actors);
   }
   await Promise.all([...running]);
 }

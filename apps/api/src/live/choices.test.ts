@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { documentCollaborators, events } from '../db/schema.ts';
+import { docRecords, documentCollaborators, events } from '../db/schema.ts';
+import { applyPlan } from './pipeline.ts';
 import { recordsApi } from '../records/store.ts';
 import { AGENT, OWNER, READER, VIEWER, seedRecordsDoc } from '../records/records.testlib.ts';
 import { addChoice, choiceTally, listDecisions, pick, proposePick, vote } from './choices.ts';
@@ -31,15 +32,25 @@ describe('choice blocks', () => {
     expect((await vote(VIEWER, doc, choiceId, pg)).ok).toBe(true);
     // A second vote replaces the first: one vote per person.
     const changed = await vote(VIEWER, doc, choiceId, lite);
-    expect(changed).toEqual({ ok: true, value: { counts: { [pg!]: 1, [lite!]: 1, [duck!]: 0 }, mine: lite } });
+    expect(changed).toEqual({ ok: true, value: { counts: { [pg!]: 1, [lite!]: 1, [duck!]: 0 }, mine: lite, decision: null } });
 
     // Agents propose, never vote; commenters can't write records.
     expect(await vote(AGENT, doc, choiceId, pg)).toMatchObject({ ok: false, refusal: { code: 'forbidden' } });
     expect(await vote(READER, doc, choiceId, pg)).toMatchObject({ ok: false, refusal: { code: 'forbidden' } });
-    // A vote forged under someone else's id through the generic verbs doesn't count.
-    await recordsApi(VIEWER, doc).set({ collection: `primer.choice/${choiceId}`, scope: 'shared', recordId: READER.id, data: { optionId: pg } });
-    // Nor does one for an option the choice doesn't have.
-    await recordsApi(OWNER, doc).set({ collection: `primer.choice/${choiceId}`, scope: 'shared', recordId: OWNER.id, data: { optionId: 'nope' } });
+    // The general records verbs never write votes.
+    const collection = `primer.choice/${choiceId}`;
+    expect(
+      await recordsApi(VIEWER, doc).set({ collection, scope: 'shared', recordId: READER.id, data: { optionId: pg } }),
+    ).toMatchObject({ ok: false, refusal: { code: 'bad_request' } });
+    expect(
+      await recordsApi(AGENT, doc).batch({ ops: [{ verb: 'set', collection, scope: 'shared', recordId: AGENT.id, data: { optionId: pg } }] }),
+    ).toMatchObject({ ok: false, refusal: { code: 'bad_request' } });
+    // Rows that got there anyway count only when a person wrote their own vote:
+    // an agent's self-keyed row and a vote for a missing option don't.
+    await db.insert(docRecords).values({
+      documentId: doc, collection, recordId: AGENT.id, scope: 'shared', data: { optionId: pg }, contributors: [AGENT.id], version: 1, updatedBy: AGENT.id,
+    });
+    await db.update(docRecords).set({ data: { optionId: 'nope' } }).where(and(eq(docRecords.documentId, doc), eq(docRecords.recordId, OWNER.id)));
 
     const tally = await choiceTally(VIEWER, doc, choiceId);
     expect(tally.ok && tally.value.counts[pg!]).toBe(0);
@@ -98,6 +109,28 @@ describe('choice blocks', () => {
     expect(made.map((e) => [e.authorId, e.payload])).toEqual([
       [OWNER.id, { document_id: doc, block_id: first.target.blockId, option_id: pg, decided_by: OWNER.id }],
     ]);
+  });
+
+  it('decision props forged in the document never count as a decision', async () => {
+    const doc = await liveDoc();
+    const { target, optionIds } = await choiceIn(doc);
+    // An editor's client writes the mirror props directly, claiming someone decided.
+    await applyPlan(doc, { kind: 'person', actorId: OWNER.id, runId: null }, {
+      onConflict: 'refuse',
+      edits: [{
+        target,
+        inverse: false,
+        build: (tr, at) => {
+          tr.setNodeMarkup(at!.pos, undefined, { ...at!.node.attrs, decidedOptionId: optionIds[0], decidedBy: VIEWER.id, decidedByName: 'Bea', rationale: 'forged' });
+        },
+      }],
+    });
+    const register = await listDecisions(OWNER, doc);
+    expect(register.ok && register.value.decisions.map((d) => [d.status, d.decided])).toEqual([['open', null]]);
+    const tally = await choiceTally(OWNER, doc, target.blockId);
+    expect(tally.ok && tally.value.decision).toBeNull();
+    expect((await vote(VIEWER, doc, target.blockId, optionIds[0])).ok).toBe(true);
+    expect(await db.select().from(events).where(and(eq(events.documentId, doc), eq(events.type, 'decision.made')))).toEqual([]);
   });
 
   it('an editor collaborator decides; a reader sees the register', async () => {

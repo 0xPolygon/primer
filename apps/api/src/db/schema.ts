@@ -656,3 +656,30 @@ export const docTasks = pgTable(
     assignee: index('doc_tasks_assignee').on(t.assigneeId),
   }),
 );
+
+/**
+ * Decisions on choice blocks, written only by the pick route after its
+ * edit-rights check (live/choices.ts). The choice block's decision props are a
+ * display mirror for exports; the register and the block's UI read this
+ * table, never those props, since the document is client-writable.
+ */
+export const docDecisions = pgTable(
+  'doc_decisions',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    blockId: text('block_id').notNull(),
+    optionId: text('option_id').notNull(),
+    rationale: text('rationale').notNull(),
+    evidence: jsonb('evidence').notNull(),
+    openQuestions: jsonb('open_questions').notNull(),
+    decidedBy: text('decided_by')
+      .notNull()
+      .references(() => users.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.documentId, t.blockId] }),
+  }),
+);

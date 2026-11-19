@@ -5,6 +5,7 @@ import {
   parseOpenQuestions,
   usePrimerBlockServices,
   type Evidence,
+  type ChoiceTally,
   type PrimerBlockServices,
 } from './services.ts';
 
@@ -120,10 +121,35 @@ export function optionLabel(option: AnyBlock): string {
   return '';
 }
 
+/** The decision to show: the server's record in the editor (the props are a
+ *  mirror anyone with edit access could rewrite), the props mirror in exports. */
+function useDecision(block: AnyBlock, services: PrimerBlockServices | null): DecisionView | null {
+  const tally = (services?.useTally ?? noTally)(block.id);
+  if (services) {
+    const d = tally?.decision;
+    const option = d && block.children.find((o) => o.id === d.optionId);
+    return d && option ? { ...d, label: optionLabel(option) } : null;
+  }
+  const p = block.props as Record<string, string>;
+  const option = block.children.find((o) => o.id === p.decidedOptionId);
+  if (!option) return null;
+  return {
+    label: optionLabel(option),
+    rationale: p.rationale ?? '',
+    evidence: parseEvidence(p.evidence),
+    openQuestions: parseOpenQuestions(p.openQuestions),
+    decidedByName: p.decidedByName ?? '',
+  };
+}
+
+const noTally = (): ChoiceTally | null => null;
+
+type DecisionView = { label: string; rationale: string; evidence: Evidence[]; openQuestions: string[]; decidedByName: string };
+
 function ChoiceFrame({ block, editor, slotRef }: ChoiceFrameProps) {
   const services = usePrimerBlockServices();
   const p = block.props as Record<string, string>;
-  const decided = block.children.find((o) => o.id === p.decidedOptionId);
+  const decided = useDecision(block, services);
   return (
     <div className="primer-choice" data-primer-choice="" data-decided={decided ? 'true' : 'false'}>
       <div className="primer-choice-head" contentEditable={false}>
@@ -148,7 +174,7 @@ function ChoiceFrame({ block, editor, slotRef }: ChoiceFrameProps) {
           </button>
         )}
         {decided ? (
-          <Decision block={block} label={optionLabel(decided)} />
+          <Decision decision={decided} />
         ) : (
           <Undecided block={block} services={services} />
         )}
@@ -165,17 +191,15 @@ function addOption(editor: Editor, choiceId: string) {
   if (option?.children[0]) editor.setTextCursorPosition(option.children[0].id, 'start');
 }
 
-function Decision({ block, label }: { block: AnyBlock; label: string }) {
-  const p = block.props as Record<string, string>;
-  const evidence = parseEvidence(p.evidence);
-  const questions = parseOpenQuestions(p.openQuestions);
+function Decision({ decision }: { decision: DecisionView }) {
+  const { evidence, openQuestions: questions } = decision;
   return (
     <div className="primer-choice-decision" data-primer-decision="">
       <div>
-        <strong>Decision:</strong> {label}
-        {p.decidedByName && <span className="primer-choice-meta"> by {p.decidedByName}</span>}
+        <strong>Decision:</strong> {decision.label}
+        {decision.decidedByName && <span className="primer-choice-meta"> by {decision.decidedByName}</span>}
       </div>
-      {p.rationale && <p className="primer-choice-rationale">{p.rationale}</p>}
+      {decision.rationale && <p className="primer-choice-rationale">{decision.rationale}</p>}
       {evidence.length > 0 && (
         <ul className="primer-choice-evidence">
           {evidence.map((e, i) => (
@@ -300,12 +324,13 @@ function parseEvidenceLines(text: string): Evidence[] {
 function OptionFrame({ block, editor, slotRef }: OptionFrameProps) {
   const services = usePrimerBlockServices();
   const choice = editor.getParentBlock(block.id);
-  const decided = choice?.props.decidedOptionId === block.id;
+  const tally = (services?.useTally ?? noTally)(choice?.id ?? '');
+  const decided = services ? tally?.decision?.optionId === block.id : choice?.props.decidedOptionId === block.id;
   return (
     <div className="primer-choice-option" data-primer-option="" data-chosen={decided ? 'true' : 'false'}>
       <div className="primer-choice-vote" contentEditable={false}>
         {services && choice ? (
-          <VoteButton services={services} choiceId={choice.id} optionId={block.id} locked={Boolean(choice.props.decidedOptionId)} />
+          <VoteButton services={services} choiceId={choice.id} optionId={block.id} locked={Boolean(tally?.decision)} />
         ) : (
           <span className="primer-choice-dot" />
         )}
