@@ -76,6 +76,7 @@ import {
 } from '../lib/eventsGrant.ts';
 import { EventsGrantPrompt } from '../components/EventsGrantPrompt.tsx';
 import { api } from '../lib/fetch.ts';
+import { ApiError } from '../lib/apiError.ts';
 
 // First-submission grants (issue #78, security requirement 6): per
 // (viewer, document, artifact content version), fronted by an in-memory map
@@ -668,7 +669,20 @@ function DocumentPageInner() {
     // Posts to the version the anchor was captured on; if that is no longer
     // the latest the server refuses (not_latest_version) and the composer
     // offers to switch.
-    await createThread.mutateAsync({ versionId: pending.versionId, anchor: pending.anchor, body, mentions });
+    try {
+      await createThread.mutateAsync({ versionId: pending.versionId, anchor: pending.anchor, body, mentions });
+    } catch (err) {
+      // The server's 404 carries no message: the version was deleted, or
+      // commenting access went away.
+      if (err instanceof ApiError && err.status === 404) {
+        throw new ApiError(
+          404,
+          "This comment can't be posted: the version it was started on is gone, or you can no longer comment on this document. Your text is still here.",
+          err.code,
+        );
+      }
+      throw err;
+    }
     setPendingSelection(null);
     setPendingPick(null);
   };
