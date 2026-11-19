@@ -69,7 +69,8 @@ export async function importMarkdown(source: string): Promise<ImportResult> {
     let converted: ImportedBlock[] | null = null;
     if (group.tokens && !hasRawSyntax(group.tokens, slice)) {
       const html = md.renderer.render(group.tokens, md.options, env);
-      converted = await toBlocks(html);
+      const callout = await alertCallout(slice, env);
+      converted = callout ? [callout] : await toBlocks(html);
     }
     const groupBlocks = converted ?? [sourceBlock(slice, env)];
     blocks.push(...groupBlocks);
@@ -274,6 +275,29 @@ async function toBlocks(html: string): Promise<ImportedBlock[] | null> {
   const blocks = parsed.map(withIds);
   if (!blocks.every(withCanonicalLanguage)) return null;
   return signature(htmlSignature(html)) === signature(blocksSignature(blocks)) ? blocks : null;
+}
+
+const ALERT_MARKER = /^ {0,3}>[ \t]?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\r?\n/i;
+const ALERT_KINDS: Record<string, string> = { NOTE: 'note', TIP: 'success', IMPORTANT: 'info', WARNING: 'warning', CAUTION: 'warning' };
+
+/**
+ * A GitHub alert (`> [!NOTE]` and its body) as a `callout` block, when its body
+ * is a single paragraph of inline text a callout can hold; null otherwise.
+ * Richer alerts (several paragraphs, lists, code) stay `source` blocks, so no
+ * byte is lost either way.
+ */
+async function alertCallout(slice: string, env: object): Promise<ImportedBlock | null> {
+  const marker = ALERT_MARKER.exec(slice);
+  if (!marker) return null;
+  const body = slice
+    .slice(marker[0].length)
+    .split('\n')
+    .map((line) => line.replace(/^ {0,3}>[ \t]?/, ''))
+    .join('\n');
+  const parsed = await toBlocks(md.render(body, { ...env }));
+  if (!parsed || parsed.length !== 1 || parsed[0]!.type !== 'paragraph' || parsed[0]!.children.length > 0) return null;
+  const kind = ALERT_KINDS[marker[1]!.toUpperCase()]!;
+  return { id: randomUUID(), type: 'callout', props: { kind }, content: parsed[0]!.content, children: [] };
 }
 
 const languages = codeBlockOptions.supportedLanguages as Record<string, { aliases?: string[] }>;
