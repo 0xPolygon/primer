@@ -5,13 +5,14 @@ import { describe, it, expect } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sql as rawSql } from 'drizzle-orm';
+import { eq, sql as rawSql } from 'drizzle-orm';
 import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { users } from '../db/schema.ts';
+import { threadPlacements, users } from '../db/schema.ts';
+import { buildMcpToolHandlers } from '../mcp/tools.ts';
 import { setDocumentStatus } from '../lib/events.ts';
 import type { DocumentStatusResponse, EventRowDTO, EventsListResponse } from '@polygonlabs/primer-api-types';
 import { asUser, asUserJson } from '../test/harness.ts';
@@ -22,11 +23,12 @@ const OWNER = 'mock-user-1';
 const READER = 'mock-user-2'; // an org reader, not a collaborator
 const ANCHOR = { type: 'text-range', selectorText: 't', prefix: '', suffix: '', containerPath: 'body' };
 
-async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
+async function withApp<T>(fn: (app: App, storage: FilesystemStorage) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-lifecycle-'));
   try {
+    const storage = new FilesystemStorage(root);
     const app = createApp({
-      storage: new FilesystemStorage(root),
+      storage,
       notifier: new NoopNotifier(),
       userResolver: mockMultiResolver,
     });
@@ -37,7 +39,7 @@ async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
         { id: READER, email: 'two@example.com', displayName: 'User Two' },
       ])
       .onConflictDoNothing();
-    return await fn(app);
+    return await fn(app, storage);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -133,6 +135,61 @@ describe('lifecycle events', () => {
         expect(res.status).toBe(400);
       }
       expect((await primerRows(app, documentId, OWNER)).map((r) => r.type)).toEqual(['version.published']);
+    });
+  });
+});
+
+describe('lifecycle events with threads across versions', () => {
+  const owner = { id: OWNER, email: 'one@example.com', displayName: 'User One' };
+
+  it('MCP reply and resolve write the same rows as the REST routes', async () => {
+    await withApp(async (app, storage) => {
+      const mcp = buildMcpToolHandlers({ storage, notifier: new NoopNotifier(), apiBaseUrl: 'https://primer.example.com' });
+      const { documentId, versionId } = await uploadFixture(app);
+      const thread = await newThread(app, versionId, OWNER);
+      const reply = await mcp.primer_reply_to_thread({ thread_id: thread.id, body: 'from an agent' }, owner);
+      expect(reply.isError).toBeFalsy();
+      const resolved = await mcp.primer_resolve_thread({ thread_id: thread.id }, owner);
+      expect(resolved.isError).toBeFalsy();
+
+      const rows = await primerRows(app, documentId, READER);
+      expect(rows.map((r) => r.type)).toEqual(['version.published', 'comment.created', 'comment.created', 'thread.resolved']);
+      expect(rows[2].payload).toMatchObject({ thread_id: thread.id, author_id: OWNER });
+      expect(rows[3].payload).toEqual({ document_id: documentId, thread_id: thread.id, by: OWNER });
+    });
+  });
+
+  it('a publish over REST or MCP carries open threads and writes its version row in the same commit', async () => {
+    await withApp(async (app, storage) => {
+      const mcp = buildMcpToolHandlers({ storage, notifier: new NoopNotifier(), apiBaseUrl: 'https://primer.example.com' });
+      const { documentId, versionId } = await uploadFixture(app);
+      const thread = await newThread(app, versionId, OWNER);
+
+      const fd = new FormData();
+      fd.append('file', new Blob(['<html><body><h1>fixture</h1><p>more</p></body></html>'], { type: 'text/html' }), 'v2.html');
+      const v2 = await app.request(`/api/documents/${documentId}/versions`, { method: 'POST', headers: asUser(OWNER), body: fd });
+      expect(v2.status).toBe(201);
+      const v2Id = ((await v2.json()) as { versionId: string }).versionId;
+      const v3 = await mcp.primer_add_version(
+        { documentId, content: '<html><body><h1>fixture</h1><p>even more</p></body></html>', format: 'html' },
+        owner,
+      );
+      expect(v3.isError).toBeFalsy();
+      const v3Id = (JSON.parse(v3.content[0].text) as { versionId: string }).versionId;
+
+      const placements = await db.select().from(threadPlacements).where(eq(threadPlacements.threadId, thread.id));
+      const byVersion = new Map(placements.map((p) => [p.versionId, p.anchor]));
+      expect([...byVersion.keys()].sort()).toEqual([versionId, v2Id, v3Id].sort());
+      expect(byVersion.get(v2Id)).toMatchObject({ type: 'text-range', selectorText: 't' });
+      expect(byVersion.get(v3Id)).toMatchObject({ type: 'text-range', selectorText: 't' });
+
+      const rows = await primerRows(app, documentId, READER);
+      expect(rows.map((r) => [r.type, r.versionId])).toEqual([
+        ['version.published', versionId],
+        ['comment.created', versionId],
+        ['version.published', v2Id],
+        ['version.published', v3Id],
+      ]);
     });
   });
 });

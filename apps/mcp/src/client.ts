@@ -1,12 +1,14 @@
 import type {
   AddVersionResponse,
   CollaboratorRole,
+  CommentDTO,
   DocumentDetailResponse,
   EventInput,
   DocumentStatusResponse,
   DocumentStatusState,
   EventsListResponse,
   SendEventsResponse,
+  ThreadDTO,
   ThreadsListResponse,
   UploadResponse,
   UserDTO,
@@ -156,6 +158,23 @@ export class PrimerClient {
     return this.request<ThreadsListResponse>({
       method: 'GET',
       path: `/api/versions/${encodeURIComponent(versionId)}/threads`,
+    });
+  }
+
+  /** Posts a reply in a thread (reopening it if resolved). */
+  replyToThread(threadId: string, body: string): Promise<{ comment: CommentDTO; thread: ThreadDTO }> {
+    return this.request<{ comment: CommentDTO; thread: ThreadDTO }>({
+      method: 'POST',
+      path: `/api/threads/${encodeURIComponent(threadId)}/comments`,
+      json: { body },
+    });
+  }
+
+  /** Resolves a thread (document owner or thread starter only). */
+  resolveThread(threadId: string): Promise<ThreadDTO> {
+    return this.request<ThreadDTO>({
+      method: 'POST',
+      path: `/api/threads/${encodeURIComponent(threadId)}/resolve`,
     });
   }
 

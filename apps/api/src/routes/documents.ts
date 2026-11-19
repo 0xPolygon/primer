@@ -5,7 +5,6 @@ import type { AppVariables, AppDeps } from '../app.ts';
 import type { DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary } from '@polygonlabs/primer-api-types';
 import { documents, versions, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
-import { transactionWithEvents } from '../lib/events.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
@@ -15,6 +14,8 @@ import {
   type Visibility,
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
+import { loadCarryOrigins } from '../lib/threadCarry.ts';
+import { insertPublishedVersion } from '../lib/publishVersion.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -448,26 +449,21 @@ export function registerDocumentRoutes(
     `)) as unknown as { max_n: number }[];
     const nextNumber = (maxRow?.max_n ?? 0) + 1;
 
+    const origins = await loadCarryOrigins(deps.storage, docId);
+
     await deps.storage.put(storageKey, transformedBytes);
 
     try {
-      const actorId = c.get('user').id;
-      await transactionWithEvents(async (tx, emit) => {
-        await tx.insert(versions).values({
-          id: versionId,
-          documentId: docId,
-          versionNumber: nextNumber,
-          storageKey,
-          sizeBytes: transformedBytes.byteLength,
-          versionNote,
-        });
-        emit({
-          documentId: docId,
-          versionId: versionId,
-          actorId: actorId,
-          type: 'version.published',
-          payload: { document_id: docId, version_id: versionId, number: nextNumber, author_id: actorId },
-        });
+      await insertPublishedVersion(deps.storage, {
+        documentId: docId,
+        versionId,
+        versionNumber: nextNumber,
+        storageKey,
+        sizeBytes: transformedBytes.byteLength,
+        versionNote,
+        html: transformed.html,
+        origins,
+        actorId: c.get('user').id,
       });
     } catch (err) {
       try { await deps.storage.delete(storageKey); } catch {}

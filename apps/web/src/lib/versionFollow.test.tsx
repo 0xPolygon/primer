@@ -70,7 +70,9 @@ function thread(): ThreadDTO {
   return {
     id: 't-1',
     versionId: 'v-4',
+    versionNumber: 4,
     anchor: { type: 'text-range', selectorText: 'some text', prefix: '', suffix: '', containerPath: 'body' },
+    contextChanged: false,
     resolvedAt: null,
     resolvedBy: null,
     resolvedByDisplayName: null,
