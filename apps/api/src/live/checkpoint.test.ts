@@ -34,7 +34,7 @@ async function withStorage<T>(fn: (storage: FilesystemStorage) => Promise<T>): P
   }
 }
 
-async function publish(storage: Storage, input: Partial<PublishInput> & { content: string; format: PublishInput['format'] }) {
+async function publish(storage: Storage, input: Omit<Partial<PublishInput>, 'content'> & { content: string; format: PublishInput['format'] }) {
   const r = await publishDocument(storage, {
     actor: MOCK_USER,
     title: 'Plan',

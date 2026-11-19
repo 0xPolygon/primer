@@ -1,24 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import matter from 'gray-matter';
 import taskLists from 'markdown-it-task-lists';
-import { MARKDOWN_STYLESHEET } from './markdownStylesheet.ts';
-
-export interface MarkdownConversionResult {
-  /** Full <!doctype html>…</html> document with inline stylesheet. */
-  html: string;
-  /** Title pulled from YAML frontmatter, if present and a non-empty string. */
-  frontmatterTitle: string | null;
-  /** True when the Markdown body (post-frontmatter) is whitespace-only.
-   *  The caller decides how to handle (we map it to parse_failed). */
-  bodyIsEmpty: boolean;
-}
-
-const md = new MarkdownIt({
-  html: false,        // raw HTML in source becomes text, not tags
-  linkify: true,      // bare URLs autolink
-  breaks: false,      // single newlines stay as spaces (CommonMark default)
-  typographer: false, // no smart-quote rewriting
-}).use(taskLists, { label: false });
 
 /** The one Markdown tokenizer of live imports. Raw HTML is tokenized (so an
  *  import can keep it, verbatim, in a source block) but never rendered into a
@@ -58,46 +40,4 @@ export function splitFrontMatter(input: string): { frontMatter: string; data: Re
     data: { ...parsed.data },
     body: parsed.content,
   };
-}
-
-export function markdownToHtml(input: string): MarkdownConversionResult {
-  const parsed = matter(input, { engines: FRONTMATTER_ENGINES });
-  const body = parsed.content.trim();
-  const bodyIsEmpty = body.length === 0;
-
-  const rendered = bodyIsEmpty ? '' : md.render(parsed.content);
-
-  const fmTitle =
-    typeof parsed.data.title === 'string' && parsed.data.title.trim().length > 0
-      ? parsed.data.title.trim()
-      : null;
-
-  return { html: wrapArticle(rendered), frontmatterTitle: fmTitle, bodyIsEmpty };
-}
-
-/** Plain text (`.txt`) as escaped paragraphs in the Markdown page shell:
- *  blank lines split paragraphs, single newlines become line breaks. */
-export function textToHtml(input: string): { html: string; bodyIsEmpty: boolean } {
-  const paragraphs = input
-    .replace(/\r\n?/g, '\n')
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0)
-    .map((p) => `<p>${md.utils.escapeHtml(p).replace(/\n/g, '<br>')}</p>`);
-  return { html: wrapArticle(paragraphs.join('')), bodyIsEmpty: paragraphs.length === 0 };
-}
-
-function wrapArticle(body: string): string {
-  return (
-    '<!doctype html>' +
-    '<html data-theme="light">' +
-    '<head>' +
-    '<meta charset="utf-8">' +
-    `<style>${MARKDOWN_STYLESHEET}</style>` +
-    '</head>' +
-    '<body>' +
-    `<article class="primer-md">${body}</article>` +
-    '</body>' +
-    '</html>'
-  );
 }
