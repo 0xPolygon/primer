@@ -178,6 +178,33 @@ function primerSlashItems(editor: unknown) {
       group: t('slash.group'),
       onItemClick: insert({ type: 'task' }),
     },
+    {
+      title: t('slash.callout'),
+      subtext: t('slash.calloutHint'),
+      aliases: ['callout', 'alert', 'note', 'warning', 'info', 'admonition'],
+      group: t('slash.blocksGroup'),
+      onItemClick: insert({ type: 'callout', props: { kind: 'info' } }),
+    },
+    {
+      title: t('slash.columns'),
+      subtext: t('slash.columnsHint'),
+      aliases: ['columns', 'column', 'layout', 'side by side', 'grid'],
+      group: t('slash.blocksGroup'),
+      onItemClick: insert({
+        type: 'columnList',
+        children: [
+          { type: 'column', children: [{ type: 'paragraph' }] },
+          { type: 'column', children: [{ type: 'paragraph' }] },
+        ],
+      }),
+    },
+    {
+      title: t('slash.embed'),
+      subtext: t('slash.embedHint'),
+      aliases: ['embed', 'link', 'card', 'bookmark', 'document', 'unfurl'],
+      group: t('slash.blocksGroup'),
+      onItemClick: insert({ type: 'embed' }),
+    },
   ];
 }
 

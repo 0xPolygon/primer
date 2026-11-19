@@ -61,7 +61,9 @@ describe('importMarkdown', () => {
     const ts = flatten((await importMarkdown(fixture('adr.md'))).blocks).find((b) => b.type === 'codeBlock')!;
     expect(ts.props!.language).toBe('typescript');
     expect(types(notes.blocks)).toContain('image');
-    expect(types(notes.blocks)).toContain('quote');
+    // GitHub alerts are callouts (with their kind); a plain quote stays a quote.
+    expect(flatten(notes.blocks).filter((b) => b.type === 'callout').map((b) => b.props!.kind)).toEqual(['note', 'warning']);
+    expect(types((await importMarkdown(fixture('readme.md'))).blocks)).toContain('quote');
   });
 
   it('every sample renders to static HTML', async () => {
