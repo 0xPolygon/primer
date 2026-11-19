@@ -342,6 +342,7 @@ export function registerDocumentRoutes(
         versionNote: versions.versionNote,
         sizeBytes: versions.sizeBytes,
         createdAt: versions.createdAt,
+        bundleKey: versions.bundleKey,
       })
       .from(versions)
       .where(eq(versions.documentId, docId))
@@ -355,6 +356,7 @@ export function registerDocumentRoutes(
           versionNote: r.versionNote,
           sizeBytes: r.sizeBytes,
           createdAt: r.createdAt.toISOString(),
+          bundled: r.bundleKey !== null,
         })),
       },
       200

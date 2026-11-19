@@ -96,12 +96,13 @@ export function DocumentSurface(props: {
   readOnly: boolean;
   theme: 'light' | 'dark';
   userName: string;
+  onOpenLegacyVersion?: (versionNumber: number) => void;
   frame: () => ReactNode;
 }) {
   if (!props.live) return <>{props.frame()}</>;
   return (
     <Suspense fallback={<div className="p-4 text-sm text-neutral-500">Loading editor…</div>}>
-      <LiveEditor documentId={props.documentId} readOnly={props.readOnly} theme={props.theme} userName={props.userName} />
+      <LiveEditor documentId={props.documentId} readOnly={props.readOnly} theme={props.theme} userName={props.userName} onOpenLegacyVersion={props.onOpenLegacyVersion} />
     </Suspense>
   );
 }
@@ -1033,6 +1034,7 @@ function DocumentPageInner() {
             readOnly={!canEdit}
             theme={theme}
             userName={me.data?.displayName ?? 'Someone'}
+            onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
             frame={() =>
               currentVersionId && (
                 <ArtifactIframe

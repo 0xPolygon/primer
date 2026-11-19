@@ -21,6 +21,8 @@ export type LiveEditorProps = {
   theme: 'light' | 'dark';
   /** Shown on this viewer's cursor to everyone else. */
   userName: string;
+  /** Opens a version from before the document went live in the version viewer. */
+  onOpenLegacyVersion?: (versionNumber: number) => void;
 };
 
 /**
@@ -58,7 +60,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   );
 }
 
-function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
+function TabEditor({ live, tabId, documentId, readOnly, theme, userName, onOpenLegacyVersion }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const editor = useCreateBlockNote(
@@ -66,7 +68,7 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveE
       schema: primerSchema,
       // Until comments ship, the comment mark must still be known, or
       // y-prosemirror would delete commented text.
-      extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId) })],
+      extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId, onOpenLegacyVersion) })],
       collaboration: {
         provider: { awareness: live.provider.awareness ?? undefined },
         fragment: live.doc.getXmlFragment(tabFragmentName(tabId)),

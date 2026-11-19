@@ -278,6 +278,9 @@ export interface VersionSummaryDTO {
   versionNote: string | null;
   sizeBytes: number;
   createdAt: string;
+  /** True for a checkpoint of a live document (it has a render bundle).
+   *  Versions from before the document went live are plain rendered HTML. */
+  bundled?: boolean;
 }
 
 export interface VersionsListResponse {
