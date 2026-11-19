@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
-import { anchorAt, applyLabels, safeSvg } from './WidgetView.tsx';
+import { anchorAt, applyLabels, parseSafeSvg } from './WidgetView.tsx';
 
 const SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">' +
@@ -29,17 +29,26 @@ describe('WidgetView', () => {
   });
 
   it('only drawing reaches the page', () => {
-    expect(safeSvg(SVG)).toBe(SVG);
+    expect(parseSafeSvg(SVG)?.querySelector('rect')?.getAttribute('data-row')).toBe('w2');
+    const svg = (inner: string, attrs = '') => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"${attrs}>${inner}</svg>`;
     for (const bad of [
-      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
-      '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>',
-      '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject/></svg>',
-      '<svg xmlns="http://www.w3.org/2000/svg"><use href="https://example.com/s.svg#a"/></svg>',
-      '<svg xmlns="http://www.w3.org/2000/svg"><rect mask="url(https://example.com/m)"/></svg>',
-      '<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:red"/></svg>',
+      svg('<text data-text-id="t"><![CDATA[</text><img src=x onerror=alert(1)>]]></text>'),
+      svg('<?xml-stylesheet href="https://example.com/x.css"?><rect/>'),
+      svg('<!-- <img src=x onerror=alert(1)> --><rect/>'),
+      svg('<script xmlns="http://www.w3.org/1999/xhtml">alert(1)</script>'),
+      svg('<h:img xmlns:h="http://www.w3.org/1999/xhtml" src="x"/>'),
+      svg('<script>alert(1)</script>'),
+      svg('<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject>'),
+      svg('<rect/>', ' onload="alert(1)"'),
+      svg('<use href="https://example.com/s.svg#a"/>'),
+      svg('<use xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#a"/>'),
+      svg('<rect mask="url(https://example.com/m)"/>'),
+      svg('<rect style="fill:red"/>'),
+      svg('<rect class="x"/>'),
+      '<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"/>',
       '<div>not svg</div>',
     ]) {
-      expect(safeSvg(bad), bad).toBeNull();
+      expect(parseSafeSvg(bad), bad).toBeNull();
     }
   });
 });

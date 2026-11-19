@@ -56,33 +56,70 @@ function anchorElements(root: Element, anchor: WidgetAnchor): Element[] {
   return [...root.querySelectorAll(sel)];
 }
 
-const SVG_ELEMENTS = new Set([
-  'svg', 'g', 'defs', 'title', 'desc', 'symbol', 'marker', 'use', 'path', 'rect', 'circle', 'ellipse', 'line',
-  'polyline', 'polygon', 'text', 'tspan', 'textPath', 'linearGradient', 'radialGradient', 'stop', 'clipPath',
-  'mask', 'pattern', 'filter',
-]);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// The server's SVG allowlist (apps/api/src/upload/sanitize.ts SVG_TAGS,
+// SVG_TAG_ATTRS and SVG_PRESENTATION_ATTRS, as widgets/serialize.ts applies it).
+const PRESENTATION = [
+  'fill', 'fill-opacity', 'fill-rule', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray',
+  'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'opacity', 'transform', 'font-size', 'font-weight',
+  'font-style', 'text-anchor', 'dominant-baseline', 'alignment-baseline', 'letter-spacing', 'word-spacing',
+  'clip-path', 'mask', 'filter', 'marker-start', 'marker-mid', 'marker-end',
+  'id', 'data-text-id', 'data-anchor', 'data-row', 'data-col',
+];
+const TAG_ATTRS: Record<string, string[]> = {
+  svg: ['viewBox', 'xmlns', 'preserveAspectRatio', 'role', 'aria-label', 'aria-labelledby', 'aria-describedby', 'font-family'],
+  g: [], defs: [], title: [], desc: [], symbol: [], textPath: [],
+  use: ['href', 'x', 'y', 'width', 'height'],
+  path: ['d', 'pathLength'],
+  rect: ['x', 'y', 'width', 'height', 'rx', 'ry'],
+  circle: ['cx', 'cy', 'r'],
+  ellipse: ['cx', 'cy', 'rx', 'ry'],
+  line: ['x1', 'y1', 'x2', 'y2'],
+  polyline: ['points'],
+  polygon: ['points'],
+  text: ['x', 'y', 'dx', 'dy', 'rotate', 'textLength', 'lengthAdjust'],
+  tspan: ['x', 'y', 'dx', 'dy', 'rotate', 'textLength', 'lengthAdjust'],
+  marker: ['markerWidth', 'markerHeight', 'markerUnits', 'refX', 'refY', 'orient', 'viewBox'],
+  linearGradient: ['x1', 'y1', 'x2', 'y2', 'gradientUnits', 'gradientTransform', 'spreadMethod'],
+  radialGradient: ['cx', 'cy', 'r', 'fx', 'fy', 'gradientUnits', 'gradientTransform', 'spreadMethod'],
+  stop: ['offset', 'stop-color', 'stop-opacity'],
+  clipPath: ['clipPathUnits'],
+  mask: ['maskUnits', 'maskContentUnits', 'x', 'y', 'width', 'height'],
+  pattern: ['patternUnits', 'patternContentUnits', 'patternTransform', 'x', 'y', 'width', 'height', 'viewBox'],
+  filter: ['x', 'y', 'width', 'height', 'filterUnits', 'primitiveUnits'],
+};
 
 /**
- * The widget SVG, if it holds only drawing: SVG elements, no event handlers
- * or style, and references only inside the widget. The server already
- * allowlists every render (apps/api/src/widgets/serialize.ts); this second
- * check keeps the host window safe should that ever slip, since the SVG is
- * placed in Primer's own page, not a sandbox.
+ * The widget SVG as a checked element tree, or null. The server allowlists
+ * every render (apps/api/src/widgets/serialize.ts); this second check keeps
+ * the host window safe should that ever slip, since the SVG sits in Primer's
+ * own page, not a sandbox. The string is parsed once, as XML, and only the
+ * checked nodes are mounted (`importNode`), never the string itself, so no
+ * second parser can read it differently. Anything but SVG elements and text
+ * (comments, CDATA, processing instructions, another namespace), and any tag
+ * or attribute outside the allowlist, refuses the whole widget.
  */
-export function safeSvg(text: string): string | null {
+export function parseSafeSvg(text: string): Element | null {
   const parsed = new DOMParser().parseFromString(text, 'image/svg+xml');
   const root = parsed.documentElement;
-  if (root.nodeName !== 'svg' || parsed.getElementsByTagName('parsererror').length > 0) return null;
-  for (const el of [root, ...root.querySelectorAll('*')]) {
-    if (!SVG_ELEMENTS.has(el.nodeName)) return null;
+  if (parsed.getElementsByTagName('parsererror').length > 0 || root.localName !== 'svg') return null;
+  for (const child of parsed.childNodes) if (child !== root) return null; // a doctype, PI or comment outside the root
+  const ok = (node: Node): boolean => {
+    if (node.nodeType === Node.TEXT_NODE) return true;
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    const el = node as Element;
+    const allowed = TAG_ATTRS[el.localName];
+    if (el.namespaceURI !== SVG_NS || el.prefix !== null || !allowed) return false;
     for (const a of el.attributes) {
-      const name = a.name.toLowerCase();
-      if (name.startsWith('on') || name === 'style' || name.includes(':')) return null;
-      if (name === 'href' && !a.value.startsWith('#')) return null;
-      if (a.value.includes('url(') && !/^url\(#[\w-]+\)$/.test(a.value.trim())) return null;
+      if (a.name === 'xmlns' && el === root) continue;
+      if (a.namespaceURI !== null || (!allowed.includes(a.name) && !PRESENTATION.includes(a.name))) return false;
+      if (a.name === 'href' && !/^#[\w-]+$/.test(a.value)) return false;
+      if (a.value.includes('url(') && !/^url\(#[\w-]+\)$/.test(a.value.trim())) return false;
     }
-  }
-  return text;
+    return [...el.childNodes].every(ok);
+  };
+  return ok(root) ? root : null;
 }
 
 /** Each label's current words into its `[data-text-id]` element. */
@@ -106,7 +143,7 @@ export function WidgetView(props: PageViewContext & { blockId: string; props: Wi
   const { widgetId, hash } = props.props;
   const textIds = props.props.textIds.split(' ').filter(Boolean);
   const box = useRef<HTMLDivElement>(null);
-  const [svg, setSvg] = useState<string | null>(null);
+  const [svg, setSvg] = useState<Element | null>(null);
   const [failed, setFailed] = useState(false);
   const [label, setLabel] = useState<{ textId: string; rect: OverlayRect } | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -120,7 +157,7 @@ export function WidgetView(props: PageViewContext & { blockId: string; props: Wi
     let live = true;
     void api(`/api/widgets/${encodeURIComponent(widgetId)}/image?theme=${theme}&v=${hash}`).then(async (res) => {
       if (!live) return;
-      const safe = res.ok ? safeSvg(await res.text()) : null;
+      const safe = res.ok ? parseSafeSvg(await res.text()) : null;
       setFailed(safe === null);
       setSvg(safe);
     });
@@ -128,6 +165,11 @@ export function WidgetView(props: PageViewContext & { blockId: string; props: Wi
       live = false;
     };
   }, [widgetId, hash, theme]);
+
+  // The checked tree is mounted as nodes, never as markup.
+  useLayoutEffect(() => {
+    box.current?.replaceChildren(...(svg ? [document.importNode(svg, true)] : []));
+  }, [svg, hash]);
 
   // Labels show their current words, and follow every edit.
   useLayoutEffect(() => {
@@ -198,7 +240,7 @@ export function WidgetView(props: PageViewContext & { blockId: string; props: Wi
   return (
     <div className="primer-widget" data-widget-id={widgetId} contentEditable={false}>
       {failed && <p className="text-xs text-red-600">{t('widget.unavailable')}</p>}
-      <div ref={box} className="primer-widget-svg" onClick={onClick} dangerouslySetInnerHTML={{ __html: svg ?? '' }} />
+      <div ref={box} className="primer-widget-svg" onClick={onClick} />
       {threads.length > 0 && (
         <ul className="primer-widget-threads" aria-label={t('widget.comments')}>
           {threads.map((th) => (
