@@ -19,6 +19,7 @@ interface DocRow {
   lastActivityAt: string | Date;
   createdAt: string | Date;
   folderId: string | null;
+  isTemplate: boolean;
 }
 
 interface FolderRow {
@@ -83,7 +84,8 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
           COALESCE(MAX(vc.comment_activity), d.created_at)
         )                   AS "lastActivityAt",
         d.created_at        AS "createdAt",
-        df.folder_id        AS "folderId"
+        df.folder_id        AS "folderId",
+        d.is_template       AS "isTemplate"
       FROM documents d
       INNER JOIN users u              ON u.id = d.uploader_id
       LEFT JOIN document_folders df   ON df.document_id = d.id AND df.user_id = ${userId}
@@ -102,7 +104,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
                 SELECT 1 FROM document_views dv
                  WHERE dv.document_id = d.id AND dv.user_id = ${userId}))
         )
-      GROUP BY d.id, d.title, d.description, d.uploader_id, d.visibility, u.id, d.created_at, df.folder_id
+      GROUP BY d.id, d.title, d.description, d.uploader_id, d.visibility, u.id, d.created_at, df.folder_id, d.is_template
       ORDER BY "lastActivityAt" DESC
     `)) as unknown as DocRow[];
 
@@ -157,6 +159,7 @@ export function registerLibraryRoute(app: Hono<{ Variables: AppVariables }>): vo
       lastActivityAt: toIso(r.lastActivityAt),
       createdAt: toIso(r.createdAt),
       folderId: r.folderId,
+      isTemplate: r.isTemplate,
     }));
 
     const foldersOut: FolderDTO[] = folderRows.map((r) => ({

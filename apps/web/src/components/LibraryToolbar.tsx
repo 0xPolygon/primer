@@ -18,6 +18,7 @@ const CHIPS: ReadonlyArray<{ key: Chip; label: string }> = [
   { key: 'all', label: t('libraryToolbar.all') },
   { key: 'mine', label: t('libraryToolbar.mine') },
   { key: 'shared', label: t('libraryToolbar.shared') },
+  { key: 'templates', label: t('libraryToolbar.templates') },
   { key: 'deleted', label: t('libraryToolbar.deleted') },
 ];
 

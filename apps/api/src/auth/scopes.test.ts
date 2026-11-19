@@ -160,6 +160,7 @@ describe('route scope table', () => {
       'primer_apply_ops',
       'primer_update_run',
       'primer_withdraw_suggestion',
+      'primer_fork_document',
       'primer_add_choice',
       'primer_propose_pick',
       'primer_add_task',

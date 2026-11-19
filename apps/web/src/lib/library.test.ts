@@ -16,6 +16,7 @@ function doc(partial: Partial<LibraryDocument>): LibraryDocument {
     lastActivityAt: '2026-07-01T00:00:00Z',
     createdAt: '2026-07-01T00:00:00Z',
     folderId: null,
+    isTemplate: false,
     ...partial,
   };
 }

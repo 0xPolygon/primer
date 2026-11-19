@@ -4,6 +4,7 @@ import type { LibraryDocument, FolderDTO } from '@polygonlabs/primer-api-types';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 import { DocKebabMenu } from './DocKebabMenu.tsx';
 import { DocFolderChip } from './DocFolderChip.tsx';
+import { UseTemplateButton } from './UseTemplateButton.tsx';
 import { hashHue } from '../lib/library.ts';
 import { relativeTime } from '../lib/relativeTime.ts';
 
@@ -56,7 +57,8 @@ export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
           </div>
         </div>
       </Link>
-      <div className="absolute right-2 top-0 flex h-9 items-center">
+      <div className="absolute right-2 top-0 flex h-9 items-center gap-2">
+        <UseTemplateButton doc={doc} />
         {assignedFolder ? (
           <DocFolderChip doc={doc} folderName={assignedFolder.name} folders={folders} />
         ) : (
