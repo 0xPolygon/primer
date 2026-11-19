@@ -1,4 +1,4 @@
-import type { PagePolicy } from '@polygonlabs/primer-api-types';
+import type { PagePolicy, RecordsSnapshot } from '@polygonlabs/primer-api-types';
 
 // A page reads records only if it opts in, in its <head>:
 //   <meta name="primer-records" content="read">
@@ -20,4 +20,23 @@ export function readsRecords(html: string): boolean {
 
 export function pagePolicyOf(html: string): PagePolicy {
   return readsRecords(html) ? 'records' : 'standard';
+}
+
+/** The element a checkpoint's page reads its frozen records from (v1.js). */
+export const FROZEN_RECORDS_ID = 'primer-records-frozen';
+
+/**
+ * A checkpoint's page served with its frozen records (`records.json`), for a
+ * page that opted in to records: shares and checkpoint views answer the page's
+ * record reads from these, in the page (companion v1.js), never from live
+ * records, and refuse writes. Only shared records are ever frozen. The JSON
+ * sits in an inert `application/json` script at the top of <head>, with `<`
+ * escaped so no text in it can close the element.
+ */
+export function withFrozenRecords(html: string, snapshot: RecordsSnapshot | null): string {
+  if (snapshot === null || !readsRecords(html)) return html;
+  const json = JSON.stringify(snapshot).replace(/</g, '\\u003c');
+  const tag = `<script type="application/json" id="${FROZEN_RECORDS_ID}">${json}</script>`;
+  const head = /<head\b[^>]*>/i.exec(html);
+  return head ? html.slice(0, head.index + head[0].length) + tag + html.slice(head.index + head[0].length) : tag + html;
 }

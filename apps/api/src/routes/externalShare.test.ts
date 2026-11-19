@@ -22,6 +22,10 @@ import { readBlocks } from '../live/editor.ts';
 import { withLiveDoc } from '../live/live.testlib.ts';
 import { originFor } from '../live/origin.ts';
 import { applyPlan } from '../live/pipeline.ts';
+import { applyOps } from '../live/ops.ts';
+import { recordsApi } from '../records/store.ts';
+import { flushDataChanged } from '../records/changed.ts';
+import type { RecordsSnapshot } from '@polygonlabs/primer-api-types';
 
 class CaptureNotifier extends NoopNotifier {
   override readonly emailEnabled = true;
@@ -236,6 +240,75 @@ describe('external share public routes', () => {
       expect(html).toContain('Ship the editor first.');
       expect(html).not.toContain('Secret draft change.');
       expect(content.headers.get('content-security-policy')).toBe(artifactCsp('standard'));
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it('external share reads the frozen snapshot', async () => {
+    const f = await fixture();
+    try {
+      const storage = new FilesystemStorage(f.root);
+      const share = async (documentId: string, versionId: string) => {
+        const shareToken = generateShareToken();
+        const shareId = uuidv7();
+        await db.insert(externalShares).values({ id: shareId, documentId, shareToken, createdBy: 'mock-user-1', publishedVersionId: versionId });
+        await db.insert(externalRecipients).values({
+          id: uuidv7(), shareId, email: 'client@example.com', addedBy: 'mock-user-1',
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        });
+        const cookie = await authenticate({ ...f, shareToken });
+        return f.app.request(`/api/share/${shareToken}/content`, { headers: { cookie } });
+      };
+
+      // A live document with a data table over `metrics`.
+      const doc = await publishDocument(storage, {
+        actor: MOCK_USER, title: 'Metrics', filename: 'm.md', format: 'markdown',
+        content: new TextEncoder().encode('# Metrics\n\nWeekly numbers.\n'),
+      });
+      if (!doc.ok) throw new Error('publish refused');
+      const intro = await withLiveDoc(doc.documentId, (d) => readBlocks(d, 'main').find((b) => JSON.stringify(b.content).includes('Weekly'))!.id);
+      const columns = JSON.stringify([{ key: 'week', label: 'Week', type: 'text' }, { key: 'signups', label: 'Signups', type: 'number' }]);
+      const added = await applyOps(doc.documentId, MOCK_USER, {
+        ops: [{ op: 'add', at: { tabId: 'main', blockId: intro }, position: 'after', blocks: [{ json: { type: 'dataTable', props: { collection: 'metrics', columns, scope: 'shared' } } }] }],
+      });
+      expect(added.ok).toBe(true);
+      const records = recordsApi(MOCK_USER, doc.documentId);
+      await records.set({ collection: 'metrics', scope: 'shared', recordId: 'w1', data: { week: 'W1', signups: 240 } });
+      await records.set({ collection: 'metrics', scope: 'shared', recordId: 'w2', data: { week: 'W2 <b>bold</b>', signups: 410 } });
+      const checkpoint = await f.app.request(`/api/documents/${doc.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const { versionId } = (await checkpoint.json()) as { versionId: string };
+      // Live data moves on after publish.
+      await records.update({ collection: 'metrics', scope: 'shared', recordId: 'w2', data: { signups: 999 } });
+
+      const table = await (await share(doc.documentId, versionId)).text();
+      expect(table).toContain('<th>Week</th><th>Signups</th>');
+      expect(table).toContain('<td>W1</td><td>240</td>');
+      expect(table).toContain('<td>W2 &lt;b&gt;bold&lt;/b&gt;</td><td>410</td>');
+      expect(table).not.toContain('999');
+
+      // A record-reading page reads the same frozen records, under the records lockdown.
+      const page = await publishDocument(storage, {
+        actor: MOCK_USER, title: 'Board', filename: 'b.html', format: 'html',
+        content: new TextEncoder().encode('<!doctype html><html><head><meta name="primer-records" content="read"><title>Board</title></head><body><h1>Board</h1></body></html>'),
+      });
+      if (!page.ok) throw new Error('publish refused');
+      const pageRecords = recordsApi(MOCK_USER, page.documentId);
+      await pageRecords.set({ collection: 'votes', scope: 'shared', recordId: 'a', data: { note: '</script><script>alert(1)</script>' } });
+      await pageRecords.set({ collection: 'mine', scope: 'personal', recordId: 'p', data: { secret: 'personal-only' } });
+      const pageCheckpoint = await f.app.request(`/api/documents/${page.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const pageVersion = ((await pageCheckpoint.json()) as { versionId: string }).versionId;
+      await pageRecords.set({ collection: 'votes', scope: 'shared', recordId: 'b', data: { note: 'after publish' } });
+
+      const res = await share(page.documentId, pageVersion);
+      expect(res.headers.get('content-security-policy')).toBe(artifactCsp('records'));
+      const html = await res.text();
+      const frozen = /<script type="application\/json" id="primer-records-frozen">(.*?)<\/script>/s.exec(html);
+      expect(frozen).not.toBeNull();
+      const snapshot = JSON.parse(frozen![1]!) as RecordsSnapshot;
+      expect(Object.keys(snapshot.collections)).toEqual(['votes']);
+      expect(snapshot.collections.votes!.map((r) => [r.recordId, r.data.note])).toEqual([['a', '</script><script>alert(1)</script>']]);
+      expect(html).not.toContain('after publish');
+      expect(html).not.toContain('personal-only');
+      await flushDataChanged();
     } finally { await rm(f.root, { recursive: true, force: true }); }
   });
 

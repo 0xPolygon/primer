@@ -764,7 +764,87 @@
     else pending.reject(recordsError(msg.refusal));
   }
 
+  // A checkpoint (an external share, a checkpoint view) is served with the
+  // shared records frozen when it was published, in an inert JSON script
+  // (#primer-records-frozen, placed by the server). Reads are answered from
+  // it, here in the page, and writes are refused: the data is as published,
+  // never live. Personal records are never frozen.
+  let frozenRecords; // undefined until first read; null when there are none
+  function readFrozenRecords() {
+    if (frozenRecords !== undefined) return frozenRecords;
+    frozenRecords = null;
+    const el = document.getElementById('primer-records-frozen');
+    if (!el || el.getAttribute('type') !== 'application/json') return null;
+    try {
+      const snap = JSON.parse(el.textContent || '');
+      if (snap && typeof snap === 'object' && snap.collections && typeof snap.collections === 'object') frozenRecords = snap;
+    } catch (e) {
+      log.warn('frozen records unreadable:', e && e.message ? e.message : e);
+    }
+    return frozenRecords;
+  }
+
+  function frozenRefusal(code, message, fix) {
+    return { ok: false, refusal: { code, message, fix } };
+  }
+
+  /** One record call answered from the frozen snapshot. */
+  function frozenRecordCall(snap, verb, args) {
+    if (verb === 'changesSince') return { ok: true, value: { changes: [], toChangeId: snap.toChangeId || 0, hasMore: false } };
+    if (verb !== 'get' && verb !== 'list' && verb !== 'query') {
+      return frozenRefusal('forbidden', 'This is a published checkpoint: its records are frozen.', 'Open the live document to change records.');
+    }
+    const collection = typeof args.collection === 'string' ? args.collection : '';
+    const scope = args.scope;
+    if (scope !== 'shared' && scope !== 'personal') return frozenRefusal('bad_request', 'scope must be "shared" or "personal"', 'Call again with valid arguments.');
+    const list = scope === 'shared' && Object.prototype.hasOwnProperty.call(snap.collections, collection) && Array.isArray(snap.collections[collection])
+      ? snap.collections[collection]
+      : [];
+    const dto = (r) => ({
+      collection,
+      recordId: r.recordId,
+      scope: 'shared',
+      data: JSON.parse(JSON.stringify(r.data)),
+      version: r.version,
+      updatedAt: r.updatedAt,
+      updatedBy: '',
+      writtenBy: r.writtenBy,
+    });
+    if (verb === 'get') {
+      const found = list.find((r) => r.recordId === args.recordId);
+      return { ok: true, value: { record: found ? dto(found) : null } };
+    }
+    const limit = args.limit === undefined ? 50 : args.limit;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) return frozenRefusal('bad_request', 'limit must be an integer from 1 to 200', 'Call again with valid arguments.');
+    const offset = args.cursor === undefined ? 0 : /^f:\d{1,6}$/.test(String(args.cursor)) ? Number(String(args.cursor).slice(2)) : -1;
+    if (offset < 0) return frozenRefusal('bad_request', 'cursor is not a cursor from a previous page', 'Call again with valid arguments.');
+    let rows = list.slice();
+    if (verb === 'query') {
+      const where = args.where && typeof args.where === 'object' ? args.where : {};
+      rows = rows.filter((r) => Object.keys(where).every((k) => r.data && r.data[k] === where[k]));
+      const o = args.orderBy;
+      if (o && typeof o.key === 'string' && (o.dir === 'asc' || o.dir === 'desc')) {
+        const sign = o.dir === 'asc' ? 1 : -1;
+        rows.sort((a, b) => {
+          const x = a.data ? a.data[o.key] : undefined;
+          const y = b.data ? b.data[o.key] : undefined;
+          if (x === y) return a.recordId < b.recordId ? -1 : 1;
+          if (x === undefined || x === null) return 1;
+          if (y === undefined || y === null) return -1;
+          return (x < y ? -1 : 1) * sign;
+        });
+      }
+    }
+    const page = rows.slice(offset, offset + limit).map(dto);
+    return { ok: true, value: { records: page, nextCursor: rows.length > offset + limit ? 'f:' + (offset + limit) : null } };
+  }
+
   function callRecords(verb, args, opts) {
+    const snap = readFrozenRecords();
+    if (snap) {
+      const out = frozenRecordCall(snap, verb, args && typeof args === 'object' ? args : {});
+      return out.ok ? Promise.resolve(out.value) : Promise.reject(recordsError(out.refusal));
+    }
     return new Promise((resolve, reject) => {
       const signal = opts && opts.signal;
       if (signal && signal.aborted) {
