@@ -429,6 +429,10 @@ export function registerDocumentRoutes(
     });
     if (!result.ok) return refusalResponse(c, result);
 
+    if (result.versionId === undefined) {
+      const suggested: AddVersionResponse = { url: `/d/${docId}`, reconciliation: result.reconciliation };
+      return c.json(suggested, 200);
+    }
     const response: AddVersionResponse = {
       versionId: result.versionId,
       versionNumber: result.versionNumber,

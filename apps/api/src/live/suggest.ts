@@ -15,6 +15,7 @@ import { actorNameOf } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canEdit } from '../lib/permissions.ts';
+import { fenceUntrusted } from '../lib/untrusted.ts';
 import { blockVersion, findBlock } from './blocks.ts';
 import { serverEditor } from './editor.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -25,7 +26,6 @@ import { applyPlan, contentVersion, type PlannedEdit } from './pipeline.ts';
 import type { SuggestedEdit } from './proposals.ts';
 import { docQueue } from './queue.ts';
 import { tabFragmentName } from './reach.ts';
-import { fenceUntrusted } from './runs.ts';
 import { insertAt } from './undo.ts';
 
 export type { SuggestedEdit, Proposal } from './proposals.ts';
@@ -272,7 +272,7 @@ async function blockDTO(container: PmNode, whole: boolean, forAgent: boolean): P
   const [block] = editor._prosemirrorJSONToBlocks(doc.toJSON());
   const shown = whole ? block! : ({ ...block!, children: [] } as typeof block);
   const markdown = (await editor.blocksToMarkdownLossy([shown] as never)).trimEnd();
-  if (forAgent) return { markdown: fenceUntrusted(markdown, 'untrusted-content') };
+  if (forAgent) return { markdown: fenceUntrusted(markdown, 'content') };
   return { markdown, json: shown as unknown as Record<string, unknown> };
 }
 

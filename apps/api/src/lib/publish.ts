@@ -19,10 +19,13 @@
 // Markdown or text version becomes live the same way; its open threads are
 // re-anchored by quote, and those whose quote isn't found are orphaned. A
 // Markdown or text version of a live document is merged three ways into it
-// (live/merge.ts) and checkpointed. HTML publishes the same way as a live page
-// document (page/publish.ts): one page block over the stamped upload, whose
-// republishes carry people's text over. Legacy documents keep their versions
-// and render them as before; their next version makes them live.
+// (live/merge.ts) and checkpointed, unless the merge applied nothing (e.g. an
+// agent in suggest mode, whose changes all become suggestions): then no
+// version is made and the result carries only the reconciliation. HTML
+// publishes the same way as a live page document (page/publish.ts): one page
+// block over the stamped upload, whose republishes carry people's text over.
+// Legacy documents keep their versions and render them as before; their next
+// version makes them live, unless an agent in suggest mode publishes it.
 import * as Y from 'yjs';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
@@ -39,7 +42,7 @@ import type { Storage } from '../storage/types.ts';
 import { anchorPageThreads, buildPageDoc, preparePage, sourceKeyOf, republishPage } from '../page/publish.ts';
 import { MAX_BYTES, MAX_DESCRIPTION, MAX_TITLE } from '../upload/validate.ts';
 import { transactionWithEvents } from './events.ts';
-import { canEdit, canRead, loadEffectiveRole, type Visibility } from './permissions.ts';
+import { canEdit, canRead, effectiveAgentMode, loadEffectiveRole, type Visibility } from './permissions.ts';
 
 export const MAX_VERSION_NOTE = 500;
 
@@ -58,9 +61,12 @@ export interface PublishInput {
   baseVersionNumber?: number;
 }
 
-export type PublishResult =
-  | { ok: true; documentId: string; versionId: string; versionNumber: number; reconciliation?: Reconciliation }
-  | { ok: false; status: 400 | 403 | 404 | 409; refusal: Refusal };
+export type Published = { ok: true; documentId: string; versionId: string; versionNumber: number; reconciliation?: Reconciliation };
+/** A republish onto a live document that applied nothing (an agent in suggest
+ *  mode, or no change): no new version, only what became of each group. */
+export type Suggested = { ok: true; documentId: string; versionId?: never; versionNumber?: never; reconciliation: Reconciliation };
+export type Refused = { ok: false; status: 400 | 403 | 404 | 409; refusal: Refusal };
+export type PublishResult = Published | Suggested | Refused;
 
 /** `details.error` keeps the REST error code clients already branch on. */
 function refuse(
@@ -69,7 +75,7 @@ function refuse(
   message: string,
   fix: string,
   restError: string = code,
-): PublishResult {
+): Refused {
   return { ok: false, status, refusal: { code, message, fix, details: { error: restError } } };
 }
 
@@ -81,6 +87,9 @@ class StaleBase extends Error {
 
 class Republish extends Error {}
 
+/** A new document always gets version 1. */
+export function publishDocument(storage: Storage, input: PublishInput & { documentId?: undefined }): Promise<Published | Refused>;
+export function publishDocument(storage: Storage, input: PublishInput): Promise<PublishResult>;
 export async function publishDocument(storage: Storage, input: PublishInput): Promise<PublishResult> {
   const { actor, documentId: existingId } = input;
 
@@ -125,6 +134,16 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       }
       return republishLive(storage, input, doc.format, versionNote);
     }
+    // Making a legacy document live replaces what it shows: an agent that may
+    // only suggest here can't, since there is nothing to suggest against.
+    if (actor.kind === 'agent' && (await effectiveAgentMode(existingId, actor.id)) === 'suggest') {
+      return refuse(
+        403,
+        'forbidden',
+        'This document predates live documents, and you may only suggest changes to it.',
+        'Comment with your proposed version instead, or ask the owner to publish it or to switch your mode to edit.',
+      );
+    }
   }
 
   const versionNote = input.versionNote?.trim() || null;
@@ -152,7 +171,7 @@ async function lockForVersion(tx: Tx, documentId: string, base: number | undefin
   return latest;
 }
 
-function refusalFor(err: unknown, base: number | undefined): PublishResult {
+function refusalFor(err: unknown, base: number | undefined): Refused {
   if (err instanceof StaleBase) {
     return refuse(
       409,
@@ -165,7 +184,7 @@ function refusalFor(err: unknown, base: number | undefined): PublishResult {
   throw err;
 }
 
-function formatRefusal(format: PublishFormat, live: string): PublishResult {
+function formatRefusal(format: PublishFormat, live: string): Refused {
   return refuse(
     400,
     'bad_request',
@@ -178,7 +197,10 @@ function formatRefusal(format: PublishFormat, live: string): PublishResult {
  * A new Markdown or text version of a live document: merged three ways into
  * the live blocks (live/merge.ts), so people's edits and comments stay and
  * groups both sides changed become suggestions; then checkpointed as the new
- * version, with the uploaded file kept as its original.
+ * version, with the uploaded file kept as its original. When nothing was
+ * applied (an agent in suggest mode gets every change as a suggestion), the
+ * live document is unchanged, so no original is stored and no checkpoint
+ * written: an agent's suggestions never become the published version.
  */
 async function republishLive(
   storage: Storage,
@@ -216,6 +238,7 @@ async function republishLive(
       await db.update(documents).set({ metadata: imported.metadata }).where(eq(documents.id, documentId));
     }
   }
+  if (!reconciliation.outcomes.some((o) => o.status === 'applied')) return { ok: true, documentId, reconciliation };
   const originalKey = `v1/${versionId}.orig`;
   await storage.put(originalKey, input.content);
   try {
@@ -242,7 +265,7 @@ async function publishLive(
   storage: Storage,
   input: PublishInput,
   doc: { title: string; description: string | null; versionNote: string | null },
-): Promise<PublishResult> {
+): Promise<Published | Refused> {
   const format = input.format;
   const source = new TextDecoder('utf-8').decode(input.content);
   if (source.trim().length === 0) {

@@ -13,9 +13,10 @@ import { decideSuggestion, listSuggestions } from './suggest.ts';
 import { claimRun, finishRun, requestRun } from './runs.ts';
 import { undoRun } from './undo.ts';
 import { createCheckpoint, restoreCheckpoint } from './checkpoint.ts';
+import { publishDocument } from '../lib/publish.ts';
 import { versions as versionsTable } from '../db/schema.ts';
 import { eq } from 'drizzle-orm';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -72,7 +73,7 @@ describe('suggestions', () => {
     expect(list[1]!.edits[0]).toMatchObject({ kind: 'delete', current: { markdown: 'Gamma' }, proposed: null });
     // The same suggestions reach an agent fenced, without JSON.
     const fenced = await open(id, agent);
-    expect(fenced[0]!.edits[0]!.proposed).toEqual({ markdown: '<untrusted-content>\nAlpha, reworded\n</untrusted-content>' });
+    expect(fenced[0]!.edits[0]!.proposed!.markdown).toMatch(/^<(untrusted-content-[0-9a-f]{16})>\nAlpha, reworded\n<\/\1>$/);
 
     expect(await decideSuggestion(list[0]!.id, owner, 'accept')).toMatchObject({ ok: true, value: { outcomes: [{ status: 'applied' }] } });
     expect(await decideSuggestion(list[1]!.id, owner, 'reject')).toMatchObject({ ok: true });
@@ -122,6 +123,35 @@ describe('suggestions', () => {
       expect(restored.outcomes.map((o) => o.status)).toEqual(['suggested']);
       expect(await markdownOf(id, owner)).toEqual(['Alpha', 'Beta, later', 'Gamma']);
       expect((await open(id))[0]!.edits).toMatchObject([{ kind: 'replace', proposed: { markdown: 'Beta' } }]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('an agent in suggest mode republishing creates suggestions only, with no new version', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-suggest-'));
+    try {
+      const storage = new FilesystemStorage(root);
+      const md = (source: string) => ({ content: new TextEncoder().encode(source), filename: 'doc.md', format: 'markdown' as const });
+      const first = await publishDocument(storage, { actor: owner, title: 'Doc', ...md('The quarterly numbers grew in every region we track.\n\nBeta.\n') });
+      if (!first.ok) throw new Error(first.refusal.message);
+      const editor = await person('collab-editor');
+      const agent = await makeAgent(editor.id);
+      await grant(first.documentId, editor.id, 'editor');
+
+      const out = await publishDocument(storage, { actor: agent, documentId: first.documentId, ...md('The quarterly numbers grew in nearly every region we track.\n\nBeta.\n\nGamma is new.\n') });
+      if (!out.ok) throw new Error(out.refusal.message);
+      expect(out.versionId).toBeUndefined();
+      expect(out.versionNumber).toBeUndefined();
+      expect(out.reconciliation!.outcomes.map((o) => o.status)).toEqual(['suggested', 'suggested']);
+
+      // The live document and its published versions are as they were; the
+      // changes wait as suggestions, and no original was stored.
+      expect(await markdownOf(first.documentId, owner)).toEqual(['The quarterly numbers grew in every region we track.', 'Beta.']);
+      const rows = await db.select({ n: versionsTable.versionNumber }).from(versionsTable).where(eq(versionsTable.documentId, first.documentId));
+      expect(rows.map((r) => r.n)).toEqual([1]);
+      expect((await readdir(join(root, 'v1'))).filter((f) => f.endsWith('.orig'))).toHaveLength(1);
+      expect((await open(first.documentId)).flatMap((s) => s.edits.map((e) => e.kind)).sort()).toEqual(['insert', 'replace']);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
