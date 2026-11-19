@@ -12,6 +12,7 @@ import type {
   WidgetPublishResponse,
   WidgetRowInput,
 } from '@polygonlabs/primer-api-types';
+import { RECORD_COLLECTION_RE } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, widgets } from '../db/schema.ts';
@@ -22,7 +23,7 @@ import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
 import { MAIN_TAB } from '../live/reach.ts';
 import { carryLabels, labelEdit, readLabel, tabOfBlock } from './labels.ts';
 import { withLiveDocument } from '../live/instance.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceData, fenceUntrusted } from '../lib/untrusted.ts';
 import { blockVersion, findBlock } from '../live/blocks.ts';
 import { fragmentFor } from '../live/reach.ts';
 import { pmDocOf } from '../live/sources.ts';
@@ -120,6 +121,13 @@ async function labelList(row: WidgetRowRecord, actor: AuthUser): Promise<WidgetL
   });
 }
 
+/** Rows drawn from a records collection are what viewers and other agents
+ *  wrote: an agent reads every value fenced (the row ids stay plain). */
+function fencedRows(actor: AuthUser, rows: unknown, collection: string | null): WidgetRowInput[] | null {
+  if (rows === null || collection === null || actor.kind !== 'agent') return rows as WidgetRowInput[] | null;
+  return (rows as WidgetRowInput[]).map((r) => fenceData(r, 'record', ['id']));
+}
+
 /** Words people wrote reach an agent fenced as untrusted data. */
 function fenced(actor: AuthUser, text: string): string {
   return actor.kind === 'agent' ? fenceUntrusted(text, 'label') : text;
@@ -139,7 +147,7 @@ async function fragmentLabels(row: Pick<WidgetRowRecord, 'documentId' | 'blockId
 }
 
 function checkInput(source: unknown, rows: unknown, collection: unknown): WidgetError[] {
-  if (collection !== undefined && (typeof collection !== 'string' || collection.length === 0 || collection.length > 200 || rows !== undefined)) {
+  if (collection !== undefined && (typeof collection !== 'string' || !RECORD_COLLECTION_RE.test(collection) || rows !== undefined)) {
     return [{ line: 0, message: 'collection is a records collection name, sent instead of rows.', fix: 'Send rows or collection, not both.' }];
   }
   if (typeof source !== 'string' || source.trim() === '') return [{ line: 0, message: 'source is required.', fix: 'Send the whole module as `source`.' }];
@@ -354,14 +362,14 @@ export async function getWidget(actor: AuthUser, widgetId: string): Promise<Widg
       documentId: row.documentId,
       blockId: row.blockId,
       source: row.publishedSource,
-      rows: row.rows as WidgetRowInput[] | null,
+      rows: fencedRows(actor, row.rows, row.collection),
       collection: row.collection,
       publishedHash: row.publishedHash,
       labels,
       draft:
         row.draftSource === null
           ? null
-          : { source: row.draftSource, rows: row.draftRows as WidgetRowInput[] | null, collection: row.draftCollection, errors: row.draftErrors as WidgetError[] | null },
+          : { source: row.draftSource, rows: fencedRows(actor, row.draftRows, row.draftCollection), collection: row.draftCollection, errors: row.draftErrors as WidgetError[] | null },
       updatedAt: row.updatedAt.toISOString(),
     },
   };

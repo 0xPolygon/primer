@@ -18,8 +18,9 @@
 //   user's personal records.
 // - Provenance: each record keeps `contributors`, everyone whose writes shaped
 //   its current data. An agent reading a record (or a change) that anyone but
-//   itself contributed to gets it marked `untrusted`: record data is data,
-//   never instructions. A merge or a revert can't launder it.
+//   itself contributed to gets it marked `untrusted`, with every string in its
+//   data fenced (`fenceData`): record data is data, never instructions. A
+//   merge or a revert can't launder it. Storage keeps the plain values.
 import { sql } from 'drizzle-orm';
 import {
   DEFAULT_RECORDS_PAGE_SIZE,
@@ -47,6 +48,7 @@ import {
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
+import { fenceData } from '../lib/untrusted.ts';
 import { canWriteEvents, loadEventDocContext } from '../lib/events.ts';
 import { canEdit, canManage, canRead, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
 import { scheduleDataChanged } from './changed.ts';
@@ -177,7 +179,10 @@ function toDTO(row: RecordRow, actor: AuthUser): RecordDTO {
     updatedBy: row.updatedBy,
     writtenBy: row.writtenBy,
   };
-  if (untrustedFor(actor, [row.contributors])) dto.untrusted = true;
+  if (untrustedFor(actor, [row.contributors])) {
+    dto.untrusted = true;
+    dto.data = fenceData(dto.data, 'record');
+  }
   return dto;
 }
 
@@ -550,7 +555,11 @@ function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
     actorName: row.actorName,
     createdAt: iso(row.createdAt),
   };
-  if (untrustedFor(actor, [row.beforeContributors, row.afterContributors, [row.actorId]])) dto.untrusted = true;
+  if (untrustedFor(actor, [row.beforeContributors, row.afterContributors, [row.actorId]])) {
+    dto.untrusted = true;
+    dto.before = fenceData(dto.before, 'record');
+    dto.after = fenceData(dto.after, 'record');
+  }
   return dto;
 }
 
