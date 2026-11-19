@@ -167,7 +167,7 @@ const BLOB = /primer-blob:\/\/([0-9a-f-]{36})/g;
  * Block props are editor-writable, so an id that belongs to another document
  * is left out.
  */
-async function referencedFiles(doc: Y.Doc, documentId: string): Promise<string[]> {
+export async function referencedFiles(doc: Y.Doc, documentId: string): Promise<string[]> {
   const ids = new Set<string>();
   for (const tab of tabsOf(doc)) {
     for (const match of JSON.stringify(readBlocks(doc, tab.id)).matchAll(BLOB)) ids.add(match[1]!);

@@ -18,6 +18,12 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { ThreadAnchor } from '@polygonlabs/primer-api-types';
 
+const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
+  dataType: () => 'bytea',
+  toDriver: (value) => Buffer.from(value.buffer, value.byteOffset, value.byteLength),
+  fromDriver: (value) => new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+});
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),                                       // Okta sub (Phase 2) or "mock-user-1" (Phase 1)
   email: text('email').notNull(),
@@ -47,6 +53,16 @@ export const documents = pgTable('documents', {
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   // How agents write here: `auto` edits documents an agent owns and suggests elsewhere.
   agentMode: text('agent_mode', { enum: ['auto', 'edit', 'suggest'] }).notNull().default('auto'),
+  // A private branch (live/copy.ts): the document it was branched from, and
+  // that document's state and docVersion at the branch, the base of the
+  // three-way comparison that proposes the branch back.
+  branchOf: uuid('branch_of').references((): AnyPgColumn => documents.id, { onDelete: 'set null' }),
+  branchBaseDocVersion: bigint('branch_base_doc_version', { mode: 'number' }),
+  branchBaseState: bytea('branch_base_state'),
+  // A fork (or a document made from a template): where it was copied from.
+  forkedFrom: uuid('forked_from').references((): AnyPgColumn => documents.id, { onDelete: 'set null' }),
+  // Listed under Templates; "New from template" forks it.
+  isTemplate: boolean('is_template').notNull().default(false),
 });
 
 export const versions = pgTable(
@@ -96,6 +112,9 @@ export const threads = pgTable('threads', {
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   resolvedBy: text('resolved_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // On a branch: the parent's thread this one was copied from, so a proposal
+  // maps comment marks back (never a foreign key: the parent may be purged).
+  copiedFrom: uuid('copied_from'),
 });
 
 // Where a thread shows on a version. The originating version gets a row when
@@ -528,12 +547,6 @@ export const externalViews = pgTable(
   }),
 );
 
-const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
-  dataType: () => 'bytea',
-  toDriver: (value) => Buffer.from(value.buffer, value.byteOffset, value.byteLength),
-  fromDriver: (value) => new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
-});
-
 // A live document's Y.Doc is its update log: one row per Yjs update, in
 // order. `id` is the document's `docVersion`. Compaction folds old updates into
 // doc_snapshots and sets `update` to null, keeping the row for its id,
@@ -580,6 +593,8 @@ export const docFiles = pgTable(
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
     uploadedBy: text('uploaded_by').notNull().references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // On a copy: the source document's file this one was copied from.
+    copiedFrom: uuid('copied_from'),
   },
   (t) => ({
     byDoc: index('doc_files_document_id_idx').on(t.documentId),

@@ -162,6 +162,13 @@
       "when": 1795116500261,
       "tag": "0022_records_decisions_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795117464424,
+      "tag": "0023_branches_forks_templates",
+      "breakpoints": true
     }
   ]
 }
