@@ -602,7 +602,7 @@ export async function revertChange(changeId: number, actor: AuthUser): Promise<R
 }
 
 /** Deletes one user's personal records on a document (the owner's way to
- *  reclaim space or remove what a viewer stored). Logged as deletes in that
+ *  reclaim space or remove what a viewer stored). People only. Logged as deletes in that
  *  user's personal change log. */
 export async function purgePersonalRecords(
   actor: AuthUser,
@@ -610,6 +610,12 @@ export async function purgePersonalRecords(
   userId: unknown,
 ): Promise<RecordsResult<{ deleted: number }>> {
   if (typeof userId !== 'string' || userId.length === 0) return refuse('bad_request', 'userId is required');
+  // Erasing people's data is a person's decision. Agents own what they
+  // upload and OAuth tokens carry no scopes, so neither the role nor the
+  // scope alone would keep an agent out.
+  if (actor.kind === 'agent') {
+    return refuse('forbidden', "Only a person who owns the document can purge someone's personal records.");
+  }
   const a = await access(documentId, actor);
   if (!a) return refuse('not_found', 'Document not found.');
   if (!canManage(a.role)) return refuse('forbidden', "Only the document owner can purge someone's personal records.");

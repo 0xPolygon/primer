@@ -1354,7 +1354,7 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_purge_personal_records: {
     description:
-      "Delete one user's personal records on a document (the owner's way to reclaim space or remove what a viewer stored). Only the document owner may. Returns { deleted }.",
+      "Delete one user's personal records on a document (the owner's way to reclaim space or remove what a viewer stored). Only a person who owns the document may (agents are always refused). Returns { deleted }.",
     inputSchema: { documentId: z.string(), userId: z.string() },
   },
 };

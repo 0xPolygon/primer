@@ -283,11 +283,29 @@ describe('enforcing scopes', () => {
       expect(((await refused.json()) as { error: string }).error).toBe('insufficient_scope');
       expect(toolsForScopes(['records:write'])).not.toContain('primer_purge_personal_records');
 
-      const manager = await mintAgentToken(app, ['records:manage']);
+      // Even with records:manage, an agent never purges: it owns this
+      // document, and OAuth agents carry no scopes at all.
+      const agentManager = await mintAgentToken(app, ['records:manage']);
       expect(toolsForScopes(['records:manage'])).toContain('primer_purge_personal_records');
+      const agentPurge = await app.request(`/api/documents/${docId}/records/purge-personal`, {
+        method: 'POST',
+        headers: bearer(agentManager.token),
+        body: JSON.stringify({ userId: HUMAN_ID }),
+      });
+      expect(agentPurge.status).toBe(403);
+      expect(((await agentPurge.json()) as { error: string }).error).toBe('forbidden');
+
+      // A person's token with records:manage purges on documents they own
+      // (their agent's upload included).
+      const personRes = await app.request('/api/tokens', {
+        method: 'POST',
+        headers: asUserJson(ADMIN_ID),
+        body: JSON.stringify({ name: 'manage', scopes: ['records:manage'] }),
+      });
+      const person = (await personRes.json()) as CreateTokenResponse;
       const allowed = await app.request(`/api/documents/${docId}/records/purge-personal`, {
         method: 'POST',
-        headers: bearer(manager.token),
+        headers: bearer(person.token),
         body: JSON.stringify({ userId: HUMAN_ID }),
       });
       expect(allowed.status).toBe(200);

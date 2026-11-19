@@ -20,8 +20,8 @@ Shared records: per-document storage for pages and agents, like Claude Artifacts
   data (`GET /api/documents/:docId/records/changes?since=`,
   `primer_record_changes`); owners and editors revert a shared change
   (`POST /api/record-changes/:changeId/revert`, `primer_revert_record_change`).
-  The owner can delete one user's personal records (`…/records/purge-personal`,
-  `primer_purge_personal_records`).
+  The owner (a person, never an agent) can delete one user's personal records
+  (`…/records/purge-personal`, `primer_purge_personal_records`).
 - **Caps.** Shared records: 10,000 and 10 MB per document. Personal records:
   1,000 and 1 MB per person or agent per document. 64 KB per record.
   Crossing one is refused with `records_cap`.
