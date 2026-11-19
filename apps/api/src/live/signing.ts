@@ -20,26 +20,34 @@ let loading: Promise<void> | null = null;
 export function ensureSigningKey(storage: Storage): Promise<void> {
   if (key) return Promise.resolve();
   loading ??= (async () => {
+    let stored: Buffer;
     try {
-      key = Buffer.from(await new Response(await storage.get(KEY_PATH)).arrayBuffer());
-      if (key.length < 32) throw new Error('signing key too short');
-    } catch {
-      const fresh = randomBytes(32);
-      await storage.put(KEY_PATH, fresh);
-      key = fresh;
+      stored = Buffer.from(await new Response(await storage.get(KEY_PATH)).arrayBuffer());
+    } catch (err) {
+      // Only a missing key is made: any other failure (storage briefly down)
+      // must not replace the key every existing signature depends on.
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+      stored = randomBytes(32);
+      await storage.put(KEY_PATH, stored);
     }
+    if (stored.length < 32) throw new Error(`live: the signing key at ${KEY_PATH} is too short`);
+    key = stored;
   })().finally(() => {
     loading = null;
   });
   return loading;
 }
 
+// Used only until the stored key is loaded; never replaces it.
+let processKey: Buffer | null = null;
+
 function currentKey(): Buffer {
-  if (!key) {
+  if (key) return key;
+  if (!processKey) {
     logger.warn('live: import signing key not loaded; using a process-local key');
-    key = randomBytes(32);
+    processKey = randomBytes(32);
   }
-  return key;
+  return processKey;
 }
 
 /** MAC over a document id and the given fields, in order. */

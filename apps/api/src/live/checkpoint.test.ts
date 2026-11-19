@@ -15,7 +15,7 @@ import type { Storage } from '../storage/types.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
 import { readBundleFile, type BundleThread } from './bundle.ts';
 import { captureState, writeCheckpoint } from './checkpoint.ts';
-import { readBlocks } from './editor.ts';
+import { readBlocks, serverEditor } from './editor.ts';
 import { exportMarkdown } from './export.ts';
 import { withLiveDoc } from './live.testlib.ts';
 import { originFor } from './origin.ts';
@@ -173,14 +173,53 @@ describe('checkpoints', () => {
       };
       const png = await upload('a.png', 'image/png', 'png-bytes');
       expect(png.url).toBe(`primer-blob://${png.fileId}`);
-      const image = await app.request(`/api/files/${png.fileId}`);
+      const image = await app.request(`/api/files/${png.fileId}?doc=${documentId}`);
       expect(image.headers.get('content-type')).toBe('image/png');
       expect(image.headers.get('content-security-policy')).toContain('sandbox');
       const page = await upload('x.html', 'text/html', '<script>alert(1)</script>');
-      const served = await app.request(`/api/files/${page.fileId}`);
+      const served = await app.request(`/api/files/${page.fileId}?doc=${documentId}`);
       expect(served.headers.get('content-type')).toBe('application/octet-stream');
       expect(served.headers.get('content-disposition')).toBe('attachment');
       expect(served.headers.get('x-content-type-options')).toBe('nosniff');
+    });
+  });
+
+  it("a file id from another document is neither served nor bundled", async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const a = await publish(storage, { content: SOURCE, format: 'markdown' });
+      const b = await publish(storage, { content: SOURCE, format: 'markdown' });
+      const upload = async (documentId: string) => {
+        const fd = new FormData();
+        fd.append('file', new Blob(['png'], { type: 'image/png' }), 'a.png');
+        const res = await app.request(`/api/documents/${documentId}/files`, { method: 'POST', headers: CSRF_HEADERS, body: fd });
+        return (await res.json()) as { fileId: string; url: string };
+      };
+      const own = await upload(a.documentId);
+      const foreign = await upload(b.documentId);
+
+      // An editor of A plants both ids in A's content (block props are theirs to write).
+      const image = (id: string, url: string) => ({ id, type: 'image', props: { url } });
+      await applyPlan(a.documentId, originFor(MOCK_USER), {
+        onConflict: 'refuse',
+        edits: [{
+          target: { tabId: 'main', blockId: '' },
+          inverse: false,
+          build: (tr) => {
+            const nodes = serverEditor()._blocksToProsemirrorNode([image('img-own', own.url), image('img-foreign', foreign.url)] as never);
+            tr.insert(tr.doc.content.size - 1, nodes.content);
+          },
+        }],
+      });
+
+      expect((await app.request(`/api/files/${own.fileId}?doc=${a.documentId}`)).status).toBe(200);
+      expect((await app.request(`/api/files/${foreign.fileId}?doc=${a.documentId}`)).status).toBe(404);
+      expect((await app.request(`/api/files/${foreign.fileId}`)).status).toBe(404);
+
+      const res = await app.request(`/api/documents/${a.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const checkpoint = (await res.json()) as CheckpointResponse;
+      const files = JSON.parse(dec(await readBundleFile(storage, await bundleOf(checkpoint.versionId), 'files.json'))) as string[];
+      expect(files).toEqual([own.fileId]);
     });
   });
 });
