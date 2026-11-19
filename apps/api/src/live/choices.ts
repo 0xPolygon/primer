@@ -42,7 +42,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceStrings } from '../lib/untrusted.ts';
 import { recordsApi } from '../records/store.ts';
 import {
   checkPlacement,
@@ -153,17 +153,42 @@ async function decisionFor(documentId: string, choiceId: string, choice: { props
   return standing((await decisionsOf(documentId, [choiceId])).get(choiceId), choice.props, choice.options);
 }
 
-/** A decision for an agent: the text people wrote in it is fenced. */
-function fenceDecision(d: ChoiceDecisionDTO): ChoiceDecisionDTO {
-  const f = (text: string) => fenceUntrusted(text, 'content');
-  return {
-    ...d,
-    question: f(d.question),
-    label: f(d.label),
-    rationale: f(d.rationale),
-    evidence: d.evidence.map((e) => ({ ...e, label: f(e.label) })),
-    openQuestions: d.openQuestions.map(f),
-  };
+/** The field names of the register's DTOs, and the fields whose string Primer
+ *  built or validated itself. Everything else an agent reads from a decision
+ *  (keys included) is fenced. */
+const DECISION_FIELDS = {
+  keys: new Set([
+    'target', 'tabId', 'blockId', 'question', 'options', 'id', 'label', 'votes', 'status', 'decided', 'optionId',
+    'changedSinceDecided', 'rationale', 'evidence', 'url', 'docId', 'openQuestions', 'decidedBy', 'decidedByName',
+    'decidedAt', 'proposed', 'by', 'note', 'untrusted',
+  ]),
+  plain: new Set(['tabId', 'blockId', 'id', 'optionId', 'status', 'decidedBy', 'decidedAt', 'url', 'docId']),
+};
+
+/** A link only when it is a well-formed http(s) URL. */
+function httpUrl(raw: unknown): string | undefined {
+  try {
+    const url = new URL(String(raw));
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Evidence links stay only when they are a well-formed http(s) URL (and a
+ *  document id only when it is one); the rest of the entry is dropped. */
+function cleanEvidence(d: ChoiceDecisionDTO): ChoiceDecisionDTO {
+  const evidence = d.evidence.map(({ label, url, docId }) => ({
+    label,
+    ...(httpUrl(url) ? { url: httpUrl(url) } : {}),
+    ...(typeof docId === 'string' && /^[0-9a-f-]{36}$/i.test(docId) ? { docId } : {}),
+  }));
+  return { ...d, evidence };
+}
+
+/** What an agent reads: every text field and key fenced, the picker's name too. */
+function forAgent<T>(dto: T): T {
+  return fenceStrings(dto, 'content', DECISION_FIELDS);
 }
 
 export async function choiceTally(actor: AuthUser, documentId: string, choiceId: string): Promise<Result<ChoiceTallyResponse>> {
@@ -174,7 +199,7 @@ export async function choiceTally(actor: AuthUser, documentId: string, choiceId:
   if (!choice) return refuse('not_found', 'Choice not found.');
   const tally = await countVotes(actor, documentId, choiceId, choice.options);
   const decision = await decisionFor(documentId, choiceId, choice);
-  return { ok: true, value: { ...tally, decision: decision && actor.kind === 'agent' ? fenceDecision(decision) : decision } };
+  return { ok: true, value: { ...tally, decision: decision && actor.kind === 'agent' ? forAgent(cleanEvidence(decision)) : decision } };
 }
 
 /** Records the caller's vote (`optionId: null` withdraws it). People only. */
@@ -382,15 +407,7 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
         ? { optionId: proposed.id, label: proposed.label, by: c.props.proposedBy ?? '', note: c.props.proposalNote ?? '' }
         : null,
     };
-    if (actor.kind === 'agent') {
-      const f = (text: string) => fenceUntrusted(text, 'content');
-      entry.untrusted = true;
-      entry.question = f(entry.question);
-      entry.options = entry.options.map((o) => ({ ...o, label: f(o.label) }));
-      if (entry.decided) entry.decided = fenceDecision(entry.decided);
-      if (entry.proposed) entry.proposed = { ...entry.proposed, label: f(entry.proposed.label), note: f(entry.proposed.note) };
-    }
-    decisions.push(entry);
+    decisions.push(actor.kind === 'agent' ? forAgent({ ...entry, decided: entry.decided && cleanEvidence(entry.decided), untrusted: true as const }) : entry);
   }
   decisions.sort((a, b) => (a.status === b.status ? 0 : a.status === 'decided' ? -1 : 1));
   return { ok: true, value: { decisions } };
