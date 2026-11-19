@@ -137,6 +137,21 @@ describe('lifecycle events', () => {
   });
 });
 
+describe('GET /api/documents/:id/events/stream?since=0', () => {
+  it('replays rows committed before the stream opened; without since it starts live', async () => {
+    await withApp(async (app) => {
+      // The web client opens with since=0 after an empty or failed hydrate,
+      // so a row committed in between is still delivered.
+      const { documentId } = await uploadFixture(app);
+      const [published] = await primerRows(app, documentId, OWNER);
+      const live = await app.request(`/api/documents/${documentId}/events/stream`, { headers: asUser(OWNER) });
+      expect(await readFrames(live, 300)).toEqual([]);
+      const fromZero = await app.request(`/api/documents/${documentId}/events/stream?since=0`, { headers: asUser(OWNER) });
+      expect(await readFrames(fromZero, 300)).toEqual([published.id]);
+    });
+  });
+});
+
 describe('GET /api/events/stream?scope=me', () => {
   it('requires scope=me and carries only rows on documents the caller owns', async () => {
     await withApp(async (app) => {

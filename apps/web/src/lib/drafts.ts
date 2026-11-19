@@ -9,6 +9,20 @@ import { createContext, useContext, useEffect, useId } from 'react';
  */
 export const DraftReporterContext = createContext<(key: string, dirty: boolean) => void>(() => {});
 
+/** The page's side: the set of inputs holding unsent text. `report` is
+ *  the DraftReporterContext value; `any()` is read live when deciding
+ *  whether to follow a new version. */
+export function createDraftTracker(): { report: (key: string, dirty: boolean) => void; any: () => boolean } {
+  const dirty = new Set<string>();
+  return {
+    report: (key, isDirty) => {
+      if (isDirty) dirty.add(key);
+      else dirty.delete(key);
+    },
+    any: () => dirty.size > 0,
+  };
+}
+
 /** Reports this input's draft state while it is mounted. */
 export function useReportDraft(dirty: boolean): void {
   const report = useContext(DraftReporterContext);

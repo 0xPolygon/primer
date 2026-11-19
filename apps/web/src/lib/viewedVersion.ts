@@ -67,14 +67,23 @@ export function resolveViewedVersion<V extends NumberedVersion>(params: {
  *  and throw the draft away. The submit then hits the server's
  *  not_latest_version guard and the composer shows the error inline. New
  *  composers still can't open on a non-latest version, because the page
- *  only sets a pending anchor while the viewed version is latest. */
+ *  only sets a pending anchor while the viewed version is latest.
+ *
+ *  It IS gated on the anchor belonging to the viewed version: an anchor
+ *  captured on another version never shows (the page clears it one commit
+ *  after a version switch; this covers that commit). */
 export function composerPendingFrom<A>(params: {
-  pendingSelection: { anchor: A } | null;
-  pendingPick: { anchor: A } | null;
+  pendingSelection: { anchor: A; versionId: string } | null;
+  pendingPick: { anchor: A; versionId: string } | null;
+  viewedVersionId: string;
 }): { anchor: A; origin: 'selection' | 'pick' } | null {
-  const { pendingSelection, pendingPick } = params;
-  if (pendingSelection) return { anchor: pendingSelection.anchor, origin: 'selection' };
-  if (pendingPick) return { anchor: pendingPick.anchor, origin: 'pick' };
+  const { pendingSelection, pendingPick, viewedVersionId } = params;
+  if (pendingSelection) {
+    return pendingSelection.versionId === viewedVersionId ? { anchor: pendingSelection.anchor, origin: 'selection' } : null;
+  }
+  if (pendingPick) {
+    return pendingPick.versionId === viewedVersionId ? { anchor: pendingPick.anchor, origin: 'pick' } : null;
+  }
   return null;
 }
 
