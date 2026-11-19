@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildLiveDoc, importMarkdown, importText, type ImportedBlock } from './import.ts';
-import { exportMarkdown, plainText } from './export.ts';
+import { exportHtml, exportMarkdown, plainText } from './export.ts';
 import { readBlocks } from './editor.ts';
 
 const fixtures = new URL('./__fixtures__/', import.meta.url);
@@ -57,9 +57,23 @@ describe('importMarkdown', () => {
     const checks = flatten(notes.blocks).filter((b) => b.type === 'checkListItem');
     expect(checks.map((b) => b.props!.checked)).toEqual([true, false, false, true, false]);
     const code = flatten((await importMarkdown(fixture('readme.md'))).blocks).find((b) => b.type === 'codeBlock')!;
-    expect(code.props!.language).toBe('sh');
+    expect(code.props!.language).toBe('shellscript');
+    const ts = flatten((await importMarkdown(fixture('adr.md'))).blocks).find((b) => b.type === 'codeBlock')!;
+    expect(ts.props!.language).toBe('typescript');
     expect(types(notes.blocks)).toContain('image');
     expect(types(notes.blocks)).toContain('quote');
+  });
+
+  it('every sample renders to static HTML', async () => {
+    for (const name of markdownFixtures) {
+      const html = await exportHtml(buildLiveDoc(await importMarkdown(fixture(name)), 'markdown', 'doc-1'), name);
+      expect(html, name).toContain('bn-container');
+    }
+  });
+
+  it('a fence in a language the editor lacks stays verbatim', async () => {
+    const { blocks } = await importMarkdown('```klingon\nqapla\n```\n');
+    expect(blocks).toEqual([expect.objectContaining({ type: 'source', props: expect.objectContaining({ markdown: '```klingon\nqapla\n```\n' }) })]);
   });
 });
 

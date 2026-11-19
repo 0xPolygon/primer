@@ -3,6 +3,7 @@ import * as Y from 'yjs';
 import sanitizeHtml from 'sanitize-html';
 import type Token from 'markdown-it/lib/token.mjs';
 import { getDocument } from '@blocknote/server-util/dom';
+import { codeBlockOptions } from '@blocknote/code-block';
 import { Transform } from '@tiptap/pm/transform';
 import type { Node as PmNode } from '@tiptap/pm/model';
 import { updateYFragment } from 'y-prosemirror';
@@ -271,7 +272,26 @@ async function toBlocks(html: string): Promise<ImportedBlock[] | null> {
   const parsed = (await serverEditor().tryParseHTMLToBlocks(html)) as unknown as ImportedBlock[];
   if (parsed.length === 0) return null;
   const blocks = parsed.map(withIds);
+  if (!blocks.every(withCanonicalLanguage)) return null;
   return signature(htmlSignature(html)) === signature(blocksSignature(blocks)) ? blocks : null;
+}
+
+const languages = codeBlockOptions.supportedLanguages as Record<string, { aliases?: string[] }>;
+
+/**
+ * Code blocks name their language by BlockNote's own id (`typescript`, not
+ * `ts`): the editor refuses anything else. A fence in a language it doesn't
+ * know is kept verbatim instead (false), so the info string isn't lost.
+ */
+function withCanonicalLanguage(block: ImportedBlock): boolean {
+  if (block.type === 'codeBlock') {
+    const props = (block.props ??= {});
+    const asked = String(props.language ?? '').toLowerCase();
+    const id = asked === '' ? 'text' : Object.keys(languages).find((key) => key === asked || languages[key]!.aliases?.includes(asked));
+    if (!id) return false;
+    props.language = id;
+  }
+  return block.children.every(withCanonicalLanguage);
 }
 
 function withIds(block: ImportedBlock): ImportedBlock {
