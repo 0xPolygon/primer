@@ -574,6 +574,51 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
       }
     },
 
+    primer_lookup_user: async (args) => {
+      const email = typeof args.email === 'string' ? args.email.trim() : '';
+      if (!email) return err('bad_request', '`email` is required.');
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+      try {
+        return ok(await auth.client.lookupUser(email));
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
+
+    primer_add_collaborator: async (args) => {
+      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      if (!documentId) return err('bad_request', '`documentId` is required.');
+      const email = typeof args.email === 'string' ? args.email.trim() : '';
+      const userIdArg = typeof args.userId === 'string' ? args.userId : '';
+      if ((email === '') === (userIdArg === '')) {
+        return err('bad_request', 'Provide exactly one of `email` or `userId`.');
+      }
+      if (args.role !== 'commenter' && args.role !== 'responder' && args.role !== 'editor') {
+        return err('bad_request', '`role` must be "commenter", "responder" or "editor".');
+      }
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+      try {
+        const userId = userIdArg || (await auth.client.lookupUser(email)).id;
+        return ok(await auth.client.addCollaborator(documentId, userId, args.role));
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
+
+    primer_list_collaborators: async (args) => {
+      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      if (!documentId) return err('bad_request', '`documentId` is required.');
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+      try {
+        return ok(await auth.client.listCollaborators(documentId));
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
+
     primer_resolve_thread: async (args) => {
       const threadId = typeof args.thread_id === 'string' ? args.thread_id : '';
       if (!threadId) return err('bad_request', '`thread_id` is required.');
@@ -905,6 +950,30 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     description:
       'Move a live-document comment (for example one flagged orphaned, "Text removed") back onto text. Without target and quote it uses the thread\'s own. The quote is matched exactly first, then reworded: the best run of whole words at least 80% alike in the target block (or anywhere in its tab once that block is gone), refused as quote_not_found when nothing is close enough or two places are equally close. Nothing is ever re-anchored automatically. Allowed for the thread starter, the owner and editors. Returns { thread_id, orphaned: false, target, quote } (the text now marked).',
     inputSchema: { thread_id: z.string(), target: TARGET_SCHEMA.optional(), quote: z.string().optional() },
+  },
+  primer_lookup_user: {
+    description:
+      'Find a Primer user by email (case-insensitive) so you can share a document with them. Returns { id }, or a not_found error when nobody has that email. This never creates users.',
+    inputSchema: {
+      email: z.string(),
+    },
+  },
+  primer_add_collaborator: {
+    description:
+      "Share a document you created with the person who asked for it (or other named reviewers). Pass documentId, the person's email or userId, and a role: commenter (read and comment; private documents only), responder (also submits events) or editor (also publishes versions). Only the document's owner may add people (for an agent, documents it created), and never at a role above your own. This only adds: you cannot change a role, remove anyone or change visibility. The person is notified. Returns the collaborator row.",
+    inputSchema: {
+      documentId: z.string(),
+      email: z.string().optional(),
+      userId: z.string().optional(),
+      role: z.enum(['commenter', 'responder', 'editor']),
+    },
+  },
+  primer_list_collaborators: {
+    description:
+      "List who a document is shared with: the people you have added, their roles and who granted each. Only the document's owner may list (for an agent, documents it created). Returns { collaborators }.",
+    inputSchema: {
+      documentId: z.string(),
+    },
   },
   primer_get_events: {
     description:

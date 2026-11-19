@@ -453,13 +453,23 @@ describe('PrimerClient.getEvents / sendEvents (issue #78)', () => {
     );
   });
 
-  it('addCollaborator POSTs the userId and role as JSON', async () => {
-    const mockFetch = vi.fn(async () => jsonResponse({}, 201));
+  it('addCollaborator POSTs the userId and role as JSON and returns the row', async () => {
+    const row = { userId: 'okta-sub-1', displayName: 'R', role: 'responder', grantedBy: 'me', createdAt: 't' };
+    const mockFetch = vi.fn(async () => jsonResponse(row, 201));
     const client = makeClient(mockFetch as unknown as typeof fetch);
-    await client.addCollaborator('doc-1', 'okta-sub-1', 'responder');
+    const result = await client.addCollaborator('doc-1', 'okta-sub-1', 'responder');
+    expect(result).toEqual(row);
     const [url, init] = firstCall(mockFetch);
     expect(url).toBe('http://localhost:3000/api/documents/doc-1/collaborators');
     expect(JSON.parse(init.body as string)).toEqual({ userId: 'okta-sub-1', role: 'responder' });
+  });
+
+  it('listCollaborators GETs the collaborators of a document', async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ collaborators: [] }, 200));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+    expect(await client.listCollaborators('doc-1')).toEqual({ collaborators: [] });
+    const [url] = firstCall(mockFetch);
+    expect(url).toBe('http://localhost:3000/api/documents/doc-1/collaborators');
   });
 });
 
