@@ -179,3 +179,9 @@
   padding-left: 16px;
   list-style: disc;
 }
+
+/* The page-text overlay sits exactly over the element it edits. */
+.primer-overlay .bn-editor {
+  padding-inline: 8px;
+  padding-block: 4px;
+}

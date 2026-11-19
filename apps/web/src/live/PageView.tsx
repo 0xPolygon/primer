@@ -52,12 +52,26 @@ export function PageView(props: PageViewContext & { blockId: string; title: stri
     };
   }, [documentId, blockId]);
 
+  // The overlay follows the frame when the host scrolls or resizes.
+  const [, setLayout] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const relayout = () => setLayout((n) => n + 1);
+    window.addEventListener('scroll', relayout, true);
+    window.addEventListener('resize', relayout);
+    return () => {
+      window.removeEventListener('scroll', relayout, true);
+      window.removeEventListener('resize', relayout);
+    };
+  }, [open]);
+
   const editable = useMemo(() => (info && reported ? editablePids(info.texts, reported) : new Set<string>()), [info, reported]);
 
   // Push current texts and embeds once the page reported, and on every change.
   useEffect(() => {
     if (!info || !reported) return;
-    const pids = Object.keys(info.texts);
+    // Script-drawn text stays as the script drew it.
+    const pids = Object.keys(info.texts).filter((pid) => editable.has(pid));
     const pidTarget = (pid: string): Target => ({ tabId, blockId, pid });
     const embedTarget = (embedId: string): Target => ({ tabId, blockId, embedId });
     const read = (fragment: Y.XmlFragment) => yXmlFragmentToProsemirrorJSON(fragment) as Parameters<typeof fragmentText>[0];
@@ -93,7 +107,7 @@ export function PageView(props: PageViewContext & { blockId: string; title: stri
       off.push(() => fragment.unobserveDeep(onChange));
     }
     return () => off.forEach((f) => f());
-  }, [doc, info, reported, tabId, blockId]);
+  }, [doc, info, reported, editable, tabId, blockId]);
 
   const page = useMemo<PageFrame>(
     () => ({

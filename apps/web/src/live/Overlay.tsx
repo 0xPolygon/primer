@@ -10,6 +10,7 @@ import { primerSchema } from '@primer/blocks';
 import { editorDictionary, t } from '../i18n/index.ts';
 import { PrimerThreadStore, type StoreViewer } from './PrimerThreadStore.ts';
 import { useThreadEvents } from './threadEvents.ts';
+import './blocks.css';
 
 /** A rect in the host window's viewport (CSS pixels). */
 export type OverlayRect = { x: number; y: number; width: number; height: number };
@@ -86,7 +87,13 @@ export function Overlay(props: OverlayProps) {
       threadStore.editor = editor;
       void threadStore.refresh();
     }
-    if (!readOnly) setTimeout(() => editor.focus(), 0);
+    if (readOnly) return;
+    // Open with the cursor at the end of the text, ready to type.
+    setTimeout(() => {
+      const last = editor.document[editor.document.length - 1];
+      if (last) editor.setTextCursorPosition(last, 'end');
+      editor.focus();
+    }, 0);
   }, [editor, threadStore, readOnly]);
 
   useEffect(() => {
@@ -124,6 +131,7 @@ export function Overlay(props: OverlayProps) {
         sideMenu={kind === 'blocks'}
         slashMenu={kind === 'blocks'}
         renderEditor={false}
+        className="primer-overlay"
       >
         <BlockNoteViewEditor />
       </BlockNoteView>
