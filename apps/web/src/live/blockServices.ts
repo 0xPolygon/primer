@@ -26,7 +26,8 @@ export type ChoiceStore = {
   /** Bumped on every change, so the register re-reads. */
   version(): number;
   subscribeAll(listener: () => void): () => void;
-  close(): void;
+  /** Follows the document's event stream until the returned function runs. */
+  connect(): () => void;
 };
 
 export function createChoiceStore(
@@ -67,24 +68,6 @@ export function createChoiceStore(
     }
   };
 
-  const stream = deps.eventSourceFactory(`${base}/events/stream?namespace=${PRIMER_EVENT_NAMESPACE}`);
-  stream.onopen = () => refresh();
-  stream.onmessage = (ev) => {
-    let row: EventRowDTO;
-    try {
-      row = JSON.parse(ev.data) as EventRowDTO;
-    } catch {
-      return;
-    }
-    const payload = row.payload as { collections?: unknown; block_id?: unknown };
-    if (row.type === 'decision.made' && typeof payload.block_id === 'string') refresh(payload.block_id);
-    if (row.type === 'data.changed' && Array.isArray(payload.collections)) {
-      for (const c of payload.collections) {
-        if (typeof c === 'string' && c.startsWith('primer.choice/')) refresh(c.slice('primer.choice/'.length));
-      }
-    }
-  };
-
   return {
     get: (id) => tallies.get(id) ?? null,
     subscribe(choiceId, listener) {
@@ -107,7 +90,28 @@ export function createChoiceStore(
       all.add(listener);
       return () => all.delete(listener);
     },
-    close: () => stream.close(),
+    connect() {
+      const stream = deps.eventSourceFactory(`${base}/events/stream?namespace=${PRIMER_EVENT_NAMESPACE}`);
+      stream.onopen = () => refresh();
+      stream.onmessage = (ev) => {
+        let row: EventRowDTO;
+        try {
+          row = JSON.parse(ev.data) as EventRowDTO;
+        } catch {
+          return;
+        }
+        const payload = row.payload as { collections?: unknown; block_id?: unknown };
+        if ((row.type === 'decision.made' || row.type === 'decision.cleared') && typeof payload.block_id === 'string') {
+          refresh(payload.block_id);
+        }
+        if (row.type === 'data.changed' && Array.isArray(payload.collections)) {
+          for (const c of payload.collections) {
+            if (typeof c === 'string' && c.startsWith('primer.choice/')) refresh(c.slice('primer.choice/'.length));
+          }
+        }
+      };
+      return () => stream.close();
+    },
   };
 }
 
@@ -132,7 +136,9 @@ export function useBlockServices(
   access: { canPick: boolean; canVote: boolean },
 ): { services: PrimerBlockServices; store: ChoiceStore } {
   const store = useMemo(() => createChoiceStore(documentId), [documentId]);
-  useEffect(() => () => store.close(), [store]);
+  // Connected by an effect, so a remount (React runs effects twice in
+  // development) reconnects instead of reusing a closed stream.
+  useEffect(() => store.connect(), [store]);
   const [assignees, setAssignees] = useState<Assignee[]>([]);
   useEffect(() => {
     let live = true;

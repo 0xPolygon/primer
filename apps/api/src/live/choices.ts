@@ -70,8 +70,9 @@ function optionsOf(block: PrimerBlock): Option[] {
 
 type PrimerBlockLike = { id: string; type: string; props: Record<string, unknown>; children: PrimerBlockLike[] };
 
+/** How Primer names the actor (an agent's name already says whose it is). */
 function label(actor: AuthUser): string {
-  return actor.kind === 'agent' ? `${actor.displayName} (agent)` : actor.displayName;
+  return actor.displayName;
 }
 
 async function readChoice(documentId: string, choiceId: string) {

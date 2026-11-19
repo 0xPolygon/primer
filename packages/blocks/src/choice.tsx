@@ -343,6 +343,8 @@ function OptionFrame({ block, editor, slotRef }: OptionFrameProps) {
   const decided = services ? tally?.decision?.optionId === block.id : choice?.props.decidedOptionId === block.id;
   return (
     <div className="primer-choice-option" data-primer-option="" data-chosen={decided ? 'true' : 'false'}>
+      <div className="primer-choice-option-body" ref={slotRef} />
+      {/* After the body: BlockNote's side menu sits to the left of each block. */}
       <div className="primer-choice-vote" contentEditable={false}>
         {services && choice ? (
           <VoteButton services={services} choiceId={choice.id} optionId={block.id} locked={Boolean(tally?.decision)} />
@@ -350,7 +352,6 @@ function OptionFrame({ block, editor, slotRef }: OptionFrameProps) {
           <span className="primer-choice-dot" />
         )}
       </div>
-      <div className="primer-choice-option-body" ref={slotRef} />
     </div>
   );
 }
