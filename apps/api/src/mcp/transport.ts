@@ -44,8 +44,11 @@ export async function handleMcpRequest(
     server.registerTool(
       name,
       { description: config.description, inputSchema: config.inputSchema },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      async (args: Record<string, unknown>) => handler(args ?? {}, user) as any,
+      async (args: Record<string, unknown>) => {
+        const { images, ...result } = await handler(args ?? {}, user);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (images ? { ...result, content: [...result.content, ...images] } : result) as any;
+      },
     );
   }
 

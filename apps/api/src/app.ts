@@ -21,6 +21,7 @@ import { registerCommentRoutes } from './routes/comments.ts';
 import { registerEventRoutes } from './routes/events.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
+import { registerWidgetRoutes } from './routes/widgets.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerMeRoute } from './routes/me.ts';
 import { registerUserRoutes } from './routes/users.ts';
@@ -118,6 +119,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerLibraryRoute(app);
   registerAdminRoute(app);
   registerVersionRoutes(app);
+  registerWidgetRoutes(app);
   registerAuthRoutes(app, deps);
   const adminEmails = deps.adminEmails ?? parseAdminEmails(process.env.ADMIN_EMAILS);
   registerMeRoute(app, { adminEmails });

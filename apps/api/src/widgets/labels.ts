@@ -9,32 +9,35 @@ import type { PlannedEdit } from '../live/pipeline.ts';
 import { fragmentName, tabFragmentName, tabsOf } from '../live/reach.ts';
 
 /**
- * A text sub-fragment (a widget label, `widget/<blockId>/<textId>`) holds one
- * paragraph block whose id is the owning block's id, so the pipeline locates
- * it by the Target's `blockId` and its `block.version` is the precondition of
- * a label edit. This builds that content.
+ * A label fragment (`widget/<blockId>/<textId>`) has the shape of a page-text
+ * fragment (M6), so the one overlay edits both: a single paragraph whose block
+ * id is the text id, holding the label's words.
  */
-export function textFragmentContent(blockId: string, text: string): PmNode {
-  return serverEditor()._blocksToProsemirrorNode([{ id: blockId, type: 'paragraph', content: text }] as never);
+export function textFragmentContent(textId: string, text: string): PmNode {
+  return serverEditor()._blocksToProsemirrorNode([{ id: textId, type: 'paragraph', content: text }] as never);
 }
 
-/** Sets one label's words (one line), whatever the fragment held. */
+/** Sets one label's words (one line), whatever the fragment held. Only the
+ *  paragraph's text changes when the fragment already has that shape. */
 export function labelEdit(target: Target & { textId: string }, text: string, inverse = false): PlannedEdit {
   const words = text.replace(/\s+/g, ' ').trim();
   return {
     target,
     inverse,
-    build: (tr, at) => {
-      if (at) {
-        const paragraph = at.node.firstChild!;
-        const from = at.pos + 2;
-        const to = from + paragraph.content.size;
-        if (paragraph.textContent === words) return;
-        if (words === '') tr.delete(from, to);
-        else tr.replaceWith(from, to, serverEditor().editor.pmSchema.text(words));
+    build: (tr) => {
+      const paragraphs: { pos: number; node: PmNode }[] = [];
+      tr.doc.descendants((node, pos) => {
+        if (node.type.name === 'paragraph') paragraphs.push({ pos, node });
+        return !node.isTextblock;
+      });
+      const only = paragraphs.length === 1 ? paragraphs[0]! : null;
+      if (only && only.node.textContent === words) return;
+      if (only) {
+        const from = only.pos + 1;
+        tr.replaceWith(from, from + only.node.content.size, words ? [serverEditor().editor.pmSchema.text(words)] : []);
         return;
       }
-      tr.replaceWith(0, tr.doc.content.size, textFragmentContent(target.blockId, words).content);
+      tr.replaceWith(0, tr.doc.content.size, textFragmentContent(target.textId, words).content);
     },
   };
 }
