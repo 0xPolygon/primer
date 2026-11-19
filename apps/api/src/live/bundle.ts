@@ -11,6 +11,8 @@ import { tabsOf } from './reach.ts';
 import { trustedMeta } from './sources.ts';
 import { currentPageHtml } from '../page/publish.ts';
 import { bundleWidgets } from '../widgets/bundle.ts';
+import { snapshotRecords } from '../records/snapshot.ts';
+import { embedTables } from '../records/table.ts';
 
 /**
  * A checkpoint's render bundle (C11): everything shares, previews, print,
@@ -28,9 +30,13 @@ import { bundleWidgets } from '../widgets/bundle.ts';
  * - `widgets/<id>.light.svg`, `.dark.svg` and `.json`: each published widget
  *   as it looked, and what restore republishes it from (widgets/bundle.ts).
  *
+ * - `records.json`: the document's shared records at capture
+ *   (records/snapshot.ts). Data tables in `static.html` and bound widgets are
+ *   drawn from it, and shares and checkpoint views answer a page's record
+ *   reads from it: data frozen at publish, never live.
+ *
  * A page document's stamped source is stored once with the checkpoint that
  * published it (page/publish.ts `sourceKeyOf`), not copied into each bundle.
- * Later milestones add `records.json`.
  */
 export type BundleManifest = { versionId: string; format: string; files: string[] };
 
@@ -62,7 +68,8 @@ export async function renderStatic(
   title: string,
   decisions: ExportDecisions = new Map(),
   page: string | null = null,
-  /** Puts each widget's SVG in place of its block (widgets/bundle.ts `bundleWidgets`). */
+  /** Puts each widget's SVG and each data table's rows in place of their blocks
+   *  (widgets/bundle.ts `bundleWidgets`, records/table.ts `embedTables`). */
   embedWidgets: (html: string) => string = (html) => html,
 ): Promise<{ html: string; served: string }> {
   const html = page ?? embedWidgets(await exportHtml(doc, title, decisions));
@@ -103,8 +110,10 @@ export async function renderBundle(
     const decisions = await exportDecisions(opts.documentId);
     const page = format === 'html' ? await currentPageHtml(storage, opts.documentId, doc) : null;
     if (format === 'html' && page === null) throw new Error('page document has no readable page');
-    const widgets = await bundleWidgets(doc, opts.documentId);
-    const { html, served } = await renderStatic(doc, opts.title, decisions, page, widgets.embed);
+    const records = await snapshotRecords(opts.documentId);
+    const widgets = await bundleWidgets(doc, opts.documentId, records);
+    const tables = embedTables(doc, records);
+    const { html, served } = await renderStatic(doc, opts.title, decisions, page, (h) => tables(widgets.embed(h)));
     const exported =
       format === 'html' ? html : format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
@@ -114,6 +123,7 @@ export async function renderBundle(
       'static.html': served,
       'threads.json': JSON.stringify(await openThreads(opts.documentId)),
       'files.json': JSON.stringify(await referencedFiles(doc, opts.documentId)),
+      'records.json': JSON.stringify(records),
       ...widgets.files,
     };
     const manifest: BundleManifest = { versionId: opts.versionId, format, files: Object.keys(files) };
@@ -146,7 +156,7 @@ export async function loadBundleDoc(storage: Storage, bundleKey: string): Promis
 
 /** Every storage key a bundle can hold (missing ones are skipped on delete). */
 export function bundleFileKeys(bundleKey: string): string[] {
-  const names = ['manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json'];
+  const names = ['manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json', 'records.json'];
   return names.map((name) => bundleKey + name);
 }
 

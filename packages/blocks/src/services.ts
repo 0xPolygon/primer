@@ -68,6 +68,13 @@ export type PrimerBlockServices = {
   PageView?: ComponentType<{ blockId: string; title: string }>;
   /** Renders a widget block's SVG, label editing and comments (the web editor). */
   WidgetView?: ComponentType<{ blockId: string; props: { widgetId: string; hash: string; textIds: string } }>;
+  /** Renders a data-table block's rows, cell editing and row comments (the web editor). */
+  DataTableView?: ComponentType<{
+    blockId: string;
+    props: { collection: string; columns: string; scope: 'shared' | 'personal' };
+    /** Sets the block's props (the collection, the columns). */
+    update: (props: Partial<{ collection: string; columns: string }>) => void;
+  }>;
 };
 
 export const PrimerBlocksContext = createContext<PrimerBlockServices | null>(null);

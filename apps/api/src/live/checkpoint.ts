@@ -15,7 +15,7 @@ import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 import { isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
-import { restoreWidgets } from '../widgets/bundle.ts';
+import { redrawBoundWidgets, restoreWidgets } from '../widgets/bundle.ts';
 import { pmDocOf } from './sources.ts';
 
 /** A live document's state frozen at one docVersion. */
@@ -150,7 +150,9 @@ export async function restoreCheckpoint(
     }
     // Widget rows first, as a publish does: viewers refetch when the block's hash changes.
     await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
-    return await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    const out = await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    await redrawBoundWidgets(checkpoint.documentId);
+    return out;
   } finally {
     frozen.destroy();
   }

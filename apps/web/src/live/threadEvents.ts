@@ -2,20 +2,21 @@ import { useEffect, useRef } from 'react';
 
 const THREAD_EVENTS = new Set(['comment.created', 'thread.resolved', 'thread.updated', 'thread.orphaned']);
 
-type Shared = { source: EventSource; listeners: Set<(type: string) => void> };
+type Listener = (type: string, payload: unknown) => void;
+type Shared = { source: EventSource; listeners: Set<Listener> };
 
 /** One event stream per document, shared by every listener on the page: each
  *  stream holds a connection, and a browser allows only a few per host. */
 const streams = new Map<string, Shared>();
 
-function subscribe(documentId: string, listener: (type: string) => void): () => void {
+function subscribe(documentId: string, listener: Listener): () => void {
   let shared = streams.get(documentId);
   if (!shared) {
     const source = new EventSource(`/api/documents/${encodeURIComponent(documentId)}/events/stream`);
     const created: Shared = { source, listeners: new Set() };
     source.onmessage = (message) => {
-      const row = JSON.parse(message.data as string) as { namespace?: string; type?: string };
-      if (row.namespace === 'primer' && row.type) for (const l of created.listeners) l(row.type);
+      const row = JSON.parse(message.data as string) as { namespace?: string; type?: string; payload?: unknown };
+      if (row.namespace === 'primer' && row.type) for (const l of created.listeners) l(row.type, row.payload);
     };
     shared = created;
     streams.set(documentId, shared);
@@ -45,4 +46,22 @@ export function useThreadEvents(documentId: string, onChange: () => void, types:
       if (types.has(type)) latest.current();
     });
   }, [documentId, types]);
+}
+
+/**
+ * Calls `onChange` with the collections others changed (a coalesced
+ * `primer.data.changed` on the document's stream). The viewer's own writes
+ * never come back as events: refresh after them yourself.
+ */
+export function useDataChanged(documentId: string, onChange: (collections: string[]) => void): void {
+  const latest = useRef(onChange);
+  latest.current = onChange;
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    return subscribe(documentId, (type, payload) => {
+      if (type !== 'data.changed') return;
+      const collections = (payload as { collections?: unknown } | null)?.collections;
+      if (Array.isArray(collections)) latest.current(collections.filter((c): c is string => typeof c === 'string'));
+    });
+  }, [documentId]);
 }
