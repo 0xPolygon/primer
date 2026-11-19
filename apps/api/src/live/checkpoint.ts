@@ -1,10 +1,10 @@
 import * as Y from 'yjs';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { CheckpointResponse, Reconciliation } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
-import { documents, versions } from '../db/schema.ts';
+import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
@@ -13,9 +13,8 @@ import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
-import { tabsOf } from './reach.ts';
+import { tabFragmentName, tabsOf } from './reach.ts';
 import { pmDocOf } from './sources.ts';
-import { tabFragmentName } from './reach.ts';
 
 /** A live document's state frozen at one docVersion. */
 export type CapturedState = { state: Uint8Array; docVersion: number };
@@ -64,6 +63,7 @@ export async function writeCheckpoint(
   const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
   const versionId = uuidv7();
   const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
+  const marked = markedThreads(captured.state);
   try {
     const versionNumber = await transactionWithEvents(async (tx, emit) => {
       await tx.execute(sql`SELECT id FROM documents WHERE id = ${documentId} FOR UPDATE`);
@@ -81,6 +81,15 @@ export async function writeCheckpoint(
         bundleKey: bundle.bundleKey,
         docVersion: captured.docVersion,
       });
+      // Open threads stay listed on the checkpoint: anchored where their
+      // comment mark is in the captured content, orphaned elsewhere.
+      const open = await tx
+        .select({ id: threads.id, anchor: threads.anchor })
+        .from(threads)
+        .where(and(eq(threads.documentId, documentId), isNull(threads.resolvedAt)));
+      for (const thread of open) {
+        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: marked.has(thread.id) ? thread.anchor : null });
+      }
       emit({
         documentId,
         versionId,
@@ -124,4 +133,18 @@ export async function restoreCheckpoint(
   } finally {
     frozen.destroy();
   }
+}
+
+/** Thread ids whose comment mark is in a state's tabs. */
+export function markedThreads(state: Uint8Array): Set<string> {
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, state);
+  const ids = new Set<string>();
+  for (const tab of tabsOf(doc)) {
+    pmDocOf(doc.getXmlFragment(tabFragmentName(tab.id))).descendants((node) => {
+      for (const mark of node.marks) if (mark.type.name === 'comment' && !mark.attrs.orphan) ids.add(mark.attrs.threadId as string);
+    });
+  }
+  doc.destroy();
+  return ids;
 }

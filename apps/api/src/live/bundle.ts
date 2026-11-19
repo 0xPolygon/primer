@@ -79,7 +79,7 @@ export async function renderBundle(
   }
 }
 
-export async function readBundleFile(storage: Storage, bundleKey: string, name: string): Promise<Uint8Array> {
+export async function readBundleFile(storage: Storage, bundleKey: string, name: string): Promise<Uint8Array<ArrayBuffer>> {
   return new Uint8Array(await new Response(await storage.get(bundleKey + name)).arrayBuffer());
 }
 
