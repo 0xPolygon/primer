@@ -6,7 +6,9 @@ import { eq } from 'drizzle-orm';
 import type { UploadResponse } from '@polygonlabs/primer-api-types';
 import { createApp } from '../app.ts';
 import { db } from '../db/client.ts';
-import { versions } from '../db/schema.ts';
+import { docUpdates, documents, threadPlacements, versions } from '../db/schema.ts';
+import { readBundleFile } from '../live/bundle.ts';
+import { withLiveDoc } from '../live/live.testlib.ts';
 import { buildMcpToolHandlers } from '../mcp/tools.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { MOCK_USER } from '../auth/resolver.ts';
@@ -34,6 +36,12 @@ function md(content: string, extra: Partial<PublishInput> = {}): PublishInput {
   return { actor: MOCK_USER, title: 'Doc', content: enc(content), filename: 'doc.md', format: 'markdown', ...extra };
 }
 
+// Version preconditions apply to version-only (HTML) documents; Markdown
+// documents are live and edited in place.
+function html(content: string, extra: Partial<PublishInput> = {}): PublishInput {
+  return { actor: MOCK_USER, title: 'Doc', content: enc(`<!doctype html><html><body>${content}</body></html>`), filename: 'doc.html', format: 'html', ...extra };
+}
+
 async function publishOk(storage: Storage, input: PublishInput) {
   const r = await publishDocument(storage, input);
   if (!r.ok) throw new Error(`publish refused: ${r.refusal.code}`);
@@ -53,10 +61,10 @@ describe('publishDocument', () => {
 
   it('stale baseVersionNumber is refused', async () => {
     await withStorage(async (storage) => {
-      const v1 = await publishOk(storage, md('# One\n'));
-      await publishOk(storage, md('# Two\n', { documentId: v1.documentId, baseVersionNumber: 1 }));
+      const v1 = await publishOk(storage, html('<h1>One</h1>'));
+      await publishOk(storage, html('<h1>Two</h1>', { documentId: v1.documentId, baseVersionNumber: 1 }));
 
-      const r = await publishDocument(storage, md('# Three\n', { documentId: v1.documentId, baseVersionNumber: 1 }));
+      const r = await publishDocument(storage, html('<h1>Three</h1>', { documentId: v1.documentId, baseVersionNumber: 1 }));
       expect(r.ok).toBe(false);
       if (r.ok) return;
       expect(r.status).toBe(409);
@@ -69,9 +77,9 @@ describe('publishDocument', () => {
 
   it('concurrent publishes on the same base: exactly one wins', async () => {
     await withStorage(async (storage) => {
-      const v1 = await publishOk(storage, md('# One\n'));
+      const v1 = await publishOk(storage, html('<h1>One</h1>'));
       const results = await Promise.all(
-        ['# A\n', '# B\n'].map((c) => publishDocument(storage, md(c, { documentId: v1.documentId, baseVersionNumber: 1 }))),
+        ['<h1>A</h1>', '<h1>B</h1>'].map((c) => publishDocument(storage, html(c, { documentId: v1.documentId, baseVersionNumber: 1 }))),
       );
       expect(results.filter((r) => r.ok)).toHaveLength(1);
       const refused = results.find((r) => !r.ok);
@@ -79,7 +87,7 @@ describe('publishDocument', () => {
     });
   });
 
-  it('REST and MCP produce identical stored HTML', async () => {
+  it('REST and MCP produce the same document', async () => {
     await withStorage(async (storage) => {
       const source = '# Same\n\nBody text.\n';
       const app = createApp({ storage, notifier: new NoopNotifier() });
@@ -95,9 +103,70 @@ describe('publishDocument', () => {
       expect(out.isError).toBeUndefined();
       const mcp = JSON.parse(out.content[0].text) as { versionId: string };
 
-      const keyOf = async (id: string) =>
-        (await db.select({ k: versions.storageKey }).from(versions).where(eq(versions.id, id)))[0].k;
-      expect(await bytesAt(storage, await keyOf(mcp.versionId))).toEqual(await bytesAt(storage, await keyOf(rest.versionId)));
+      // Block ids differ per import, so compare what each one exports.
+      const exportOf = async (id: string) => {
+        const [row] = await db.select({ k: versions.bundleKey }).from(versions).where(eq(versions.id, id));
+        return new TextDecoder().decode(await readBundleFile(storage, row!.k!, 'export.md'));
+      };
+      expect(await exportOf(mcp.versionId)).toBe(source);
+      expect(await exportOf(rest.versionId)).toBe(source);
+    });
+  });
+
+  it('markdown upload creates a live document with checkpoint 1', async () => {
+    await withStorage(async (storage) => {
+      const source = '---\ntitle: Plan\n---\n\n# Plan\n\n- one\n- two\n';
+      const r = await publishOk(storage, md(source));
+      expect(r.versionNumber).toBe(1);
+      const [doc] = await db.select().from(documents).where(eq(documents.id, r.documentId));
+      expect(doc!.format).toBe('markdown');
+      expect(doc!.metadata).toEqual({ title: 'Plan' });
+      const [version] = await db.select().from(versions).where(eq(versions.id, r.versionId));
+      const updates = await db.select().from(docUpdates).where(eq(docUpdates.documentId, r.documentId));
+      expect(updates).toHaveLength(1);
+      expect(version!.docVersion).toBe(updates[0]!.id);
+      expect(version!.storageKey).toBe(`bundles/${r.versionId}/static.html`);
+      // The live document holds the import, and exports the file unchanged.
+      const blocks = await withLiveDoc(r.documentId, (d) => d.getXmlFragment('document-store').length);
+      expect(blocks).toBeGreaterThan(0);
+      expect(new TextDecoder().decode(await readBundleFile(storage, version!.bundleKey!, 'export.md'))).toBe(source);
+
+      // Publishing onto a live document is refused, with a fix.
+      const again = await publishDocument(storage, md('# Other\n', { documentId: r.documentId }));
+      expect(again.ok).toBe(false);
+      if (!again.ok) expect(again.refusal).toMatchObject({ code: 'republish_unsupported' });
+    });
+  });
+
+  it('legacy Markdown doc converts and re-anchors open threads by quote', async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const legacy = await publishOk(storage, html('<p>Revenue grew in March.</p><p>Churn fell.</p>'));
+      const thread = async (quote: string) => {
+        const res = await app.request(`/api/versions/${legacy.versionId}/threads`, {
+          method: 'POST',
+          headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
+          body: JSON.stringify({ anchor: { type: 'text-range', selectorText: quote, prefix: '', suffix: '', containerPath: 'body' }, body: 'why?' }),
+        });
+        expect(res.status).toBe(201);
+        return ((await res.json()) as { id: string }).id;
+      };
+      const kept = await thread('grew in March');
+      const gone = await thread('Churn fell');
+
+      const r = await publishOk(storage, md('# Q1\n\nRevenue grew in March, again.\n', { documentId: legacy.documentId }));
+      expect(r.versionNumber).toBe(2);
+      const [doc] = await db.select().from(documents).where(eq(documents.id, legacy.documentId));
+      expect(doc!.format).toBe('markdown');
+
+      // The found quote carries its thread's comment mark in the live document.
+      const marked = await withLiveDoc(legacy.documentId, (d) => d.getXmlFragment('document-store').toString());
+      expect(marked).toContain(kept);
+      expect(marked).not.toContain(gone);
+      // Both threads stay listed on the new checkpoint; the lost one is orphaned.
+      const placements = await db.select().from(threadPlacements).where(eq(threadPlacements.versionId, r.versionId));
+      expect(placements.find((p) => p.threadId === kept)!.anchor).not.toBeNull();
+      expect(placements.find((p) => p.threadId === gone)!.anchor).toBeNull();
     });
   });
 });

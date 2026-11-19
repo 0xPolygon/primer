@@ -12,15 +12,26 @@
 // together. Carried placements emit no event of their own: they are part of
 // the version, and a reader that sees version.published lists the new
 // version's threads.
-import { eq, sql } from 'drizzle-orm';
+//
+// Markdown and text publish live documents (M2b): the import is built as a
+// detached Y.Doc and stored as the document's first update, together with the
+// document, checkpoint 1 and its render bundle. A legacy document that gets a
+// Markdown or text version becomes live the same way; its open threads are
+// re-anchored by quote, and those whose quote isn't found are orphaned. A live
+// document is edited in place, so publishing onto one is refused until
+// republish merges arrive. HTML stays on the version path until pages land.
+import * as Y from 'yjs';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
-import { documents, versions } from '../db/schema.ts';
+import { docUpdates, documents, threadPlacements, threads, versions } from '../db/schema.ts';
+import { deleteBundle, quoteOf, renderBundle } from '../live/bundle.ts';
+import { ensureSigningKey } from '../live/signing.ts';
+import { anchorThreads, buildLiveDoc, importMarkdown, importText, type ImportResult } from '../live/import.ts';
 import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
-import { markdownToHtml, textToHtml } from '../upload/markdown.ts';
 import { MAX_BYTES, MAX_DESCRIPTION, MAX_TITLE } from '../upload/validate.ts';
 import { transactionWithEvents } from './events.ts';
 import { canEdit, canRead, loadEffectiveRole, type Visibility } from './permissions.ts';
@@ -64,22 +75,7 @@ class StaleBase extends Error {
   }
 }
 
-function render(format: PublishFormat, text: string): { ok: true; html: string } | { ok: false; message: string } {
-  if (format === 'html') {
-    const t = transformHtml(text);
-    return t.ok ? { ok: true, html: t.html } : { ok: false, message: t.message };
-  }
-  let prepared: { html: string; bodyIsEmpty: boolean };
-  try {
-    prepared = format === 'markdown' ? markdownToHtml(text) : textToHtml(text);
-  } catch (err) {
-    return { ok: false, message: `Markdown conversion failed: ${(err as Error).message}` };
-  }
-  if (prepared.bodyIsEmpty) return { ok: false, message: 'Document body is empty.' };
-  // Primer authored this HTML, so the parent app owns its theme.
-  const t = transformHtml(prepared.html, { themeManaged: true });
-  return t.ok ? { ok: true, html: t.html } : { ok: false, message: t.message };
-}
+class Republish extends Error {}
 
 export async function publishDocument(storage: Storage, input: PublishInput): Promise<PublishResult> {
   const { actor, documentId: existingId } = input;
@@ -101,7 +97,13 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
     }
   } else {
     const [doc] = await db
-      .select({ uploaderId: documents.uploaderId, visibility: documents.visibility, deletedAt: documents.deletedAt })
+      .select({
+        uploaderId: documents.uploaderId,
+        visibility: documents.visibility,
+        deletedAt: documents.deletedAt,
+        format: documents.format,
+        title: documents.title,
+      })
       .from(documents)
       .where(eq(documents.id, existingId));
     const notFound = refuse(404, 'not_found', 'Document not found.', 'Check the document id, or create a new document.');
@@ -111,6 +113,8 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
     if (!canEdit(eff)) {
       return refuse(403, 'forbidden', 'Only the document owner or an editor can add versions.', 'Ask the owner for editor access, or leave a comment instead.');
     }
+    if (doc.format !== null) return republishRefusal();
+    title = doc.title;
   }
 
   const versionNote = input.versionNote?.trim() || null;
@@ -118,8 +122,11 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
     return refuse(400, 'bad_request', `versionNote must be ≤${MAX_VERSION_NOTE} chars.`, 'Shorten the version note.', 'invalid_body');
   }
 
-  const rendered = render(input.format, new TextDecoder('utf-8').decode(input.content));
-  if (!rendered.ok) return refuse(400, 'bad_request', rendered.message, 'Fix the content and publish again.', 'parse_failed');
+  if (input.format !== 'html') return publishLive(storage, input, { title: title!, description, versionNote });
+
+  const transformed = transformHtml(new TextDecoder('utf-8').decode(input.content));
+  if (!transformed.ok) return refuse(400, 'bad_request', transformed.message, 'Fix the content and publish again.', 'parse_failed');
+  const rendered = { html: transformed.html };
 
   const documentId = existingId ?? uuidv7();
   const versionId = uuidv7();
@@ -143,13 +150,7 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       if (existingId === undefined) {
         await tx.insert(documents).values({ id: documentId, title: title!, description, uploaderId: actor.id });
       } else {
-        await tx.execute(sql`SELECT id FROM documents WHERE id = ${documentId} FOR UPDATE`);
-        const [row] = (await tx.execute(sql`
-          SELECT COALESCE(MAX(version_number), 0)::int AS latest FROM versions WHERE document_id = ${documentId}
-        `)) as unknown as { latest: number }[];
-        const latest = row?.latest ?? 0;
-        if (input.baseVersionNumber !== undefined && input.baseVersionNumber !== latest) throw new StaleBase(latest);
-        next = latest + 1;
+        next = (await lockForVersion(tx, documentId, input.baseVersionNumber)) + 1;
       }
       await tx.insert(versions).values({
         id: versionId,
@@ -175,16 +176,158 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
     });
   } catch (err) {
     await cleanup();
-    if (err instanceof StaleBase) {
-      return refuse(
-        409,
-        'stale_base',
-        `The document is at version ${err.latest}, not ${input.baseVersionNumber}.`,
-        `Read version ${err.latest}, merge your changes into it, and publish again with baseVersionNumber ${err.latest}.`,
-      );
-    }
-    throw err;
+    return refusalFor(err, input.baseVersionNumber);
   }
 
   return { ok: true, documentId, versionId, versionNumber };
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Locks the document row and returns its latest version number, refusing a
+ *  stale base and a document that went live meanwhile. */
+async function lockForVersion(tx: Tx, documentId: string, base: number | undefined): Promise<number> {
+  const [doc] = (await tx.execute(sql`SELECT format FROM documents WHERE id = ${documentId} FOR UPDATE`)) as unknown as {
+    format: string | null;
+  }[];
+  if (doc?.format) throw new Republish();
+  const [row] = (await tx.execute(sql`
+    SELECT COALESCE(MAX(version_number), 0)::int AS latest FROM versions WHERE document_id = ${documentId}
+  `)) as unknown as { latest: number }[];
+  const latest = row?.latest ?? 0;
+  if (base !== undefined && base !== latest) throw new StaleBase(latest);
+  return latest;
+}
+
+function refusalFor(err: unknown, base: number | undefined): PublishResult {
+  if (err instanceof StaleBase) {
+    return refuse(
+      409,
+      'stale_base',
+      `The document is at version ${err.latest}, not ${base}.`,
+      `Read version ${err.latest}, merge your changes into it, and publish again with baseVersionNumber ${err.latest}.`,
+    );
+  }
+  if (err instanceof Republish) return republishRefusal();
+  throw err;
+}
+
+function republishRefusal(): PublishResult {
+  return refuse(
+    409,
+    'republish_unsupported',
+    'This document is live: it is edited in place, not republished.',
+    'Edit with primer_apply_ops; republish arrives with suggestions.',
+  );
+}
+
+/**
+ * A Markdown or text publish: a new live document, or a legacy document
+ * becoming live. Everything is built detached first (import, Y.Doc, thread
+ * marks, bundle); then the document, its first update and checkpoint 1 commit
+ * together, so nobody can open the live document half made.
+ */
+async function publishLive(
+  storage: Storage,
+  input: PublishInput,
+  doc: { title: string; description: string | null; versionNote: string | null },
+): Promise<PublishResult> {
+  const format = input.format as 'markdown' | 'text';
+  const source = new TextDecoder('utf-8').decode(input.content);
+  let imported: ImportResult;
+  try {
+    imported = format === 'markdown' ? await importMarkdown(source) : importText(source);
+  } catch (err) {
+    return refuse(400, 'bad_request', `Import failed: ${(err as Error).message}`, 'Fix the content and publish again.', 'parse_failed');
+  }
+  if (imported.blocks.length === 0) {
+    return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
+  }
+
+  const existingId = input.documentId;
+  const documentId = existingId ?? uuidv7();
+  await ensureSigningKey(storage);
+  const ydoc = buildLiveDoc(imported, format, documentId);
+  const open = existingId === undefined ? [] : await openThreadQuotes(existingId);
+  const anchored = anchorThreads(ydoc, open);
+  const state = Y.encodeStateAsUpdate(ydoc);
+  ydoc.destroy();
+
+  const versionId = uuidv7();
+  const originalKey = `v1/${versionId}.orig`;
+  await storage.put(originalKey, input.content);
+  let bundle: Awaited<ReturnType<typeof renderBundle>>;
+  try {
+    bundle = await renderBundle(storage, { versionId, documentId, title: doc.title, state });
+  } catch (err) {
+    await storage.delete(originalKey).catch(() => undefined);
+    throw err;
+  }
+
+  let versionNumber: number;
+  try {
+    versionNumber = await transactionWithEvents(async (tx, emit) => {
+      let next = 1;
+      if (existingId === undefined) {
+        await tx.insert(documents).values({
+          id: documentId,
+          title: doc.title,
+          description: doc.description,
+          uploaderId: input.actor.id,
+          format,
+          metadata: imported.metadata,
+        });
+      } else {
+        next = (await lockForVersion(tx, documentId, input.baseVersionNumber)) + 1;
+        await tx.update(documents).set({ format, metadata: imported.metadata }).where(eq(documents.id, documentId));
+      }
+      // The import is the system's first update: docVersion 1 of the log.
+      const [first] = await tx
+        .insert(docUpdates)
+        .values({ documentId, update: state, actorId: null, runId: null, touched: [] })
+        .returning({ id: docUpdates.id });
+      await tx.insert(versions).values({
+        id: versionId,
+        documentId,
+        versionNumber: next,
+        storageKey: bundle.staticKey,
+        sizeBytes: bundle.staticBytes,
+        versionNote: doc.versionNote,
+        originalKey,
+        sourceFormat: format,
+        bundleKey: bundle.bundleKey,
+        docVersion: first!.id,
+      });
+      // Converted threads stay listed on the new version: anchored where
+      // their quote was found, "context changed" (orphaned) elsewhere.
+      for (const thread of open) {
+        await tx.insert(threadPlacements).values({
+          threadId: thread.threadId,
+          versionId,
+          anchor: anchored.has(thread.threadId) ? thread.anchor : null,
+        });
+      }
+      emit({
+        documentId,
+        versionId,
+        actorId: input.actor.id,
+        type: 'version.published',
+        payload: { document_id: documentId, version_id: versionId, number: next, author_id: input.actor.id },
+      });
+      return next;
+    });
+  } catch (err) {
+    await deleteBundle(storage, bundle.bundleKey);
+    await storage.delete(originalKey).catch(() => undefined);
+    return refusalFor(err, input.baseVersionNumber);
+  }
+  return { ok: true, documentId, versionId, versionNumber };
+}
+
+async function openThreadQuotes(documentId: string) {
+  const rows = await db
+    .select({ threadId: threads.id, anchor: threads.anchor })
+    .from(threads)
+    .where(and(eq(threads.documentId, documentId), isNull(threads.resolvedAt)));
+  return rows.map((r) => ({ ...r, quote: quoteOf(r.anchor) }));
 }
