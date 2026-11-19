@@ -7,6 +7,9 @@ export const SVG_LIMITS = { nodes: RUN_LIMITS.nodes, bytes: 512 * 1024, viewBox:
 
 /** The one font widgets draw with, on the server (raster.ts) and in the page. */
 export const WIDGET_FONT = 'Roboto';
+/** The root's font stack: Roboto (loaded by the server and the page), then
+ *  what a renderer without it has. */
+const FONT_STACK = `${WIDGET_FONT}, Helvetica, Arial, sans-serif`;
 
 const TAGS = new Set(SVG_TAGS);
 const PRESENTATION = new Set(SVG_PRESENTATION_ATTRS.filter((a) => a !== 'font-family'));
@@ -79,7 +82,7 @@ export function serializeSvg(tree: WidgetNode, ctx: SerializeContext): Serialize
       return '';
     }
     const allowed = SVG_TAG_ATTRS[tag] ?? [];
-    let attrs = root ? ` xmlns="http://www.w3.org/2000/svg" font-family="${WIDGET_FONT}"` : '';
+    let attrs = root ? ` xmlns="http://www.w3.org/2000/svg" font-family="${FONT_STACK}"` : '';
     for (const [rawName, rawValue] of Object.entries(node.p ?? {})) {
       if (IGNORED.has(rawName) || rawValue === null || rawValue === undefined || rawValue === false) continue;
       const name = CAMEL.get(rawName) ?? rawName;
@@ -101,6 +104,10 @@ export function serializeSvg(tree: WidgetNode, ctx: SerializeContext): Serialize
         continue;
       }
       let value = rawValue === true ? '' : String(rawValue);
+      if (value.includes('url(') && !/^url\(#[A-Za-z0-9_-]+\)$/.test(value.trim())) {
+        errors.push(`${name} on <${tag}> references "${value}": only url(#id) inside the widget.`);
+        continue;
+      }
       if (COLOUR_ATTRS.has(name) && !isColourKeyword(value) && !ctx.colours.has(value)) {
         errors.push(`${name}="${value}" on <${tag}> is not a theme token: use tokens.*.`);
         continue;

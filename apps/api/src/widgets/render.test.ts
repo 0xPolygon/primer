@@ -121,7 +121,7 @@ export default function render({ tokens }) {
     expect(errorsOf(out)).toBe('');
     if ('errors' in out) return;
     expect(out.svg).toBe(
-      '<svg xmlns="http://www.w3.org/2000/svg" font-family="Roboto" viewBox="0 0 10 10"><use></use><use href="#wg1-dot"></use><rect id="wg1-dot" fill="url(#wg1-grad)"></rect></svg>',
+      '<svg xmlns="http://www.w3.org/2000/svg" font-family="Roboto, Helvetica, Arial, sans-serif" viewBox="0 0 10 10"><use></use><use href="#wg1-dot"></use><rect id="wg1-dot" fill="url(#wg1-grad)"></rect></svg>',
     );
     expect(out.warnings).toEqual(expect.arrayContaining(['dropped onload on <svg>', 'dropped <script>', 'dropped <a>', 'dropped an external href on <use>']));
   });
@@ -150,12 +150,15 @@ export default function render({ tokens }) {
   const k = ['sty', 'le'].join('');
   const evil = { [k]: 'fill: url(https://example.com/x)' };
   const fo = ['foreign', 'Object'].join('');
-  return <svg viewBox="0 0 10 10"><rect {...evil} fill={tokens.fg} />{__h(fo, null)}</svg>;
+  const leak = { mask: 'url(https://example.com/m.svg#a)', filter: 'url( #x ) url(https://example.com/f)' };
+  return <svg viewBox="0 0 10 10"><rect {...evil} fill={tokens.fg} /><rect {...leak} />{__h(fo, null)}</svg>;
 }`;
     expect(validateWidget(source)).toEqual({ ok: true });
     const out = await renderWidget(source, [], 'light');
     expect(errorsOf(out)).toContain('has a style attribute');
     expect(errorsOf(out)).toContain('<foreignObject> is not an element');
+    expect(errorsOf(out)).toContain('mask on <rect> references "url(https://example.com/m.svg#a)"');
+    expect(errorsOf(out)).toContain('filter on <rect> references');
   });
 
   it('runtime refuses literal colours, copied text ids and unknown rows the source hid', async () => {
