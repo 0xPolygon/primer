@@ -839,7 +839,12 @@ function DocumentPageInner() {
     return { kind: 'success', message: `Checkpoint v${checkpoint.versionNumber} saved` };
   }
 
-  function exportAs(format: 'markdown' | 'html') {
+  function exportAs(format: 'markdown' | 'html' | 'print') {
+    if (format === 'print') {
+      const version = requestedNumber !== undefined ? `?version=${requestedNumber}` : '';
+      window.open(`/d/${docId}/print${version}`, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const params = new URLSearchParams({ format: format === 'html' ? 'html' : document.format === 'text' ? 'text' : 'markdown' });
     if (requestedNumber !== undefined) params.set('version', String(requestedNumber));
     const a = window.document.createElement('a');

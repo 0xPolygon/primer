@@ -4,6 +4,7 @@ export type MenuItemId =
   | 'download-html'
   | 'export-markdown'
   | 'export-html'
+  | 'export-print'
   | 'notebooklm'
   | 'copy'
   | 'download'
@@ -36,6 +37,7 @@ export function buildMenuItems({ isUploader, includeShare = false, live = false 
     items.push(
       { id: 'export-markdown', label: 'Export Markdown' },
       { id: 'export-html', label: 'Export HTML' },
+      { id: 'export-print', label: 'Print / PDF' },
       { id: 'separator' },
     );
   }

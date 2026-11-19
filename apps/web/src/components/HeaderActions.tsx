@@ -33,7 +33,7 @@ interface Props {
   /** Live documents: saves a checkpoint of the current state. */
   onSaveCheckpoint?: () => Promise<ActionFeedback>;
   /** Live documents: downloads the content in a format. */
-  onExport?: (format: 'markdown' | 'html') => void;
+  onExport?: (format: 'markdown' | 'html' | 'print') => void;
 }
 
 type MenuState = 'closed' | 'menu' | 'confirm';
@@ -140,6 +140,10 @@ export function HeaderActions({
     'export-html': () => {
       setMenuState('closed');
       onExport?.('html');
+    },
+    'export-print': () => {
+      setMenuState('closed');
+      onExport?.('print');
     },
     delete: () => setMenuState('confirm'),
   };

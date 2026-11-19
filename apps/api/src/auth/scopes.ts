@@ -38,6 +38,7 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/status', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read', upcoming: true },
+  { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read', upcoming: true },
   { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read', upcoming: true },
 
