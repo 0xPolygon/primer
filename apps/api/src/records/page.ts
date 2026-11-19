@@ -46,13 +46,16 @@ export function declaredCollections(html: string): string[] {
 
 /**
  * What an external recipient's copy of a page's frozen records holds: only
- * the collections the page declares it reads, and of each record only its id
+ * the collections the page declares it reads (never Primer's own `primer.*`
+ * ones, whose record ids are people's ids), and of each record only its id
  * and data. No identities (who wrote it), versions, times or change ids
  * leave Primer, and personal records are never frozen at all.
  */
 export function frozenForShare(snapshot: RecordsSnapshot, html: string): FrozenRecords {
   const collections: FrozenRecords['collections'] = {};
   for (const name of declaredCollections(html)) {
+    // Primer's own collections (votes: record id = the voter) never go out.
+    if (name.startsWith('primer.')) continue;
     if (Object.hasOwn(snapshot.collections, name)) collections[name] = snapshot.collections[name]!.map((r) => ({ recordId: r.recordId, data: r.data }));
   }
   return { collections };

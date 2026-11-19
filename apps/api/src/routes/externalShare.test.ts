@@ -273,6 +273,7 @@ describe('external share public routes', () => {
       const records = recordsApi(MOCK_USER, doc.documentId);
       await records.set({ collection: 'metrics', scope: 'shared', recordId: 'w1', data: { week: 'W1', signups: 240 } });
       await records.set({ collection: 'metrics', scope: 'shared', recordId: 'w2', data: { week: 'W2 <b>bold</b>', signups: 410 } });
+      await records.set({ collection: 'payroll', scope: 'shared', recordId: 'p1', data: { amount: 'unbound-in-markdown' } });
       const checkpoint = await f.app.request(`/api/documents/${doc.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
       const { versionId } = (await checkpoint.json()) as { versionId: string };
       // Live data moves on after publish.
@@ -283,16 +284,18 @@ describe('external share public routes', () => {
       expect(table).toContain('<td>W1</td><td>240</td>');
       expect(table).toContain('<td>W2 &lt;b&gt;bold&lt;/b&gt;</td><td>410</td>');
       expect(table).not.toContain('999');
+      expect(table).not.toContain('unbound-in-markdown');
 
       // A record-reading page reads the same frozen records, under the records lockdown.
       const page = await publishDocument(storage, {
         actor: MOCK_USER, title: 'Board', filename: 'b.html', format: 'html',
-        content: new TextEncoder().encode('<!doctype html><html><head><meta name="primer-records" content="read"><meta name="primer-records-collections" content="votes"><title>Board</title></head><body><h1>Board</h1></body></html>'),
+        content: new TextEncoder().encode('<!doctype html><html><head><meta name="primer-records" content="read"><meta name="primer-records-collections" content="votes primer.choice/c1"><title>Board</title></head><body><h1>Board</h1></body></html>'),
       });
       if (!page.ok) throw new Error('publish refused');
       const pageRecords = recordsApi(MOCK_USER, page.documentId);
       await pageRecords.set({ collection: 'votes', scope: 'shared', recordId: 'a', data: { note: '</script><script>alert(1)</script>' } });
       await pageRecords.set({ collection: 'mine', scope: 'personal', recordId: 'p', data: { secret: 'personal-only' } });
+      await recordsApi(MOCK_USER, page.documentId, { reserved: true }).set({ collection: 'primer.choice/c1', scope: 'shared', recordId: 'mock-user-1', data: { optionId: 'o1' } });
       await pageRecords.set({ collection: 'salaries', scope: 'shared', recordId: 's', data: { amount: 'unbound-collection' } });
       const pageCheckpoint = await f.app.request(`/api/documents/${page.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
       const pageVersion = ((await pageCheckpoint.json()) as { versionId: string }).versionId;
@@ -307,7 +310,7 @@ describe('external share public routes', () => {
       expect(JSON.parse(frozen![1]!)).toEqual({ collections: { votes: [{ recordId: 'a', data: { note: '</script><script>alert(1)</script>' } }] } });
       expect(html).not.toContain('unbound-collection');
       expect(html).not.toContain('writtenBy');
-      expect(html).not.toContain('mock-user-1');
+      expect(html).not.toContain('mock-user-1'); // nor a vote, keyed by the voter's id
       expect(html).not.toContain('after publish');
       expect(html).not.toContain('personal-only');
       await flushDataChanged();
