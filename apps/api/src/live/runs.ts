@@ -8,6 +8,7 @@ import { runInverses } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canComment, canEdit, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
+import { fenceUntrusted } from '../lib/untrusted.ts';
 import { setAgentAwareness } from './awareness.ts';
 import type { BlockInverse, DryRun } from './pipeline.ts';
 import { docQueue } from './queue.ts';
@@ -482,13 +483,8 @@ function toDTO(row: RunRow): AgentRunDTO & { request: AgentRunRequest } {
 
 function fencedRequest(request: AgentRunRequest): AgentRunRequest {
   const viewer = { ...request.viewer };
-  if (viewer.unsentText !== undefined) viewer.unsentText = fenceUntrusted(viewer.unsentText);
-  return { ...request, prompt: fenceUntrusted(request.prompt), viewer };
-}
-
-/** Text written by people, fenced for an agent's context. */
-export function fenceUntrusted(text: string): string {
-  return `<untrusted-request>\n${text.replace(/<\/?untrusted-request>/gi, '')}\n</untrusted-request>`;
+  if (viewer.unsentText !== undefined) viewer.unsentText = fenceUntrusted(viewer.unsentText, 'request');
+  return { ...request, prompt: fenceUntrusted(request.prompt, 'request'), viewer };
 }
 
 function parseRequest(raw: unknown): AgentRunRequest | string {
