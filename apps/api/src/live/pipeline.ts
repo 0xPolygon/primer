@@ -73,7 +73,7 @@ export type Plan = {
    *  then both report `conflict`. */
   onConflict: 'refuse' | 'suggest';
   /** Runs on the document's queue just before the mutation, with the live
-   *  Y.Doc (read it with `liveFragment`); a refusal turns every edit into a
+   *  Y.Doc (e.g. to `dryRun` the plan); a refusal turns every edit into a
    *  conflict carrying it (e.g. a cancelled run). */
   guard?: (doc: Y.Doc) => Promise<Refusal | null>;
   /** Runs once the update is stored, with its docVersion (e.g. to write the
@@ -124,9 +124,45 @@ export async function applyPlan(documentId: string, origin: LiveOrigin, plan: Pl
   }
 }
 
-/** The live content of `target`'s fragment, as a ProseMirror doc. */
-export function liveFragment(doc: Y.Doc, target: Target): PmNode {
-  return toPmDoc(doc.getXmlFragment(fragmentName(target)));
+/** What a plan would do to the live document, block by block. */
+export type DryRun = {
+  /** Blocks added (nested ones included), changed or moved. */
+  edits: number;
+  /** Blocks gone afterwards, whole subtrees included. */
+  removals: number;
+  /** Some edit would not apply (a conflict, or a throw) while the others
+   *  remove or move blocks. */
+  unresolved: boolean;
+};
+
+/**
+ * Runs the plan's own builds, exactly as `applyPlan` would, on scratch copies
+ * of the live fragments, and counts by block id what the whole plan does:
+ * whatever the order of its edits, a block present before and absent after
+ * is a removal. Writes nothing. The edits should be side-effect free (no
+ * cursor, notes or `applied`): they run again for real.
+ */
+export function dryRun(doc: Y.Doc, edits: PlannedEdit[]): DryRun {
+  let out: ReturnType<typeof prepare>;
+  try {
+    out = prepare(doc, edits);
+  } catch {
+    return { edits: 0, removals: 0, unresolved: true };
+  }
+  let changed = 0;
+  let removals = 0;
+  for (const { before, after } of out.fragments) {
+    const b = indexBlocks(before);
+    const a = indexBlocks(after);
+    for (const [id, old] of b) {
+      const now = a.get(id);
+      if (!now) removals++;
+      else if (out.moved.has(id) || contentVersion(old.node) !== contentVersion(now.node)) changed++;
+    }
+    for (const id of a.keys()) if (!b.has(id)) changed++;
+  }
+  const conflicted = out.outcomes.some((o) => o.status === 'conflict');
+  return { edits: changed, removals, unresolved: conflicted && (removals > 0 || out.moved.size > 0) };
 }
 
 /** Synchronous: locate, check, build and capture inverses for every edit. */
@@ -134,6 +170,7 @@ function prepare(doc: Y.Doc, edits: PlannedEdit[]) {
   const fragments = new Map<string, { fragment: Y.XmlFragment; tr: Transform }>();
   const outcomes: EditOutcome[] = [];
   const inverses: BlockInverse[] = [];
+  const movedAll = new Set<string>();
 
   edits.forEach((edit, index) => {
     const name = fragmentName(edit.target);
@@ -169,6 +206,7 @@ function prepare(doc: Y.Doc, edits: PlannedEdit[]) {
       return;
     }
     for (const step of scratch.steps) entry.tr.step(step);
+    for (const id of moved) movedAll.add(id);
     outcomes.push({ index, target: edit.target, status: 'applied' });
     if (edit.inverse || edit.applied) {
       const diff = blockDiff(scratch.before, scratch.doc, moved);
@@ -182,7 +220,8 @@ function prepare(doc: Y.Doc, edits: PlannedEdit[]) {
   const writes = [...fragments.values()]
     .filter((entry) => entry.tr.docChanged)
     .map((entry) => ({ fragment: entry.fragment, doc: entry.tr.doc }));
-  return { outcomes, inverses, writes };
+  const docs = [...fragments.values()].map((entry) => ({ before: entry.tr.before, after: entry.tr.doc }));
+  return { outcomes, inverses, writes, fragments: docs, moved: movedAll };
 }
 
 /** A block's own content (type, props, inline content), without its

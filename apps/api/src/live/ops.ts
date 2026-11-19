@@ -1,6 +1,5 @@
 import { Fragment, type Node as PmNode } from '@tiptap/pm/model';
 import type { Transform } from '@tiptap/pm/transform';
-import type * as Y from 'yjs';
 import { sql } from 'drizzle-orm';
 import {
   isTarget,
@@ -18,7 +17,7 @@ import { canEdit } from '../lib/permissions.ts';
 import { blockVersion, findBlock } from './blocks.ts';
 import { InputError, inputToBlocks } from './convert.ts';
 import { originFor } from './origin.ts';
-import { applyPlan, liveFragment, type AppliedBlock, type Located, type PlannedEdit } from './pipeline.ts';
+import { applyPlan, dryRun, type AppliedBlock, type Located, type PlannedEdit } from './pipeline.ts';
 import { appliedBlockDTO } from './read.ts';
 import { rebaseUpdate, type UpdateInput } from './rebase.ts';
 import { activeRequestedRunIds, finishDirectRun, runHooks, startDirectRun } from './runs.ts';
@@ -152,17 +151,21 @@ async function applyScoped(
       onTarget: direct ? undefined : hooks?.onTarget,
     }),
   );
-  const edited = prepared.reduce((n, p) => n + (p.op === 'add' || p.op === 'replaceRange' ? countBlocks(p.nodes) : 1), 0);
+  // The same builds without side effects, for the budget's dry run.
+  const inert = prepared.map((p) => toEdit(p, { inverse: false, open, allowCommentedDelete, note: () => {} }));
 
   const result = await applyPlan(documentId, originFor(actor, runId), {
     edits,
     onConflict,
     guard: async (doc) => {
+      // Threads first: the dry run must refuse what the real apply refuses.
+      for (const id of await openThreadIds(documentId)) open.add(id);
       if (hooks) {
-        const refused = await hooks.guard({ edits: edited, removals: removals(doc, prepared) });
+        // The run's budget is charged with what the batch does to the live
+        // document, counted by a dry run of these very edits.
+        const refused = await hooks.guard(dryRun(doc, inert));
         if (refused) return refused;
       }
-      for (const id of await openThreadIds(documentId)) open.add(id);
       return null;
     },
     afterPersist: hooks?.afterPersist,
@@ -292,7 +295,7 @@ type EditContext = {
   open: Set<string>;
   allowCommentedDelete: boolean;
   note: (note: string) => void;
-  applied: (blocks: AppliedBlock[]) => void;
+  applied?: (blocks: AppliedBlock[]) => void;
   onTarget?: (target: Target) => void;
 };
 
@@ -401,49 +404,6 @@ function rangeOf(doc: PmNode, at: NonNullable<Located>, toBlockId: string): { bl
     if (child.attrs.id === toBlockId) return { blocks, end: pos };
   }
   return null;
-}
-
-/** Blocks (`blockContainer`s) in `nodes`, nested ones included. */
-function countBlocks(nodes: readonly PmNode[]): number {
-  let n = 0;
-  for (const node of nodes) {
-    if (node.type.name === 'blockContainer') n++;
-    node.descendants((d) => {
-      if (d.type.name === 'blockContainer') n++;
-    });
-  }
-  return n;
-}
-
-/** Blocks the batch's deletes and replacements would remove, subtrees
- *  included, counted on the live document (a missing target or bad range
- *  counts 0: that op conflicts). A subtree moved earlier in the batch may
- *  sit inside a later removal, so it counts with the next one. */
-function removals(doc: Y.Doc, prepared: Prepared[]): number {
-  const fragments = new Map<string, PmNode>();
-  const live = (target: Target) => {
-    if (!fragments.has(target.tabId)) fragments.set(target.tabId, liveFragment(doc, target));
-    return fragments.get(target.tabId)!;
-  };
-  let n = 0;
-  let moved = 0;
-  for (const p of prepared) {
-    if (p.op === 'move') {
-      const at = findBlock(live(p.target), p.target.blockId);
-      if (at) moved += countBlocks([at.node]);
-    } else if (p.op === 'delete') {
-      const at = findBlock(live(p.target), p.target.blockId);
-      if (at) n += countBlocks([at.node]) + moved;
-      moved = 0;
-    } else if (p.op === 'replaceRange') {
-      const root = live(p.from);
-      const at = findBlock(root, p.from.blockId);
-      const range = at ? rangeOf(root, at, p.to.blockId) : null;
-      if (range) n += countBlocks(range.blocks) + moved;
-      moved = 0;
-    }
-  }
-  return n;
 }
 
 /** Removes a block; a last child takes its (then empty) group with it. The

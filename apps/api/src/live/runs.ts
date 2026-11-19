@@ -9,7 +9,7 @@ import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canComment, canEdit, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
 import { setAgentAwareness } from './awareness.ts';
-import type { BlockInverse } from './pipeline.ts';
+import type { BlockInverse, DryRun } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 
 /** Past either count in one run, more ops need a plan a person approved. */
@@ -308,13 +308,15 @@ export async function approveRun(user: AuthUser, runId: string, body: { planHash
 
 /**
  * Run support for a batch of ops (live/ops.ts): the run must be this agent's
- * and this document's. The guard runs on the document queue: one conditional
- * UPDATE reserves the batch's work (edits: one per op, or per block written
- * for add and replaceRange; removals: every block in the subtrees the batch
- * deletes or replaces, counted from the live document) if the run is still
- * active and stays under the large-edit threshold or has an approved plan;
- * otherwise the batch is refused (`run_cancelled` or `approval_required`).
- * The reservation is not refunded for ops that end as conflicts.
+ * and this document's. The guard runs on the document queue with the batch's
+ * dry run (pipeline `dryRun`: blocks added, changed or moved, and blocks
+ * removed, by id on the live document). One conditional UPDATE reserves that
+ * work if the run is still active and either has an approved plan or stays
+ * under the large-edit threshold; otherwise the batch is refused
+ * (`run_cancelled` or `approval_required`). Fail closed: a dry run with an op
+ * that would not apply while the rest removes or moves blocks needs an
+ * approved plan whatever the counts. The reservation is not refunded for ops
+ * that end as conflicts.
  */
 export async function runHooks(documentId: string, actor: AuthUser, runId: string) {
   const run = await loadRun(runId);
@@ -337,19 +339,29 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
     } as Refusal;
   }
   return {
-    guard: async (work: { edits: number; removals: number }): Promise<Refusal | null> => {
+    guard: async (work: DryRun): Promise<Refusal | null> => {
+      const underBudget = work.unresolved
+        ? sql`FALSE`
+        : sql`(edits_applied + ${work.edits} <= ${LARGE_RUN_EDITS} AND blocks_removed + ${work.removals} <= ${LARGE_RUN_REMOVALS})`;
       const rows = (await db.execute(sql`
         UPDATE agent_runs
            SET edits_applied = edits_applied + ${work.edits}, blocks_removed = blocks_removed + ${work.removals}
          WHERE id = ${runId} AND document_id = ${documentId} AND status IN ('queued', 'running')
-           AND (plan_approved_by IS NOT NULL
-                OR (edits_applied + ${work.edits} <= ${LARGE_RUN_EDITS} AND blocks_removed + ${work.removals} <= ${LARGE_RUN_REMOVALS}))
+           AND (plan_approved_by IS NOT NULL OR ${underBudget})
         RETURNING id
       `)) as unknown as { id: string }[];
       if (rows.length > 0) return null;
       const now = (await loadRun(runId))!;
       if (now.status !== 'queued' && now.status !== 'running') {
         return { code: 'run_cancelled', message: `The run is ${now.status}; nothing was applied.`, fix: 'Stop working on this run.' };
+      }
+      if (work.unresolved) {
+        return {
+          code: 'approval_required',
+          message: 'Some ops in this batch would not apply while others remove or move blocks, so its removals can\'t be counted safely; nothing was applied.',
+          fix: 'Read the document again and send the batch with current targets and versions, or send the removals and moves in a batch of their own.',
+          details: { editsApplied: now.editsApplied, blocksRemoved: now.blocksRemoved, unresolved: true },
+        };
       }
       return {
         code: 'approval_required',

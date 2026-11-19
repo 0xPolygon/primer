@@ -202,6 +202,50 @@ describe('agent runs', () => {
     expect((await markdownOf(id, agent)).length).toBe(53);
   });
 
+  it('move a large subtree then delete it in one batch trips approval with the full count', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    const kids = Array.from({ length: 50 }, (_, k) => paragraph(`x${k}`, `child ${k}`));
+    await seedBlocks(id, [paragraph('a', 'Alpha'), paragraph('b', 'Beta'), { ...paragraph('x', 'Moved'), children: kids }]);
+    const run = await startedRun(id, agent);
+    const v = await versions(id, agent);
+    const batch = [
+      { op: 'move', target: main('x'), at: main('a'), position: 'after', expectVersion: v.x },
+      { op: 'delete', target: main('x'), expectVersion: v.x },
+    ];
+
+    const held = await ops(id, agent, { runId: run.id, ops: batch });
+    expect(held.outcomes.every((o) => o.refusal?.code === 'approval_required')).toBe(true);
+    expect((await markdownOf(id, agent)).length).toBe(53);
+
+    // Approved, the same batch is charged the whole subtree.
+    const planned = await updateRunStatus(agent, run.id, { plan: 'Drop the moved section.' });
+    expect((await approveRun(owner, run.id, { planHash: planned.ok ? planned.value.planHash : null })).ok).toBe(true);
+    const done = await ops(id, agent, { runId: run.id, ops: batch });
+    expect(done.outcomes.map((o) => o.status)).toEqual(['applied', 'applied']);
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta']);
+    const [row] = (await db.execute(sql`SELECT blocks_removed AS n FROM agent_runs WHERE id = ${run.id}`)) as unknown as { n: number }[];
+    expect(row!.n).toBe(51);
+  });
+
+  it('a batch with an unresolvable removal after moves requires approval', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('a', 'Alpha'), paragraph('b', 'Beta'), paragraph('c', 'Gamma')]);
+    const run = await startedRun(id, agent);
+    const v = await versions(id, agent);
+
+    const out = await ops(id, agent, {
+      runId: run.id,
+      ops: [
+        { op: 'move', target: main('c'), at: main('a'), position: 'before', expectVersion: v.c },
+        { op: 'delete', target: main('missing'), expectVersion: '0123456789abcdef' },
+      ],
+    });
+    expect(out.outcomes.every((o) => o.refusal?.code === 'approval_required')).toBe(true);
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta', 'Gamma']);
+  });
+
   it('ids planted from another document are refused and never touch it', async () => {
     const agent = await makeAgent();
     const a = await createLiveDoc();
