@@ -1,6 +1,6 @@
 import * as Y from 'yjs';
 import { Hocuspocus } from '@hocuspocus/server';
-import { attachPersistence, loadYDoc } from './persist.ts';
+import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
 
@@ -16,7 +16,6 @@ export function documentIdOf(name: string): string | null {
   return NAME.exec(name)?.[1] ?? null;
 }
 
-const detachers = new Map<string, () => Promise<void>>();
 const failureHandlers = new Set<(documentId: string, doc: Y.Doc) => void>();
 
 /** Runs when a document's persistence fails (the hub closes its sockets). */
@@ -54,21 +53,19 @@ export function liveInstance(): Hocuspocus {
       const { doc, docVersion } = await loadYDoc(documentId);
       Y.applyUpdate(document, Y.encodeStateAsUpdate(doc));
       doc.destroy();
-      detachers.set(
-        documentName,
-        attachPersistence(document, documentId, {
-          docVersion,
-          onFailure: (err) => {
-            logger.error({ documentId, error: err.message }, 'live document: saving an update failed');
-            for (const handler of failureHandlers) handler(documentId, document);
-          },
-        }),
-      );
+      const detach = attachPersistence(document, documentId, {
+        docVersion,
+        onFailure: (err) => {
+          logger.error({ documentId, error: err.message }, 'live document: saving an update failed');
+          for (const handler of failureHandlers) handler(documentId, document);
+        },
+      });
+      // Detach only once the document is really gone: Hocuspocus keeps it
+      // after beforeUnloadDocument when someone connected meanwhile.
+      document.on('destroy', () => void detach());
     },
-    async beforeUnloadDocument({ documentName }) {
-      const detach = detachers.get(documentName);
-      detachers.delete(documentName);
-      await detach?.();
+    async beforeUnloadDocument({ document }) {
+      await persistedUpTo(document).catch(() => undefined);
     },
   });
   return instance;

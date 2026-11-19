@@ -4,6 +4,8 @@ import { sql } from 'drizzle-orm';
 import { yXmlFragmentToProsemirrorJSON } from 'y-prosemirror';
 import { db } from '../db/client.ts';
 import { compact, loadYDoc, persistedUpTo } from './persist.ts';
+import { docQueue } from './queue.ts';
+import { liveDocName, liveInstance } from './instance.ts';
 import { createLiveDoc, paragraph, seedBlocks, withLiveDoc } from './live.testlib.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
 import { serverEditor } from './editor.ts';
@@ -67,5 +69,32 @@ describe('live document persistence', () => {
     const loaded = await loadYDoc(id);
     expect(loaded.doc.getArray<number>('stress').toArray()).toEqual(inMemory);
     expect(loaded.docVersion).toBeGreaterThan(0);
+  });
+
+  it('a document kept in memory during unload still stores its updates', async () => {
+    const id = await createLiveDoc();
+    const hocuspocus = liveInstance();
+    const first = await hocuspocus.openDirectConnection(liveDocName(id), SYSTEM_ORIGIN);
+    const doc = first.document!;
+
+    // Hold the queue so the unload waits on a pending insert.
+    let release!: () => void;
+    const held = docQueue(id)(() => new Promise<void>((resolve) => (release = resolve)));
+    await first.transact((d) => d.getMap('meta').set('a', 1));
+    const unloading = first.disconnect({ unloadImmediately: true });
+    const inUnload = (hocuspocus as unknown as { unloadingDocuments: Map<string, unknown> }).unloadingDocuments;
+    while (!inUnload.has(liveDocName(id))) await new Promise((resolve) => setTimeout(resolve, 5));
+    // Someone connects while the unload waits; the document must stay live.
+    const second = await hocuspocus.openDirectConnection(liveDocName(id), SYSTEM_ORIGIN);
+    release();
+    await held;
+    await unloading;
+
+    expect(second.document).toBe(doc);
+    await second.transact((d) => d.getMap('meta').set('b', 2));
+    await persistedUpTo(doc);
+    await second.disconnect({ unloadImmediately: false });
+
+    expect((await loadYDoc(id)).doc.getMap('meta').toJSON()).toEqual({ a: 1, b: 2 });
   });
 });
