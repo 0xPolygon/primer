@@ -73,7 +73,7 @@ describe('LiveEditor', () => {
   it('live document renders the editor and legacy renders the iframe', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
     const frame = () => createElement('iframe', { title: 'legacy-frame' });
-    const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', frame };
+    const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, frame };
 
     const live = await render(createElement(DocumentSurface, { ...props, live: true }));
     await until(() => live.querySelector('[contenteditable="true"].bn-editor')?.textContent?.includes('Seeded from the Y.Doc') === true);
@@ -94,7 +94,7 @@ describe('LiveEditor', () => {
 
   it('editor uses the dark theme when Primer is dark', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
-    const props = { documentId: 'doc-1', readOnly: false, userName: 'Ana', frame: () => null, live: true };
+    const props = { documentId: 'doc-1', readOnly: false, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, frame: () => null, live: true };
     const dark = await render(createElement(DocumentSurface, { ...props, theme: 'dark' as const }));
     await until(() => dark.querySelector('.bn-editor') !== null);
     expect(dark.querySelector('.bn-container')!.getAttribute('data-color-scheme')).toBe('dark');

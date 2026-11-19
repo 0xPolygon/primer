@@ -1,4 +1,5 @@
 import type {
+  Target,
   AddVersionResponse,
   Collaborator,
   CollaboratorRole,
@@ -184,6 +185,27 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/threads/${encodeURIComponent(threadId)}/comments`,
       json: { body },
+    });
+  }
+
+  /** Comments on a live document's text, quoted exactly from one block. */
+  createLiveThread(
+    documentId: string,
+    input: { target: Target; quote: string; body: string },
+  ): Promise<ThreadDTO & { commentId: string }> {
+    return this.request<ThreadDTO & { commentId: string }>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/threads`,
+      json: { anchor: { type: 'prose', target: input.target, quote: input.quote }, body: input.body },
+    });
+  }
+
+  /** Moves a live thread's comment onto quoted text. */
+  reanchorThread(threadId: string, input: { target: Target; quote: string }): Promise<ThreadDTO> {
+    return this.request<ThreadDTO>({
+      method: 'POST',
+      path: `/api/threads/${encodeURIComponent(threadId)}/reanchor`,
+      json: input,
     });
   }
 

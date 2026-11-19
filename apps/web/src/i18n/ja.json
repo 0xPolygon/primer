@@ -537,5 +537,16 @@
   "relativeTime.daysAgo": "{count} 日前",
   "records.noAccess": "このページはレコードにアクセスできません。",
   "records.tooMany": "同時に実行できるレコード呼び出しは最大 {max} 件です。",
-  "records.timeout": "呼び出しが {seconds} 秒を超えました。"
+  "records.timeout": "呼び出しが {seconds} 秒を超えました。",
+  "liveEditor.comments": "コメント",
+  "liveEditor.showComments": "表示するコメント",
+  "liveEditor.filterOpen": "未解決",
+  "liveEditor.filterResolved": "解決済み",
+  "liveEditor.filterAll": "すべて",
+  "deleteCommented.title": "コメント付きのテキストを削除しますか？",
+  "deleteCommented.body": "未解決のコメントが指しているテキストを削除します。コメントは「テキストが削除されました」と表示されたまま残ります。",
+  "deleteCommented.keep": "テキストを残す",
+  "deleteCommented.confirm": "削除する",
+  "threads.notDeleted": "スレッドは削除ではなく解決します。",
+  "request.failed": "リクエストに失敗しました（{status}）。"
 }

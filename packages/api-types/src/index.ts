@@ -49,6 +49,39 @@ export interface ElementPathAnchor {
 
 export type AnchorData = TextRangeAnchor | ElementPathAnchor;
 
+// Live-document anchors (C6). A `prose` anchor's live position is BlockNote's
+// `comment` mark in the fragment its target names (tab text, page text, a
+// widget label), so one kind covers all marked text; `quote` keeps the text
+// for when the mark is gone. The others stay structured.
+export interface ProseAnchor {
+  type: 'prose';
+  target: Target;
+  quote: string;
+}
+
+export interface WidgetPartAnchor {
+  type: 'widget-part';
+  target: Target;
+  anchor: string;
+}
+
+export interface DataPointAnchor {
+  type: 'data-point';
+  target: Target;
+  row: string;
+  column: string;
+}
+
+export interface BlockAnchor {
+  type: 'block';
+  target: Target;
+}
+
+export type LiveAnchor = ProseAnchor | WidgetPartAnchor | DataPointAnchor | BlockAnchor;
+
+/** Every anchor a thread can carry: legacy version anchors and live ones. */
+export type ThreadAnchor = AnchorData | LiveAnchor;
+
 // ───────────────────── Validation helpers ─────────────────────
 // Moved from packages/shared/src/companion-protocol.ts, along with the
 // private helpers they depend on. Dependency-free — the package's only
@@ -87,6 +120,55 @@ export function isElementPathAnchor(v: unknown): v is ElementPathAnchor {
     isString(v.path) &&
     isString(v.innerHash)
   );
+}
+
+const TARGET_SUBS = ['pid', 'textId', 'embedId'] as const;
+
+export function isTarget(v: unknown): v is Target {
+  if (!isObject(v) || !isString(v.tabId) || v.tabId === '' || !isString(v.blockId)) return false;
+  let subs = 0;
+  for (const key of TARGET_SUBS) {
+    if (v[key] === undefined) continue;
+    if (!isString(v[key]) || v[key] === '') return false;
+    subs++;
+  }
+  return subs <= 1;
+}
+
+export function isLiveAnchor(v: unknown): v is LiveAnchor {
+  if (!isObject(v) || !isTarget(v.target)) return false;
+  switch (v.type) {
+    case 'prose':
+      return isString(v.quote) && v.quote.length > 0;
+    case 'widget-part':
+      return isString(v.anchor) && v.anchor.length > 0;
+    case 'data-point':
+      return isString(v.row) && isString(v.column);
+    case 'block':
+      return v.target.blockId !== '';
+    default:
+      return false;
+  }
+}
+
+/** The text a thread is about, for labels: the quote, the picked element's
+ *  text (or its path), or '' for structured live anchors. */
+export function anchorLabel(anchor: ThreadAnchor): string {
+  switch (anchor.type) {
+    case 'text-range':
+      return anchor.selectorText;
+    case 'element-path':
+      return anchor.innerText && anchor.innerText.length > 0 ? anchor.innerText : anchor.path;
+    case 'prose':
+      return anchor.quote;
+    default:
+      return '';
+  }
+}
+
+/** Validates any thread anchor, legacy or live. */
+export function isValidAnchor(v: unknown): v is ThreadAnchor {
+  return isTextRangeAnchor(v) || isElementPathAnchor(v) || isLiveAnchor(v);
 }
 
 // ───────────────────── REST API DTOs ─────────────────────
@@ -210,6 +292,13 @@ export interface CommentDTO {
   updatedAt: string | null;
   deletedAt: string | null;
   mentions: string[];
+  /** Emoji reactions, each with the ids of the people who reacted. */
+  reactions: CommentReaction[];
+}
+
+export interface CommentReaction {
+  emoji: string;
+  userIds: string[];
 }
 
 /** How long after deleting a comment its author may still undo the delete.
@@ -222,16 +311,20 @@ export const COMMENT_UNDO_WINDOW_MS = 15 * 60 * 1000;
  *  `contextChanged`). */
 export interface ThreadDTO {
   id: string;
-  /** The version the thread was started on. */
-  versionId: string;
-  versionNumber: number;
+  /** The version the thread was started on; null for a thread on a live
+   *  document, which belongs to the live content. */
+  versionId: string | null;
+  versionNumber: number | null;
   /** Where the thread sits on the version that was listed. When
    *  `contextChanged` is true, or in single-thread responses, this is the
    *  anchor the thread was started with. */
-  anchor: AnchorData;
+  anchor: ThreadAnchor;
   /** True when the thread's quoted text could not be found on the listed
    *  version: it shows there without a highlight. */
   contextChanged: boolean;
+  /** A live thread whose commented text was removed ("Text removed"). It
+   *  stays open with its quote and can be re-anchored. */
+  orphaned: boolean;
   resolvedAt: string | null;
   resolvedBy: string | null;
   resolvedByDisplayName: string | null;
@@ -249,6 +342,28 @@ export interface CreateThreadRequest {
   body: string;
   mentions?: string[];
 }
+
+/** A selection in a live document: base64-encoded Yjs relative positions
+ *  (`Y.encodeRelativePosition`) in the target's fragment. */
+export interface RelativeSelection {
+  anchor: string;
+  head: string;
+}
+
+/** POST /api/documents/:docId/threads: a thread on a live document. A
+ *  `prose` anchor's comment mark is placed by the server over `selection`,
+ *  or else over the first occurrence of the anchor's quote; nothing is
+ *  written when it can't be placed. */
+export interface CreateLiveThreadRequest {
+  anchor: LiveAnchor;
+  body: string;
+  mentions?: string[];
+  selection?: RelativeSelection;
+}
+
+/** POST /api/threads/:threadId/reanchor: moves a live thread's mark to a
+ *  selection, or to the first occurrence of a quote. */
+export type ReanchorThreadRequest = ({ target: Target } & RelativeSelection) | { target: Target; quote: string };
 
 export interface CommentBodyRequest {
   body: string;
@@ -331,7 +446,11 @@ export type RefusalCode =
   /** Records: the page did not opt in to records, or its access was revoked. */
   | 'records_unavailable'
   /** Records: a page has too many calls in flight, or a call timed out or was cancelled. */
-  | 'records_busy';
+  | 'records_busy'
+  /** A comment's selection no longer resolves in the live document. */
+  | 'target_missing'
+  /** The quoted text was not found in the target. */
+  | 'quote_not_found';
 
 export interface Refusal {
   code: RefusalCode;
@@ -849,7 +968,8 @@ export const PRIMER_EVENT_NAMESPACE = 'primer';
 
 export interface PrimerCommentCreatedPayload {
   document_id: string;
-  version_id: string;
+  /** Null for a comment on a live document. */
+  version_id: string | null;
   thread_id: string;
   comment_id: string;
   author_id: string;
@@ -867,6 +987,14 @@ export interface PrimerThreadUpdatedPayload {
   document_id: string;
   thread_id: string;
   by: string;
+}
+
+/** A live thread's commented text was removed (`orphaned: true`) or is back
+ *  (`orphaned: false`). */
+export interface PrimerThreadOrphanedPayload {
+  document_id: string;
+  thread_id: string;
+  orphaned: boolean;
 }
 
 export interface PrimerVersionPublishedPayload {
@@ -903,6 +1031,7 @@ export interface PrimerEventPayloads {
   'data.changed': PrimerDataChangedPayload;
   'thread.resolved': PrimerThreadResolvedPayload;
   'thread.updated': PrimerThreadUpdatedPayload;
+  'thread.orphaned': PrimerThreadOrphanedPayload;
   'version.published': PrimerVersionPublishedPayload;
   status: PrimerStatusPayload;
 }

@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PrimerApiError, type DocumentFormat, type PrimerClient, type PrimerErrorCode } from './client.ts';
 import { pollUntil, startDeviceLogin } from './deviceLogin.ts';
 import { commentRecords, formatComments } from './format.ts';
-import type { RecordVerb } from '@polygonlabs/primer-api-types';
+import type { RecordVerb, Target } from '@polygonlabs/primer-api-types';
 
 /**
  * Public surface of the MCP server. Every tool returns either:
@@ -595,6 +595,35 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
         return errFromException(e);
       }
     },
+
+    primer_create_thread: async (args) => {
+      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      const quote = typeof args.quote === 'string' ? args.quote : '';
+      const body = typeof args.body === 'string' ? args.body : '';
+      if (!documentId || !quote || !body) return err('bad_request', '`documentId`, `target`, `quote` and `body` are required.');
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+      try {
+        const out = await auth.client.createLiveThread(documentId, { target: args.target as Target, quote, body });
+        return ok({ thread_id: out.id, comment_id: out.commentId });
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
+
+    primer_reanchor_thread: async (args) => {
+      const threadId = typeof args.thread_id === 'string' ? args.thread_id : '';
+      const quote = typeof args.quote === 'string' ? args.quote : '';
+      if (!threadId || !quote) return err('bad_request', '`thread_id`, `target` and `quote` are required.');
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+      try {
+        const out = await auth.client.reanchorThread(threadId, { target: args.target as Target, quote });
+        return ok({ thread_id: threadId, orphaned: out.orphaned });
+      } catch (e) {
+        return errFromException(e);
+      }
+    },
   };
 }
 
@@ -604,6 +633,15 @@ interface ToolConfig {
   description: string;
   inputSchema: Record<string, z.ZodTypeAny>;
 }
+
+/** A live-document address: the tab (`main` for the first) and the block id. */
+const TARGET_SCHEMA = z.object({
+  tabId: z.string(),
+  blockId: z.string(),
+  pid: z.string().optional(),
+  textId: z.string().optional(),
+  embedId: z.string().optional(),
+});
 
 const TOOL_CONFIGS: Record<string, ToolConfig> = {
   primer_login: {
@@ -719,6 +757,16 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     inputSchema: {
       documentId: z.string(),
     },
+  },
+  primer_create_thread: {
+    description:
+      'Comment on a live document: quote text exactly as it appears in one block (from primer_get_doc) and the server places the comment on its first occurrence there. Refused with quote_not_found when the text is not in the block. Returns { thread_id, comment_id }.',
+    inputSchema: { documentId: z.string(), target: TARGET_SCHEMA, quote: z.string(), body: z.string() },
+  },
+  primer_reanchor_thread: {
+    description:
+      'Move a live-document comment (for example one flagged orphaned, "Text removed") onto text quoted exactly from one block. Allowed for the thread starter, the owner and editors. Returns { thread_id, orphaned: false }.',
+    inputSchema: { thread_id: z.string(), target: TARGET_SCHEMA, quote: z.string() },
   },
   primer_get_events: {
     description:

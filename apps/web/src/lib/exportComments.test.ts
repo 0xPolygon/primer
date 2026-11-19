@@ -22,6 +22,7 @@ function comment(over: Partial<CommentDTO> = {}): CommentDTO {
     updatedAt: null,
     deletedAt: null,
     mentions: [],
+    reactions: [],
     ...over,
   };
 }
@@ -33,6 +34,7 @@ function thread(over: Partial<ThreadDTO> = {}): ThreadDTO {
     versionNumber: 1,
     anchor: { type: 'text-range', selectorText: 'hello world', prefix: 'say ', suffix: ' loud', containerPath: 'body > p' },
     contextChanged: false,
+    orphaned: false,
     resolvedAt: null,
     resolvedBy: null,
     resolvedByDisplayName: null,

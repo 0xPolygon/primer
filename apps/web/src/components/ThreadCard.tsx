@@ -2,6 +2,7 @@ import { relativeTime } from '../lib/relativeTime.ts';
 import { t } from '../i18n/index.ts';
 import { useState } from 'react';
 import type { CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
+import { anchorLabel } from '@polygonlabs/primer-api-types';
 import {
   useReply,
   useResolveThread,
@@ -37,11 +38,9 @@ function anchorPreview(t: ThreadDTO): string {
   }
   // element-path: prefer the captured innerText; fall back to the CSS path
   // for legacy rows that pre-date innerText capture.
-  const inner = t.anchor.innerText;
-  if (inner && inner.length > 0) {
-    return `"${inner.slice(0, 60)}${inner.length > 60 ? '…' : ''}"`;
-  }
-  return t.anchor.path;
+  if (t.anchor.type === 'element-path' && !t.anchor.innerText) return t.anchor.path;
+  const inner = anchorLabel(t.anchor);
+  return `"${inner.slice(0, 60)}${inner.length > 60 ? '…' : ''}"`;
 }
 
 // Inline icons (Lucide-style outline marks). Stroke uses currentColor.

@@ -4,6 +4,7 @@ import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
+import { cancelOrphanSync, scheduleOrphanSync } from './orphans.ts';
 
 const NAME = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
@@ -61,9 +62,15 @@ export function liveInstance(): Hocuspocus {
           for (const handler of failureHandlers) handler(documentId, document);
         },
       });
+      const recheckThreads = () => scheduleOrphanSync(documentId, document);
+      document.on('update', recheckThreads);
       // Detach only once the document is really gone: Hocuspocus keeps it
       // after beforeUnloadDocument when someone connected meanwhile.
-      document.on('destroy', () => void detach());
+      document.on('destroy', () => {
+        document.off('update', recheckThreads);
+        cancelOrphanSync(documentId);
+        void detach();
+      });
     },
     async beforeUnloadDocument({ document }) {
       await persistedUpTo(document).catch(() => undefined);

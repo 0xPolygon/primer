@@ -5,10 +5,11 @@ import { v7 as uuidv7 } from 'uuid';
 import { isTextRangeAnchor, isElementPathAnchor, type Refusal } from '@polygonlabs/primer-api-types';
 import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
 import { logger } from '../logger.ts';
-import type { CommentDTO, CreateThreadRequest, ThreadDTO, ThreadsListResponse } from '@polygonlabs/primer-api-types';
-import { threads, threadPlacements, versions, comments, users } from '../db/schema.ts';
+import type { CreateThreadRequest, ThreadDTO, ThreadsListResponse } from '@polygonlabs/primer-api-types';
+import { threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
-import { actorName, authorColumns } from '../lib/actors.ts';
+import { loadThread, loadThreads } from '../lib/threadList.ts';
+import { reanchorThread, createLiveThread, listLiveThreads, setReaction } from '../lib/liveThreads.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import type { Visibility } from '../lib/permissions.ts';
@@ -52,8 +53,7 @@ async function loadDocContextForThread(
            d.visibility   AS "visibility",
            d.deleted_at   AS "deletedAt"
     FROM threads t
-    INNER JOIN versions v ON v.id = t.version_id
-    INNER JOIN documents d ON d.id = v.document_id
+    INNER JOIN documents d ON d.id = t.document_id
     WHERE t.id = ${threadId}
     LIMIT 1
   `)) as unknown as {
@@ -65,66 +65,6 @@ async function loadDocContextForThread(
   if (!r) return { ok: false };
   if (r.deletedAt !== null) return { ok: false };
   return { ok: true, docId: r.docId, uploaderId: r.uploaderId, visibility: r.visibility };
-}
-
-interface ThreadRow {
-  id: string;
-  versionId: string;
-  versionNumber: number;
-  anchor: unknown;
-  /** Present when listing a version: the anchor there (null = context changed). */
-  placementAnchor?: unknown;
-  resolvedAt: Date | null;
-  resolvedBy: string | null;
-  resolvedByDisplayName: string | null;
-  createdAt: Date;
-}
-
-interface CommentRow {
-  id: string;
-  threadId: string;
-  authorId: string;
-  authorDisplayName: string;
-  authorKind: 'person' | 'agent';
-  authorVia: string | null;
-  body: string;
-  mentions: string[];
-  createdAt: Date;
-  updatedAt: Date | null;
-  deletedAt: Date | null;
-}
-
-function commentToDTO(row: CommentRow): CommentDTO {
-  const isTombstoned = row.deletedAt !== null;
-  return {
-    id: row.id,
-    threadId: row.threadId,
-    authorId: row.authorId,
-    authorDisplayName: row.authorDisplayName,
-    authorKind: row.authorKind,
-    authorVia: row.authorVia,
-    body: isTombstoned ? '' : row.body,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt?.toISOString() ?? null,
-    deletedAt: row.deletedAt?.toISOString() ?? null,
-    mentions: row.mentions,
-  };
-}
-
-function threadToDTO(row: ThreadRow, threadComments: CommentRow[]): ThreadDTO {
-  const placed = row.placementAnchor === undefined ? row.anchor : row.placementAnchor;
-  return {
-    id: row.id,
-    versionId: row.versionId,
-    versionNumber: row.versionNumber,
-    anchor: (placed ?? row.anchor) as ThreadDTO['anchor'],
-    contextChanged: placed === null,
-    resolvedAt: row.resolvedAt?.toISOString() ?? null,
-    resolvedBy: row.resolvedBy,
-    resolvedByDisplayName: row.resolvedByDisplayName,
-    createdAt: row.createdAt.toISOString(),
-    comments: threadComments.map(commentToDTO),
-  };
 }
 
 async function computeVersionEtag(versionId: string): Promise<string> {
@@ -163,44 +103,6 @@ function validateAnchor(raw: unknown): boolean {
   return isTextRangeAnchor(raw) || isElementPathAnchor(raw);
 }
 
-async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
-  const [row] = (await db
-    .select({
-      id: threads.id,
-      versionId: threads.versionId,
-      versionNumber: versions.versionNumber,
-      anchor: threads.anchor,
-      resolvedAt: threads.resolvedAt,
-      resolvedBy: threads.resolvedBy,
-      resolvedByDisplayName: actorName,
-      createdAt: threads.createdAt,
-    })
-    .from(threads)
-    .innerJoin(versions, eq(versions.id, threads.versionId))
-    .leftJoin(users, eq(users.id, threads.resolvedBy))
-    .where(eq(threads.id, threadId))) as ThreadRow[];
-  if (!row) return null;
-
-  const commentRows = (await db
-    .select({
-      id: comments.id,
-      threadId: comments.threadId,
-      authorId: comments.authorId,
-      ...authorColumns,
-      body: comments.body,
-      mentions: comments.mentions,
-      createdAt: comments.createdAt,
-      updatedAt: comments.updatedAt,
-      deletedAt: comments.deletedAt,
-    })
-    .from(comments)
-    .innerJoin(users, eq(users.id, comments.authorId))
-    .where(eq(comments.threadId, threadId))
-    .orderBy(comments.createdAt)) as CommentRow[];
-
-  return threadToDTO(row, commentRows);
-}
-
 export type ResolveResult =
   | { ok: true; thread: ThreadDTO }
   | { ok: false; status: 403 | 404; error: 'forbidden' | 'not_found'; refusal: Refusal };
@@ -224,7 +126,7 @@ export async function resolveThread(user: AuthUser, threadId: string): Promise<R
       payload: { document_id: ctx.docId, thread_id: threadId, by: user.id },
     });
   });
-  const dto = await loadThreadDTO(threadId);
+  const dto = await loadThread(threadId);
   if (!dto) return { ok: false, status: 404, error: 'not_found', refusal: THREAD_NOT_FOUND };
   return { ok: true, thread: dto };
 }
@@ -251,59 +153,8 @@ export function registerThreadRoutes(
       });
     }
 
-    const threadRows = (await db
-      .select({
-        id: threads.id,
-        versionId: threads.versionId,
-        versionNumber: versions.versionNumber,
-        anchor: threads.anchor,
-        resolvedAt: threads.resolvedAt,
-        resolvedBy: threads.resolvedBy,
-        resolvedByDisplayName: actorName,
-        createdAt: threads.createdAt,
-        placementAnchor: threadPlacements.anchor,
-      })
-      .from(threadPlacements)
-      .innerJoin(threads, eq(threads.id, threadPlacements.threadId))
-      .innerJoin(versions, eq(versions.id, threads.versionId))
-      .leftJoin(users, eq(users.id, threads.resolvedBy))
-      .where(eq(threadPlacements.versionId, versionId))
-      .orderBy(threads.createdAt)) as ThreadRow[];
-
-    const commentRows =
-      threadRows.length === 0
-        ? []
-        : ((await db
-            .select({
-              id: comments.id,
-              threadId: comments.threadId,
-              authorId: comments.authorId,
-              ...authorColumns,
-              body: comments.body,
-              mentions: comments.mentions,
-              createdAt: comments.createdAt,
-              updatedAt: comments.updatedAt,
-              deletedAt: comments.deletedAt,
-            })
-            .from(comments)
-            .innerJoin(users, eq(users.id, comments.authorId))
-            .where(
-              sql`${comments.threadId} IN (${sql.join(
-                threadRows.map((t) => sql`${t.id}`),
-                sql`, `
-              )})`
-            )
-            .orderBy(comments.createdAt)) as CommentRow[]);
-
-    const commentsByThread = new Map<string, CommentRow[]>();
-    for (const cr of commentRows) {
-      const list = commentsByThread.get(cr.threadId);
-      if (list) list.push(cr);
-      else commentsByThread.set(cr.threadId, [cr]);
-    }
-
     const body: ThreadsListResponse = {
-      threads: threadRows.map((t) => threadToDTO(t, commentsByThread.get(t.id) ?? [])),
+      threads: await loadThreads({ placedOn: versionId }),
       asOf: new Date().toISOString(),
     };
 
@@ -438,10 +289,43 @@ export function registerThreadRoutes(
       })
       .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
 
-    const dto = await loadThreadDTO(threadId);
+    const dto = await loadThread(threadId);
     if (!dto) return c.json({ error: 'internal' }, 500);
     return c.json({ ...dto, commentId }, 201);
   });
+
+  // Threads on live documents, their comment marks placed by the server
+  // (lib/liveThreads.ts).
+  app.get('/api/documents/:docId/threads', async (c) => {
+    const out = await listLiveThreads(c.get('user'), c.req.param('docId'));
+    if (!out.ok) return c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+    const body: ThreadsListResponse = { threads: out.value, asOf: new Date().toISOString() };
+    return c.json(body, 200);
+  });
+
+  app.post('/api/documents/:docId/threads', async (c) => {
+    const payload = await jsonBody(c);
+    if (payload === null) return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
+    const out = await createLiveThread(deps.notifier, c.get('user'), c.req.param('docId'), payload);
+    if (!out.ok) return c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+    return c.json(out.value, 201);
+  });
+
+  app.post('/api/threads/:threadId/reanchor', async (c) => {
+    const payload = await jsonBody(c);
+    if (payload === null) return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
+    const out = await reanchorThread(c.get('user'), c.req.param('threadId'), payload);
+    if (!out.ok) return c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+    return c.json(out.value, 200);
+  });
+
+  for (const method of ['post', 'delete'] as const) {
+    app[method]('/api/comments/:commentId/reactions/:emoji', async (c) => {
+      const out = await setReaction(c.get('user'), c.req.param('commentId'), c.req.param('emoji'), method === 'post');
+      if (!out.ok) return c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+      return c.json(out.value, 200);
+    });
+  }
 
   app.post('/api/threads/:threadId/resolve', async (c) => {
     const out = await resolveThread(c.get('user'), c.req.param('threadId'));
@@ -468,7 +352,7 @@ export function registerThreadRoutes(
         payload: { document_id: ctx.docId, thread_id: threadId, by: user.id },
       });
     });
-    const dto = await loadThreadDTO(threadId);
+    const dto = await loadThread(threadId);
     if (!dto) return c.json({ error: 'not_found' }, 404);
     return c.json(dto, 200);
   });
@@ -533,4 +417,13 @@ async function authorizeThreadMutation(
       fix: 'Reply in the thread instead.',
     },
   };
+}
+
+async function jsonBody(c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown> | null> {
+  try {
+    const body = await c.req.json();
+    return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }

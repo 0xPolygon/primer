@@ -5,11 +5,13 @@ import type { Storage } from '../storage/types.ts';
 import type { AuthUser } from '../app.ts';
 import type { Notifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
-import { actorName, actorNameOf, authorColumns } from '../lib/actors.ts';
+import { actorName, actorNameOf } from '../lib/actors.ts';
+import { loadThreads } from '../lib/threadList.ts';
 import { documents, versions, threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { replyToThread } from '../routes/comments.ts';
 import { addCollaborator, listCollaborators, lookupUserByEmail, type CollaboratorFailure } from '../routes/collaborators.ts';
 import { resolveThread } from '../routes/threads.ts';
+import { createLiveThread, reanchorThread } from '../lib/liveThreads.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
 import { publishDocument } from '../lib/publish.ts';
 import { listRecordChanges, purgePersonalRecords, recordsApi, revertChange, type RecordsResult } from '../records/store.ts';
@@ -146,6 +148,8 @@ export const TOOL_NAMES = [
   'primer_set_status',
   'primer_reply_to_thread',
   'primer_resolve_thread',
+  'primer_create_thread',
+  'primer_reanchor_thread',
   'primer_read_records',
   'primer_write_records',
   'primer_record_changes',
@@ -209,6 +213,8 @@ export const TOOL_SCOPES: Record<ToolName, ApiTokenScope | null> = {
   primer_set_status: 'events:write',
   primer_reply_to_thread: 'comments:write',
   primer_resolve_thread: 'comments:write',
+  primer_create_thread: 'comments:write',
+  primer_reanchor_thread: 'comments:write',
   primer_read_records: 'records:read',
   primer_record_changes: 'records:read',
   primer_write_records: 'records:write',
@@ -515,7 +521,14 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       };
 
       const markdown = formatCommentsMarkdown(threadsResponse, docTitle, versionNumber);
-      return ok({ markdown, threadCount: threadDTOs.length, comments: commentRecords(threadDTOs) });
+      // Threads on the live content of a live document belong to no version.
+      const live = await loadThreads({ liveOf: docRow.documentId });
+      return ok({
+        markdown,
+        threadCount: threadDTOs.length,
+        comments: commentRecords(threadDTOs),
+        ...(live.length > 0 ? { live: { threadCount: live.length, comments: commentRecords(live) } } : {}),
+      });
     },
 
     primer_create_document: async (args, user) => {
@@ -744,15 +757,18 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         .where(eq(versions.documentId, documentId))
         .orderBy(desc(versions.versionNumber));
 
-      if (versionRows.length === 0) {
-        return ok({ documentId, title: doc.title, versions: [], threadCount: 0 });
-      }
-
-      // Each thread once, under the version it was started on.
+      // Each thread once, under the version it was started on; threads on
+      // the live content under `live`.
       const threadDTOs = await loadThreads({ documentId });
+      const live = threadDTOs.filter((t) => t.versionId === null);
+      const liveOut = live.length > 0 ? { live: { threadCount: live.length, comments: commentRecords(live) } } : {};
+      if (versionRows.length === 0) {
+        return ok({ documentId, title: doc.title, versions: [], threadCount: live.length, ...liveOut });
+      }
 
       const threadsByVersion = new Map<string, ThreadDTO[]>();
       for (const t of threadDTOs) {
+        if (t.versionId === null) continue;
         const list = threadsByVersion.get(t.versionId);
         if (list) list.push(t);
         else threadsByVersion.set(t.versionId, [t]);
@@ -777,6 +793,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         title: doc.title,
         versions: versionsOut,
         threadCount: threadDTOs.length,
+        ...liveOut,
       });
     },
 
@@ -836,7 +853,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
                c.thread_id AS "threadId",
                t.version_id AS "versionId",
                v.version_number AS "versionNumber",
-               v.document_id AS "documentId",
+               t.document_id AS "documentId",
                d.title AS "documentTitle",
                c.author_id AS "authorId",
                ${actorNameOf('u')} AS "authorDisplayName",
@@ -848,8 +865,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
                t.resolved_at AS "threadResolvedAt"
         FROM comments c
         INNER JOIN threads t ON t.id = c.thread_id
-        INNER JOIN versions v ON v.id = t.version_id
-        INNER JOIN documents d ON d.id = v.document_id
+        INNER JOIN documents d ON d.id = t.document_id
+        LEFT JOIN versions v ON v.id = t.version_id
         INNER JOIN users u ON u.id = c.author_id
         WHERE d.deleted_at IS NULL
         ${canReadFilter}
@@ -1068,130 +1085,30 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const out = await purgePersonalRecords(user, documentId, args.userId);
       return out.ok ? ok(out.value) : refusalErr(out.refusal);
     },
+
+    primer_create_thread: async (args, user) => {
+      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      if (!documentId) return err('bad_request', 'documentId is required');
+      const out = await createLiveThread(deps.notifier, user, documentId, {
+        anchor: { type: 'prose', target: args.target, quote: args.quote },
+        body: args.body,
+      });
+      if (!out.ok) return refusalErr(out.refusal);
+      return ok({ thread_id: out.value.id, comment_id: out.value.commentId });
+    },
+
+    primer_reanchor_thread: async (args, user) => {
+      const threadId = typeof args.thread_id === 'string' ? args.thread_id : '';
+      if (!threadId) return err('bad_request', 'thread_id is required');
+      const out = await reanchorThread(user, threadId, { target: args.target, quote: args.quote });
+      if (!out.ok) return refusalErr(out.refusal);
+      return ok({ thread_id: threadId, orphaned: out.value.orphaned });
+    },
   };
-}
-
-/**
- * Load threads with their comments as ThreadDTOs: either the threads placed on
- * one version (with their anchor there), or every thread of a document (with
- * the anchor it was started with). Shared by the comment-listing tools.
- */
-async function loadThreads(
-  filter: { placedOn: string } | { documentId: string },
-): Promise<ThreadDTO[]> {
-  interface ThreadRow {
-    id: string;
-    versionId: string;
-    versionNumber: number;
-    anchor: unknown;
-    placementAnchor: unknown;
-    resolvedAt: Date | null;
-    resolvedBy: string | null;
-    resolvedByDisplayName: string | null;
-    createdAt: Date;
-  }
-  interface CommentRow {
-    id: string;
-    threadId: string;
-    authorId: string;
-    authorDisplayName: string;
-    authorKind: 'person' | 'agent';
-    authorVia: string | null;
-    body: string;
-    mentions: string[];
-    createdAt: Date;
-    updatedAt: Date | null;
-    deletedAt: Date | null;
-  }
-
-  const columns = {
-    id: threads.id,
-    versionId: threads.versionId,
-    versionNumber: versions.versionNumber,
-    anchor: threads.anchor,
-    resolvedAt: threads.resolvedAt,
-    resolvedBy: threads.resolvedBy,
-    resolvedByDisplayName: actorName,
-    createdAt: threads.createdAt,
-  };
-  const threadRows = (
-    'placedOn' in filter
-      ? await db
-          .select({ ...columns, placementAnchor: threadPlacements.anchor })
-          .from(threadPlacements)
-          .innerJoin(threads, eq(threads.id, threadPlacements.threadId))
-          .innerJoin(versions, eq(versions.id, threads.versionId))
-          .leftJoin(users, eq(users.id, threads.resolvedBy))
-          .where(eq(threadPlacements.versionId, filter.placedOn))
-          .orderBy(threads.createdAt)
-      : await db
-          .select({ ...columns, placementAnchor: threads.anchor })
-          .from(threads)
-          .innerJoin(versions, eq(versions.id, threads.versionId))
-          .leftJoin(users, eq(users.id, threads.resolvedBy))
-          .where(eq(threads.documentId, filter.documentId))
-          .orderBy(threads.createdAt)
-  ) as ThreadRow[];
-
-  const commentRows: CommentRow[] =
-    threadRows.length === 0
-      ? []
-      : ((await db
-          .select({
-            id: comments.id,
-            threadId: comments.threadId,
-            authorId: comments.authorId,
-            ...authorColumns,
-            body: comments.body,
-            mentions: comments.mentions,
-            createdAt: comments.createdAt,
-            updatedAt: comments.updatedAt,
-            deletedAt: comments.deletedAt,
-          })
-          .from(comments)
-          .innerJoin(users, eq(users.id, comments.authorId))
-          .where(
-            sql`${comments.threadId} IN (${sql.join(
-              threadRows.map((t) => sql`${t.id}`),
-              sql`, `,
-            )})`,
-          )
-          .orderBy(comments.createdAt)) as CommentRow[]);
-
-  const commentsByThread = new Map<string, CommentRow[]>();
-  for (const cr of commentRows) {
-    const list = commentsByThread.get(cr.threadId);
-    if (list) list.push(cr);
-    else commentsByThread.set(cr.threadId, [cr]);
-  }
-
-  return threadRows.map((t) => ({
-    id: t.id,
-    versionId: t.versionId,
-    versionNumber: t.versionNumber,
-    anchor: (t.placementAnchor ?? t.anchor) as ThreadDTO['anchor'],
-    contextChanged: t.placementAnchor === null,
-    resolvedAt: t.resolvedAt?.toISOString() ?? null,
-    resolvedBy: t.resolvedBy,
-    resolvedByDisplayName: t.resolvedByDisplayName,
-    createdAt: t.createdAt.toISOString(),
-    comments: (commentsByThread.get(t.id) ?? []).map((c) => ({
-      id: c.id,
-      threadId: c.threadId,
-      authorId: c.authorId,
-      authorDisplayName: c.authorDisplayName,
-      authorKind: c.authorKind,
-      authorVia: c.authorVia,
-      body: c.deletedAt !== null ? '' : c.body,
-      createdAt: c.createdAt.toISOString(),
-      updatedAt: c.updatedAt?.toISOString() ?? null,
-      deletedAt: c.deletedAt?.toISOString() ?? null,
-      mentions: c.mentions,
-    })),
-  }));
 }
 
 function anchorText(anchor: ThreadDTO['anchor']): string {
+  if (anchor.type === 'prose') return anchor.quote;
   if (isTextRangeAnchor(anchor)) return anchor.selectorText;
   if (isElementPathAnchor(anchor)) return anchor.innerText ?? '';
   return '';
@@ -1215,9 +1132,19 @@ function commentRecords(list: ThreadDTO[]) {
         version_number: t.versionNumber,
         resolved: t.resolvedAt !== null,
         context_changed: t.contextChanged,
+        orphaned: t.orphaned,
       })),
   );
 }
+
+/** A live-document address: the tab (`main` for the first) and the block id. */
+const TARGET_SCHEMA = z.object({
+  tabId: z.string(),
+  blockId: z.string(),
+  pid: z.string().optional(),
+  textId: z.string().optional(),
+  embedId: z.string().optional(),
+});
 
 export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: Record<string, ZodTypeAny> }> = {
   primer_whoami: {
@@ -1346,6 +1273,16 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
     description:
       "List who a document is shared with: the people you have added, their roles and who granted each. Pass documentId or a Primer url. Only the document's owner may list (for an agent, documents it created). Returns { collaborators }.",
     inputSchema: { documentId: z.string().optional(), url: z.string().optional() },
+  },
+  primer_create_thread: {
+    description:
+      'Comment on a live document: quote text exactly as it appears in one block (from primer_get_doc) and the server places the comment on its first occurrence there. Refused with quote_not_found when the text is not in the block. Returns { thread_id, comment_id }.',
+    inputSchema: { documentId: z.string(), target: TARGET_SCHEMA, quote: z.string(), body: z.string() },
+  },
+  primer_reanchor_thread: {
+    description:
+      'Move a live-document comment (for example one flagged orphaned, "Text removed") onto text quoted exactly from one block. Allowed for the thread starter, the owner and editors. Returns { thread_id, orphaned: false }.',
+    inputSchema: { thread_id: z.string(), target: TARGET_SCHEMA, quote: z.string() },
   },
   primer_send_events: {
     description:

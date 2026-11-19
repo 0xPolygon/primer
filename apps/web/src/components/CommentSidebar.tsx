@@ -1,6 +1,7 @@
 import { t } from '../i18n/index.ts';
 import { useEffect, useMemo, useState } from 'react';
 import type { AnchorData, ThreadDTO } from '@polygonlabs/primer-api-types';
+import { anchorLabel } from '@polygonlabs/primer-api-types';
 import { useThreadsQuery } from '../queries/threads.ts';
 import { ThreadCard } from './ThreadCard.tsx';
 import { NewThreadComposer } from './NewThreadComposer.tsx';
@@ -143,13 +144,7 @@ export function CommentSidebar({
             <button
               key={t.id}
               type="button"
-              title={
-                t.anchor.type === 'text-range'
-                  ? t.anchor.selectorText
-                  : (t.anchor.innerText && t.anchor.innerText.length > 0
-                      ? t.anchor.innerText
-                      : t.anchor.path)
-              }
+              title={anchorLabel(t.anchor)}
               onClick={() => {
                 setCollapsed(false);
                 onHighlight(t.id);
