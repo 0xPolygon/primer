@@ -154,10 +154,11 @@ Comment on a live document's text. Quote the text exactly as it appears in one b
 
 ### `primer_reanchor_thread`
 
-Move a live-document comment onto quoted text, for example a thread listed with `orphaned: true` ("Text removed": its text was deleted; it stays open with its quote). Allowed for the thread starter, the owner and editors.
+Move a live-document comment back onto text, for example a thread listed with `orphaned: true` ("Text removed": its text was deleted or reworded; it stays open with its quote). Allowed for the thread starter, the owner and editors. Nothing re-anchors automatically: you or a person ask for it.
 
-- **Input:** `{ thread_id: string, target: { tabId: string, blockId: string }, quote: string }`.
-- **Output:** `{ thread_id, orphaned: false }`. Errors: `quote_not_found`, `forbidden`, `not_found`.
+- **Input:** `{ thread_id: string, target?: { tabId: string, blockId: string }, quote?: string }`. Without them, the thread's own target and quote.
+- **Matching:** exact first; then reworded text, the best run of whole words at least 80% alike in the target block (or anywhere in its tab when that block is gone). Two places about equally close is ambiguous and refused, never guessed.
+- **Output:** `{ thread_id, orphaned: false, target, quote }`: the block and text now marked. Errors: `quote_not_found` (not close enough, or ambiguous), `forbidden`, `not_found`.
 
 ### `primer_get_doc`
 

@@ -136,4 +136,54 @@ describe('orphaned threads', () => {
     expect(await orphanEvents(b.id)).toEqual([true]);
     expect(await orphanEvents(a.id)).toEqual([]);
   });
+  it('orphaned thread re-anchors to the reworded sentence', async () => {
+    const id = await createLiveDoc({ uploaderId: MOCK_USER.id });
+    await seedBlocks(id, [paragraph('p1', 'We ship the beta to five pilot customers in March.'), paragraph('p2', 'Unrelated')]);
+    const made = await createLiveThread(new NoopNotifier(), MOCK_USER, id, {
+      anchor: { type: 'prose', target: main('p1'), quote: 'We ship the beta to five pilot customers in March.' },
+      body: 'Which customers?',
+    });
+    if (!made.ok) throw new Error(made.refusal.message);
+    // The sentence is rewritten in a new block: the old one, and its mark, are gone.
+    await deleteBlock(id, 'p1');
+    await applyPlan(id, SYSTEM_ORIGIN, {
+      onConflict: 'refuse',
+      edits: [
+        {
+          target: main(''),
+          inverse: false,
+          build: (tr) => void tr.insert(1, serverEditor()._blocksToProsemirrorNode([paragraph('p3', 'Plan: we ship the beta to 5 pilot customers in March, then widen.')] as never)),
+        },
+      ],
+    });
+    expect((await sync(id)).orphaned).toBe(true);
+
+    // Creating a thread stays exact; only re-anchoring matches reworded text.
+    const exact = await createLiveThread(new NoopNotifier(), MOCK_USER, id, {
+      anchor: { type: 'prose', target: main('p3'), quote: 'We ship the beta to five pilot customers in March.' },
+      body: 'x',
+    });
+    expect(exact.ok).toBe(false);
+
+    // The Re-anchor button sends nothing: the thread's own quote and (gone) block.
+    const out = await reanchorThread(MOCK_USER, made.value.id, {});
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.orphaned).toBe(false);
+    expect(out.value.anchor).toEqual({ type: 'prose', target: main('p3'), quote: 'we ship the beta to 5 pilot customers in March,' });
+    await withLiveDoc(id, (doc) => expect(presentThreadIds(doc).has(made.value.id)).toBe(true));
+  });
+
+  it('a reworded quote that fits two places equally is refused, not guessed', async () => {
+    const id = await createLiveDoc({ uploaderId: MOCK_USER.id });
+    await seedBlocks(id, [paragraph('p1', 'Review the budget by Friday.'), paragraph('p2', 'Review the budgets by Friday.')]);
+    const made = await createLiveThread(new NoopNotifier(), MOCK_USER, id, {
+      anchor: { type: 'prose', target: main('p2'), quote: 'Review the budgets by Friday.' },
+      body: 'Ok?',
+    });
+    if (!made.ok) throw new Error(made.refusal.message);
+    const out = await reanchorThread(MOCK_USER, made.value.id, { target: main(''), quote: 'Review the budgetz by Friday.' });
+    expect(out.ok).toBe(false);
+    expect(!out.ok && out.refusal.code).toBe('quote_not_found');
+  });
 });

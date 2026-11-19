@@ -26,6 +26,7 @@ import { commentDeleteGuard, type HeldDelete } from './commentDeleteGuard.ts';
 import { DeleteCommentedDialog } from './DeleteCommentedDialog.tsx';
 import { useThreadEvents } from './threadEvents.ts';
 import { SuggestionsPanel } from './SuggestionsPanel.tsx';
+import { ThreadActions } from './ThreadActions.tsx';
 import { useBlockServices, type ChoiceStore } from './blockServices.ts';
 import { DecisionRegister } from './DecisionRegister.tsx';
 import './blocks.css';
@@ -222,6 +223,7 @@ function TabEditor({
               <option value="all">{t('liveEditor.filterAll')}</option>
             </select>
             <ThreadsSidebar filter={filter} />
+            <ThreadActions store={threadStore} canPromote={false} />
           </div>
         )}
         <div

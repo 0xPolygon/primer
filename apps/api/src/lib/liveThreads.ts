@@ -169,22 +169,29 @@ export async function reanchorThread(
     };
   }
   if (row.anchor.type !== 'prose') return badRequest('Only text comments have a mark.', 'Leave block and widget anchors as they are.');
-  if (!isTarget(req.target)) return badRequest('The target is missing or invalid.', 'Send target: { tabId, blockId }.');
-  const target: Target = req.target;
+  // Without a target or quote, the thread's own: what the Re-anchor button sends.
+  if (req.target !== undefined && !isTarget(req.target)) return badRequest('The target is invalid.', 'Send target: { tabId, blockId }.');
+  let target: Target = req.target ?? row.anchor.target;
 
-  let quote = typeof req.quote === 'string' ? req.quote : '';
+  let quote = typeof req.quote === 'string' && req.quote !== '' ? req.quote : row.anchor.quote;
   let edit: PlannedEdit;
   if (typeof req.anchor === 'string' && typeof req.head === 'string') {
     const sel: RelativeSelection = { anchor: req.anchor, head: req.head };
     edit = commentMarkEdit(row.documentId, threadId, target, sel, (q) => (quote = q));
-  } else if (quote) {
-    edit = quoteMarkEdit(threadId, target, quote);
   } else {
-    return badRequest('Send a selection or a quote.', 'Send { target, anchor, head } or { target, quote }.');
+    // Exact first, then the best reworded match (M10b.3); the anchor then
+    // records the text actually marked, in the block it is in.
+    edit = quoteMarkEdit(threadId, target, quote, {
+      fuzzy: true,
+      onPlaced: (q, blockId) => {
+        quote = q;
+        if (blockId && !target.pid && !target.textId && !target.embedId) target = { ...target, blockId };
+      },
+    });
   }
 
   const placed = await placeMark(row.documentId, user, edit);
-  if (!placed.ok) return typeof req.anchor === 'string' ? targetMissing(placed.message) : quoteNotFound(quote);
+  if (!placed.ok) return typeof req.anchor === 'string' ? targetMissing(placed.message) : quoteNotFound(quote, true);
 
   const anchor: LiveAnchor = { type: 'prose', target, quote };
   await transactionWithEvents(async (tx, emit) => {
@@ -266,14 +273,18 @@ function targetMissing(message: string): LiveThreadResult<never> {
   return { ok: false, status: 409, refusal: { code: 'target_missing', message, fix: 'Select the text again and retry.' } };
 }
 
-function quoteNotFound(quote: string): LiveThreadResult<never> {
+function quoteNotFound(quote: string, fuzzy = false): LiveThreadResult<never> {
   return {
     ok: false,
     status: 409,
     refusal: {
       code: 'quote_not_found',
-      message: `"${quote}" was not found in the target block.`,
-      fix: 'Read the block with primer_get_doc and quote its text exactly, within one paragraph.',
+      message: fuzzy
+        ? `Nothing in the target reads like "${quote}" (80% alike or more), or more than one place does.`
+        : `"${quote}" was not found in the target block.`,
+      fix: fuzzy
+        ? 'Read the document with primer_get_doc and pass the target block and its current text as quote.'
+        : 'Read the block with primer_get_doc and quote its text exactly, within one paragraph.',
     },
   };
 }

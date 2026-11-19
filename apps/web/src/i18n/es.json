@@ -601,5 +601,9 @@
   "suggestions.kindReplace": "Cambio",
   "suggestions.kindInsert": "Añadir",
   "suggestions.kindDelete": "Eliminar",
-  "suggestions.kindMove": "Mover"
+  "suggestions.kindMove": "Mover",
+  "threadActions.orphaned": "Texto eliminado",
+  "threadActions.reanchor": "Volver a anclar",
+  "threadActions.promoteHeading": "Hilos",
+  "threadActions.promote": "Convertir en documento"
 }

@@ -698,13 +698,16 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
 
     primer_reanchor_thread: async (args) => {
       const threadId = typeof args.thread_id === 'string' ? args.thread_id : '';
-      const quote = typeof args.quote === 'string' ? args.quote : '';
-      if (!threadId || !quote) return err('bad_request', '`thread_id`, `target` and `quote` are required.');
+      if (!threadId) return err('bad_request', '`thread_id` is required.');
+      const input: { target?: Target; quote?: string } = {};
+      if (args.target !== undefined) input.target = args.target as Target;
+      if (typeof args.quote === 'string') input.quote = args.quote;
       const auth = await requireClient(deps);
       if (!auth.ok) return auth.result;
       try {
-        const out = await auth.client.reanchorThread(threadId, { target: args.target as Target, quote });
-        return ok({ thread_id: threadId, orphaned: out.orphaned });
+        const out = await auth.client.reanchorThread(threadId, input);
+        const anchor = out.anchor as { target?: Target; quote?: string };
+        return ok({ thread_id: threadId, orphaned: out.orphaned, target: anchor.target, quote: anchor.quote });
       } catch (e) {
         return errFromException(e);
       }
@@ -894,8 +897,8 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
   },
   primer_reanchor_thread: {
     description:
-      'Move a live-document comment (for example one flagged orphaned, "Text removed") onto text quoted exactly from one block. Allowed for the thread starter, the owner and editors. Returns { thread_id, orphaned: false }.',
-    inputSchema: { thread_id: z.string(), target: TARGET_SCHEMA, quote: z.string() },
+      'Move a live-document comment (for example one flagged orphaned, "Text removed") back onto text. Without target and quote it uses the thread\'s own. The quote is matched exactly first, then reworded: the best run of whole words at least 80% alike in the target block (or anywhere in its tab once that block is gone), refused as quote_not_found when nothing is close enough or two places are equally close. Nothing is ever re-anchored automatically. Allowed for the thread starter, the owner and editors. Returns { thread_id, orphaned: false, target, quote } (the text now marked).',
+    inputSchema: { thread_id: z.string(), target: TARGET_SCHEMA.optional(), quote: z.string().optional() },
   },
   primer_get_events: {
     description:

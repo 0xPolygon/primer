@@ -285,8 +285,9 @@ export class PrimerClient {
     });
   }
 
-  /** Moves a live thread's comment onto quoted text. */
-  reanchorThread(threadId: string, input: { target: Target; quote: string }): Promise<ThreadDTO> {
+  /** Moves a live thread's comment back onto text (its own quote and
+   *  target when omitted; reworded text matches too). */
+  reanchorThread(threadId: string, input: { target?: Target; quote?: string }): Promise<ThreadDTO> {
     return this.request<ThreadDTO>({
       method: 'POST',
       path: `/api/threads/${encodeURIComponent(threadId)}/reanchor`,

@@ -601,5 +601,9 @@
   "suggestions.kindReplace": "Change",
   "suggestions.kindInsert": "Add",
   "suggestions.kindDelete": "Delete",
-  "suggestions.kindMove": "Move"
+  "suggestions.kindMove": "Move",
+  "threadActions.orphaned": "Text removed",
+  "threadActions.reanchor": "Re-anchor",
+  "threadActions.promoteHeading": "Threads",
+  "threadActions.promote": "Promote to document"
 }

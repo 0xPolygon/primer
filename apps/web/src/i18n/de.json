@@ -601,5 +601,9 @@
   "suggestions.kindReplace": "Änderung",
   "suggestions.kindInsert": "Hinzufügen",
   "suggestions.kindDelete": "Löschen",
-  "suggestions.kindMove": "Verschieben"
+  "suggestions.kindMove": "Verschieben",
+  "threadActions.orphaned": "Text entfernt",
+  "threadActions.reanchor": "Neu verankern",
+  "threadActions.promoteHeading": "Threads",
+  "threadActions.promote": "In Dokument umwandeln"
 }

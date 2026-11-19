@@ -601,5 +601,9 @@
   "suggestions.kindReplace": "変更",
   "suggestions.kindInsert": "追加",
   "suggestions.kindDelete": "削除",
-  "suggestions.kindMove": "移動"
+  "suggestions.kindMove": "移動",
+  "threadActions.orphaned": "テキストが削除されました",
+  "threadActions.reanchor": "再アンカー",
+  "threadActions.promoteHeading": "スレッド",
+  "threadActions.promote": "ドキュメントにする"
 }

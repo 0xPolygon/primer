@@ -601,5 +601,9 @@
   "suggestions.kindReplace": "更改",
   "suggestions.kindInsert": "添加",
   "suggestions.kindDelete": "删除",
-  "suggestions.kindMove": "移动"
+  "suggestions.kindMove": "移动",
+  "threadActions.orphaned": "文字已删除",
+  "threadActions.reanchor": "重新锚定",
+  "threadActions.promoteHeading": "讨论串",
+  "threadActions.promote": "转为文档"
 }

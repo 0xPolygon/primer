@@ -1014,7 +1014,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!threadId) return err('bad_request', 'thread_id is required');
       const out = await reanchorThread(user, threadId, { target: args.target, quote: args.quote });
       if (!out.ok) return refusalErr(out.refusal);
-      return ok({ thread_id: threadId, orphaned: out.value.orphaned });
+      const anchor = out.value.anchor as { target?: Target; quote?: string };
+      return ok({ thread_id: threadId, orphaned: out.value.orphaned, target: anchor.target, quote: anchor.quote });
     },
     primer_get_doc: async (args, user) => {
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
@@ -1325,8 +1326,8 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_reanchor_thread: {
     description:
-      'Move a live-document comment (for example one flagged orphaned, "Text removed") onto text quoted exactly from one block. Allowed for the thread starter, the owner and editors. Returns { thread_id, orphaned: false }.',
-    inputSchema: { thread_id: z.string(), target: TARGET_SCHEMA, quote: z.string() },
+      'Move a live-document comment (for example one flagged orphaned, "Text removed") back onto text. Without target and quote it uses the thread\'s own. The quote is matched exactly first, then reworded: the best run of whole words at least 80% alike in the target block (or anywhere in its tab once that block is gone), refused as quote_not_found when nothing is close enough or two places are equally close. Nothing is ever re-anchored automatically. Allowed for the thread starter, the owner and editors. Returns { thread_id, orphaned: false, target, quote } (the text now marked).',
+    inputSchema: { thread_id: z.string(), target: TARGET_SCHEMA.optional(), quote: z.string().optional() },
   },
   primer_get_doc: {
     description:
