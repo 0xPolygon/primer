@@ -7,6 +7,10 @@ import type {
   DocumentStatusResponse,
   DocumentStatusState,
   EventsListResponse,
+  PurgePersonalRecordsResponse,
+  RecordChangesResponse,
+  RecordVerb,
+  RecordVerbResults,
   SendEventsResponse,
   ThreadDTO,
   ThreadsListResponse,
@@ -263,6 +267,43 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/documents/${encodeURIComponent(documentId)}/status`,
       json: { state },
+    });
+  }
+
+  /** Calls one records verb (`POST /api/documents/:docId/records/<verb>`)
+   *  with its arguments; the server validates and authorises. */
+  records<V extends RecordVerb>(documentId: string, verb: V, args: Record<string, unknown>): Promise<RecordVerbResults[V]> {
+    return this.request<RecordVerbResults[V]>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/${verb}`,
+      json: args,
+    });
+  }
+
+  /** The records change log after `since`. */
+  recordChanges(documentId: string, opts: { since?: number; limit?: number } = {}): Promise<RecordChangesResponse> {
+    const params = new URLSearchParams();
+    if (opts.since !== undefined) params.set('since', String(opts.since));
+    if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+    const qs = params.size > 0 ? `?${params.toString()}` : '';
+    return this.request<RecordChangesResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/changes${qs}`,
+    });
+  }
+
+  revertRecordChange(changeId: number): Promise<{ changeId: number }> {
+    return this.request<{ changeId: number }>({
+      method: 'POST',
+      path: `/api/record-changes/${encodeURIComponent(String(changeId))}/revert`,
+    });
+  }
+
+  purgePersonalRecords(documentId: string, userId: string): Promise<PurgePersonalRecordsResponse> {
+    return this.request<PurgePersonalRecordsResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/records/purge-personal`,
+      json: { userId },
     });
   }
 
