@@ -1,5 +1,7 @@
 import type {
   Target,
+  ApplyOpsRequest,
+  Reconciliation,
   LiveDocDTO,
   LiveReadFormat,
   AddVersionResponse,
@@ -38,12 +40,15 @@ export type PrimerErrorCode =
 export class PrimerApiError extends Error {
   readonly code: PrimerErrorCode;
   readonly status?: number;
+  /** The server's JSON error body (refusal, per-op errors), when it sent one. */
+  readonly body?: unknown;
 
-  constructor(code: PrimerErrorCode, message: string, status?: number) {
+  constructor(code: PrimerErrorCode, message: string, status?: number, body?: unknown) {
     super(message);
     this.name = 'PrimerApiError';
     this.code = code;
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -194,6 +199,15 @@ export class PrimerClient {
     return this.request<LiveDocDTO>({
       method: 'GET',
       path: `/api/documents/${encodeURIComponent(documentId)}/live${qs ? `?${qs}` : ''}`,
+    });
+  }
+
+  /** Edits a live document by block (see primer_apply_ops). */
+  applyOps(documentId: string, req: ApplyOpsRequest): Promise<Reconciliation> {
+    return this.request<Reconciliation>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/ops`,
+      json: req,
     });
   }
 
@@ -387,7 +401,7 @@ export class PrimerClient {
       const code = statusToCode(res.status);
       const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
       const message = body?.refusal?.fix ? `${base} ${body.refusal.fix}` : base;
-      throw new PrimerApiError(code, message, res.status);
+      throw new PrimerApiError(code, message, res.status, body ?? undefined);
     }
 
     return res;

@@ -9,6 +9,7 @@ import { blockVersion } from './blocks.ts';
 import { serverEditor, type PrimerBlock } from './editor.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
+import type { AppliedBlock } from './pipeline.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
 import { MAIN_TAB, tabFragmentName, tabsOf } from './reach.ts';
@@ -157,4 +158,20 @@ async function withDoc<T>(documentId: string, fn: (doc: Y.Doc) => T): Promise<T>
   } finally {
     await connection.disconnect({ unloadImmediately: false });
   }
+}
+
+/** A block an edit just stored, as the Markdown read returns it (its
+ *  children included). */
+export async function appliedBlockDTO(applied: AppliedBlock, tabId: string): Promise<LiveBlockDTO> {
+  const schema = serverEditor().editor.pmSchema;
+  const doc = schema.topNodeType.create(null, schema.nodes.blockGroup!.create(null, applied.node));
+  const [block] = serverEditor()._prosemirrorJSONToBlocks(doc.toJSON());
+  return {
+    target: { tabId, blockId: applied.node.attrs.id as string },
+    type: block!.type,
+    version: blockVersion(applied.node),
+    markdown: (await serverEditor().blocksToMarkdownLossy([block!] as never)).trimEnd(),
+    depth: applied.depth,
+    parentId: applied.parentId,
+  };
 }

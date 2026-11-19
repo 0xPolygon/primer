@@ -429,7 +429,17 @@ export type RefusalCode =
   /** A comment's selection no longer resolves in the live document. */
   | 'target_missing'
   /** The quoted text was not found in the target. */
-  | 'quote_not_found';
+  | 'quote_not_found'
+  /** An op names an agent run that was cancelled or has finished. */
+  | 'run_cancelled'
+  /** An op would remove text an open comment thread is on; `details.threads`
+   *  lists them. Retry with `allowCommentedDelete` once that is intended. */
+  | 'deletes_commented_text'
+  /** An op is malformed or can't apply to the document's structure. */
+  | 'invalid_op'
+  /** The run's edits would pass the large-edit threshold: post a plan and
+   *  wait for a person to approve it. */
+  | 'approval_required';
 
 export interface Refusal {
   code: RefusalCode;
@@ -525,6 +535,39 @@ export interface LiveDocDTO {
   blocks: LiveBlockDTO[];
   deletedIds?: string[];
   viewer?: ViewerContext;
+}
+
+/** A block an agent writes: Markdown (several top-level nodes make several
+ *  blocks, one list item per block), one HTML element, or BlockNote partial
+ *  block JSON (for custom blocks and props). */
+export type BlockInput = string | { html: string } | { json: Record<string, unknown> };
+
+/** One semantic edit of a live document (POST /api/documents/:docId/ops). */
+export type LiveOp =
+  | { op: 'add'; at: Target; position: 'before' | 'after'; blocks: BlockInput[] }
+  | { op: 'update'; target: Target; block: BlockInput; expectVersion: string }
+  | { op: 'replaceRange'; from: Target; to: Target; blocks: BlockInput[]; expectVersions: Record<string, string> }
+  | { op: 'delete'; target: Target; expectVersion: string }
+  | { op: 'move'; target: Target; at: Target; position: 'before' | 'after'; expectVersion: string };
+
+export interface ApplyOpsRequest {
+  /** The docVersion the agent read (informational: preconditions are per block). */
+  baseVersion: number;
+  ops: LiveOp[];
+  /** The agent run these edits belong to (undo, status, cancel). */
+  runId?: string;
+  /** `suggest` turns a stale op into a suggestion once suggestions exist (M5);
+   *  until then it is a conflict either way. */
+  onConflict?: 'refuse' | 'suggest';
+  /** Allow removing text that open comment threads are on. */
+  allowCommentedDelete?: boolean;
+}
+
+/** A batch refused before anything applied: one refusal per bad op. */
+export interface ApplyOpsRejection {
+  error: RefusalCode;
+  refusal: Refusal;
+  errors: { index: number; refusal: Refusal }[];
 }
 
 /** POST /api/documents/:docId/checkpoints */

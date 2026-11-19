@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { PrimerApiError, type DocumentFormat, type PrimerClient, type PrimerErrorCode } from './client.ts';
 import { pollUntil, startDeviceLogin } from './deviceLogin.ts';
 import { commentRecords, formatComments } from './format.ts';
-import type { Target } from '@polygonlabs/primer-api-types';
+import type { ApplyOpsRequest, Target } from '@polygonlabs/primer-api-types';
 
 /**
  * Public surface of the MCP server. Every tool returns either:
@@ -505,6 +505,24 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
       }
     },
 
+    primer_apply_ops: async (args) => {
+      const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      if (!documentId) return err('bad_request', '`documentId` is required.');
+      const auth = await requireClient(deps);
+      if (!auth.ok) return auth.result;
+      const { documentId: _id, ...req } = args;
+      try {
+        return ok(await auth.client.applyOps(documentId, req as unknown as ApplyOpsRequest));
+      } catch (e) {
+        const body = e instanceof PrimerApiError ? (e.body as { refusal?: { code: string; message: string; fix: string }; errors?: unknown } | undefined) : undefined;
+        if (body?.refusal) {
+          const { code, message, fix } = body.refusal;
+          return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message, fix, errors: body.errors ?? [] }) }] };
+        }
+        return errFromException(e);
+      }
+    },
+
     primer_create_thread: async (args) => {
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       const quote = typeof args.quote === 'string' ? args.quote : '';
@@ -652,6 +670,33 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
       tabId: z.string().optional(),
       range: z.object({ from: TARGET_SCHEMA, to: TARGET_SCHEMA }).optional(),
       since: z.number().int().nonnegative().optional(),
+    },
+  },
+  primer_apply_ops: {
+    description:
+      'Edit a live document by block, atomically per batch. Ops: add { at, position: before|after, blocks }, update { target, block, expectVersion }, replaceRange { from, to, blocks, expectVersions: { blockId: version } for every block in the range }, delete { target, expectVersion }, move { target, at, position, expectVersion }. Targets are { tabId, blockId } from primer_get_doc; versions are the block versions you read. A block is Markdown (prose; several paragraphs or list items make several blocks, one list item per block), { html: "<one element>" } for formatting Markdown can\'t carry, or { json: BlockNote partial block } for custom blocks and props (e.g. { type: "pending", props: { intent } }). update keeps what your Markdown can\'t express (colours, comments, children). A malformed op rejects the whole batch with errors[] (index + fix); otherwise each op lands or not on its own: an op whose block changed since you read it is a conflict (target_changed, re-read and retry) while the others apply, and an op that removes text an open comment thread is on is refused deletes_commented_text (details.threads lists them) unless allowCommentedDelete. Pass runId when working on a run: its edits can then be undone, and a cancelled run\'s ops are refused run_cancelled; large runs need a plan approved by a person first (approval_required). Returns { docVersion, outcomes: [{ index, target, status: applied|conflict|unchanged|suggested, blocks?, refusal?, note? }] }; read note: it says when what was stored differs from what you wrote.',
+    inputSchema: {
+      documentId: z.string(),
+      baseVersion: z.number().int().nonnegative(),
+      ops: z
+        .array(
+          z.object({
+            op: z.enum(['add', 'update', 'replaceRange', 'delete', 'move']),
+            target: TARGET_SCHEMA.optional(),
+            at: TARGET_SCHEMA.optional(),
+            from: TARGET_SCHEMA.optional(),
+            to: TARGET_SCHEMA.optional(),
+            position: z.enum(['before', 'after']).optional(),
+            block: z.unknown().optional(),
+            blocks: z.array(z.unknown()).optional(),
+            expectVersion: z.string().optional(),
+            expectVersions: z.record(z.string(), z.string()).optional(),
+          }),
+        )
+        .min(1),
+      runId: z.string().optional(),
+      onConflict: z.enum(['refuse', 'suggest']).optional(),
+      allowCommentedDelete: z.boolean().optional(),
     },
   },
   primer_create_thread: {

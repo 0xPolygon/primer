@@ -2,6 +2,7 @@ import type { Hono } from 'hono';
 import type { LiveReadFormat } from '@polygonlabs/primer-api-types';
 import type { AppVariables } from '../app.ts';
 import { getLiveDoc } from '../live/read.ts';
+import { applyOps } from '../live/ops.ts';
 
 /** Agent-facing reads and writes of live documents (live/read.ts, live/ops.ts). */
 export function registerLiveRoutes(app: Hono<{ Variables: AppVariables }>): void {
@@ -19,6 +20,16 @@ export function registerLiveRoutes(app: Hono<{ Variables: AppVariables }>): void
     const range = q.from !== undefined ? { from: { tabId, blockId: q.from }, to: { tabId, blockId: q.to! } } : undefined;
     const out = await getLiveDoc(c.req.param('docId'), c.get('user'), { format, tabId, since, range });
     if (!out.ok) return c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+    return c.json(out.value, 200);
+  });
+
+  // Body: ApplyOpsRequest. 200 with the Reconciliation (per-op outcomes); a
+  // batch refused before anything applied is 400 with per-op `errors`.
+  app.post('/api/documents/:docId/ops', async (c) => {
+    const body = await jsonBody(c);
+    if (body === null) return badRequest(c, 'The body must be a JSON object.');
+    const out = await applyOps(c.req.param('docId'), c.get('user'), body);
+    if (!out.ok) return c.json({ error: out.refusal.code, refusal: out.refusal, errors: out.errors ?? [] }, out.status);
     return c.json(out.value, 200);
   });
 }

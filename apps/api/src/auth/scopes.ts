@@ -50,6 +50,7 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   // (routes/documents.ts).
   { method: 'PATCH', path: '/api/documents/:docId', scope: 'documents:write' },
   { method: 'PATCH', path: '/api/versions/:versionId', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/ops', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write' },
   { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write' },
