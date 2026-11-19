@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
 import { VersioningSidebar } from '@blocknote/react/versioning';
 import { BlockNoteView } from '@blocknote/ariakit';
-import { YjsVersioningExtension } from '@blocknote/core/yjs';
+import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
 import * as locales from '@blocknote/core/locales';
 import { commentMarkExtension, primerSchema } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
@@ -10,7 +10,7 @@ import '@blocknote/ariakit/style.css';
 import type { DocFileUploadResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
-import { createLiveProvider } from './provider.ts';
+import { createLiveProvider, type LiveProvider } from './provider.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
 
 export type LiveEditorProps = {
@@ -28,19 +28,30 @@ export type LiveEditorProps = {
  * checkpoints. Files upload to the document and are stored as opaque
  * `primer-blob://` ids, resolved to an authorised link at read time.
  */
-export default function LiveEditor({ documentId, readOnly, theme, userName }: LiveEditorProps) {
-  const live = useMemo(() => createLiveProvider(documentId), [documentId]);
-  useEffect(() => () => live.destroy(), [live]);
+export default function LiveEditor(props: LiveEditorProps) {
+  // The connection is made and torn down by one effect, so a remount (React
+  // runs effects twice in development) never reuses a destroyed provider.
+  const [live, setLive] = useState<LiveProvider | null>(null);
+  useEffect(() => {
+    const created = createLiveProvider(props.documentId);
+    setLive(created);
+    return () => created.destroy();
+  }, [props.documentId]);
+  if (!live) return null;
+  return <LiveEditorView key={live.doc.guid} live={live} {...props} />;
+}
+
+function LiveEditorView({ live, documentId, readOnly, theme, userName }: LiveEditorProps & { live: LiveProvider }) {
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const editor = useCreateBlockNote(
-    {
+    withCollaboration({
       schema: primerSchema,
       // Until comments ship, the comment mark must still be known, or
       // y-prosemirror would delete commented text.
       extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId) })],
       collaboration: {
-        provider: live.provider,
+        provider: { awareness: live.provider.awareness ?? undefined },
         fragment: live.doc.getXmlFragment('document-store'),
         user: { name: userName, color: colorFor(userName) },
       },
@@ -54,7 +65,7 @@ export default function LiveEditor({ documentId, readOnly, theme, userName }: Li
       },
       resolveFileUrl: async (url: string) =>
         url.startsWith('primer-blob://') ? `/api/files/${encodeURIComponent(url.slice('primer-blob://'.length))}` : url,
-    },
+    }),
     [live],
   );
 

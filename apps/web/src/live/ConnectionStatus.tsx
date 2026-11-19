@@ -10,7 +10,10 @@ import { connectionView, UNSAVED_AFTER_MS } from './connectionState.ts';
  * when the server closed the connection because it couldn't store an update.
  */
 export function ConnectionStatus({ provider }: { provider: HocuspocusProvider }) {
-  const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  // The socket may already be up when this mounts: start from where it is.
+  const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>(
+    () => (provider.configuration?.websocketProvider?.status as 'connecting' | 'connected' | 'disconnected' | undefined) ?? 'connecting',
+  );
   const [lastCloseCode, setLastCloseCode] = useState<number | null>(null);
   const [unsyncedSince, setUnsyncedSince] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());

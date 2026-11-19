@@ -4,16 +4,21 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import * as Y from 'yjs';
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
+import { BlockNoteEditor } from '@blocknote/core';
+import { blocksToYXmlFragment } from '@blocknote/core/yjs';
+import { primerSchema } from '@primer/blocks';
 import type { LiveProvider } from './provider.ts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// A provider that never connects: the editor binds to its Y.Doc as it would
-// to a synced one.
+// A provider that never connects, over a document that already holds a
+// heading: the editor must show what the Y.Doc holds.
 vi.mock('./provider.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./provider.ts')>()),
   createLiveProvider: (documentId: string): LiveProvider => {
     const doc = new Y.Doc();
+    const seed = BlockNoteEditor.create({ schema: primerSchema });
+    blocksToYXmlFragment(seed, [{ type: 'heading', content: 'Seeded from the Y.Doc' }] as never, doc.getXmlFragment('document-store'));
     const provider = new HocuspocusProvider({
       websocketProvider: new HocuspocusProviderWebsocket({ url: 'ws://127.0.0.1:9/collab', autoConnect: false }),
       name: `doc:${documentId}`,
@@ -68,7 +73,7 @@ describe('LiveEditor', () => {
     const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', frame };
 
     const live = await render(createElement(DocumentSurface, { ...props, live: true }));
-    await until(() => live.querySelector('[contenteditable="true"].bn-editor') !== null);
+    await until(() => live.querySelector('[contenteditable="true"].bn-editor')?.textContent?.includes('Seeded from the Y.Doc') === true);
     expect(live.querySelector('iframe[title="legacy-frame"]')).toBeNull();
     expect(live.textContent).toContain('History');
     await act(async () => root!.unmount());
