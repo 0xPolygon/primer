@@ -264,7 +264,7 @@ pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 table{border-collapse:collapse}td,th{border:1px solid #d4d4d4;padding:4px 8px}
 img,video{max-width:100%}
 .primer-chip{border-radius:4px;background:#ede9fe;color:#4c1d95;padding:0 4px}
-.bn-container{counter-reset:primer-citation}.primer-citation::before{counter-increment:primer-citation;content:"[" counter(primer-citation) "] "}
+.bn-container{counter-reset:primer-citation}.primer-citation{display:inline-block;line-height:1.2;font-size:.75em;vertical-align:super}.primer-citation::before{counter-increment:primer-citation;content:"[" counter(primer-citation) "] "}
 html[data-theme="dark"] body{background:#0a0a0a;color:#e5e5e5}
 html[data-theme="dark"] a{color:#c4b5fd}
 html[data-theme="dark"] td,html[data-theme="dark"] th{border-color:#404040}

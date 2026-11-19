@@ -47,6 +47,7 @@ export function registerCatchUpRoutes(app: Hono<{ Variables: AppVariables }>, de
     const since = parseDigestSince(body?.since);
     if (!since) return c.json(badSince, 400);
     if (c.get('user').kind !== 'person') return c.json({ error: 'forbidden', message: 'agents have no mailbox' }, 403);
+    if (!deps.notifier.emailEnabled) return c.json({ error: 'email_disabled', message: 'this Primer sends no email' }, 503);
     return c.json(await sendDigestEmail(deps.notifier, c.get('user'), since), 200);
   });
 }

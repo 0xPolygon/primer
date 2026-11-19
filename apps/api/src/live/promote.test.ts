@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
+import { createApp } from '../app.ts';
+import { mockMultiResolver } from '../auth/resolver.ts';
+import { asUserJson } from '../test/harness.ts';
 import { db } from '../db/client.ts';
 import { comments, documents } from '../db/schema.ts';
 import { createLiveThread } from '../lib/liveThreads.ts';
@@ -57,6 +60,20 @@ describe('promote a conversation', () => {
       // Someone who can't read the source thread can't promote it.
       const stranger = { ...READER, id: 'mock-user-2' };
       expect((await promoteThread(storage, stranger, thread.value.id)).ok).toBe(false);
+    }));
+
+  it('the REST route creates the document for the caller', async () =>
+    withStorage(async (storage) => {
+      await seedRecordsDoc();
+      const app = createApp({ storage, notifier: new NoopNotifier(), userResolver: mockMultiResolver });
+      const res = await app.request('/api/documents/from-conversation', {
+        method: 'POST',
+        headers: asUserJson(OWNER.id),
+        body: JSON.stringify({ title: 'Standup', messages: [{ author: 'Ana', text: 'Shipped the importer.' }] }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { documentId: string };
+      expect(await quotes(body.documentId)).toEqual(['Ana\nShipped the importer.']);
     }));
 
   it('message text stays literal text', async () =>

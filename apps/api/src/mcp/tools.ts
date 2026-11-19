@@ -309,9 +309,10 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       // mirroring GET /api/documents/:docId in routes/documents.ts.
       try {
         await db.execute(sql`
-          INSERT INTO document_views (user_id, document_id)
-          VALUES (${user.id}, ${documentId})
-          ON CONFLICT (user_id, document_id) DO UPDATE SET viewed_at = excluded.viewed_at
+          INSERT INTO document_views (user_id, document_id, last_doc_version)
+          VALUES (${user.id}, ${documentId}, (SELECT max(id) FROM doc_updates WHERE document_id = ${documentId}))
+          ON CONFLICT (user_id, document_id) DO UPDATE
+            SET viewed_at = excluded.viewed_at, last_doc_version = excluded.last_doc_version
         `);
       } catch (viewErr) {
         logger.warn({ err: viewErr, docId: documentId, userId: user.id }, 'failed to upsert document_views (mcp)');
