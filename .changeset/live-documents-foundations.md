@@ -25,9 +25,11 @@ user-visible change yet; the Markdown editor builds on this.
 - **Live sync.** Hocuspocus runs inside the API at `/collab`, authenticated
   with Primer's own sessions and tokens. Browser credentials are accepted only
   from the app's own origin; owners and editors connect read-write, readers
-  read-only, and token connections always read-only. Access is rechecked
-  after sharing changes and every minute; a document whose update can't be
-  saved closes its sockets with code 4500.
+  read-only, and token connections always read-only. Revoking a token,
+  logging out, removing or demoting a collaborator, changing visibility or
+  deleting the document closes the affected sockets at once (code 4403); a
+  timer rechecks bearer connections every 10 s and others every minute. A
+  document whose update can't be saved closes its sockets with code 4500.
 - **api-types.** `Target`, `Reconciliation`, `EditOutcome`, `LiveBlockDTO`,
   `DocumentFormat`, `AgentMode`, the checkpoint, export and file DTOs,
   `DocumentDetail.format`, and the refusal codes `target_changed` and
