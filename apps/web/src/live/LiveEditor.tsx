@@ -243,7 +243,7 @@ function TabEditor({
               <option value="all">{t('liveEditor.filterAll')}</option>
             </select>
             <ThreadsSidebar filter={filter} />
-            <ThreadActions store={threadStore} canPromote={false} />
+            <ThreadActions store={threadStore} canPromote />
           </div>
         )}
         <div

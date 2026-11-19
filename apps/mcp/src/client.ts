@@ -32,6 +32,8 @@ import type {
   UserLookupResponse,
   VersionsListResponse,
   DigestResponse,
+  PromoteConversationRequest,
+  PromoteConversationResponse,
 } from '@polygonlabs/primer-api-types';
 
 /**
@@ -465,6 +467,11 @@ export class PrimerClient {
       method: 'GET',
       path: documentId ? `/api/documents/${encodeURIComponent(documentId)}/tasks` : '/api/tasks?assignee=me',
     });
+  }
+
+  /** A conversation as a document (or added to one), one quote per message. */
+  promoteConversation(input: PromoteConversationRequest): Promise<PromoteConversationResponse> {
+    return this.request<PromoteConversationResponse>({ method: 'POST', path: '/api/documents/from-conversation', json: input });
   }
 
   /** What changed across the caller's library since `since` (default: the last day). */

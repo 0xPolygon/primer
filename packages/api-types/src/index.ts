@@ -1763,3 +1763,20 @@ export interface CitationDTO {
 export interface CitationsResponse {
   citations: CitationDTO[];
 }
+
+/** POST /api/documents/from-conversation and MCP primer_promote_conversation:
+ *  a conversation (Slack, Telegram, a comment thread) as a document, one
+ *  quote block per message under its author's name. With `documentId`, the
+ *  quotes are added to the end of that live document instead. */
+export interface PromoteConversationRequest {
+  title: string;
+  messages: { author: string; text: string }[];
+  documentId?: string;
+}
+export interface PromoteConversationResponse {
+  documentId: string;
+  /** The new document's first checkpoint; absent when added to an existing one. */
+  versionId?: string;
+  /** Added to an existing document: what the edit did (it may be a suggestion). */
+  reconciliation?: Reconciliation;
+}
