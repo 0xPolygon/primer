@@ -25,11 +25,11 @@
 //
 // RESERVED NAMESPACE: `primer` (and `primer/*`) holds Primer's own
 // lifecycle events — comment created, thread resolved/updated, version
-// published, working status. The server writes them in the same transaction
+// published, agent runs. The server writes them in the same transaction
 // as the change, with audience `readers` (everyone who can read the
 // document); no client can write them, and the page never relays them into
 // the artifact, so they stay system notifications and never become artifact
-// data. See SetDocumentStatusRequest and PrimerEventPayloads in api-types.
+// data. See PrimerEventPayloads in api-types.
 //
 // PAYLOADS ARE ALWAYS UNTRUSTED: `payload` is opaque data Primer never
 // interprets. Consuming code must treat payloads as data to parse and
@@ -50,7 +50,6 @@ import type { UserResolver } from '../auth/resolver.ts';
 import { stillResolves, watchAccess, type AccessKey } from '../auth/revocation.ts';
 import { libraryOwnerId } from '../lib/permissions.ts';
 import {
-  type DocumentStatusResponse,
   type EventRowDTO,
   type EventsListResponse,
   type SendEventsResponse,
@@ -61,7 +60,6 @@ import {
   DEFAULT_EVENTS_PAGE_SIZE,
   MAX_EVENTS_PAGE_SIZE,
   decodePageToken,
-  activeDocumentStatuses,
   findForeignVersionIds,
   gateEventAccess as gate,
   insertEventBatch,
@@ -69,7 +67,6 @@ import {
   listEvents,
   listOwnedEvents,
   parseSince,
-  setDocumentStatus,
   subscribeDocWakes,
   subscribeOwnerWakes,
   validateEventBatch,
@@ -271,41 +268,6 @@ export function registerEventRoutes(
       async () => ((await stillSignedIn(c)) ? reader : null),
       accessKey(c),
     );
-  });
-
-  // ── Working status ─────────────────────────────────────────────────
-  // POST records the caller's state on the document as a `primer.status`
-  // event (same write bar as events: owner, editor, responder). `working`
-  // lasts DOCUMENT_STATUS_TTL_MS unless refreshed; `idle` clears it. GET
-  // returns who is working now, for any reader.
-  app.post('/api/documents/:documentId/status', async (c) => {
-    const documentId = c.req.param('documentId');
-    const user = c.get('user');
-    const g = await gate(documentId, user);
-    if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
-    if (!g.mayWrite) return c.json({ error: 'forbidden' }, 403);
-    let raw: unknown;
-    try {
-      raw = await c.req.json();
-    } catch {
-      return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
-    }
-    const state = (raw as { state?: unknown } | null)?.state;
-    if (state !== 'working' && state !== 'idle') {
-      return c.json({ error: 'bad_request', message: 'state must be "working" or "idle"' }, 400);
-    }
-    await setDocumentStatus(documentId, user.id, state);
-    const body: DocumentStatusResponse = { statuses: await activeDocumentStatuses(documentId) };
-    return c.json(body, 200);
-  });
-
-  app.get('/api/documents/:documentId/status', async (c) => {
-    const documentId = c.req.param('documentId');
-    const user = c.get('user');
-    const g = await gate(documentId, user);
-    if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
-    const body: DocumentStatusResponse = { statuses: await activeDocumentStatuses(documentId) };
-    return c.json(body, 200);
   });
 }
 

@@ -37,7 +37,10 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/documents/:documentId/events', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
-  { method: 'GET', path: '/api/documents/:documentId/status', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/live', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/agents', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/runs', scope: 'documents:read' },
+  { method: 'GET', path: '/api/runs', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read' },
@@ -51,6 +54,13 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   // (routes/documents.ts).
   { method: 'PATCH', path: '/api/documents/:docId', scope: 'documents:write' },
   { method: 'PATCH', path: '/api/versions/:versionId', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/ops', scope: 'documents:write' },
+  // Agents work their runs with documents:write (the run must be theirs).
+  { method: 'POST', path: '/api/runs/:runId/claim', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/status', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/finish', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/cancel', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/undo', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write' },
   { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write' },
@@ -67,8 +77,11 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/comments/:commentId/reactions/:emoji', scope: 'comments:write' },
   { method: 'DELETE', path: '/api/comments/:commentId/reactions/:emoji', scope: 'comments:write' },
 
+  // Asking an agent is like commenting.
+  { method: 'POST', path: '/api/documents/:docId/runs', scope: 'comments:write' },
+  { method: 'POST', path: '/api/runs/:runId/retry', scope: 'comments:write' },
+
   { method: 'POST', path: '/api/documents/:documentId/events', scope: 'events:write' },
-  { method: 'POST', path: '/api/documents/:documentId/status', scope: 'events:write' },
 
   { method: 'GET', path: '/api/documents/:docId/collaborators', scope: 'collaborators:manage' },
   { method: 'POST', path: '/api/documents/:docId/collaborators', scope: 'collaborators:manage' },
@@ -124,6 +137,7 @@ export const NOT_GRANTABLE: readonly { method: Method; path: string; reason: str
   { method: 'POST', path: '/api/device/deny', reason: 'device login (session-only)' },
   { method: 'GET', path: '/api/admin/stats', reason: 'admin (session-only)' },
   { method: 'POST', path: '/auth/logout', reason: 'browser session' },
+  { method: 'POST', path: '/api/runs/:runId/approve', reason: 'a person approves an agent\'s plan; agents never do' },
 ];
 
 function compile(path: string): RegExp {

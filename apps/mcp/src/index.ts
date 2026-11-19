@@ -29,6 +29,7 @@ import { PrimerApiError, PrimerClient } from './client.ts';
 import { pollUntil, startDeviceLogin } from './deviceLogin.ts';
 import { clearToken, loadToken, resolveToken, saveToken } from './tokenStore.ts';
 import { registerTools } from './tools.ts';
+import { MCP_INSTRUCTIONS, registerAuthoringResource } from './authoring.ts';
 
 /** Heartbeat cadence for the CLI long-poll loop. */
 const HEARTBEAT_MS = 15_000;
@@ -129,7 +130,8 @@ async function runMcpServer(baseUrl: string): Promise<void> {
     return new PrimerClient({ baseUrl, token });
   }
 
-  const server = new McpServer({ name: 'primer', version: '0.0.0' });
+  const server = new McpServer({ name: 'primer', version: '0.0.0' }, { instructions: MCP_INSTRUCTIONS });
+  registerAuthoringResource(server);
   registerTools(server, {
     baseUrl,
     clientBuilder,

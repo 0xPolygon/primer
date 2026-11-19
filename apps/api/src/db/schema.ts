@@ -645,3 +645,69 @@ export const docRecordChanges = pgTable(
     byDoc: index('doc_record_changes_doc_idx').on(t.documentId, t.id),
   }),
 );
+
+// An agent asked to work on a live document (live/runs.ts). Status moves
+// queued → running → done | failed, or to cancelled; every change runs on the
+// document's queue, so it never interleaves with an apply. `edits_applied`
+// and `blocks_removed` count the run's ops; past the large-edit threshold more
+// ops need `plan` approved by a person (`plan_approved_by`).
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    agentId: text('agent_id').notNull().references(() => users.id),
+    requestedBy: text('requested_by').notNull().references(() => users.id),
+    status: text('status', { enum: ['queued', 'running', 'failed', 'done', 'cancelled'] }).notNull().default('queued'),
+    request: jsonb('request').$type<Record<string, unknown>>().notNull(),
+    dedupeKey: text('dedupe_key').notNull(),
+    statusLine: text('status_line'),
+    error: text('error'),
+    editsApplied: integer('edits_applied').notNull().default(0),
+    blocksRemoved: integer('blocks_removed').notNull().default(0),
+    plan: text('plan'),
+    // sha256 of `plan`: an approval names the plan it approves.
+    planHash: text('plan_hash'),
+    planApprovedBy: text('plan_approved_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => ({
+    active: uniqueIndex('agent_runs_active_dedupe')
+      .on(t.documentId, t.agentId, t.dedupeKey)
+      .where(sql`status in ('queued', 'running')`),
+    byDoc: index('agent_runs_document_id_idx').on(t.documentId, t.createdAt),
+    byAgent: index('agent_runs_agent_id_idx').on(t.agentId, t.status),
+  }),
+);
+
+// What one run's applied edits replaced, per block (live/pipeline.ts
+// BlockInverse), so the run can be undone durably (live/undo.ts).
+export const runInverses = pgTable(
+  'run_inverses',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    target: jsonb('target').$type<Record<string, unknown>>().notNull(),
+    // The block's subtree before the edit; null when the run created it.
+    prior: jsonb('prior').$type<Record<string, unknown>>(),
+    // The block's content version right after the edit; null when removed.
+    afterVersion: text('after_version'),
+    // Where the block was (parentId, prevId, nextId) when the edit removed or moved it.
+    place: jsonb('place').$type<Record<string, unknown>>(),
+    // A sub-fragment the run created (page text, embed, widget label).
+    createdFragment: text('created_fragment'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byRun: index('run_inverses_run_id_idx').on(t.runId, t.id),
+  }),
+);

@@ -5,6 +5,7 @@ import { createReactMathBlockSpec } from '@blocknote/math-block';
 import { createReactDiagramBlockSpec } from '@blocknote/diagram-block';
 import { dateChip, dropdownChip, mentionChip } from './chips.tsx';
 import { sourceBlock } from './source.tsx';
+import { pendingBlock } from './pending.tsx';
 
 /**
  * Primer's document model: every stock BlockNote block, code with languages,
@@ -18,6 +19,7 @@ export const primerSchema = BlockNoteSchema.create({
     mathBlock: createReactMathBlockSpec(),
     diagram: createReactDiagramBlockSpec(),
     source: sourceBlock(),
+    pending: pendingBlock(),
   },
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip },
 });
