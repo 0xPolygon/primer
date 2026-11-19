@@ -170,6 +170,9 @@ export interface VersionSummary {
 
 export interface DocumentDetail extends DocumentSummary {
   externallyShared: boolean;
+  /** Set for live documents (edited in place, with checkpoints); null for
+   *  legacy documents, which are version-only HTML. */
+  format: DocumentFormat | null;
 }
 
 /** The requesting viewer's effective role on a document. Mirrors
@@ -299,7 +302,15 @@ export interface AddVersionResponse {
 /** Why the server refused a write, with a ready fix the caller (often an
  *  agent) can follow. Codes grow per feature; branch on `code`, never on
  *  message text. */
-export type RefusalCode = 'stale_base' | 'forbidden' | 'not_found' | 'bad_request';
+export type RefusalCode =
+  | 'stale_base'
+  | 'forbidden'
+  | 'not_found'
+  | 'bad_request'
+  /** A live edit's target block changed (or is gone) since the version it read. */
+  | 'target_changed'
+  /** Publishing a new version onto a live document is not supported yet. */
+  | 'republish_unsupported';
 
 export interface Refusal {
   code: RefusalCode;
@@ -309,8 +320,94 @@ export interface Refusal {
   details?: Record<string, unknown>;
 }
 
-/** The formats a document version can be published from. */
+/** The formats a document version can be published from. A `.txt` upload
+ *  publishes as `text`. */
 export type PublishFormat = 'html' | 'markdown' | 'text';
+
+// ───────────────────── Live documents ─────────────────────
+// A live document is one Y.Doc (BlockNote content) edited in place. Three
+// version values exist and are never mixed:
+// - `versionNumber`: a checkpoint's number (publish preconditions use it);
+// - `docVersion`: the id of the latest persisted update; every live read
+//   returns it;
+// - `LiveBlockDTO.version`: 16 hex chars hashing a block's whole subtree, so
+//   editing a child changes its parent's version.
+
+/** The format a live document was imported from. */
+export type DocumentFormat = 'markdown' | 'text' | 'html';
+
+/** Who may write on a live document: `auto` lets an agent edit documents it
+ *  owns and suggest everywhere else. */
+export type AgentMode = 'auto' | 'edit' | 'suggest';
+
+/** The address of everything in a live document. `tabId` is `main` for the
+ *  first tab. `pid` (page text), `embedId` and `textId` (widget label) name a
+ *  sub-fragment of the block; at most one is set. */
+export interface Target {
+  tabId: string;
+  blockId: string;
+  pid?: string;
+  textId?: string;
+  embedId?: string;
+}
+
+/** One block of a live read. `json` is BlockNote partial-block JSON. */
+export interface LiveBlockDTO {
+  target: Target;
+  type: string;
+  version: string;
+  markdown?: string;
+  html?: string;
+  json?: Record<string, unknown>;
+  depth: number;
+  parentId: string | null;
+}
+
+export type EditStatus = 'applied' | 'conflict' | 'suggested' | 'unchanged';
+
+/** What happened to one planned edit, by its index in the request. */
+export interface EditOutcome {
+  index: number;
+  target: Target;
+  status: EditStatus;
+  blocks?: LiveBlockDTO[];
+  suggestionId?: string;
+  refusal?: Refusal;
+  note?: string;
+}
+
+/** The one result format of every server write to a live document: ops,
+ *  restores, republish merges, page carry-over, branch proposals, run undo. */
+export interface Reconciliation {
+  docVersion: number;
+  outcomes: EditOutcome[];
+}
+
+/** POST /api/documents/:docId/checkpoints */
+export interface CreateCheckpointRequest {
+  note?: string | null;
+}
+
+/** A checkpoint: a version of a live document captured at `docVersion`. */
+export interface CheckpointResponse {
+  versionId: string;
+  versionNumber: number;
+  docVersion: number;
+}
+
+/** POST /api/versions/:versionId/restore: the restore is a new edit. */
+export type RestoreCheckpointResponse = Reconciliation;
+
+/** GET /api/documents/:docId/export?format= */
+export type ExportFormat = 'markdown' | 'text' | 'html';
+
+/** POST /api/documents/:docId/files. The document stores `url`
+ *  (`primer-blob://<fileId>`), never an expiring link; it resolves to
+ *  GET /api/files/:fileId at read time. */
+export interface DocFileUploadResponse {
+  fileId: string;
+  url: string;
+}
 
 export interface AdminStatsBucket {
   total: number;

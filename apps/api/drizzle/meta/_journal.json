@@ -127,6 +127,13 @@
       "when": 1795102939182,
       "tag": "0017_agent_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795105532475,
+      "tag": "0018_magenta_wolfpack",
+      "breakpoints": true
     }
   ]
 }

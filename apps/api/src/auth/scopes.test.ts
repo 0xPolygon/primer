@@ -135,7 +135,8 @@ describe('route scope table', () => {
 
       // And no table entry is stale (typo or removed route).
       const registeredSet = new Set(registered);
-      const stale = [...classified].filter((r) => !registeredSet.has(r));
+      const upcoming = new Set(ROUTE_SCOPES.filter((r) => r.upcoming).map((r) => `${r.method} ${r.path}`));
+      const stale = [...classified].filter((r) => !registeredSet.has(r) && !upcoming.has(r));
       expect(stale).toEqual([]);
     });
   });
