@@ -1,8 +1,14 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
-import { widgets } from '../db/schema.ts';
+import { versions, widgets } from '../db/schema.ts';
+import { readBundleFile } from '../live/bundle.ts';
+import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
+import { FilesystemStorage } from '../storage/filesystem.ts';
 import { createLiveDoc, paragraph, seedBlocks, withLiveDoc } from '../live/live.testlib.ts';
 import { applyPlan } from '../live/pipeline.ts';
 import { readBlocks } from '../live/editor.ts';
@@ -109,5 +115,36 @@ describe('widget drafts and publishes', () => {
     const stranger: AuthUser = { ...owner, id: 'someone-else' };
     const documentId = await createLiveDoc();
     expect(await draftWidget(stranger, documentId, { source: flow('Review') })).toMatchObject({ ok: false, status: 404 });
+  });
+});
+
+describe('widgets in checkpoints', () => {
+  it('a checkpoint keeps the widget as it looked, and restore brings back its labels and publish', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-widget-bundle-'));
+    const storage = new FilesystemStorage(root);
+    try {
+      const documentId = await createLiveDoc();
+      await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+      const { draft } = await draftAndPublish(documentId, flow('Review'));
+      await personEdits(documentId, draft.blockId, 'review', 'Peer review');
+      const checkpoint = await createCheckpoint(storage, documentId, owner, null);
+      const [version] = await db.select().from(versions).where(eq(versions.id, checkpoint.versionId));
+      const file = async (name: string) => new TextDecoder().decode(await readBundleFile(storage, version!.bundleKey!, name));
+
+      expect(await file(`widgets/${draft.widgetId}.dark.svg`)).toContain('>Peer review</text>');
+      const staticHtml = await file('static.html');
+      expect(staticHtml).toContain('class="primer-widget-light"');
+      expect(staticHtml).toContain('>Peer review</text>');
+      expect(await file('export.md')).toContain(`\`\`\`primer-widget\n${draft.widgetId}\n\`\`\``);
+
+      // Later: the person edits again and the agent redraws; restore brings both back.
+      await personEdits(documentId, draft.blockId, 'review', 'Second look');
+      await draftAndPublish(documentId, flow('Review', 'Ship it'), draft.widgetId);
+      await restoreCheckpoint(storage, { documentId, bundleKey: version!.bundleKey! }, owner);
+      const dto = await getWidget(owner, draft.widgetId);
+      expect(dto.ok && dto.value.labels).toEqual({ review: 'Peer review', merge: 'Merge' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

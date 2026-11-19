@@ -8,6 +8,7 @@ import { readBlocks } from './editor.ts';
 import { exportHtml, exportMarkdown, exportText } from './export.ts';
 import { tabsOf } from './reach.ts';
 import { trustedMeta } from './sources.ts';
+import { bundleWidgets } from '../widgets/bundle.ts';
 
 /**
  * A checkpoint's render bundle (C11): everything shares, previews, print,
@@ -21,7 +22,10 @@ import { trustedMeta } from './sources.ts';
  *   counts, so the checkpoint keeps its discussion context;
  * - `files.json`: the ids of the files the content references.
  *
- * Later milestones add `pages/`, `widgets/` and `records.json`.
+ * - `widgets/<id>.light.svg`, `.dark.svg` and `.json`: each published widget
+ *   as it looked, and what restore republishes it from (widgets/bundle.ts).
+ *
+ * Later milestones add `pages/` and `records.json`.
  */
 export type BundleManifest = { versionId: string; format: string; files: string[] };
 
@@ -50,7 +54,8 @@ export async function renderBundle(
   Y.applyUpdate(doc, opts.state);
   try {
     const { format } = trustedMeta(doc, opts.documentId);
-    const html = await exportHtml(doc, opts.title);
+    const widgets = await bundleWidgets(doc);
+    const html = widgets.embed(await exportHtml(doc, opts.title));
     const served = transformHtml(html, { themeManaged: true });
     if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
     const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId);
@@ -61,6 +66,7 @@ export async function renderBundle(
       'static.html': served.html,
       'threads.json': JSON.stringify(await openThreads(opts.documentId)),
       'files.json': JSON.stringify(referencedFiles(doc)),
+      ...widgets.files,
     };
     const manifest: BundleManifest = { versionId: opts.versionId, format, files: Object.keys(files) };
     files['manifest.json'] = JSON.stringify(manifest);
@@ -92,7 +98,10 @@ export async function loadBundleDoc(storage: Storage, bundleKey: string): Promis
 
 /** Deletes what `renderBundle` stored (a checkpoint that failed to commit). */
 export async function deleteBundle(storage: Storage, bundleKey: string): Promise<void> {
-  const names = ['manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json'];
+  const listed = await readBundleFile(storage, bundleKey, 'manifest.json')
+    .then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as BundleManifest).files)
+    .catch(() => []);
+  const names = [...listed, 'manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json'];
   for (const name of names) await storage.delete(bundleKey + name).catch(() => undefined);
 }
 

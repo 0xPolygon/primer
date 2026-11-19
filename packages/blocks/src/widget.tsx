@@ -30,6 +30,13 @@ export const widgetBlock = createReactBlockSpec(
     render: ({ block, editor }) => (
       <WidgetSlot blockId={block.id} props={block.props as WidgetBlockProps} editable={editor.isEditable} />
     ),
+    // Markdown and external HTML keep a reference, never nothing: a fenced
+    // `primer-widget` block naming the widget.
+    toExternalHTML: ({ block }) => (
+      <pre>
+        <code className="language-primer-widget">{(block.props as WidgetBlockProps).widgetId}</code>
+      </pre>
+    ),
   },
 );
 

@@ -13,7 +13,8 @@ import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
-import { tabFragmentName, tabsOf } from './reach.ts';
+import { isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment } from './reach.ts';
+import { restoreWidgets } from '../widgets/bundle.ts';
 import { pmDocOf } from './sources.ts';
 
 /** A live document's state frozen at one docVersion. */
@@ -129,7 +130,15 @@ export async function restoreCheckpoint(
         },
       };
     });
-    return await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    // The sub-fragments the restored content reaches (widget labels) come back too.
+    for (const name of reachableFragments(frozen).filter((n) => !isTabFragment(n))) {
+      const target = targetOfFragment(name)!;
+      const content = pmDocOf(frozen.getXmlFragment(name)).content;
+      edits.push({ target, inverse: false, build: (tr) => void tr.replaceWith(0, tr.doc.content.size, content) });
+    }
+    const result = await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    await restoreWidgets(storage, checkpoint.bundleKey, frozen);
+    return result;
   } finally {
     frozen.destroy();
   }

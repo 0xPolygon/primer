@@ -1,0 +1,109 @@
+import * as Y from 'yjs';
+import { eq, inArray } from 'drizzle-orm';
+import { db } from '../db/client.ts';
+import { widgets } from '../db/schema.ts';
+import { tabFragmentName, tabsOf } from '../live/reach.ts';
+import type { Storage } from '../storage/types.ts';
+import { readLabel } from './labels.ts';
+import { renderBoth, widgetIdPrefix, type WidgetRow } from './render.ts';
+import { labelsOf, withLabels } from './serialize.ts';
+
+/** A widget block in a document state. */
+type PlacedWidget = { blockId: string; widgetId: string; hash: string; textIds: string[] };
+
+/** What a checkpoint keeps of a widget (`widgets/<id>.json`): enough to republish it. */
+type BundledWidget = { widgetId: string; blockId: string; hash: string; source: string; rows: WidgetRow[] | null };
+
+function placedWidgets(doc: Y.Doc): PlacedWidget[] {
+  const out: PlacedWidget[] = [];
+  const walk = (node: Y.XmlFragment | Y.XmlElement) => {
+    for (const child of node.toArray()) {
+      if (!(child instanceof Y.XmlElement)) continue;
+      if (child.nodeName === 'widget') {
+        const blockId = (child.parent as Y.XmlElement | null)?.getAttribute('id');
+        const widgetId = String(child.getAttribute('widgetId') ?? '');
+        const hash = String(child.getAttribute('hash') ?? '');
+        const textIds = String(child.getAttribute('textIds') ?? '').split(' ').filter(Boolean);
+        if (blockId && widgetId && hash) out.push({ blockId, widgetId, hash, textIds });
+      } else walk(child);
+    }
+  };
+  for (const tab of tabsOf(doc)) walk(doc.getXmlFragment(tabFragmentName(tab.id)));
+  return out;
+}
+
+/**
+ * The widgets of a checkpoint's frozen state (C11): for each published widget
+ * block, `widgets/<id>.light.svg` and `.dark.svg` with the labels as they
+ * were, and `widgets/<id>.json` to republish it on restore. `embed` puts both
+ * themes' SVG in place of the blocks' placeholders in the static rendering.
+ */
+export async function bundleWidgets(doc: Y.Doc): Promise<{ files: Record<string, string>; embed: (html: string) => string }> {
+  const placed = placedWidgets(doc);
+  const rows = placed.length === 0 ? [] : await db.select().from(widgets).where(inArray(widgets.id, placed.map((w) => w.widgetId)));
+  const files: Record<string, string> = {};
+  const svgs = new Map<string, { light: string; dark: string }>();
+  for (const widget of placed) {
+    const row = rows.find((r) => r.id === widget.widgetId);
+    if (!row?.publishedSvgLight || !row.publishedSvgDark || !row.publishedSource) continue;
+    const labels = labelsOf(row.publishedSvgLight);
+    for (const textId of widget.textIds) labels[textId] = readLabel(doc, widget.blockId, textId) ?? labels[textId] ?? '';
+    const light = withLabels(row.publishedSvgLight, labels);
+    const dark = withLabels(row.publishedSvgDark, labels);
+    svgs.set(widget.widgetId, { light, dark });
+    files[`widgets/${widget.widgetId}.light.svg`] = light;
+    files[`widgets/${widget.widgetId}.dark.svg`] = dark;
+    const kept: BundledWidget = {
+      widgetId: row.id,
+      blockId: widget.blockId,
+      hash: row.publishedHash!,
+      source: row.publishedSource,
+      rows: row.rows as WidgetRow[] | null,
+    };
+    files[`widgets/${widget.widgetId}.json`] = JSON.stringify(kept);
+  }
+  const embed = (html: string) => {
+    if (svgs.size === 0) return html;
+    const replaced = html.replace(/<div class="primer-widget" data-widget-id="([^"]+)"><\/div>/g, (whole, id: string) => {
+      const svg = svgs.get(id);
+      return svg ? `<div class="primer-widget"><div class="primer-widget-light">${svg.light}</div><div class="primer-widget-dark">${svg.dark}</div></div>` : whole;
+    });
+    return replaced.replace('</head>', `<style>${THEME_CSS}</style></head>`);
+  };
+  return { files, embed };
+}
+
+/** A widget shows its light SVG unless the page is dark (Primer sets
+ *  `data-theme` on pages it owns). */
+const THEME_CSS =
+  '.primer-widget svg{display:block;width:100%;height:auto}.primer-widget-dark{display:none}' +
+  'html[data-theme="dark"] .primer-widget-light{display:none}html[data-theme="dark"] .primer-widget-dark{display:block}';
+
+/**
+ * Restoring a checkpoint republishes each of its widgets from the bundle
+ * (C12): the kept source and rows are rendered again and become the live
+ * publish when they give the kept hash. A pending draft is left alone.
+ */
+export async function restoreWidgets(storage: Storage, bundleKey: string, frozen: Y.Doc): Promise<void> {
+  for (const widget of placedWidgets(frozen)) {
+    let kept: BundledWidget;
+    try {
+      kept = JSON.parse(await new Response(await storage.get(`${bundleKey}widgets/${widget.widgetId}.json`)).text()) as BundledWidget;
+    } catch {
+      continue; // a checkpoint taken before the widget was ever published
+    }
+    const rendered = await renderBoth(kept.source, kept.rows ?? [], widgetIdPrefix(kept.widgetId));
+    if ('errors' in rendered || rendered.hash !== kept.hash) continue;
+    await db
+      .update(widgets)
+      .set({
+        publishedSource: kept.source,
+        publishedSvgLight: rendered.light.svg,
+        publishedSvgDark: rendered.dark.svg,
+        publishedHash: rendered.hash,
+        rows: kept.rows,
+        updatedAt: new Date(),
+      })
+      .where(eq(widgets.id, kept.widgetId));
+  }
+}

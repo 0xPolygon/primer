@@ -20,7 +20,7 @@ import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
 import { MAIN_TAB } from '../live/reach.ts';
 import { carryLabels, labelEdit, readLabel, readLiveDoc, tabOfBlock } from './labels.ts';
 import { rasterise } from './raster.ts';
-import { renderBoth, type WidgetRow, type WidgetTheme } from './render.ts';
+import { renderBoth, widgetIdPrefix, type WidgetRow, type WidgetTheme } from './render.ts';
 import { labelsOf, withLabels } from './serialize.ts';
 
 export type WidgetResult<T> = { ok: true; value: T } | { ok: false; status: 400 | 403 | 404 | 409 | 422; refusal: Refusal };
@@ -31,11 +31,6 @@ const MAX_ROWS_BYTES = 1024 * 1024;
 const NOT_FOUND: Refusal = { code: 'not_found', message: 'No such widget or document.', fix: 'Check the id; you may not have access.' };
 
 type WidgetRowRecord = typeof widgets.$inferSelect;
-
-/** Ids in a widget's SVG get this prefix, so two widgets on a page never collide. */
-function idPrefix(widgetId: string): string {
-  return `wg${widgetId.replace(/-/g, '').slice(-12)}-`;
-}
 
 function invalid(message: string, errors: WidgetError[]): WidgetResult<never> {
   return {
@@ -128,7 +123,7 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
 
   const widgetId = existing?.id ?? uuidv7();
   const rows = (req.rows ?? []) as WidgetRow[];
-  const rendered = await renderBoth(req.source, rows, idPrefix(widgetId));
+  const rendered = await renderBoth(req.source, rows, widgetIdPrefix(widgetId));
   if ('errors' in rendered) {
     if (existing) {
       await db
@@ -224,7 +219,7 @@ export async function publishWidget(actor: AuthUser, widgetId: string, previewHa
   if (row.draftSource === null || row.draftErrors !== null) {
     return invalid('There is no valid draft to publish.', (row.draftErrors as WidgetError[] | null) ?? []);
   }
-  const rendered = await renderBoth(row.draftSource, (row.draftRows ?? []) as WidgetRow[], idPrefix(widgetId));
+  const rendered = await renderBoth(row.draftSource, (row.draftRows ?? []) as WidgetRow[], widgetIdPrefix(widgetId));
   if ('errors' in rendered) return invalid('The draft no longer renders.', rendered.errors);
   if (rendered.hash !== previewHash) {
     return {

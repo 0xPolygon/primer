@@ -17,6 +17,17 @@ export function fragmentName(target: Target): string {
   return tabFragmentName(target.tabId);
 }
 
+/** The Target of a sub-fragment name (`page/…`, `embed/…`, `widget/…`), or
+ *  null for a tab fragment. The inverse of `fragmentName`. */
+export function targetOfFragment(name: string, tabId: string = MAIN_TAB): Target | null {
+  const [kind, blockId, sub] = name.split('/');
+  if (!blockId || !sub) return null;
+  if (kind === 'page') return { tabId, blockId, pid: sub };
+  if (kind === 'embed') return { tabId, blockId, embedId: sub };
+  if (kind === 'widget') return { tabId, blockId, textId: sub };
+  return null;
+}
+
 export function fragmentFor(doc: Y.Doc, target: Target): Y.XmlFragment {
   return doc.getXmlFragment(fragmentName(target));
 }

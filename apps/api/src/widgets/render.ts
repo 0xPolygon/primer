@@ -85,6 +85,11 @@ export async function renderBoth(
   return { light, dark, hash: previewHash(light.svg, dark.svg) };
 }
 
+/** Ids in a widget's SVG get this prefix, so two widgets on a page never collide. */
+export function widgetIdPrefix(widgetId: string): string {
+  return `wg${widgetId.replace(/-/g, '').slice(-12)}-`;
+}
+
 /** What a publish is bound to: the light and dark SVG the agent previewed. */
 export function previewHash(light: string, dark: string): string {
   return createHash('sha256').update(light).update('\n').update(dark).digest('hex');
