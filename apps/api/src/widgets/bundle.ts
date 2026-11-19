@@ -16,7 +16,7 @@ type BundledWidget = { widgetId: string; blockId: string; hash: string; source: 
 
 /** Ids read from a Y.Doc are client-written: only a UUID may name a widget
  *  (a lookup, or a storage key) and only a plain name a block. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const BLOCK_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** The widget blocks in a document state whose ids are well formed. Their

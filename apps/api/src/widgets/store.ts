@@ -2,7 +2,9 @@ import { and, eq, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type {
   Refusal,
+  Target,
   WidgetDTO,
+  WidgetLabelDTO,
   WidgetDraftRequest,
   WidgetDraftResponse,
   WidgetError,
@@ -13,15 +15,22 @@ import type {
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, widgets } from '../db/schema.ts';
-import { canEdit, canRead, loadEffectiveRole, type Visibility } from '../lib/permissions.ts';
+import { canEdit, canRead, effectiveAgentMode, loadEffectiveRole, type Visibility } from '../lib/permissions.ts';
 import { serverEditor } from '../live/editor.ts';
 import { originFor } from '../live/origin.ts';
 import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
 import { MAIN_TAB } from '../live/reach.ts';
-import { carryLabels, labelEdit, readLabel, readLiveDoc, tabOfBlock } from './labels.ts';
+import { carryLabels, labelEdit, readLabel, tabOfBlock } from './labels.ts';
+import { withLiveDocument } from '../live/instance.ts';
+import { fenceUntrusted } from '../lib/untrusted.ts';
+import { blockVersion, findBlock } from '../live/blocks.ts';
+import { fragmentFor } from '../live/reach.ts';
+import { pmDocOf } from '../live/sources.ts';
+
 import { rasterise } from './raster.ts';
 import { renderBoth, widgetIdPrefix, type WidgetRow, type WidgetTheme } from './render.ts';
 import { labelsOf, withLabels } from './serialize.ts';
+import { collectionRows } from './records.ts';
 
 export type WidgetResult<T> = { ok: true; value: T } | { ok: false; status: 400 | 403 | 404 | 409 | 422; refusal: Refusal };
 
@@ -61,6 +70,19 @@ async function documentAccess(
   if (need === 'edit' && !canEdit(role)) {
     return { ok: false, status: 403, refusal: { code: 'forbidden', message: 'Only the owner and editors change widgets.', fix: 'Ask the owner for editor access.' } };
   }
+  // A widget's publish replaces what people see at once, so an agent that may
+  // only suggest here doesn't draw.
+  if (need === 'edit' && actor.kind === 'agent' && (await effectiveAgentMode(documentId, actor.id)) === 'suggest') {
+    return {
+      ok: false,
+      status: 403,
+      refusal: {
+        code: 'forbidden',
+        message: 'You may only suggest changes in this document, and a widget publishes directly.',
+        fix: 'Ask the owner to let you edit (agent mode), or describe the drawing in a comment.',
+      },
+    };
+  }
   if (doc.format === null) {
     return {
       ok: false,
@@ -84,6 +106,25 @@ async function currentLabels(row: WidgetRowRecord): Promise<Record<string, strin
   return Object.fromEntries(Object.entries(published).map(([id, text]) => [id, mine[id] ?? text]));
 }
 
+/** Each published label with its target and version, for reads and ops. */
+async function labelList(row: WidgetRowRecord, actor: AuthUser): Promise<WidgetLabelDTO[]> {
+  const published = row.publishedSvgLight ? labelsOf(row.publishedSvgLight) : {};
+  return withLiveDocument(row.documentId, (doc) => {
+    const tabId = tabOfBlock(doc, row.blockId) ?? MAIN_TAB;
+    return Object.entries(published).map(([textId, words]) => {
+      const target: Target = { tabId, blockId: row.blockId, textId };
+      const at = findBlock(pmDocOf(fragmentFor(doc, target)), row.blockId);
+      const text = readLabel(doc, row.blockId, textId) ?? words;
+      return { textId, target, text: fenced(actor, text), version: at ? blockVersion(at.node) : null };
+    });
+  });
+}
+
+/** Words people wrote reach an agent fenced as untrusted data. */
+function fenced(actor: AuthUser, text: string): string {
+  return actor.kind === 'agent' ? fenceUntrusted(text, 'label') : text;
+}
+
 /** Each label's words once `theirs` (a new render's labels) is published. */
 async function carryFor(row: Pick<WidgetRowRecord, 'documentId' | 'blockId' | 'publishedSvgLight'>, theirs: Record<string, string>) {
   const base = row.publishedSvgLight ? labelsOf(row.publishedSvgLight) : {};
@@ -92,12 +133,15 @@ async function carryFor(row: Pick<WidgetRowRecord, 'documentId' | 'blockId' | 'p
 
 async function fragmentLabels(row: Pick<WidgetRowRecord, 'documentId' | 'blockId'>, textIds: string[]): Promise<Record<string, string | null>> {
   if (textIds.length === 0) return {};
-  return readLiveDoc(row.documentId, (doc) =>
+  return withLiveDocument(row.documentId, (doc) =>
     Object.fromEntries(textIds.map((textId) => [textId, readLabel(doc, row.blockId, textId)])),
   );
 }
 
-function checkInput(source: unknown, rows: unknown): WidgetError[] {
+function checkInput(source: unknown, rows: unknown, collection: unknown): WidgetError[] {
+  if (collection !== undefined && (typeof collection !== 'string' || collection.length === 0 || collection.length > 200 || rows !== undefined)) {
+    return [{ line: 0, message: 'collection is a records collection name, sent instead of rows.', fix: 'Send rows or collection, not both.' }];
+  }
   if (typeof source !== 'string' || source.trim() === '') return [{ line: 0, message: 'source is required.', fix: 'Send the whole module as `source`.' }];
   if (Buffer.byteLength(source) > MAX_SOURCE_BYTES) return [{ line: 0, message: 'source is over 1 MB.', fix: 'Draw from rows instead of typing data into the module.' }];
   if (rows !== undefined && JSON.stringify(rows).length > MAX_ROWS_BYTES) return [{ line: 0, message: 'rows are over 1 MB.', fix: 'Aggregate the rows first.' }];
@@ -118,17 +162,25 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
     existing = await loadWidget(req.widgetId);
     if (!existing || existing.documentId !== documentId) return { ok: false, status: 404, refusal: NOT_FOUND };
   }
-  const inputErrors = checkInput(req.source, req.rows);
+  const inputErrors = checkInput(req.source, req.rows, req.collection);
   if (inputErrors.length > 0) return invalid('The draft request is invalid.', inputErrors);
 
   const widgetId = existing?.id ?? uuidv7();
-  const rows = (req.rows ?? []) as WidgetRow[];
+  // A bound draft keeps the records it was drawn from, so its publish is the preview.
+  const collection = req.collection ?? null;
+  let rows = (req.rows ?? []) as WidgetRow[];
+  if (collection !== null) {
+    const read = await collectionRows(documentId, collection);
+    if ('errors' in read) return invalid('The collection can\'t be drawn.', read.errors);
+    rows = read;
+  }
+  const draftRows = collection !== null || req.rows !== undefined ? rows : null;
   const rendered = await renderBoth(req.source, rows, widgetIdPrefix(widgetId));
   if ('errors' in rendered) {
     if (existing) {
       await db
         .update(widgets)
-        .set({ draftSource: req.source, draftRows: req.rows ?? null, draftErrors: rendered.errors, updatedBy: actor.id, updatedAt: new Date() })
+        .set({ draftSource: req.source, draftRows, draftCollection: collection, draftErrors: rendered.errors, updatedBy: actor.id, updatedAt: new Date() })
         .where(eq(widgets.id, widgetId));
     }
     return invalid(`The draft has ${rendered.errors.length} error${rendered.errors.length === 1 ? '' : 's'}; the live widget is unchanged.`, rendered.errors);
@@ -139,7 +191,7 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
     blockId = existing.blockId;
     await db
       .update(widgets)
-      .set({ draftSource: req.source, draftRows: req.rows ?? null, draftErrors: null, updatedBy: actor.id, updatedAt: new Date() })
+      .set({ draftSource: req.source, draftRows, draftCollection: collection, draftErrors: null, updatedBy: actor.id, updatedAt: new Date() })
       .where(eq(widgets.id, widgetId));
   } else {
     const placed = await placeBlock(actor, documentId, widgetId, req);
@@ -150,7 +202,7 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
       documentId,
       blockId,
       draftSource: req.source,
-      draftRows: req.rows ?? null,
+      draftRows, draftCollection: collection,
       updatedBy: actor.id,
     });
   }
@@ -168,7 +220,7 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
       previewHash: rendered.hash,
       png: { light: light.toString('base64'), dark: dark.toString('base64') },
       warnings: rendered.light.warnings,
-      labels: carried.outcomes,
+      labels: carried.outcomes.map((o) => ({ ...o, text: fenced(actor, o.text) })),
     },
   };
 }
@@ -177,7 +229,7 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
 async function placeBlock(actor: AuthUser, documentId: string, widgetId: string, req: WidgetDraftRequest): Promise<WidgetResult<string>> {
   const tabId = req.tabId ?? MAIN_TAB;
   if (req.afterBlockId !== undefined) {
-    const tab = await readLiveDoc(documentId, (doc) => tabOfBlock(doc, req.afterBlockId!));
+    const tab = await withLiveDocument(documentId, (doc) => tabOfBlock(doc, req.afterBlockId!));
     if (tab !== tabId) {
       return {
         ok: false,
@@ -242,8 +294,10 @@ export async function publishWidget(actor: AuthUser, widgetId: string, previewHa
       publishedSvgDark: rendered.dark.svg,
       publishedHash: rendered.hash,
       rows: row.draftRows,
+      collection: row.draftCollection,
       draftSource: null,
       draftRows: null,
+      draftCollection: null,
       draftErrors: null,
       updatedBy: actor.id,
       updatedAt: new Date(),
@@ -267,7 +321,7 @@ export async function publishWidget(actor: AuthUser, widgetId: string, previewHa
 
   const theirs = rendered.light.labels;
   const carried = await carryFor(row, theirs);
-  const tabId = (await readLiveDoc(row.documentId, (doc) => tabOfBlock(doc, row.blockId))) ?? MAIN_TAB;
+  const tabId = (await withLiveDocument(row.documentId, (doc) => tabOfBlock(doc, row.blockId))) ?? MAIN_TAB;
   const edits: PlannedEdit[] = Object.entries(carried.texts).map(([textId, text]) =>
     labelEdit({ tabId, blockId: row.blockId, textId }, text),
   );
@@ -283,7 +337,7 @@ export async function publishWidget(actor: AuthUser, widgetId: string, previewHa
   const result = await applyPlan(row.documentId, originFor(actor), { onConflict: 'refuse', edits });
   return {
     ok: true,
-    value: { widgetId, blockId: row.blockId, publishedHash: rendered.hash, docVersion: result.docVersion, labels: carried.outcomes },
+    value: { widgetId, blockId: row.blockId, publishedHash: rendered.hash, docVersion: result.docVersion, labels: carried.outcomes.map((o) => ({ ...o, text: fenced(actor, o.text) })) },
   };
 }
 
@@ -292,7 +346,7 @@ export async function getWidget(actor: AuthUser, widgetId: string): Promise<Widg
   if (!row) return { ok: false, status: 404, refusal: NOT_FOUND };
   const access = await documentAccess(row.documentId, actor, 'read');
   if (!access.ok) return access;
-  const labels = await currentLabels(row);
+  const labels = await labelList(row, actor);
   return {
     ok: true,
     value: {
@@ -301,12 +355,13 @@ export async function getWidget(actor: AuthUser, widgetId: string): Promise<Widg
       blockId: row.blockId,
       source: row.publishedSource,
       rows: row.rows as WidgetRowInput[] | null,
+      collection: row.collection,
       publishedHash: row.publishedHash,
       labels,
       draft:
         row.draftSource === null
           ? null
-          : { source: row.draftSource, rows: row.draftRows as WidgetRowInput[] | null, errors: row.draftErrors as WidgetError[] | null },
+          : { source: row.draftSource, rows: row.draftRows as WidgetRowInput[] | null, collection: row.draftCollection, errors: row.draftErrors as WidgetError[] | null },
       updatedAt: row.updatedAt.toISOString(),
     },
   };
@@ -319,14 +374,15 @@ export async function widgetImage(
   theme: WidgetTheme,
   format: 'svg' | 'png',
 ): Promise<WidgetResult<{ svg: string } | { png: Buffer }>> {
-  const dto = await getWidget(actor, widgetId);
-  if (!dto.ok) return dto;
-  const row = (await loadWidget(widgetId))!;
+  const row = await loadWidget(widgetId);
+  if (!row) return { ok: false, status: 404, refusal: NOT_FOUND };
+  const access = await documentAccess(row.documentId, actor, 'read');
+  if (!access.ok) return access;
   const published = theme === 'light' ? row.publishedSvgLight : row.publishedSvgDark;
   if (!published) {
     return { ok: false, status: 404, refusal: { code: 'not_found', message: 'The widget has not been published yet.', fix: 'Publish a draft first.' } };
   }
-  const svg = withLabels(published, dto.value.labels);
+  const svg = withLabels(published, await currentLabels(row));
   return { ok: true, value: format === 'svg' ? { svg } : { png: await rasterise(svg, theme) } };
 }
 

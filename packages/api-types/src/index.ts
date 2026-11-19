@@ -1682,7 +1682,10 @@ export interface WidgetDraftRequest {
   tabId?: string;
   afterBlockId?: string;
   source: string;
+  /** Inline rows, or `collection`: the shared records of that collection
+   *  (each row's `id` is its record id), redrawn when they change. */
   rows?: WidgetRowInput[];
+  collection?: string;
 }
 
 /** A label whose words people edited, at publish: their edit is `carried`
@@ -1722,6 +1725,13 @@ export interface WidgetPublishResponse {
   labels: WidgetLabelOutcome[];
 }
 
+export interface WidgetLabelDTO {
+  textId: string;
+  target: Target;
+  text: string;
+  version: string | null;
+}
+
 /** GET /api/widgets/:widgetId */
 export interface WidgetDTO {
   id: string;
@@ -1730,9 +1740,13 @@ export interface WidgetDTO {
   /** The live publish (null before the first publish). */
   source: string | null;
   rows: WidgetRowInput[] | null;
+  /** The records collection the live widget draws from, if bound. */
+  collection: string | null;
   publishedHash: string | null;
-  /** Each label's current words (people's edits included), by text id. */
-  labels: Record<string, string>;
-  draft: { source: string; rows: WidgetRowInput[] | null; errors: WidgetError[] | null } | null;
+  /** Each label as people see it now (their edits included). Edit one with
+   *  primer_apply_ops: `update` its `target` with `expectVersion: version`
+   *  and the new words as `block`. Agents get `text` fenced as untrusted. */
+  labels: WidgetLabelDTO[];
+  draft: { source: string; rows: WidgetRowInput[] | null; collection: string | null; errors: WidgetError[] | null } | null;
   updatedAt: string;
 }

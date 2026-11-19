@@ -95,7 +95,8 @@ describe('widgets over MCP and REST', () => {
 
       const read = await mcp(app, token, 'primer_widget_get', { widgetId });
       expect(read.content.map((c) => c.type)).toEqual(['text', 'image']);
-      expect(textOf(read)).toMatchObject({ labels: { title: 'Signups by week' }, rows, draft: null });
+      expect(textOf(read)).toMatchObject({ rows, draft: null, labels: [{ textId: 'title', target: { tabId: 'main', textId: 'title' } }] });
+      expect((textOf(read).labels as { text: string }[])[0]!.text).toMatch(/^<untrusted-label-[0-9a-f]+>\nSignups by week\n/);
 
       const stale = await app.request(`/api/widgets/${widgetId}/publish`, {
         method: 'POST',

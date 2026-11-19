@@ -1,58 +1,23 @@
 import * as Y from 'yjs';
-import type { Node as PmNode } from '@tiptap/pm/model';
-import { yXmlFragmentToProsemirrorJSON } from 'y-prosemirror';
 import type { Target, WidgetLabelOutcome } from '@polygonlabs/primer-api-types';
-import { serverEditor } from '../live/editor.ts';
-import { liveDocName, liveInstance } from '../live/instance.ts';
-import { SYSTEM_ORIGIN } from '../live/origin.ts';
 import type { PlannedEdit } from '../live/pipeline.ts';
-import { fragmentName, tabFragmentName, tabsOf } from '../live/reach.ts';
+import { fragmentFor, MAIN_TAB, tabFragmentName, tabsOf } from '../live/reach.ts';
+import { readPidText, setPidText } from '../page/text.ts';
 
 /**
- * A label fragment (`widget/<blockId>/<textId>`) has the shape of a page-text
- * fragment (M6), so the one overlay edits both: a single paragraph whose block
- * id is the text id, holding the label's words.
+ * A label's words live in its fragment `widget/<blockId>/<textId>`, shaped
+ * like page text (page/text.ts): one paragraph whose block id is the widget
+ * block's, so a label target `{ tabId, blockId, textId }` is read, written,
+ * versioned, suggested and commented like a pid. Labels are one line.
  */
-export function textFragmentContent(textId: string, text: string): PmNode {
-  return serverEditor()._blocksToProsemirrorNode([{ id: textId, type: 'paragraph', content: text }] as never);
-}
-
-/** Sets one label's words (one line), whatever the fragment held. Only the
- *  paragraph's text changes when the fragment already has that shape. */
-export function labelEdit(target: Target & { textId: string }, text: string, inverse = false): PlannedEdit {
-  const words = text.replace(/\s+/g, ' ').trim();
-  return {
-    target,
-    inverse,
-    build: (tr) => {
-      const paragraphs: { pos: number; node: PmNode }[] = [];
-      tr.doc.descendants((node, pos) => {
-        if (node.type.name === 'paragraph') paragraphs.push({ pos, node });
-        return !node.isTextblock;
-      });
-      const only = paragraphs.length === 1 ? paragraphs[0]! : null;
-      if (only && only.node.textContent === words) return;
-      if (only) {
-        const from = only.pos + 1;
-        tr.replaceWith(from, from + only.node.content.size, words ? [serverEditor().editor.pmSchema.text(words)] : []);
-        return;
-      }
-      tr.replaceWith(0, tr.doc.content.size, textFragmentContent(target.textId, words).content);
-    },
-  };
+export function labelEdit(target: Target & { textId: string }, text: string): PlannedEdit {
+  return setPidText(target, text.replace(/\s+/g, ' ').trim());
 }
 
 /** A label's current words, or null when the fragment holds none yet. */
 export function readLabel(doc: Y.Doc, blockId: string, textId: string): string | null {
-  const fragment = doc.getXmlFragment(fragmentName({ tabId: '', blockId, textId }));
-  if (fragment.length === 0) return null;
-  const parts: string[] = [];
-  const collect = (node: { type?: string; text?: string; content?: unknown[] }) => {
-    if (node.type === 'text' && typeof node.text === 'string') parts.push(node.text);
-    for (const child of (node.content ?? []) as (typeof node)[]) collect(child);
-  };
-  collect(yXmlFragmentToProsemirrorJSON(fragment) as never);
-  return parts.join('');
+  const target: Target = { tabId: MAIN_TAB, blockId, textId };
+  return fragmentFor(doc, target).length === 0 ? null : readPidText(doc, target);
 }
 
 /** The tab whose fragment holds block `blockId`, or null. */
@@ -73,16 +38,6 @@ function findElement(node: Y.XmlFragment | Y.XmlElement, match: (el: Y.XmlElemen
     if (found) return found;
   }
   return null;
-}
-
-/** Runs `fn` on the document's live Y.Doc (the one the hub and the pipeline share). Reads only. */
-export async function readLiveDoc<T>(documentId: string, fn: (doc: Y.Doc) => T): Promise<T> {
-  const connection = await liveInstance().openDirectConnection(liveDocName(documentId), SYSTEM_ORIGIN);
-  try {
-    return fn(connection.document!);
-  } finally {
-    await connection.disconnect({ unloadImmediately: false });
-  }
 }
 
 /**

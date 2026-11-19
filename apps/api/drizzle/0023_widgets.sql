@@ -11,6 +11,7 @@ CREATE TABLE "widgets" (
 	"published_hash" text,
 	"rows" jsonb,
 	"collection" text,
+	"draft_collection" text,
 	"updated_by" text NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );

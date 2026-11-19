@@ -851,7 +851,10 @@ export const widgets = pgTable(
     publishedSvgDark: text('published_svg_dark'),
     publishedHash: text('published_hash'),
     rows: jsonb('rows'),
+    // The records collection the widget draws from (widgets/records.ts); the
+    // draft's, until it is published.
     collection: text('collection'),
+    draftCollection: text('draft_collection'),
     updatedBy: text('updated_by').notNull().references(() => users.id),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

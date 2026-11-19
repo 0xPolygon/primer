@@ -3,9 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
+import type { WidgetDTO } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
-import { versions, widgets } from '../db/schema.ts';
+import { documents, suggestions, users, versions, widgets } from '../db/schema.ts';
+import { v7 as uuidv7 } from 'uuid';
+import { createLiveThread } from '../lib/liveThreads.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
+import { applyOps } from '../live/ops.ts';
+import { recordsApi } from '../records/store.ts';
+import { flushDataChanged } from '../records/changed.ts';
 import { readBundleFile } from '../live/bundle.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
@@ -27,6 +34,8 @@ const flow = (review: string, merge = 'Merge') => `export default function rende
     </svg>
   );
 }`;
+
+const labelMap = (dto: WidgetDTO) => Object.fromEntries(dto.labels.map((l) => [l.textId, l.text]));
 
 async function draftAndPublish(documentId: string, source: string, widgetId?: string) {
   const draft = await draftWidget(owner, documentId, { widgetId, source, afterBlockId: widgetId ? undefined : 'intro' });
@@ -103,7 +112,7 @@ describe('widget drafts and publishes', () => {
     const redraw = await draftAndPublish(documentId, flow('Review', 'Ship it'), draft.widgetId);
     expect(redraw.draft.labels).toEqual([{ textId: 'review', status: 'carried', text: 'Peer review', agentText: 'Review' }]);
     const dto = await getWidget(owner, draft.widgetId);
-    expect(dto.ok && dto.value.labels).toEqual({ review: 'Peer review', merge: 'Ship it' });
+    expect(dto.ok && labelMap(dto.value)).toEqual({ review: 'Peer review', merge: 'Ship it' });
 
     // Both changed the same label: the person's words stay and the agent is told.
     const clash = await draftAndPublish(documentId, flow('Approval', 'Ship it'), draft.widgetId);
@@ -143,7 +152,7 @@ describe('widgets in checkpoints', () => {
       await draftAndPublish(documentId, flow('Review', 'Ship it'), draft.widgetId);
       await restoreCheckpoint(storage, { documentId, bundleKey: version!.bundleKey! }, owner);
       const dto = await getWidget(owner, draft.widgetId);
-      expect(dto.ok && dto.value.labels).toEqual({ review: 'Peer review', merge: 'Merge' });
+      expect(dto.ok && labelMap(dto.value)).toEqual({ review: 'Peer review', merge: 'Merge' });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -187,5 +196,85 @@ describe('widgets in checkpoints', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+const CHART = `export default function render({ rows, tokens }) {
+  return (
+    <svg viewBox="0 0 300 120">
+      <text data-text-id="title" x="10" y="20" fill={tokens.fg}>Signups</text>
+      <g data-anchor="bars">{rows.map((r, i) => <rect data-row={r.id} data-col="signups" x={10 + i * 40} y={110 - r.signups / 5} width="30" height={r.signups / 5} fill={tokens.accent1} />)}</g>
+    </svg>
+  );
+}`;
+
+describe('widgets with comments, ops and records', () => {
+  it('data-point comment anchors to row and column', async () => {
+    const documentId = await createLiveDoc();
+    await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+    const draft = await draftWidget(owner, documentId, { source: CHART, rows: [{ id: 'w1', signups: 240 }, { id: 'w2', signups: 410 }], afterBlockId: 'intro' });
+    if (!draft.ok) throw new Error('draft failed');
+    await publishWidget(owner, draft.value.widgetId, draft.value.previewHash);
+    const target = { tabId: 'main', blockId: draft.value.blockId };
+    const comment = (anchor: Record<string, unknown>) => createLiveThread(new NoopNotifier(), owner, documentId, { anchor: { target, ...anchor }, body: 'Why so high?' });
+
+    const point = await comment({ type: 'data-point', row: 'w2', column: 'signups' });
+    expect(point.ok && point.value.anchor).toEqual({ type: 'data-point', target, row: 'w2', column: 'signups' });
+    expect((await comment({ type: 'widget-part', anchor: 'bars' })).ok).toBe(true);
+    expect(await comment({ type: 'data-point', row: 'w9', column: 'signups' })).toMatchObject({ ok: false, refusal: { message: 'The widget has no row "w9".' } });
+    expect(await comment({ type: 'data-point', row: 'w1', column: 'nope' })).toMatchObject({ ok: false, status: 400 });
+    expect(await comment({ type: 'widget-part', anchor: 'axis' })).toMatchObject({ ok: false, refusal: { message: 'The widget draws no part named "axis".' } });
+    expect(
+      await createLiveThread(new NoopNotifier(), owner, documentId, { anchor: { type: 'data-point', target: { tabId: 'main', blockId: 'intro' }, row: 'w1', column: 'signups' }, body: 'x' }),
+    ).toMatchObject({ ok: false, refusal: { message: 'Block intro is not a widget.' } });
+  });
+
+  it('ops edit a label by its version; an agent that may only suggest proposes it instead', async () => {
+    const agentId = `agent_${uuidv7()}`;
+    await db.insert(users).values({ id: agentId, email: '', displayName: 'Helper', kind: 'agent', viaUserId: owner.id });
+    const agent: AuthUser = { id: agentId, email: '', displayName: 'Helper', kind: 'agent', viaUserId: owner.id };
+    const documentId = await createLiveDoc();
+    await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+    const { draft } = await draftAndPublish(documentId, flow('Review'));
+    const read = await getWidget(agent, draft.widgetId);
+    if (!read.ok) throw new Error('read failed');
+    const review = read.value.labels.find((l) => l.textId === 'review')!;
+    expect(review.text).toMatch(/^<untrusted-label-[0-9a-f]+>\nReview\n<\/untrusted-label-/);
+
+    const ops = await applyOps(documentId, agent, { baseVersion: 0, ops: [{ op: 'update', target: review.target, expectVersion: review.version, block: 'Code   review' }] });
+    expect(ops).toMatchObject({ ok: true, value: { outcomes: [{ status: 'applied' }] } });
+    await withLiveDoc(documentId, (doc) => expect(readLabel(doc, draft.blockId, 'review')).toBe('Code review'));
+
+    await db.update(documents).set({ agentMode: 'suggest' }).where(eq(documents.id, documentId));
+    expect(await draftWidget(agent, documentId, { widgetId: draft.widgetId, source: flow('Again') })).toMatchObject({ ok: false, status: 403 });
+    const again = (await getWidget(agent, draft.widgetId)) as { ok: true; value: WidgetDTO };
+    const label = again.value.labels.find((l) => l.textId === 'review')!;
+    const suggested = await applyOps(documentId, agent, { baseVersion: 0, ops: [{ op: 'update', target: label.target, expectVersion: label.version, block: 'Peer review' }] });
+    expect(suggested).toMatchObject({ ok: true, value: { outcomes: [{ status: 'suggested' }] } });
+    const [row] = await db.select().from(suggestions).where(eq(suggestions.documentId, documentId));
+    expect(JSON.stringify(row!.edits)).toContain('"textId":"review"');
+    await withLiveDoc(documentId, (doc) => expect(readLabel(doc, draft.blockId, 'review')).toBe('Code review'));
+  });
+
+  it('chart re-renders when its collection changes', async () => {
+    const documentId = await createLiveDoc();
+    await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+    const records = recordsApi(owner, documentId);
+    await records.set({ collection: 'signups', scope: 'shared', recordId: 'w1', data: { signups: 240 } });
+    await records.set({ collection: 'signups', scope: 'shared', recordId: 'w2', data: { signups: 410 } });
+    await flushDataChanged();
+
+    const draft = await draftWidget(owner, documentId, { source: CHART, collection: 'signups', afterBlockId: 'intro' });
+    if (!draft.ok) throw new Error(JSON.stringify(draft.refusal));
+    await publishWidget(owner, draft.value.widgetId, draft.value.previewHash);
+
+    await records.update({ collection: 'signups', scope: 'shared', recordId: 'w2', data: { signups: 500 } });
+    await flushDataChanged();
+    const [row] = await db.select().from(widgets).where(eq(widgets.id, draft.value.widgetId));
+    expect(row!.collection).toBe('signups');
+    expect(row!.publishedHash).not.toBe(draft.value.previewHash);
+    expect(row!.rows).toEqual([{ id: 'w1', signups: 240 }, { id: 'w2', signups: 500 }]);
+    expect(row!.publishedSvgLight).toContain('height="100"');
+    await withLiveDoc(documentId, (doc) => expect(readBlocks(doc, 'main')[1]!.props).toMatchObject({ hash: row!.publishedHash }));
   });
 });

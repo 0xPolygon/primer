@@ -1,5 +1,5 @@
 {
-  "id": "e3509557-b21b-4f02-a94b-f1ee906c61d6",
+  "id": "9ebb527e-0d75-4dda-b1a2-a66f794dd4b7",
   "prevId": "50a72e66-ec83-4fe5-8510-abe6e477bdfa",
   "version": "7",
   "dialect": "postgresql",
@@ -4131,6 +4131,12 @@
         },
         "collection": {
           "name": "collection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "draft_collection": {
+          "name": "draft_collection",
           "type": "text",
           "primaryKey": false,
           "notNull": false
