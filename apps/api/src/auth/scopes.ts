@@ -92,6 +92,8 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'DELETE', path: '/api/documents/:docId/choices/:blockId/decision', scope: 'documents:write' },
   // Votes are shared records.
   { method: 'POST', path: '/api/documents/:docId/choices/:blockId/vote', scope: 'records:write' },
+  // What an embed block shows this viewer (a link card, or a document they can read).
+  { method: 'GET', path: '/api/documents/:docId/embeds/:blockId', scope: 'documents:read' },
   { method: 'GET', path: '/api/tasks', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/tasks', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/assignees', scope: 'documents:read' },
