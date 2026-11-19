@@ -6,6 +6,7 @@ import { v7 as uuidv7 } from 'uuid';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import {
+  docFiles,
   documents,
   versions,
   sessions,
@@ -46,6 +47,35 @@ async function seedExpiredDoc(daysOld: number, storage: FilesystemStorage) {
 }
 
 describe('purgeExpiredDocuments', () => {
+  it('a purged live document takes its bundles and files with it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-purge-live-'));
+    try {
+      const storage = new FilesystemStorage(root);
+      const { publishDocument } = await import('../lib/publish.ts');
+      const r = await publishDocument(storage, {
+        actor: { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User', kind: 'person', viaUserId: null },
+        title: 'Live',
+        filename: 'live.md',
+        format: 'markdown',
+        content: new TextEncoder().encode('# Live\n'),
+      });
+      if (!r.ok) throw new Error(r.refusal.code);
+      const fileKey = `files/${r.documentId}/${uuidv7()}`;
+      await storage.put(fileKey, new TextEncoder().encode('png'));
+      await db.insert(docFiles).values({ id: fileKey.split('/')[2]!, documentId: r.documentId, storageKey: fileKey, contentType: 'image/png', sizeBytes: 3, uploadedBy: 'mock-user-1' });
+      await db.update(documents).set({ deletedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) }).where(eq(documents.id, r.documentId));
+
+      const report = await purgeExpiredDocuments({ storage });
+      expect(report.purgedStorageKeys).toEqual(expect.arrayContaining([
+        `bundles/${r.versionId}/static.html`, `bundles/${r.versionId}/state.ydoc`, `v1/${r.versionId}.orig`, fileKey,
+      ]));
+      await expect(access(join(root, 'bundles', r.versionId, 'state.ydoc'))).rejects.toThrow();
+      await expect(access(join(root, fileKey))).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('returns empty report when nothing is expired', async () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-purge-empty-'));
     try {

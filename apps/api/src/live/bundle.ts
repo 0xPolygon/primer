@@ -90,10 +90,15 @@ export async function loadBundleDoc(storage: Storage, bundleKey: string): Promis
   return doc;
 }
 
+/** Every storage key a bundle can hold (missing ones are skipped on delete). */
+export function bundleFileKeys(bundleKey: string): string[] {
+  const names = ['manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json'];
+  return names.map((name) => bundleKey + name);
+}
+
 /** Deletes what `renderBundle` stored (a checkpoint that failed to commit). */
 export async function deleteBundle(storage: Storage, bundleKey: string): Promise<void> {
-  const names = ['manifest.json', 'state.ydoc', 'export.md', 'export.txt', 'export.html', 'static.html', 'threads.json', 'files.json'];
-  for (const name of names) await storage.delete(bundleKey + name).catch(() => undefined);
+  for (const key of bundleFileKeys(bundleKey)) await storage.delete(key).catch(() => undefined);
 }
 
 async function openThreads(documentId: string): Promise<BundleThread[]> {
