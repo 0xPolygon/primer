@@ -1,3 +1,5 @@
+/** @jsxRuntime automatic */
+/** @jsxImportSource react */
 import { useState } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
 

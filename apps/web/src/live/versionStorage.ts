@@ -14,14 +14,26 @@ import { api } from '../lib/fetch.ts';
  * BlockNote previews in a fork of the document. Saving names the checkpoint
  * with its note; restoring is a new edit made by the server. Versions are
  * never deleted, so `remove` is left out.
+ *
+ * Versions from before the document went live have no Y.Doc to preview. They
+ * stay in the list, and selecting one hands its number to `openLegacy`, which
+ * shows it in the read-only version viewer (rendered HTML in its sandboxed
+ * frame), the same as for any legacy document.
  */
 export class PrimerVersionStorage implements VersionStorage<Uint8Array> {
-  constructor(private readonly documentId: string) {}
+  private readonly legacy = new Map<string, number>();
+
+  constructor(
+    private readonly documentId: string,
+    private readonly openLegacy: (versionNumber: number) => void = () => undefined,
+  ) {}
 
   async list(signal: AbortSignal): Promise<VersionResult<VersionSnapshotPage>> {
     const res = await call(`/api/documents/${this.documentId}/versions`, { signal });
     if (!res.ok) return res;
     const body = (await res.value.json()) as VersionsListResponse;
+    this.legacy.clear();
+    for (const v of body.versions) if (v.bundled === false) this.legacy.set(v.id, v.versionNumber);
     return {
       ok: true,
       value: {
@@ -36,6 +48,12 @@ export class PrimerVersionStorage implements VersionStorage<Uint8Array> {
   }
 
   async getContent(id: string, signal: AbortSignal): Promise<VersionResult<Uint8Array>> {
+    const legacyNumber = this.legacy.get(id);
+    if (legacyNumber !== undefined) {
+      this.openLegacy(legacyNumber);
+      // The viewer replaces the editor, so this preview never settles.
+      return new Promise((_, reject) => signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+    }
     const res = await call(`/api/versions/${id}/ydoc`, { signal });
     if (!res.ok) return res;
     return { ok: true, value: new Uint8Array(await res.value.arrayBuffer()) };

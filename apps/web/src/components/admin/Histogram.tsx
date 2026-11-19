@@ -1,4 +1,5 @@
 import type { HistogramBucket } from '@polygonlabs/primer-api-types';
+import { t } from '../../i18n/index.ts';
 
 interface Props {
   buckets: HistogramBucket[];
@@ -15,7 +16,7 @@ export function Histogram({ buckets, height = 200 }: Props) {
   const barW = innerW / Math.max(1, buckets.length);
 
   return (
-    <svg viewBox={`0 0 ${WIDTH} ${height}`} className="w-full" role="img" aria-label="Viewers per document distribution">
+    <svg viewBox={`0 0 ${WIDTH} ${height}`} className="w-full" role="img" aria-label={t('histogram.viewersPerDocumentDistribution')}>
       {buckets.map((b, i) => {
         const x = PAD.left + i * barW;
         const h = max === 0 ? 0 : (b.count / max) * innerH;

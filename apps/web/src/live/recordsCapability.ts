@@ -19,6 +19,7 @@
 import type { Refusal, RefusalCode } from '@polygonlabs/primer-api-types';
 import { MAX_RECORDS_PAGE_SIZE } from '@polygonlabs/primer-api-types';
 import type { MsgRecordsCall, MsgRecordsResult } from '../companion/protocol.ts';
+import { t } from '../i18n/index.ts';
 
 export const MAX_RECORDS_IN_FLIGHT = 8;
 export const RECORDS_CALL_TIMEOUT_MS = 5_000;
@@ -120,7 +121,7 @@ export function createRecordsCapability(opts: RecordsCapabilityOptions): Records
       if (inFlight.size >= MAX_RECORDS_IN_FLIGHT) {
         answer({
           ok: false,
-          refusal: refusal('records_busy', `At most ${MAX_RECORDS_IN_FLIGHT} record calls may be in flight.`, 'Wait for a call to finish, then retry.'),
+          refusal: refusal('records_busy', t('records.tooMany', { max: MAX_RECORDS_IN_FLIGHT }), 'Wait for a call to finish, then retry.'),
         });
         return;
       }
@@ -139,7 +140,7 @@ export function createRecordsCapability(opts: RecordsCapabilityOptions): Records
           type: 'records_result',
           callId: msg.callId,
           ok: false,
-          refusal: refusal('records_busy', `The call took longer than ${timeoutMs / 1000} s.`, 'Retry, or ask for fewer records.'),
+          refusal: refusal('records_busy', t('records.timeout', { seconds: timeoutMs / 1000 }), 'Retry, or ask for fewer records.'),
         });
       }, timeoutMs);
       inFlight.set(msg.callId, { abort, settle });

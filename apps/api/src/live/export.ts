@@ -60,7 +60,7 @@ export async function exportHtml(doc: Y.Doc, title = ''): Promise<string> {
   }
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
-    `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style></head>` +
+    `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style><style>${STATIC_CSS}</style></head>` +
     `<body><div class="bn-root bn-container"><div class="bn-default-styles">${body}</div></div></body></html>`
   );
 }
@@ -190,13 +190,47 @@ export function plainText(block: PrimerBlock): string {
       }
       return '';
     }
-    return (content as { type: string; text?: string; content?: unknown }[])
-      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : ''))
+    return (content as { type: string; text?: string; content?: unknown; props?: Record<string, string> }[])
+      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : chipText(n)))
       .join('');
   };
   const own = isSource(block) ? String((block.props as { markdown: string }).markdown).replace(/\n+$/, '') : inline(block.content);
   const children = (block.children as PrimerBlock[]).map(plainText).filter((t) => t.length > 0);
   return [own, ...children].filter((t) => t.length > 0).join('\n');
+}
+
+/**
+ * What the static rendering needs beyond BlockNote's structural stylesheet,
+ * which ships no colours: a readable page, and light or dark to match
+ * wherever it is shown. In Primer the companion sets `data-theme` on `<html>`;
+ * a share opened on its own follows the viewer's colour scheme.
+ */
+const STATIC_CSS = `
+body{margin:0;padding:24px 16px;background:#fff;color:#171717;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+.bn-container{max-width:760px;margin:0 auto}
+.primer-tab-title{margin:2.2em 0 .6em}
+a{color:#6d28d9}
+pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+table{border-collapse:collapse}td,th{border:1px solid #d4d4d4;padding:4px 8px}
+img,video{max-width:100%}
+.primer-chip{border-radius:4px;background:#ede9fe;color:#4c1d95;padding:0 4px}
+html[data-theme="dark"] body{background:#0a0a0a;color:#e5e5e5}
+html[data-theme="dark"] a{color:#c4b5fd}
+html[data-theme="dark"] td,html[data-theme="dark"] th{border-color:#404040}
+html[data-theme="dark"] .primer-chip{background:#3b2a6b;color:#ddd6fe}
+@media (prefers-color-scheme: dark){
+html:not([data-theme]) body{background:#0a0a0a;color:#e5e5e5}
+html:not([data-theme]) a{color:#c4b5fd}
+html:not([data-theme]) td,html:not([data-theme]) th{border-color:#404040}
+html:not([data-theme]) .primer-chip{background:#3b2a6b;color:#ddd6fe}
+}`;
+
+/** What a chip reads as in text: `@name`, the date, the chosen value. */
+function chipText(node: { type: string; props?: Record<string, string> }): string {
+  if (node.type === 'mention') return `@${node.props?.name ?? ''}`;
+  if (node.type === 'date') return node.props?.date ?? '';
+  if (node.type === 'dropdown') return node.props?.value ?? '';
+  return '';
 }
 
 let css: string | null = null;

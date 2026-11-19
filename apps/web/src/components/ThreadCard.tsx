@@ -1,3 +1,5 @@
+import { relativeTime } from '../lib/relativeTime.ts';
+import { t } from '../i18n/index.ts';
 import { useState } from 'react';
 import type { CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
 import {
@@ -26,20 +28,6 @@ interface Props {
    *  in the iframe). Affects card styling only — focus changes are pushed
    *  to the companion via the parent's onHighlight. */
   isFocused?: boolean;
-}
-
-function relativeTime(iso: string): string {
-  const d = new Date(iso);
-  const diffMs = Date.now() - d.getTime();
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return 'just now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return d.toLocaleDateString();
 }
 
 function anchorPreview(t: ThreadDTO): string {
@@ -142,7 +130,7 @@ function DeletedCommentRow({
         <span className="shrink-0 whitespace-nowrap">{relativeTime(comment.createdAt)}</span>
       </div>
       <div className="mt-0.5 flex items-center gap-2 leading-snug">
-        <span className="italic text-neutral-400 dark:text-neutral-500">Comment deleted</span>
+        <span className="italic text-neutral-400 dark:text-neutral-500">{t('threadCard.commentDeleted')}</span>
         {canUndo && (
           <button
             type="button"
@@ -150,11 +138,11 @@ function DeletedCommentRow({
             disabled={restore.isPending}
             className="rounded px-1 py-0.5 text-[11px] font-medium text-blue-600 underline decoration-dotted hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
           >
-            Undo
+            {t('threadCard.undo')}
           </button>
         )}
         {restore.isError && (
-          <span className="text-[11px] text-red-600 dark:text-red-400">Could not restore</span>
+          <span className="text-[11px] text-red-600 dark:text-red-400">{t('threadCard.couldNotRestore')}</span>
         )}
       </div>
     </div>
@@ -201,7 +189,7 @@ function CommentRow({
               <button
                 type="button"
                 onClick={startEditing}
-                aria-label="Edit comment"
+                aria-label={t('threadCard.editComment')}
                 className={iconButtonClass}
               >
                 <PencilIcon />
@@ -212,7 +200,7 @@ function CommentRow({
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(true)}
-                aria-label="Delete comment"
+                aria-label={t('threadCard.deleteComment')}
                 className={dangerIconButtonClass}
               >
                 <TrashIcon />
@@ -222,21 +210,21 @@ function CommentRow({
           <span className="whitespace-nowrap">
             {relativeTime(comment.createdAt)}
             {comment.updatedAt && (
-              <span className="ml-1 italic text-neutral-400 dark:text-neutral-500">(edited)</span>
+              <span className="ml-1 italic text-neutral-400 dark:text-neutral-500">{t('threadCard.edited')}</span>
             )}
           </span>
         </div>
       </div>
       {confirmingDelete && (
         <div className="mt-1 flex flex-wrap items-center justify-between gap-2 rounded border border-red-200 bg-red-50 px-2 py-1.5 dark:border-red-900 dark:bg-red-950/40">
-          <span className="text-[11px] text-red-800 dark:text-red-300">Delete this comment?</span>
+          <span className="text-[11px] text-red-800 dark:text-red-300">{t('threadCard.deleteThisComment')}</span>
           <div className="flex shrink-0 gap-2">
             <button
               type="button"
               onClick={() => setConfirmingDelete(false)}
               className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2 py-0.5 text-[11px] text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
             >
-              Cancel
+              {t('threadCard.cancel')}
             </button>
             <button
               type="button"
@@ -244,7 +232,7 @@ function CommentRow({
               onClick={() => del.mutate(undefined, { onSuccess: () => setConfirmingDelete(false) })}
               className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700 disabled:opacity-50"
             >
-              Delete
+              {t('threadCard.delete')}
             </button>
           </div>
         </div>
@@ -269,7 +257,7 @@ function CommentRow({
               }}
               className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
             >
-              Cancel
+              {t('threadCard.cancel')}
             </button>
             <button
               type="button"
@@ -282,7 +270,7 @@ function CommentRow({
               }}
               className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
-              Save
+              {t('threadCard.save')}
             </button>
           </div>
         </div>
@@ -333,13 +321,13 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
       <div className="mb-1.5 flex items-start gap-1 border-l-2 border-yellow-300 dark:border-amber-700 pl-2 italic leading-snug text-neutral-600 dark:text-neutral-400">
         {thread.contextChanged ? (
           <span
-            title="The quoted text is not in this version"
+            title={t('threadCard.quotedTextNotInVersion')}
             className="not-italic shrink-0 rounded bg-neutral-100 dark:bg-neutral-800 px-1 text-[10px] text-neutral-500 dark:text-neutral-400"
           >
-            Context changed
+            {t('threadCard.contextChanged')}
           </span>
         ) : (
-          drifted && <span title="Could not place anchor" className="not-italic">📍?</span>
+          drifted && <span title={t('threadCard.couldNotPlaceAnchor')} className="not-italic">📍?</span>
         )}
         <span className="truncate">{anchorPreview(thread)}</span>
       </div>
@@ -386,7 +374,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
             value={replyDraft}
             onChange={setReplyDraft}
             onMentionsChange={setReplyMentions}
-            placeholder="Write a reply…"
+            placeholder={t('threadCard.writeReply')}
             rows={2}
             autoFocus
           />
@@ -406,7 +394,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
               }}
               className="rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-2.5 py-1 text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
             >
-              Cancel
+              {t('threadCard.cancel')}
             </button>
             <button
               type="button"
@@ -425,7 +413,7 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
               }
               className="rounded bg-neutral-900 px-2.5 py-1 text-xs text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
-              Reply
+              {t('threadCard.reply')}
             </button>
           </div>
         </div>
@@ -434,17 +422,17 @@ export function ThreadCard({ versionId, thread, drifted, currentUserId, onHighli
         <div className="mt-1.5 flex items-center gap-1 border-t border-neutral-100 dark:border-neutral-800 pt-1.5">
           <button type="button" onClick={startReplying} className={footerButtonClass}>
             <ReplyIcon />
-            Reply
+            {t('threadCard.reply')}
           </button>
           {isResolved ? (
             <button type="button" onClick={() => reopen.mutate()} className={footerButtonClass}>
               <ReopenIcon />
-              Reopen
+              {t('threadCard.reopen')}
             </button>
           ) : (
             <button type="button" onClick={() => resolve.mutate()} className={footerButtonClass}>
               <CheckIcon />
-              Resolve
+              {t('threadCard.resolve')}
             </button>
           )}
         </div>

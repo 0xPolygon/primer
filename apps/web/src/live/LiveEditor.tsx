@@ -3,7 +3,6 @@ import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
 import { VersioningSidebar } from '@blocknote/react/versioning';
 import { BlockNoteView } from '@blocknote/ariakit';
 import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
-import * as locales from '@blocknote/core/locales';
 import { commentMarkExtension, primerSchema } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
@@ -11,6 +10,9 @@ import type { DocFileUploadResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
+import { editorDictionary, t } from '../i18n/index.ts';
+import { ChipMenus } from './ChipMenus.tsx';
+import { routeMarkdownPasteToServer } from './paste.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
 import { TabStrip, useTabs } from './TabStrip.tsx';
 import { MAIN_TAB, tabFragmentName } from './tabs.ts';
@@ -21,6 +23,8 @@ export type LiveEditorProps = {
   theme: 'light' | 'dark';
   /** Shown on this viewer's cursor to everyone else. */
   userName: string;
+  /** Opens a version from before the document went live in the version viewer. */
+  onOpenLegacyVersion?: (versionNumber: number) => void;
 };
 
 /**
@@ -58,7 +62,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   );
 }
 
-function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
+function TabEditor({ live, tabId, documentId, readOnly, theme, userName, onOpenLegacyVersion }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const editor = useCreateBlockNote(
@@ -66,13 +70,13 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveE
       schema: primerSchema,
       // Until comments ship, the comment mark must still be known, or
       // y-prosemirror would delete commented text.
-      extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId) })],
+      extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId, onOpenLegacyVersion) })],
       collaboration: {
         provider: { awareness: live.provider.awareness ?? undefined },
         fragment: live.doc.getXmlFragment(tabFragmentName(tabId)),
         user: { name: userName, color: colorFor(userName) },
       },
-      dictionary: dictionaryFor(typeof navigator === 'undefined' ? 'en' : navigator.language),
+      dictionary: editorDictionary(),
       uploadFile: async (file: File) => {
         const form = new FormData();
         form.append('file', file);
@@ -87,6 +91,7 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveE
     }),
     [live, tabId],
   );
+  useEffect(() => routeMarkdownPasteToServer(editor), [editor]);
 
   return (
     <>
@@ -97,10 +102,11 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveE
           aria-pressed={historyOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          History
+          {t('liveEditor.history')}
         </button>
       </div>
-      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} className="flex min-h-0 flex-1">
+      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} slashMenu={false} className="flex min-h-0 flex-1">
+        <ChipMenus editor={editor} />
         <div className="min-w-0 flex-1 overflow-y-auto py-4">
           <BlockNoteViewEditor />
         </div>
@@ -120,9 +126,4 @@ function colorFor(name: string): string {
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return COLORS[Math.abs(hash) % COLORS.length]!;
-}
-
-function dictionaryFor(language: string) {
-  const all = locales as unknown as Record<string, typeof locales.en>;
-  return all[language.toLowerCase().split('-')[0] ?? 'en'] ?? locales.en;
 }

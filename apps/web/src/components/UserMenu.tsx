@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMe } from '../queries/me.ts';
@@ -49,7 +50,7 @@ export function UserMenu() {
             onClick={() => setOpen(false)}
             className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
           >
-            API tokens
+            {t('userMenu.apiTokens')}
           </Link>
           <button
             type="button"
@@ -57,7 +58,7 @@ export function UserMenu() {
             onClick={signOut}
             className="block w-full px-3 py-1.5 text-left text-xs text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
           >
-            Sign out
+            {t('userMenu.signOut')}
           </button>
         </div>
       )}
