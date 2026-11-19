@@ -110,7 +110,6 @@ const appOrigin = new URL(process.env.AUTH_BASE_URL ?? 'http://localhost:5173').
 const hub = createHub({ resolver: userResolver, appOrigin });
 
 const app = createApp({
-  hub,
   storage,
   notifier,
   userResolver,

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import type { ApiTokenScope } from '@polygonlabs/primer-api-types';
@@ -11,6 +12,8 @@ export type LiveAuth = {
   user: AuthUser;
   authMethod: 'bearer' | 'cookie' | 'mock';
   scopes?: readonly ApiTokenScope[];
+  /** sha-256 hex of the bearer token, so revoking it finds this connection. */
+  credentialHash?: string;
 };
 
 /** The per-connection Hocuspocus context: `auth` from the upgrade, `user`
@@ -33,8 +36,14 @@ export async function resolveFromHeaders(resolver: UserResolver, headers: Header
   const user = await resolver(shim);
   if (!user) return null;
   const authMethod = (vars.get('authMethod') as LiveAuth['authMethod'] | undefined) ?? 'cookie';
+  const auth: LiveAuth = { user, authMethod };
   const scopes = vars.get('tokenScopes') as readonly ApiTokenScope[] | undefined;
-  return scopes ? { user, authMethod, scopes } : { user, authMethod };
+  if (scopes) auth.scopes = scopes;
+  const bearer = headers.get('authorization');
+  if (authMethod === 'bearer' && bearer?.startsWith('Bearer ')) {
+    auth.credentialHash = createHash('sha256').update(bearer.slice('Bearer '.length).trim(), 'utf8').digest('hex');
+  }
+  return auth;
 }
 
 /**

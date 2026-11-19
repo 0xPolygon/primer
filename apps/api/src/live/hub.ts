@@ -5,22 +5,26 @@ import type { Connection, Document, Hocuspocus, WebSocketLike } from '@hocuspocu
 import type { UserResolver } from '../auth/resolver.ts';
 import { logger } from '../logger.ts';
 import { liveAccess, resolveFromHeaders, type LiveAuth, type LiveContext } from './auth.ts';
-import { documentIdOf, liveDocName, liveInstance, onPersistenceFailure } from './instance.ts';
+import { documentIdOf, liveInstance, onPersistenceFailure } from './instance.ts';
+import { onLiveRecheck, type LiveMatch } from './revoke.ts';
 
 /** The WebSocket path live documents sync on. */
 export const COLLAB_PATH = '/collab';
 /** Close codes the editor reacts to. */
 export const CLOSE_FORBIDDEN = 4403;
 export const CLOSE_SAVE_FAILED = 4500;
-const RECHECK_MS = 60_000;
+/** The backstop recheck: bearer connections every tick, others every sixth. */
+const TICK_MS = 10_000;
+const TICKS_PER_SESSION_RECHECK = 6;
 
 export type Hub = {
   hocuspocus: Hocuspocus;
   /** For the API server's `upgrade` event; anything but /collab is refused. */
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void;
-  /** Re-evaluates every connection to the document now: closes those that
-   *  lost read access, makes read-only those that lost write. */
-  recheckDocument(documentId: string): Promise<void>;
+  /** Re-evaluates the matching connections now: closes those that lost read
+   *  access (or whose credentials no longer resolve), makes read-only those
+   *  that lost write. Handlers reach it through `recheckLive`. */
+  recheck(match: LiveMatch): Promise<void>;
   close(): void;
 };
 
@@ -33,8 +37,8 @@ export type Hub = {
  * own Origin, so another site can't open a socket with a visitor's cookie.
  * Per document, `onAuthenticate` (live/instance.ts) admits readers read-only
  * and owners and editors read-write; bearer connections are always read-only.
- * Access is rechecked after every successful change to a document's sharing
- * (app.ts), and on a timer.
+ * Every handler that removes credentials or access rechecks the affected
+ * connections at once (`recheckLive`); a timer is the backstop.
  */
 export function createHub(deps: { resolver: UserResolver; appOrigin: string }): Hub {
   const hocuspocus = liveInstance();
@@ -97,18 +101,37 @@ export function createHub(deps: { resolver: UserResolver; appOrigin: string }): 
     else connection.readOnly = access === 'read';
   };
 
-  const recheckDocument = async (documentId: string) => {
-    const document = hocuspocus.documents.get(liveDocName(documentId));
-    if (!document) return;
-    await Promise.all(document.getConnections().map((connection) => recheckConnection(connection, documentId)));
+  const connections = (): { connection: Connection; documentId: string }[] =>
+    [...hocuspocus.documents.entries()].flatMap(([name, document]) => {
+      const documentId = documentIdOf(name);
+      return documentId ? document.getConnections().map((connection) => ({ connection, documentId })) : [];
+    });
+
+  const matches = (connection: Connection, documentId: string, match: LiveMatch): boolean => {
+    const auth = (connection.context as LiveContext).auth;
+    if ('documentId' in match) return match.documentId === documentId;
+    if ('userId' in match) return auth?.user.id === match.userId;
+    return auth?.credentialHash === match.credentialHash;
   };
 
+  const recheck = async (match: LiveMatch) => {
+    await Promise.all(
+      connections()
+        .filter(({ connection, documentId }) => matches(connection, documentId, match))
+        .map(({ connection, documentId }) => recheckConnection(connection, documentId)),
+    );
+  };
+  const stopRecheck = onLiveRecheck(recheck);
+
+  let tick = 0;
   const timer = setInterval(() => {
-    for (const name of hocuspocus.documents.keys()) {
-      const documentId = documentIdOf(name);
-      if (documentId) void recheckDocument(documentId);
+    const everyone = ++tick % TICKS_PER_SESSION_RECHECK === 0;
+    for (const { connection, documentId } of connections()) {
+      if (everyone || (connection.context as LiveContext).auth?.authMethod === 'bearer') {
+        void recheckConnection(connection, documentId);
+      }
     }
-  }, RECHECK_MS);
+  }, TICK_MS);
   timer.unref();
 
   // A document whose update couldn't be stored is dropped from memory so it
@@ -116,7 +139,9 @@ export function createHub(deps: { resolver: UserResolver; appOrigin: string }): 
   const stopFailures = onPersistenceFailure((_documentId, doc) => {
     const document = doc as Document;
     for (const connection of document.getConnections()) closeConnection(connection, CLOSE_SAVE_FAILED, 'save_failed');
-    void hocuspocus.unloadDocument(document);
+    hocuspocus.unloadDocument(document).catch((err: unknown) => {
+      logger.error({ error: String(err) }, 'live: unloading a document after a save failure failed');
+    });
   });
 
   return {
@@ -129,10 +154,11 @@ export function createHub(deps: { resolver: UserResolver; appOrigin: string }): 
       }
       ws.handleUpgrade(req, socket, head);
     },
-    recheckDocument,
+    recheck,
     close() {
       clearInterval(timer);
       stopFailures();
+      stopRecheck();
     },
   };
 }

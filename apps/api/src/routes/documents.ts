@@ -13,6 +13,7 @@ import {
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
 import { publishDocument } from '../lib/publish.ts';
+import { recheckLive } from '../live/revoke.ts';
 import { refusalResponse } from './upload.ts';
 
 export function registerDocumentRoutes(
@@ -194,6 +195,7 @@ export function registerDocumentRoutes(
     }
 
     await db.update(documents).set(updates).where(eq(documents.id, docId));
+    if (updates.visibility !== undefined) await recheckLive({ documentId: docId });
 
     const [updated] = await db
       .select({
@@ -248,6 +250,7 @@ export function registerDocumentRoutes(
     } else {
       deletedAt = new Date();
       await db.update(documents).set({ deletedAt }).where(eq(documents.id, docId));
+      await recheckLive({ documentId: docId });
     }
 
     return c.json({ id: docId, deletedAt: deletedAt.toISOString() }, 200);

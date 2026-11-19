@@ -14,7 +14,8 @@ import { db } from '../db/client.ts';
 import { apiTokens, documentCollaborators, users } from '../db/schema.ts';
 import { createApp } from '../app.ts';
 import { makeBearerResolver, composeResolvers } from '../auth/bearer.ts';
-import { mockMultiResolver } from '../auth/resolver.ts';
+import { makeOktaResolver, mockMultiResolver, type UserResolver } from '../auth/resolver.ts';
+import { createSession } from '../auth/session.ts';
 import { generateToken } from '../auth/tokens.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
@@ -27,13 +28,21 @@ const APP_ORIGIN = 'http://app.test';
 const OWNER = 'mock-user-1';
 const OTHER = 'collab-user';
 
+// Bearer tokens, real sessions, and the test persona header (only when sent,
+// so a logged-out session doesn't fall back to a default persona).
+const resolver: UserResolver = composeResolvers(
+  makeBearerResolver(),
+  makeOktaResolver({ cookieName: 'primer_sid' }),
+  async (c) => (c.req.header('x-mock-user-id') ? mockMultiResolver(c) : null),
+);
+
 let server: Server;
 let hub: Hub;
 let url: string;
 const open: HocuspocusProvider[] = [];
 
 beforeAll(async () => {
-  hub = createHub({ resolver: composeResolvers(makeBearerResolver(), mockMultiResolver), appOrigin: APP_ORIGIN });
+  hub = createHub({ resolver, appOrigin: APP_ORIGIN });
   server = createServer();
   server.on('upgrade', hub.handleUpgrade);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -108,6 +117,14 @@ function upgradeAccepted(headers: Record<string, string>): Promise<boolean> {
   });
 }
 
+async function makeApp() {
+  return createApp({
+    storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-hub-'))),
+    notifier: new NoopNotifier(),
+    userResolver: resolver,
+  });
+}
+
 async function addCollaborator(documentId: string, userId: string, role: 'commenter' | 'editor') {
   await db.insert(users).values({ id: userId, email: `${userId}@example.com`, displayName: userId }).onConflictDoNothing();
   await db.insert(documentCollaborators).values({ id: uuidv7(), documentId, userId, role, grantedBy: OWNER });
@@ -167,12 +184,7 @@ describe('live hub', () => {
     client.doc.getMap('meta').set('before', 1);
     await until(async () => (await storedBy(id, OTHER)) === 1);
 
-    const app = createApp({
-      storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-hub-'))),
-      notifier: new NoopNotifier(),
-      userResolver: mockMultiResolver,
-      hub,
-    });
+    const app = await makeApp();
     const res = await app.request(`/api/documents/${id}/collaborators/${OTHER}`, { method: 'DELETE', headers: asUser(OWNER) });
     expect(res.status).toBeLessThan(300);
 
@@ -203,6 +215,47 @@ describe('live hub', () => {
       await db.execute(sql`DROP TRIGGER primer_test_refuse_update ON doc_updates`);
       await db.execute(sql`DROP FUNCTION primer_test_refuse_update()`);
     }
+  });
+
+  it('refuses strangers and legacy documents per document', async () => {
+    const privateDoc = await createLiveDoc({ uploaderId: OWNER, visibility: 'private' });
+    await db.insert(users).values({ id: OTHER, email: 'o@example.com', displayName: OTHER }).onConflictDoNothing();
+    expect((await connect(privateDoc, asPerson(OTHER))).outcome).toBe('denied');
+
+    const legacyDoc = await createLiveDoc({ uploaderId: OWNER });
+    await db.execute(sql`UPDATE documents SET format = NULL WHERE id = ${legacyDoc}`);
+    expect((await connect(legacyDoc, asPerson(OWNER))).outcome).toBe('denied');
+  });
+
+  it('revoking a token closes its open connection immediately', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const tokenId = uuidv7();
+    const { token, tokenHash, tokenPrefix } = generateToken();
+    await db.insert(apiTokens).values({ id: tokenId, userId: OWNER, name: 'test', tokenHash, tokenPrefix });
+    const client = await connect(id, { authorization: `Bearer ${token}` });
+    const browser = await connect(id, asPerson(OWNER));
+    expect(client.outcome).toBe('synced');
+
+    const res = await (await makeApp()).request(`/api/tokens/${tokenId}`, { method: 'DELETE', headers: asUser(OWNER) });
+    expect(res.status).toBe(200);
+
+    expect(await client.closed).toBe(CLOSE_FORBIDDEN);
+    // The same person's other connection is unaffected.
+    browser.doc.getMap('meta').set('still', 'here');
+    await until(async () => (await storedBy(id, OWNER)) > 0);
+  });
+
+  it("logging out closes that session's connection", async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const { id: sid } = await createSession({ userId: OWNER, userAgent: 'test' });
+    const cookie = `primer_sid=${sid}`;
+    const client = await connect(id, { cookie, origin: APP_ORIGIN });
+    expect(client.outcome).toBe('synced');
+
+    const res = await (await makeApp()).request('/auth/logout', { method: 'POST', headers: { cookie, 'x-primer-csrf': '1' } });
+    expect(res.status).toBe(204);
+
+    expect(await client.closed).toBe(CLOSE_FORBIDDEN);
   });
 
   it.todo('proxy-auth headers authenticate (with #141, through makeProxyResolver)');
