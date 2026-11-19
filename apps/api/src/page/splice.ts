@@ -12,13 +12,16 @@ export function escapeText(text: string): string {
     .replace(/\n/g, '<br>');
 }
 
-/** Replaces each span (non-overlapping) with its html, highest offset first. */
+/** Replaces each span (non-overlapping) with its html, in one pass. */
 export function spliceSpans(source: string, replacements: { span: [number, number]; html: string }[]): string {
-  let out = source;
-  for (const r of [...replacements].sort((a, b) => b.span[0] - a.span[0])) {
-    out = out.slice(0, r.span[0]) + r.html + out.slice(r.span[1]);
+  const parts: string[] = [];
+  let at = 0;
+  for (const r of [...replacements].sort((a, b) => a.span[0] - b.span[0])) {
+    parts.push(source.slice(at, r.span[0]), r.html);
+    at = r.span[1];
   }
-  return out;
+  parts.push(source.slice(at));
+  return parts.join('');
 }
 
 /** `texts` maps pid to current text; pids it lacks keep their bytes. */

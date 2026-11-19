@@ -57,3 +57,17 @@ describe('matchPids', () => {
     expect(result).toEqual([{ pid: 'p1', uncertain: true }]);
   });
 });
+
+describe('matchPids on hostile pages', () => {
+  it('a 20,000-element page of identical labels finishes within its budget', () => {
+    const page = `<body>${'<div><button>Learn more</button></div>'.repeat(20_000)}</body>`;
+    const prev = stampPage(page).pids;
+    const started = Date.now();
+    const next = stampPage(page, prev);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(next.pids).toHaveLength(20_000);
+    expect(new Set(next.pids.map((p) => p.pid)).size).toBe(20_000);
+    // Every match there is uncertain (repeated labels); the rest are fresh.
+    expect(next.uncertain.length).toBeLessThanOrEqual(3000);
+  });
+});

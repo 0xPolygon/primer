@@ -7,6 +7,7 @@
 // and spliced back at the element's source span (splice.ts).
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { matchPids } from './match.ts';
+import { spliceSpans } from './splice.ts';
 
 type Node = DefaultTreeAdapterMap['node'];
 type Element = DefaultTreeAdapterMap['element'];
@@ -146,7 +147,7 @@ export function stampPage(
   }
   const matches = matchPids(previous, elements);
 
-  // Edits as [offset, deleteLength, insert], applied from the highest offset down.
+  // Edits as [offset, deleteLength, insert], applied in one pass.
   const edits: [number, number, string][] = [];
   elements.forEach((e, i) => {
     const pid = matches[i].pid;
@@ -168,9 +169,10 @@ export function stampPage(
     while (start > 0 && /\s/.test(original[start - 1])) start--;
     edits.push([start, attr.endOffset - start, '']);
   }
-  edits.sort((a, b) => b[0] - a[0]);
-  let stamped = original;
-  for (const [at, len, insert] of edits) stamped = stamped.slice(0, at) + insert + stamped.slice(at + len);
+  const stamped = spliceSpans(
+    original,
+    edits.map(([at, len, html]) => ({ span: [at, at + len] as [number, number], html })),
+  );
 
   const pids = readPids(stamped);
   const uncertain = elements.flatMap((_, i) => (matches[i].uncertain ? [matches[i].pid] : []));

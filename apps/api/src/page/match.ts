@@ -21,9 +21,15 @@ const STAGES = [
   { samePath: false, min: 0.8 },
 ];
 const RUNNER_UP = 0.1;
-/** Character pairs the similarity stages may compare in one republish (the
- *  page is untrusted input); past it the remaining elements get fresh pids. */
+/** Work the similarity stages may do in one republish (the page is untrusted
+ *  input): character pairs compared, and at least 1 for every pair examined,
+ *  rejected or not. Once spent, matching stops and the remaining elements
+ *  get fresh pids. */
 export const MATCH_BUDGET = 20_000_000;
+/** Elements per side the similarity stages consider; later ones get fresh pids. */
+export const MAX_MATCHED = 3000;
+/** Candidate pairs kept per stage. */
+export const MAX_PAIRS = 100_000;
 
 /** The pid of each element of `next` (same order). */
 export function matchPids(previous: PidInfo[], next: PageElement[], budget = MATCH_BUDGET): PidMatch[] {
@@ -50,23 +56,39 @@ export function matchPids(previous: PidInfo[], next: PageElement[], budget = MAT
   const repeatedNext = repeats(next);
   const repeatedPrev = repeats(previous);
 
+  // Candidates by tag and by tag + path, from the first MAX_MATCHED previous elements.
+  const byTag = new Map<string, number[]>();
+  const byPath = new Map<string, number[]>();
+  previous.slice(0, MAX_MATCHED).forEach((p, j) => {
+    const key = `${p.tag}\u0000${p.path}`;
+    if (!byTag.has(p.tag)) byTag.set(p.tag, []);
+    if (!byPath.has(key)) byPath.set(key, []);
+    byTag.get(p.tag)!.push(j);
+    byPath.get(key)!.push(j);
+  });
+
   // 2 and 3. Similarity stages.
   for (const stage of STAGES) {
     const pairs: { i: number; j: number; s: number }[] = [];
-    next.forEach((e, i) => {
-      if (result[i]) return;
-      previous.forEach((p, j) => {
-        if (used.has(p.pid) || p.tag !== e.tag || (stage.samePath && p.path !== e.path)) return;
+    examine: for (let i = 0; i < Math.min(next.length, MAX_MATCHED); i++) {
+      const e = next[i]!;
+      if (result[i]) continue;
+      const candidates = (stage.samePath ? byPath.get(`${e.tag}\u0000${e.path}`) : byTag.get(e.tag)) ?? [];
+      for (const j of candidates) {
+        if (spent >= budget || pairs.length >= MAX_PAIRS) break examine;
+        const p = previous[j]!;
+        spent += 1;
+        if (used.has(p.pid)) continue;
         const [x, y] = [p.text.length, e.text.length];
         // Edit distance is at least the length difference: skip hopeless pairs.
-        if (Math.min(x, y) < stage.min * Math.max(x, y)) return;
+        if (Math.min(x, y) < stage.min * Math.max(x, y)) continue;
         const cost = similarityCost(p.text, e.text, stage.min);
-        if (spent + cost > budget) return;
+        if (spent + cost > budget) break examine;
         spent += cost;
         const s = similarity(p.text, e.text, stage.min);
         if (s >= stage.min) pairs.push({ i, j, s });
-      });
-    });
+      }
+    }
     // The two best scores of each element on either side, for the runner-up test.
     const top = new Map<string, [number, number]>();
     const note = (key: string, s: number) => {
