@@ -2,36 +2,11 @@ import type { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import { db } from '../db/client.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import {
   canRead, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
-
-export const ARTIFACT_CSP = [
-  "default-src 'none'",
-  // blob: required for self-bundled artifacts that decode JS/CSS/fonts from
-  // an embedded base64 manifest into blob: URLs at runtime. Blob URLs are
-  // origin-bound to the creator (the sandboxed opaque-origin iframe) so this
-  // does not expand the exfil surface — connect-src 'none' still blocks all
-  // outbound network from the artifact.
-  // 'unsafe-inline' is required so uploaded artifacts can ship inline
-  // <script> blocks and on* event handlers — that's the only way most
-  // interactive dashboards work. The threat surface this opens is bounded
-  // by ArtifactIframe's sandbox (opaque origin, no `allow-same-origin`) plus
-  // `connect-src 'none'` and `form-action 'none'` below: inline JS runs,
-  // but cannot reach Primer cookies/storage/parent DOM, cannot make network
-  // requests, and cannot submit forms.
-  "script-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
-  "style-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net fonts.googleapis.com",
-  "connect-src 'none'",
-  "img-src data: blob: 'self' https:",
-  "font-src 'self' blob: data: fonts.gstatic.com",
-  "form-action 'none'",
-  "frame-src 'none'",
-  "frame-ancestors 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-].join('; ');
 
 export function registerVersionContentRoute(
   app: Hono<{ Variables: AppVariables }>,
@@ -75,7 +50,7 @@ export function registerVersionContentRoute(
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': ARTIFACT_CSP,
+        'content-security-policy': artifactCsp('standard'),
         'x-frame-options': 'SAMEORIGIN',
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer',
