@@ -842,7 +842,7 @@ describe('collaborator tools', () => {
   it('primer_add_collaborator resolves an email, then adds the user at the role', async () => {
     const { deps, client } = buildDeps();
     const row = { userId: 'u-2', displayName: 'Two', role: 'editor', grantedBy: 'agent', createdAt: 't' };
-    client!.lookupUser.mockResolvedValue({ id: 'u-2' });
+    client!.lookupUser.mockResolvedValue({ id: 'u-2', email: 'two@example.com', displayName: 'Two' });
     client!.addCollaborator.mockResolvedValue(row);
     const result = await buildToolHandlers(deps).primer_add_collaborator({
       documentId: 'doc-1',
@@ -879,7 +879,8 @@ describe('collaborator tools', () => {
     const h = buildToolHandlers(deps);
     client!.listCollaborators.mockResolvedValue({ collaborators: [] });
     expect(parseSuccessPayload(await h.primer_list_collaborators({ documentId: 'd' }))).toEqual({ collaborators: [] });
-    client!.lookupUser.mockResolvedValue({ id: 'u-9' });
-    expect(parseSuccessPayload(await h.primer_lookup_user({ email: 'a@b.c' }))).toEqual({ id: 'u-9' });
+    const found = { id: 'u-9', email: 'a@b.c', displayName: 'Nine' };
+    client!.lookupUser.mockResolvedValue(found);
+    expect(parseSuccessPayload(await h.primer_lookup_user({ email: 'a@b.c' }))).toEqual(found);
   });
 });

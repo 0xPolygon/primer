@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
 import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { VersioningSidebar } from '@blocknote/react/versioning';
@@ -204,46 +204,21 @@ function TabEditor({
   return (
     <>
       <div className="flex items-center justify-end gap-2 px-4 pt-2">
-        <button
-          type="button"
-          onClick={() => setCommentsOpen((open) => !open)}
-          aria-pressed={commentsOpen}
-          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
+        <ToolbarToggle pressed={commentsOpen} onToggle={() => setCommentsOpen((open) => !open)}>
           {t('liveEditor.comments')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setSuggestionsOpen((open) => !open)}
-          aria-pressed={suggestionsOpen}
-          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
+        </ToolbarToggle>
+        <ToolbarToggle pressed={suggestionsOpen} onToggle={() => setSuggestionsOpen((open) => !open)}>
           {suggestionCount > 0 ? t('liveEditor.suggestionsCount', { count: suggestionCount }) : t('liveEditor.suggestions')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setDecisionsOpen((open) => !open)}
-          aria-pressed={decisionsOpen}
-          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
+        </ToolbarToggle>
+        <ToolbarToggle pressed={decisionsOpen} onToggle={() => setDecisionsOpen((open) => !open)}>
           {t('liveEditor.decisions')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setChangesOn((on) => !on)}
-          aria-pressed={changesOn}
-          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
+        </ToolbarToggle>
+        <ToolbarToggle pressed={changesOn} onToggle={() => setChangesOn((on) => !on)}>
           {t('liveEditor.changes')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setHistoryOpen((open) => !open)}
-          aria-pressed={historyOpen}
-          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
+        </ToolbarToggle>
+        <ToolbarToggle pressed={historyOpen} onToggle={() => setHistoryOpen((open) => !open)}>
           {t('liveEditor.history')}
-        </button>
+        </ToolbarToggle>
       </div>
       <ChangeHighlights tone="catchup" blockIds={catchUp.filter((b) => b.tabId === tabId).map((b) => b.blockId)} />
       {sinceCheckpoint && <ChangeHighlights tone="checkpoint" blockIds={sinceCheckpoint} />}
@@ -293,6 +268,20 @@ function TabEditor({
       </BlockNoteView>
       {held && <DeleteCommentedDialog held={held} onClose={() => setHeld(null)} />}
     </>
+  );
+}
+
+/** One of the toolbar's panel toggles. */
+function ToolbarToggle({ pressed, onToggle, children }: { pressed: boolean; onToggle: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={pressed}
+      className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -376,3 +365,4 @@ function colorFor(name: string): string {
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return COLORS[Math.abs(hash) % COLORS.length]!;
 }
+

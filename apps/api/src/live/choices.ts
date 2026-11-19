@@ -42,6 +42,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
+import { fenceStrings } from '../lib/untrusted.ts';
 import { recordsApi } from '../records/store.ts';
 import {
   checkPlacement,
@@ -64,7 +65,8 @@ type Option = { id: string; label: string };
 
 function optionsOf(block: PrimerBlock): Option[] {
   return (block.children as unknown as PrimerBlockLike[])
-    .filter((c) => c.type === 'choiceOption')
+    // Ids come from the client-writable document; one that isn't a block id is no option.
+    .filter((c) => c.type === 'choiceOption' && validBlockId(c.id))
     .map((c) => ({ id: c.id, label: optionLabel(c as never) }));
 }
 
@@ -152,6 +154,47 @@ async function decisionFor(documentId: string, choiceId: string, choice: { props
   return standing((await decisionsOf(documentId, [choiceId])).get(choiceId), choice.props, choice.options);
 }
 
+/** The field names of the register's DTOs, and the fields whose string Primer
+ *  built or validated itself (a field is plain only if every producer
+ *  validates it: option and block ids are checked as block ids where they are
+ *  read from the document, tab ids as tab ids, `url` and `docId` in
+ *  `cleanEvidence`, the rest are built here or by the database). Everything else an agent reads from a decision
+ *  (keys included) is fenced. */
+const DECISION_FIELDS = {
+  keys: new Set([
+    'target', 'tabId', 'blockId', 'question', 'options', 'id', 'label', 'votes', 'status', 'decided', 'optionId',
+    'changedSinceDecided', 'rationale', 'evidence', 'url', 'docId', 'openQuestions', 'decidedBy', 'decidedByName',
+    'decidedAt', 'proposed', 'by', 'note', 'untrusted',
+  ]),
+  plain: new Set(['tabId', 'blockId', 'id', 'optionId', 'status', 'decidedBy', 'decidedAt', 'url', 'docId']),
+};
+
+/** A link only when it is a well-formed http(s) URL. */
+function httpUrl(raw: unknown): string | undefined {
+  try {
+    const url = new URL(String(raw));
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Evidence links stay only when they are a well-formed http(s) URL (and a
+ *  document id only when it is one); the rest of the entry is dropped. */
+function cleanEvidence(d: ChoiceDecisionDTO): ChoiceDecisionDTO {
+  const evidence = d.evidence.map(({ label, url, docId }) => ({
+    label,
+    ...(httpUrl(url) ? { url: httpUrl(url) } : {}),
+    ...(typeof docId === 'string' && /^[0-9a-f-]{36}$/i.test(docId) ? { docId } : {}),
+  }));
+  return { ...d, evidence };
+}
+
+/** What an agent reads: every text field and key fenced, the picker's name too. */
+function forAgent<T>(dto: T): T {
+  return fenceStrings(dto, 'content', DECISION_FIELDS);
+}
+
 export async function choiceTally(actor: AuthUser, documentId: string, choiceId: string): Promise<Result<ChoiceTallyResponse>> {
   if (!validBlockId(choiceId)) return refuse('not_found', 'Choice not found.');
   const access = await liveDocAccess(documentId, actor);
@@ -159,7 +202,8 @@ export async function choiceTally(actor: AuthUser, documentId: string, choiceId:
   const choice = await readChoice(documentId, choiceId);
   if (!choice) return refuse('not_found', 'Choice not found.');
   const tally = await countVotes(actor, documentId, choiceId, choice.options);
-  return { ok: true, value: { ...tally, decision: await decisionFor(documentId, choiceId, choice) } };
+  const decision = await decisionFor(documentId, choiceId, choice);
+  return { ok: true, value: { ...tally, decision: decision && actor.kind === 'agent' ? forAgent(cleanEvidence(decision)) : decision } };
 }
 
 /** Records the caller's vote (`optionId: null` withdraws it). People only. */
@@ -348,7 +392,7 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
   if (!access.ok) return access;
   const choices = await withLiveDocument(documentId, (doc) =>
     [...liveBlocks(doc)]
-      .filter((e) => e.block.type === 'choice' && validBlockId(e.block.id))
+      .filter((e) => e.block.type === 'choice' && validBlockId(e.block.id) && /^[\w-]{1,64}$/.test(e.tabId))
       .map((e) => ({ tabId: e.tabId, id: e.block.id, props: e.block.props as Record<string, string>, options: optionsOf(e.block) })),
   );
   const recorded = await decisionsOf(documentId, choices.map((c) => c.id));
@@ -367,8 +411,7 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
         ? { optionId: proposed.id, label: proposed.label, by: c.props.proposedBy ?? '', note: c.props.proposalNote ?? '' }
         : null,
     };
-    if (actor.kind === 'agent') entry.untrusted = true;
-    decisions.push(entry);
+    decisions.push(actor.kind === 'agent' ? forAgent({ ...entry, decided: entry.decided && cleanEvidence(entry.decided), untrusted: true as const }) : entry);
   }
   decisions.sort((a, b) => (a.status === b.status ? 0 : a.status === 'decided' ? -1 : 1));
   return { ok: true, value: { decisions } };

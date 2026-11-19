@@ -24,6 +24,13 @@ Anything else degrades: an unknown tag becomes a paragraph. When what was stored
 
 `update` keeps what your input can't express: text and background colours, underline (from Markdown), comments people placed on the text, the block's props and its children. Only the characters you changed are replaced. If you change line breaks, the block's type, or a table, the block's content is replaced whole and the `note` says so.
 
+## Choices and tasks
+
+Lay out a choice or a task with `primer_apply_ops` and `{ json }` input, like any other block; there are no separate tools.
+
+- **A choice** (people vote, one person with edit rights decides): `{ json: { type: "choice", props: { question }, children: [{ type: "choiceOption", children: [{ type: "paragraph", content: "First option" }] }, …] } }` with 2–20 options. Recommend an option with `primer_propose_pick`; never write `decisionId` or `decided…` props (refused `invalid_op`). `primer_list_decisions` reads the register.
+- **A task** (a tracked checklist item): `{ json: { type: "task", props: { assigneeId, due: "YYYY-MM-DD", status: "open" }, content: "Title" } }`. Report on tasks assigned to you with `update` and `{ json: { type: "task", props: { progress: "one short line", status: "done" }, content: "Title" } }`. `primer_list_tasks` lists them.
+
 ## Citing sources
 
 Link a claim to its evidence with a `citation` inline chip in `{ json }` input, right after the claim:

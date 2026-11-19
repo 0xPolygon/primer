@@ -7,6 +7,7 @@ import {
   type AddCollaboratorRequest,
   type Collaborator,
   type CollaboratorsListResponse,
+  type RefusalCode,
   type UpdateCollaboratorRequest,
 } from '@polygonlabs/primer-api-types';
 import { documents, documentCollaborators, users } from '../db/schema.ts';
@@ -31,7 +32,7 @@ type EffectiveRole = Awaited<ReturnType<typeof loadEffectiveRole>>;
 export interface CollaboratorFailure {
   ok: false;
   status: 400 | 403 | 404 | 409;
-  error: string;
+  error: RefusalCode;
   message?: string;
   fix: string;
 }
@@ -39,7 +40,7 @@ export type CollaboratorResult<T> = { ok: true; value: T } | CollaboratorFailure
 
 function fail(
   status: CollaboratorFailure['status'],
-  error: string,
+  error: RefusalCode,
   fix: string,
   message?: string,
 ): CollaboratorFailure {

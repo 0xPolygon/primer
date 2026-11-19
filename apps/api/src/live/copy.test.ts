@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
@@ -10,8 +10,15 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import type { Storage } from '../storage/types.ts';
 import { proposeBranch } from './branch.ts';
 import { copyDocument } from './copy.ts';
-import { commentedThreadIds, fragmentDoc } from './marks.ts';
+import { commentedThreadIds, fragmentDoc, presentThreadIds } from './marks.ts';
 import { comment, createLiveDoc, makeAgent, markdownOf, ops, paragraph, seedBlocks, versions, withLiveDoc } from './live.testlib.ts';
+import { createLiveThread } from '../lib/liveThreads.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
+import { publishDocument } from '../lib/publish.ts';
+import { widgets } from '../db/schema.ts';
+import { widgetAnchorProblem } from '../widgets/anchors.ts';
+import { draftWidget, publishWidget } from '../widgets/store.ts';
+import { pageBlocks } from './reach.ts';
 import { decideChangeSet, decideSuggestion, listSuggestions } from './suggest.ts';
 
 const owner: AuthUser = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User', kind: 'person', viaUserId: null };
@@ -192,6 +199,150 @@ describe('forks', () => {
       // A checkpoint to share and compare from.
       const [v] = (await db.execute(sql`SELECT version_number AS n FROM versions WHERE document_id = ${fork}`)) as unknown as { n: number }[];
       expect(v!.n).toBe(1);
+    });
+  });
+});
+
+const CHART = `export default function render({ rows, tokens }) {
+  return (
+    <svg viewBox="0 0 300 120">
+      <text data-text-id="title" x="10" y="20" fill={tokens.fg}>Signups</text>
+      <g data-anchor="bars">{rows.map((r, i) => <rect data-row={r.id} data-col="signups" x={10 + i * 40} y={110 - r.signups / 5} width="30" height={r.signups / 5} fill={tokens.accent1} />)}</g>
+    </svg>
+  );
+}`;
+
+/** A document with a published chart and three comments on it: on a label's words, on a part and on a data point. */
+async function withWidget() {
+  const doc = await createLiveDoc();
+  await seedBlocks(doc, [paragraph('intro', 'Intro')]);
+  const draft = await draftWidget(owner, doc, { source: CHART, rows: [{ id: 'w1', signups: 240 }, { id: 'w2', signups: 410 }], afterBlockId: 'intro' });
+  if (!draft.ok) throw new Error(draft.refusal.message);
+  const published = await publishWidget(owner, draft.value.widgetId, draft.value.previewHash);
+  if (!published.ok) throw new Error(published.refusal.message);
+  const { blockId, widgetId } = draft.value;
+  const target = { tabId: 'main', blockId };
+  const thread = async (anchor: Record<string, unknown>) => {
+    const out = await createLiveThread(new NoopNotifier(), owner, doc, { anchor, body: 'Why?' });
+    if (!out.ok) throw new Error(out.refusal.message);
+    return out.value.id;
+  };
+  const label = await thread({ type: 'prose', target: { ...target, textId: 'title' }, quote: 'Signups' });
+  const part = await thread({ type: 'widget-part', target, anchor: 'bars' });
+  const point = await thread({ type: 'data-point', target, row: 'w2', column: 'signups' });
+  return { doc, blockId, widgetId, label, part, point, hash: published.value.publishedHash };
+}
+
+const widgetRows = (documentId: string) => db.select().from(widgets).where(eq(widgets.documentId, documentId));
+
+/** The widget block's props in a document. */
+const widgetProps = (documentId: string) =>
+  withLiveDoc(documentId, (doc) => {
+    const props = fragmentDoc(doc.getXmlFragment('document-store'));
+    let found: Record<string, unknown> | null = null;
+    props.descendants((node) => {
+      if (node.type.name === 'widget') found = node.attrs;
+      return true;
+    });
+    return found as unknown as { widgetId: string; hash: string; textIds: string };
+  });
+
+describe('widgets in copies (C12)', () => {
+  it('a branch copies the widget under a new id and re-creates its label, part and data-point threads', async () => {
+    await withStorage(async (storage) => {
+      const src = await withWidget();
+      const out = await copyDocument(storage, owner, src.doc, 'branch');
+      if (!out.ok) throw new Error(out.refusal.message);
+      const branch = out.documentId;
+
+      const [row] = await widgetRows(branch);
+      expect(row).toMatchObject({ blockId: src.blockId, documentId: branch });
+      expect(row!.id).not.toBe(src.widgetId);
+      expect(row!.rows).toEqual([{ id: 'w1', signups: 240 }, { id: 'w2', signups: 410 }]);
+      expect(row!.publishedSvgLight).toContain('data-anchor="bars"');
+      // The source keeps its own row and the block now names the copy, with the copy's hash.
+      expect((await widgetRows(src.doc)).map((r) => r.id)).toEqual([src.widgetId]);
+      expect(await widgetProps(branch)).toEqual({ widgetId: row!.id, hash: row!.publishedHash, textIds: 'title' });
+      expect(await widgetProps(src.doc)).toMatchObject({ widgetId: src.widgetId, hash: src.hash });
+
+      // Three threads copied with their comments; the label's mark follows its copy.
+      const copied = (await db.execute(sql`SELECT id, copied_from AS "from", anchor FROM threads WHERE document_id = ${branch}`)) as unknown as { id: string; from: string; anchor: { type: string } }[];
+      expect(copied.map((t) => t.from).sort()).toEqual([src.label, src.part, src.point].sort());
+      expect(copied.map((t) => t.anchor.type).sort()).toEqual(['data-point', 'prose', 'widget-part']);
+      const labelCopy = copied.find((t) => t.from === src.label)!.id;
+      const present = await withLiveDoc(branch, (doc) => presentThreadIds(doc));
+      expect([...present]).toEqual([labelCopy]);
+      // The part and data-point threads resolve against the branch's own row.
+      for (const anchor of [
+        { type: 'widget-part' as const, target: { tabId: 'main', blockId: src.blockId }, anchor: 'bars' },
+        { type: 'data-point' as const, target: { tabId: 'main', blockId: src.blockId }, row: 'w2', column: 'signups' },
+      ]) expect(await widgetAnchorProblem(branch, anchor)).toBeNull();
+    });
+  });
+
+  it('a fork copies the widget under a new id and strips its marks and threads', async () => {
+    await withStorage(async (storage) => {
+      const src = await withWidget();
+      const out = await copyDocument(storage, owner, src.doc, 'fork');
+      if (!out.ok) throw new Error(out.refusal.message);
+      const [row] = await widgetRows(out.documentId);
+      expect(row!.id).not.toBe(src.widgetId);
+      expect(await widgetProps(out.documentId)).toMatchObject({ widgetId: row!.id, hash: row!.publishedHash });
+      expect([...(await withLiveDoc(out.documentId, (doc) => presentThreadIds(doc)))]).toEqual([]);
+      expect(await withLiveDoc(out.documentId, (doc) => doc.getXmlFragment(`widget/${src.blockId}/title`).length)).toBeGreaterThan(0);
+      expect(await db.execute(sql`SELECT id FROM threads WHERE document_id = ${out.documentId}`)).toHaveLength(0);
+    });
+  });
+
+  it('only a widget row under the block that names it is copied', async () => {
+    await withStorage(async (storage) => {
+      const src = await withWidget();
+      // The block names a widget whose row sits under another block: ids from the Y.Doc prove nothing.
+      await db.execute(sql`UPDATE widgets SET block_id = 'other' WHERE document_id = ${src.doc}`);
+      const out = await copyDocument(storage, owner, src.doc, 'fork');
+      if (!out.ok) throw new Error(out.refusal.message);
+      expect(await widgetRows(out.documentId)).toHaveLength(0);
+    });
+  });
+});
+
+describe('page text in copies (C12)', () => {
+  const PAGE = '<!doctype html><html><head><title>Plan</title></head><body><h1>Roadmap</h1><p>Ship the editor in May.</p></body></html>';
+
+  async function commentedPage(storage: Storage) {
+    const made = await publishDocument(storage, { actor: owner, title: 'Plan', content: new TextEncoder().encode(PAGE), filename: 'plan.html', format: 'html' });
+    if (!made.ok) throw new Error(made.refusal.message);
+    const doc = made.documentId;
+    const page = await withLiveDoc(doc, (d) => pageBlocks(d)[0]!);
+    const out = await createLiveThread(new NoopNotifier(), owner, doc, {
+      anchor: { type: 'prose', target: { tabId: page.tabId, blockId: page.blockId, pid: page.pids[1]! }, quote: 'editor' },
+      body: 'Which editor?',
+    });
+    if (!out.ok) throw new Error(out.refusal.message);
+    return { doc, thread: out.value.id };
+  }
+
+  it('a branch re-points the comment mark in the page text at its thread copy; a fork strips it', async () => {
+    await withStorage(async (storage) => {
+      const { doc, thread } = await commentedPage(storage);
+      expect([...(await withLiveDoc(doc, (d) => presentThreadIds(d)))]).toEqual([thread]);
+
+      const branch = await copyDocument(storage, owner, doc, 'branch');
+      if (!branch.ok) throw new Error(branch.refusal.message);
+      const [copy] = (await db.execute(sql`SELECT id FROM threads WHERE document_id = ${branch.documentId} AND copied_from = ${thread}`)) as unknown as { id: string }[];
+      expect([...(await withLiveDoc(branch.documentId, (d) => presentThreadIds(d)))]).toEqual([copy!.id]);
+      // The page block and its text fragments came along.
+      const pages = await withLiveDoc(branch.documentId, (d) => pageBlocks(d));
+      expect(pages[0]!.pids).toHaveLength(2);
+      // The page's stamped source is the branch's own copy, keyed by its checkpoint 1 (where a purge looks).
+      const [v1] = (await db.execute(sql`SELECT id FROM versions WHERE document_id = ${branch.documentId}`)) as unknown as { id: string }[];
+      expect(pages[0]!.sourceKey).toBe(`pages/${branch.documentId}/${v1!.id}.html`);
+      expect(await new Response(await storage.get(pages[0]!.sourceKey)).text()).toContain('Ship the editor in May.');
+
+      const fork = await copyDocument(storage, owner, doc, 'fork');
+      if (!fork.ok) throw new Error(fork.refusal.message);
+      expect([...(await withLiveDoc(fork.documentId, (d) => presentThreadIds(d)))]).toEqual([]);
+      expect((await withLiveDoc(fork.documentId, (d) => pageBlocks(d)))[0]!.pids).toHaveLength(2);
     });
   });
 });

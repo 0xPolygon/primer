@@ -6,17 +6,20 @@ import { v7 as uuidv7 } from 'uuid';
 import type { Refusal } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
-import { commentReactions, comments, docFiles, docUpdates, documents, threads, versions } from '../db/schema.ts';
+import { commentReactions, comments, docFiles, docUpdates, documents, threads, versions, widgets } from '../db/schema.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import type { Storage } from '../storage/types.ts';
 import { referencedFiles } from './bundle.ts';
 import { captureState, writeCheckpoint } from './checkpoint.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
-import { tabsOf } from './reach.ts';
+import { isOwnSourceKey, sourceKeyOf } from '../page/publish.ts';
+import { isTabFragment, pageBlocks, reachableFragments, tabsOf, targetOfFragment } from './reach.ts';
 import { ensureSigningKey } from './signing.ts';
 import { rewriteSources, trustedMeta, trustedSources } from './sources.ts';
 import { rebuildTaskIndex } from './tasks.ts';
+import { widgetBlocks } from '../widgets/bundle.ts';
+import { renderBoth, widgetIdPrefix } from '../widgets/render.ts';
 
 export type CopyResult = { ok: true; documentId: string } | { ok: false; status: 400 | 404; refusal: Refusal };
 
@@ -32,7 +35,14 @@ export type CopyResult = { ok: true; documentId: string } | { ok: false; status:
  * Both copy the files the content references (new ids, `primer-blob://`
  * rewritten), the mentions already announced (so nobody is told again) and
  * the latest original as checkpoint 1's. The Y.Doc is copied as state, so
- * block ids and CRDT identity are kept.
+ * block ids and CRDT identity are kept, and with them every fragment: tabs,
+ * page text, embeds and widget labels. Comment marks in all of them follow
+ * the policy above.
+ * - Widgets: each widget block gets a copy of its `widgets` row under a new
+ *   id (published source, rows and records binding; a pending draft stays
+ *   with the source), rendered again under that id so the copy's hash and
+ *   svg ids are its own. Their threads need nothing more: a widget part or
+ *   data point is anchored by block id, which a copy keeps.
  */
 export type CopyKind = 'branch' | 'fork';
 
@@ -78,7 +88,15 @@ export async function copyDocument(
   // own: block props are editor-writable.
   const ids = new Map<string, string>();
   const files = await copyFiles(storage, sourceId, documentId, await referencedFiles(ydoc, sourceId), ids);
+  // The latest original is checkpoint 1's; a page's stamped source is keyed by
+  // that checkpoint's id, which is where purging looks for it.
+  const original = await copyOriginal(storage, sourceId);
+  const pageSources = await copyPageSources(storage, sourceId, documentId, pageBlocks(ydoc), original?.versionId);
+  const widgetHashes = new Map<string, string>();
+  const widgetRows = await copyWidgets(sourceId, documentId, widgetBlocks(ydoc), ids, widgetHashes);
   const tabs = tabsOf(ydoc);
+  // Page text, embed and widget label fragments: their marks follow the policy too.
+  const subFragments = reachableFragments(ydoc).filter((name) => !isTabFragment(name));
   ydoc.destroy();
   const rewrite = <T>(value: T): T => JSON.parse(JSON.stringify(value).replace(UUID, (id) => ids.get(id.toLowerCase()) ?? id)) as T;
 
@@ -98,6 +116,7 @@ export async function copyDocument(
     });
     await tx.insert(docUpdates).values({ documentId, update: state, actorId: null, runId: null, touched: [] });
     if (files.length > 0) await tx.insert(docFiles).values(files);
+    if (widgetRows.length > 0) await tx.insert(widgets).values(widgetRows);
     if (kind === 'branch') {
       await copyThreads(tx, sourceId, documentId, ids);
       await copySuggestions(tx, sourceId, documentId, ids, rewrite);
@@ -124,16 +143,22 @@ export async function copyDocument(
   await applyPlan(documentId, SYSTEM_ORIGIN, {
     onConflict: 'refuse',
     annotation: true,
-    edits: tabs.map((tab): PlannedEdit => ({
-      target: { tabId: tab.id, blockId: '' },
-      inverse: false,
-      build: (tr) => rewriteIds(tr, kind, ids),
-    })),
+    edits: [
+      ...tabs.map((tab): PlannedEdit => ({
+        target: { tabId: tab.id, blockId: '' },
+        inverse: false,
+        build: (tr) => rewriteIds(tr, kind, ids, { widgetHashes, pageSources }),
+      })),
+      ...subFragments.map((name): PlannedEdit => ({
+        target: targetOfFragment(name)!,
+        inverse: false,
+        build: (tr) => rewriteIds(tr, kind, ids),
+      })),
+    ],
   });
   // A fork's task blocks are its own tracked tasks; a branch's stay the parent's.
   if (kind === 'fork') await rebuildTaskIndex(documentId);
 
-  const original = await copyOriginal(storage, sourceId);
   await writeCheckpoint(storage, documentId, actor, null, await captureState(documentId, actor), original);
   return { ok: true, documentId };
 }
@@ -141,10 +166,18 @@ export async function copyDocument(
 /** Comment marks re-pointed through `ids` (a branch; marks of threads not in
  *  `ids` are stripped) or all stripped (a fork); `primer-blob://` ids
  *  re-pointed through `ids`. A branch's proposal maps back the same way. */
-export function rewriteIds(tr: Transform, kind: CopyKind, ids: Map<string, string>): void {
+export function rewriteIds(
+  tr: Transform,
+  kind: CopyKind,
+  ids: Map<string, string>,
+  extra: { widgetHashes?: Map<string, string>; pageSources?: Map<string, string> } = {},
+): void {
   const comment = tr.doc.type.schema.marks.comment!;
   tr.doc.descendants((node: PmNode, pos: number) => {
-    const attrs = rewriteBlobAttrs(node.attrs, ids);
+    const attrs =
+      rewriteBlobAttrs(node.attrs, ids) ??
+      (node.type.name === 'widget' ? rewriteWidgetAttrs(node.attrs, ids, extra.widgetHashes) : null) ??
+      (node.type.name === 'page' ? rewritePageSource(node.attrs, extra.pageSources) : null);
     if (attrs) tr.setNodeMarkup(pos, undefined, attrs, node.marks);
     if (!node.isText) return true;
     for (const mark of node.marks) {
@@ -155,6 +188,19 @@ export function rewriteIds(tr: Transform, kind: CopyKind, ids: Map<string, strin
     }
     return false;
   });
+}
+
+/** A page block pointed at the copy's own stamped source. */
+function rewritePageSource(attrs: PmNode['attrs'], sources?: Map<string, string>): Record<string, unknown> | null {
+  const to = typeof attrs.sourceKey === 'string' ? sources?.get(attrs.sourceKey) : undefined;
+  return to ? { ...attrs, sourceKey: to } : null;
+}
+
+/** A widget block pointed at the copy's row (`ids`) and its new hash. */
+function rewriteWidgetAttrs(attrs: PmNode['attrs'], ids: Map<string, string>, hashes?: Map<string, string>): Record<string, unknown> | null {
+  const to = typeof attrs.widgetId === 'string' ? ids.get(attrs.widgetId.toLowerCase()) : undefined;
+  if (!to) return null;
+  return { ...attrs, widgetId: to, hash: hashes?.get(to) ?? attrs.hash };
 }
 
 function rewriteBlobAttrs(attrs: PmNode['attrs'], ids: Map<string, string>): Record<string, unknown> | null {
@@ -188,6 +234,80 @@ async function copyFiles(storage: Storage, sourceId: string, documentId: string,
     await storage.put(storageKey, new Uint8Array(await new Response(await storage.get(file.storageKey)).arrayBuffer()));
     ids.set(file.id.toLowerCase(), id);
     out.push({ ...file, id, documentId, storageKey, createdAt: undefined, copiedFrom: file.id });
+  }
+  return out;
+}
+
+/** Copies each page block's stamped source into the new document's prefix.
+ *  Only a key inside the source's own prefix is read: block props are
+ *  editor-writable. Returns old key → new key. */
+async function copyPageSources(
+  storage: Storage,
+  sourceId: string,
+  documentId: string,
+  pages: ReturnType<typeof pageBlocks>,
+  firstVersionId?: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const page of pages) {
+    if (out.has(page.sourceKey) || !isOwnSourceKey(sourceId, page.sourceKey)) continue;
+    const to = sourceKeyOf(documentId, out.size === 0 && firstVersionId ? firstVersionId : uuidv7());
+    await storage.put(to, new Uint8Array(await new Response(await storage.get(page.sourceKey)).arrayBuffer()));
+    out.set(page.sourceKey, to);
+  }
+  return out;
+}
+
+type WidgetInsert = typeof widgets.$inferInsert;
+
+/**
+ * Copies the `widgets` rows of the source's widget blocks under new ids (C12).
+ * The ids come from the Y.Doc, which clients write: only a row of the source
+ * document that sits under that very block is copied (a block naming
+ * another document's widget draws nothing, here and in the copy). A
+ * published widget is rendered again under its new id; the old hash only
+ * stands when that fails.
+ */
+async function copyWidgets(
+  sourceId: string,
+  documentId: string,
+  blocks: ReturnType<typeof widgetBlocks>,
+  ids: Map<string, string>,
+  hashes: Map<string, string>,
+): Promise<WidgetInsert[]> {
+  if (blocks.length === 0) return [];
+  const rows = await db
+    .select()
+    .from(widgets)
+    .where(and(eq(widgets.documentId, sourceId), inArray(widgets.id, blocks.map((b) => b.widgetId))));
+  const out: WidgetInsert[] = [];
+  for (const block of blocks) {
+    const row = rows.find((r) => r.id === block.widgetId && r.blockId === block.blockId);
+    if (!row) continue;
+    const id = uuidv7();
+    ids.set(row.id.toLowerCase(), id);
+    const copy: WidgetInsert = {
+      id,
+      documentId,
+      blockId: row.blockId,
+      publishedSource: row.publishedSource,
+      publishedSvgLight: row.publishedSvgLight,
+      publishedSvgDark: row.publishedSvgDark,
+      publishedHash: row.publishedHash,
+      rows: row.rows,
+      collection: row.collection,
+      updatedBy: row.updatedBy,
+    };
+    if (row.publishedSource) {
+      const rendered = await renderBoth(row.publishedSource, (row.rows ?? []) as never, widgetIdPrefix(id));
+      if (!('errors' in rendered)) {
+        copy.publishedSvgLight = rendered.light.svg;
+        copy.publishedSvgDark = rendered.dark.svg;
+        copy.publishedHash = rendered.hash;
+      }
+    }
+    if (copy.publishedHash) hashes.set(id, copy.publishedHash);
+    out.push(copy);
   }
   return out;
 }
@@ -241,7 +361,7 @@ async function copyOriginal(storage: Storage, sourceId: string) {
     .where(eq(versions.documentId, sourceId))
     .orderBy(desc(versions.versionNumber))
     .limit(1);
-  if (!latest?.originalKey || (latest.sourceFormat !== 'markdown' && latest.sourceFormat !== 'text')) return undefined;
+  if (!latest?.originalKey || (latest.sourceFormat !== 'markdown' && latest.sourceFormat !== 'text' && latest.sourceFormat !== 'html')) return undefined;
   const versionId = uuidv7();
   const originalKey = `v1/${versionId}.orig`;
   await storage.put(originalKey, new Uint8Array(await new Response(await storage.get(latest.originalKey)).arrayBuffer()));

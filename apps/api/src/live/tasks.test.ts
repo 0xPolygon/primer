@@ -4,7 +4,8 @@ import { db } from '../db/client.ts';
 import { docTasks, documents, events } from '../db/schema.ts';
 import { AGENT, OWNER, READER, seedRecordsDoc } from '../records/records.testlib.ts';
 import { readBlocks } from './editor.ts';
-import { seedBlocks, withLiveDoc } from './live.testlib.ts';
+import { paragraph, seedBlocks, versions, withLiveDoc } from './live.testlib.ts';
+import { applyOps } from './ops.ts';
 import { addTask, flushTaskSync, listDocumentTasks, listMyTasks, rebuildTaskIndex, updateTask } from './tasks.ts';
 
 async function liveDoc(): Promise<string> {
@@ -47,6 +48,9 @@ describe('task blocks', () => {
     // The assignee finds it across documents, fenced: people wrote the title.
     const mine = await listMyTasks(AGENT);
     expect(mine.ok && mine.value.tasks.map((t) => [t.id, t.untrusted])).toEqual([[task!.id, true]]);
+    // ...and the title is fenced for the agent, plain for a person.
+    expect(mine.ok && mine.value.tasks[0]!.title).toMatch(/^<untrusted-content-[0-9a-f]+>\nDraft the launch note\n<\/untrusted-content-[0-9a-f]+>$/);
+    expect(listed.ok && listed.value.tasks[0]!.title).toBe('Draft the launch note');
   });
 
   it('checking it off updates status', async () => {
@@ -134,5 +138,37 @@ describe('task blocks', () => {
     await flushTaskSync();
     const updated = (await taskEvents(doc)).filter((e) => e.type === 'task.updated');
     expect(updated.map((e) => e.author).sort()).toEqual([AGENT.id, OWNER.id].sort());
+  });
+});
+
+describe('tasks through apply_ops', () => {
+  it('an agent adds a task block and reports on it with ordinary ops', async () => {
+    const doc = await liveDoc();
+    await seedBlocks(doc, [paragraph('intro', 'Intro')]);
+    const added = await applyOps(doc, AGENT, {
+      ops: [
+        {
+          op: 'add',
+          at: { tabId: 'main', blockId: 'intro' },
+          position: 'after',
+          blocks: [{ json: { type: 'task', props: { assigneeId: AGENT.id, due: '2026-12-01', status: 'open' }, content: 'Collect numbers' } }],
+        },
+      ],
+    });
+    if (!added.ok) throw new Error(JSON.stringify(added));
+    await flushTaskSync();
+    const listed = await listDocumentTasks(OWNER, doc);
+    const task = listed.ok ? listed.value.tasks.find((t) => t.title === 'Collect numbers') : undefined;
+    expect(task).toMatchObject({ assigneeId: AGENT.id, due: '2026-12-01', status: 'open' });
+
+    const target = task!.target;
+    const version = (await versions(doc, AGENT))[target.blockId];
+    const done = await applyOps(doc, AGENT, {
+      ops: [{ op: 'update', target, expectVersion: version, block: { json: { type: 'task', props: { progress: 'Pulled Q3', status: 'done' }, content: 'Collect numbers' } } }],
+    });
+    expect(done.ok && done.value.outcomes[0]?.status).toBe('applied');
+    await flushTaskSync();
+    const after = await listDocumentTasks(OWNER, doc);
+    expect(after.ok && after.value.tasks.find((t) => t.title === 'Collect numbers')).toMatchObject({ status: 'done', assigneeId: AGENT.id });
   });
 });

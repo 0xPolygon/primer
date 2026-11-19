@@ -81,7 +81,8 @@ import {
 import { EventsGrantPrompt } from '../components/EventsGrantPrompt.tsx';
 import { api } from '../lib/fetch.ts';
 import { ApiError } from '../lib/apiError.ts';
-import type { CatchUpSince, CheckpointResponse } from '@polygonlabs/primer-api-types';
+import type { CheckpointResponse } from '@polygonlabs/primer-api-types';
+import type { LiveEditorProps } from '../live/LiveEditor.tsx';
 
 // BlockNote and its blocks load only when a live document opens.
 const LiveEditor = lazy(() => import('../live/LiveEditor.tsx'));
@@ -91,33 +92,11 @@ const LiveEditor = lazy(() => import('../live/LiveEditor.tsx'));
  * documents, and checkpoints of live ones) the rendered version in its
  * sandboxed frame.
  */
-export function DocumentSurface(props: {
-  live: boolean;
-  documentId: string;
-  readOnly: boolean;
-  canVote: boolean;
-  theme: 'light' | 'dark';
-  userName: string;
-  userId: string;
-  role: ViewerRole;
-  onOpenLegacyVersion?: (versionNumber: number) => void;
-  lastView?: CatchUpSince | null;
-  frame: () => ReactNode;
-}) {
-  if (!props.live) return <>{props.frame()}</>;
+export function DocumentSurface({ live, frame, ...editor }: LiveEditorProps & { live: boolean; frame: () => ReactNode }) {
+  if (!live) return <>{frame()}</>;
   return (
     <Suspense fallback={<div className="p-4 text-sm text-neutral-500">{t('document.loadingEditor')}</div>}>
-      <LiveEditor
-        documentId={props.documentId}
-        readOnly={props.readOnly}
-        canVote={props.canVote}
-        theme={props.theme}
-        userName={props.userName}
-        userId={props.userId}
-        role={props.role}
-        onOpenLegacyVersion={props.onOpenLegacyVersion}
-        lastView={props.lastView}
-      />
+      <LiveEditor {...editor} />
     </Suspense>
   );
 }
