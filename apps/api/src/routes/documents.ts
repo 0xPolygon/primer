@@ -14,6 +14,7 @@ import {
   type Visibility,
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
+import { carryOpenThreads, loadCarryOrigins } from '../lib/threadCarry.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -447,16 +448,21 @@ export function registerDocumentRoutes(
     `)) as unknown as { max_n: number }[];
     const nextNumber = (maxRow?.max_n ?? 0) + 1;
 
+    const origins = await loadCarryOrigins(deps.storage, docId);
+
     await deps.storage.put(storageKey, transformedBytes);
 
     try {
-      await db.insert(versions).values({
-        id: versionId,
-        documentId: docId,
-        versionNumber: nextNumber,
-        storageKey,
-        sizeBytes: transformedBytes.byteLength,
-        versionNote,
+      await db.transaction(async (tx) => {
+        await tx.insert(versions).values({
+          id: versionId,
+          documentId: docId,
+          versionNumber: nextNumber,
+          storageKey,
+          sizeBytes: transformedBytes.byteLength,
+          versionNote,
+        });
+        await carryOpenThreads(tx, deps.storage, { documentId: docId, versionId, html: transformed.html, origins });
       });
     } catch (err) {
       try { await deps.storage.delete(storageKey); } catch {}
