@@ -28,8 +28,8 @@ type InverseRow = {
  * which suggestions (M5) turn into a restore suggestion (`onConflict:
  * 'suggest'`). Blocks the run created are removed, removed ones re-inserted at
  * their place, changed ones restored, moved ones moved back. Durable: works
- * after a restart, with no expiry. Allowed for the requester, the owner and
- * editors.
+ * after a restart, with no expiry. Allowed for owners and editors (role read
+ * now), once the run has stopped.
  */
 export async function undoRun(runId: string, actor: AuthUser): Promise<RunResult<Reconciliation>> {
   const run = await loadRun(runId);
@@ -37,11 +37,19 @@ export async function undoRun(runId: string, actor: AuthUser): Promise<RunResult
   if (!run || !doc) {
     return { ok: false, status: 404, refusal: { code: 'not_found', message: 'Run not found.', fix: 'Check the run id.' } };
   }
-  if (run.requestedBy !== actor.id && !canEdit(doc.role)) {
+  // Undo writes the document: whoever asks must be able to edit it now.
+  if (!canEdit(doc.role)) {
     return {
       ok: false,
       status: 403,
-      refusal: { code: 'forbidden', message: 'Only the person who asked, the owner and editors can undo a run.', fix: 'Ask one of them.' },
+      refusal: { code: 'forbidden', message: 'Only the owner and editors can undo a run.', fix: 'Ask the owner or an editor.' },
+    };
+  }
+  if (run.status === 'queued' || run.status === 'running') {
+    return {
+      ok: false,
+      status: 409,
+      refusal: { code: 'bad_request', message: 'The run is still active.', fix: 'Cancel the run first, then undo it.' },
     };
   }
   // Scoped to the run's document: rows are never applied elsewhere.

@@ -2,23 +2,30 @@ import { describe, expect, it } from 'vitest';
 import type { AuthUser } from '../app.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { createLiveDoc, makeAgent, markdownOf, ops, paragraph, seedBlocks, until, versions } from './live.testlib.ts';
-import { claimRun, requestRun } from './runs.ts';
+import { sql } from 'drizzle-orm';
+import { db } from '../db/client.ts';
+import { claimRun, finishRun, requestRun } from './runs.ts';
 import { undoRun } from './undo.ts';
 
 const owner: AuthUser = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User', kind: 'person', viaUserId: null };
 const main = (blockId: string) => ({ tabId: 'main', blockId });
 
-async function run(documentId: string, agent: AuthUser): Promise<string> {
-  const out = await requestRun(owner, documentId, {
+const agents = new Map<string, AuthUser>();
+
+async function run(documentId: string, agent: AuthUser, by: AuthUser = owner): Promise<string> {
+  const out = await requestRun(by, documentId, {
     agentId: agent.id,
     request: { kind: 'send', prompt: `edit ${Math.random()}`, viewer: { tabId: 'main', selectedBlockIds: [], cursorBlockId: null } },
   });
   if (!out.ok) throw new Error(out.refusal.message);
   await claimRun(agent, out.value.id);
+  agents.set(out.value.id, agent);
   return out.value.id;
 }
 
+/** Finishes the run (undo needs a stopped run), then undoes it as the owner. */
 async function undo(runId: string) {
+  await finishRun(agents.get(runId)!, runId, {});
   const out = await undoRun(runId, owner);
   if (!out.ok) throw new Error(out.refusal.message);
   return out.value;
@@ -128,5 +135,29 @@ describe('undoRun', () => {
 
     await undo(runId);
     expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta']);
+  });
+
+  it("a requester demoted to commenter can't undo", async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('a', 'Alpha')]);
+    await db.execute(sql`INSERT INTO users (id, email, display_name) VALUES ('collab-user', 'c@example.com', 'Collab') ON CONFLICT DO NOTHING`);
+    await db.execute(sql`
+      INSERT INTO document_collaborators (id, document_id, user_id, role, granted_by)
+      VALUES (gen_random_uuid(), ${id}, 'collab-user', 'editor', 'mock-user-1'),
+             (gen_random_uuid(), ${id}, ${agent.id}, 'editor', 'mock-user-1')
+    `);
+    const editor: AuthUser = { id: 'collab-user', email: 'c@example.com', displayName: 'Collab', kind: 'person', viaUserId: null };
+    const runId = await run(id, agent, editor);
+    const v = await versions(id, agent);
+    await ops(id, agent, { runId, ops: [{ op: 'update', target: main('a'), block: 'Alpha by agent', expectVersion: v.a }] });
+
+    // Undo waits for the run to stop.
+    expect(await undoRun(runId, editor)).toMatchObject({ ok: false, status: 409 });
+    await finishRun(agent, runId, {});
+
+    await db.execute(sql`UPDATE document_collaborators SET role = 'commenter' WHERE document_id = ${id} AND user_id = 'collab-user'`);
+    expect(await undoRun(runId, editor)).toMatchObject({ ok: false, status: 403 });
+    expect(await markdownOf(id, agent)).toEqual(['Alpha by agent']);
   });
 });

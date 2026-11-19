@@ -7,7 +7,7 @@ import { db } from '../db/client.ts';
 import { runInverses } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
-import { canComment, canEdit, loadEffectiveRole } from '../lib/permissions.ts';
+import { canComment, canEdit, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
 import { setAgentAwareness } from './awareness.ts';
 import type { BlockInverse } from './pipeline.ts';
 import { docQueue } from './queue.ts';
@@ -94,10 +94,10 @@ export async function requestRun(
     `)) as unknown as { hit: number }[];
     if (!thread) return fail(400, 'bad_request', 'That thread is not on this document.', 'Send a thread of this document.');
   }
-  return { ok: true, value: await insertRun(documentId, agentId, user.id, request) };
+  return { ok: true, value: toDTOFor(user, doc.role, await insertRun(documentId, agentId, user.id, request)) };
 }
 
-async function insertRun(documentId: string, agentId: string, requestedBy: string, request: AgentRunRequest): Promise<AgentRunDTO> {
+async function insertRun(documentId: string, agentId: string, requestedBy: string, request: AgentRunRequest): Promise<RunRow> {
   const dedupeKey = createHash('sha256')
     .update(`${request.kind}\n${request.threadId ?? request.blockId ?? ''}\n${request.prompt}`)
     .digest('hex');
@@ -123,7 +123,7 @@ async function insertRun(documentId: string, agentId: string, requestedBy: strin
     `)) as unknown as { id: string }[];
     return existing!.id;
   });
-  return toDTO((await loadRun(id))!);
+  return (await loadRun(id))!;
 }
 
 /** Runs on a document, newest first (readers). The request (prompt, unsent
@@ -137,11 +137,7 @@ export async function listDocumentRuns(user: AuthUser, documentId: string): Prom
   `)) as unknown as RunRow[];
   return {
     ok: true,
-    value: rows.map((row) => {
-      const dto = toDTO(row);
-      const mayRead = row.requestedBy === user.id || row.agentId === user.id || doc.role === 'owner';
-      return mayRead ? dto : { ...dto, request: null };
-    }),
+    value: rows.map((row) => toDTOFor(user, doc.role, row)),
   };
 }
 
@@ -194,13 +190,14 @@ async function transition(run: RunRow, by: AuthUser, t: Transition): Promise<Run
     }),
   );
   const now = (await loadRun(run.id))!;
+  const role = (await readableLiveDoc(run.documentId, by))?.role ?? 'stranger';
   if (!updated) {
     if (now.status === 'cancelled' || now.status === 'done' || now.status === 'failed') {
       return fail(409, 'run_cancelled', `The run is ${now.status}.`, 'Start a new run (retry) instead.');
     }
     return fail(409, 'bad_request', `The run can't do that while ${now.status}${now.plan ? '' : ' and without a plan'}.`, 'Check the run\'s status and plan.');
   }
-  return { ok: true, value: toDTO(now) };
+  return { ok: true, value: toDTOFor(by, role, now) };
 }
 
 async function agentRun(agent: AuthUser, runId: string): Promise<RunRow | RunResult<never>> {
@@ -277,8 +274,9 @@ export async function cancelRun(user: AuthUser, runId: string): Promise<RunResul
 export async function retryRun(user: AuthUser, runId: string): Promise<RunResult<AgentRunDTO>> {
   const run = await steerable(user, runId);
   if ('ok' in run) return run;
-  if (user.id === run.agentId) {
-    return fail(403, 'forbidden', 'An agent can\'t retry its own run.', 'Finish with an error; a person can retry it.');
+  // Only the person who asked repeats their own ask (an agent never does).
+  if (user.id !== run.requestedBy || user.id === run.agentId) {
+    return fail(403, 'forbidden', 'Only the person who asked can retry a run.', 'Ask the agent with a new request instead (POST /api/documents/:docId/runs).');
   }
   if (run.status === 'queued' || run.status === 'running') {
     return fail(409, 'bad_request', 'The run is still active.', 'Cancel it first, or wait for it to finish.');
@@ -404,9 +402,20 @@ function iso(d: Date | string | null): string | null {
   return d === null ? null : new Date(d).toISOString();
 }
 
-/** A run as agents and the UI see it. The request's prompt and unsent text
- *  were written by people: agents get them as fenced untrusted data. */
-export function toDTO(row: RunRow): AgentRunDTO {
+/**
+ * A run as `user` may see it. Every run returned to a caller goes through
+ * here: the request (prompt, unsent text, selection) is the requester's, so
+ * only they, the run's agent and the document owner get it; others see
+ * status and progress with `request: null`.
+ */
+export function toDTOFor(user: AuthUser, role: EffectiveRole, row: RunRow): AgentRunDTO {
+  const dto = toDTO(row);
+  const mayRead = row.requestedBy === user.id || row.agentId === user.id || role === 'owner';
+  return mayRead ? dto : { ...dto, request: null };
+}
+
+/** A run with its full request (callers: `toDTOFor`, and the agent's own list). */
+function toDTO(row: RunRow): AgentRunDTO & { request: AgentRunRequest } {
   return {
     id: row.id,
     documentId: row.documentId,

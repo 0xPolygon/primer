@@ -286,3 +286,40 @@ describe('agent awareness', () => {
     await until(() => stateOf() === undefined);
   }, 15_000);
 });
+
+describe('run responses', () => {
+  it("cancel, approve and retry responses never include another person's unsent text", async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    await db.execute(sql`
+      INSERT INTO users (id, email, display_name) VALUES ('collab-user', 'c@example.com', 'Collab'), ('editor-two', 'e@example.com', 'Editor Two')
+      ON CONFLICT DO NOTHING
+    `);
+    for (const userId of ['collab-user', 'editor-two', agent.id]) {
+      await db.execute(sql`
+        INSERT INTO document_collaborators (id, document_id, user_id, role, granted_by)
+        VALUES (gen_random_uuid(), ${id}, ${userId}, 'editor', 'mock-user-1')
+      `);
+    }
+    const asker: AuthUser = { id: 'collab-user', email: 'c@example.com', displayName: 'Collab', kind: 'person', viaUserId: null };
+    const other: AuthUser = { id: 'editor-two', email: 'e@example.com', displayName: 'Editor Two', kind: 'person', viaUserId: null };
+    const asked = await requestRun(asker, id, {
+      agentId: agent.id,
+      request: { ...ask('Secret ask'), viewer: { tabId: 'main', selectedBlockIds: [], cursorBlockId: null, unsentText: 'my private draft' } },
+    });
+    if (!asked.ok) throw new Error(asked.refusal.message);
+    expect(asked.value.request!.viewer.unsentText).toBe('my private draft');
+    await claimRun(agent, asked.value.id);
+    const planned = await updateRunStatus(agent, asked.value.id, { plan: 'A plan.' });
+
+    const responses = [
+      await approveRun(other, asked.value.id, { planHash: planned.ok ? planned.value.planHash : null }),
+      await cancelRun(other, asked.value.id),
+      await retryRun(other, asked.value.id),
+    ];
+    expect(responses[0]).toMatchObject({ ok: true, value: { request: null } });
+    expect(responses[1]).toMatchObject({ ok: true, value: { status: 'cancelled', request: null } });
+    expect(responses[2]).toMatchObject({ ok: false, status: 403 });
+    expect(JSON.stringify(responses)).not.toMatch(/my private draft|Secret ask/);
+  });
+});
