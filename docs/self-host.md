@@ -90,6 +90,51 @@ const jwt = await new SignJWT({ email: 'ada@example.com', name: 'Ada' })
 // proxy forwards:  x-identity: <jwt>
 ```
 
+## Switching an existing Okta install to proxy mode
+
+Okta users are stored under their Okta `sub`; proxy users are stored as
+`proxy:<sub>`. After the switch the same person is a **new user**: documents
+they own, their collaborator memberships, comments and tokens stay with the old
+id. Re-key the old users before anyone signs in through the proxy (if a person
+has already signed in, delete their new `proxy:` row first, or the update below
+collides on it). Back up the database first, then fill in the mapping and run it
+with `psql` (the bundled Postgres user is a superuser, which `session_replication_role`
+needs). It rewrites every column that references `users(id)`:
+
+```sql
+BEGIN;
+SET LOCAL session_replication_role = replica;  -- skip FK checks while ids are rewritten
+CREATE TEMP TABLE id_map (old_id text PRIMARY KEY, new_id text NOT NULL);
+-- old Okta sub  ->  proxy:<the sub your proxy will send>
+INSERT INTO id_map VALUES ('00u1abcdEXAMPLE', 'proxy:ada@example.com');
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT k.conrelid::regclass AS tbl, a.attname AS col
+    FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.contype = 'f' AND k.confrelid = 'users'::regclass
+  LOOP
+    EXECUTE format('UPDATE %s SET %I = m.new_id FROM id_map m WHERE %I = m.old_id', r.tbl, r.col, r.col);
+  END LOOP;
+  UPDATE users u SET id = m.new_id FROM id_map m WHERE u.id = m.old_id;
+END $$;
+COMMIT;
+```
+
+Find each person's old id with `SELECT id, email FROM users;`. Mapping by email
+is fine when your proxy's `sub` is the email address; otherwise use whatever
+`sub` it issues.
+
+## Signing out
+
+`POST /auth/logout` only clears Primer's own session cookie. In proxy mode the
+identity comes from the proxy on every request, so that does not end the
+upstream session and the user is still signed in. Users sign out at the proxy,
+for example `https://<team>.cloudflareaccess.com/cdn-cgi/access/logout` for
+Cloudflare Access or `/oauth2/sign_out` on oauth2-proxy.
+
 ## Optional: email
 
 Set `MAILGUN_API_KEY` and `EMAIL_FROM` (and `AUTH_BASE_URL`) to send comment

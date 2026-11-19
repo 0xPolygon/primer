@@ -10,3 +10,8 @@ signature, issuer, audience and expiry are verified, the user is keyed by `sub`
 are unchanged, and unauthenticated browsers get a 401 page instead of an OIDC
 redirect. Also adds `docker-compose.selfhost.yml` and `docs/self-host.md` for
 running Primer with Postgres and a filesystem blob volume.
+
+The self-host image creates `/data/blobs` owned by the runtime user so a fresh
+blob volume is writable, the compose file forwards `MAILGUN_DOMAIN` and
+`MAILGUN_API_BASE_URL`, and the self-host guide covers moving an Okta install to
+proxy mode and signing out at the proxy.

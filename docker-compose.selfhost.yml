@@ -43,6 +43,8 @@ services:
       PROXY_AUTH_ISSUER: ${PROXY_AUTH_ISSUER:-}
       PROXY_AUTH_AUDIENCE: ${PROXY_AUTH_AUDIENCE:-}
       MAILGUN_API_KEY: ${MAILGUN_API_KEY:-}
+      MAILGUN_DOMAIN: ${MAILGUN_DOMAIN:-}
+      MAILGUN_API_BASE_URL: ${MAILGUN_API_BASE_URL:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
     volumes:
       - primer-blobs:/data/blobs
