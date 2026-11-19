@@ -80,17 +80,17 @@ export function liveInstance(): Hocuspocus {
           for (const handler of failureHandlers) handler(documentId, document);
         },
       });
-      const recheckThreads = () => scheduleOrphanSync(documentId, document);
-      document.on('update', recheckThreads);
-      document.on('update', (_update: Uint8Array, origin: unknown, _doc: Y.Doc, tr: Y.Transaction) => {
+      const onUpdate = (_update: Uint8Array, origin: unknown, _doc: Y.Doc, tr: Y.Transaction) => {
+        scheduleOrphanSync(documentId, document);
         const by = originOf(origin);
         const touched = touchedOf(tr);
         for (const handler of updateHandlers) handler(documentId, by, touched);
-      });
+      };
+      document.on('update', onUpdate);
       // Detach only once the document is really gone: Hocuspocus keeps it
       // after beforeUnloadDocument when someone connected meanwhile.
       document.on('destroy', () => {
-        document.off('update', recheckThreads);
+        document.off('update', onUpdate);
         cancelOrphanSync(documentId);
         void detach();
       });

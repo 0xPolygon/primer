@@ -2,6 +2,7 @@ import type {
   Target,
   AgentRunDTO,
   ApplyOpsRequest,
+  CopyDocumentResponse,
   Reconciliation,
   LiveDocDTO,
   LiveReadFormat,
@@ -266,6 +267,15 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/suggestions/${encodeURIComponent(suggestionId)}/withdraw`,
       json: {},
+    });
+  }
+
+  /** Copies a live document into a new one of the caller's (a fork). */
+  forkDocument(documentId: string, title?: string): Promise<CopyDocumentResponse> {
+    return this.request<CopyDocumentResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/fork`,
+      json: title === undefined ? {} : { title },
     });
   }
 

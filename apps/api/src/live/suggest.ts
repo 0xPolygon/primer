@@ -180,6 +180,61 @@ export async function decideSuggestion(id: string, actor: AuthUser, decision: De
   return { ok: true, value: result };
 }
 
+/**
+ * Decides a change set at once (a branch's proposal): every open suggestion
+ * in it that is not a conflict. Conflicts are decided one by one. Same rules
+ * as `decideSuggestion`: a person who owns or edits the suggestions'
+ * document. Accepting replays them in order in one plan; one whose blocks
+ * changed since stays open (its outcome says why) and the rest apply.
+ */
+export async function decideChangeSet(
+  changeSetId: string,
+  actor: AuthUser,
+  decision: 'accept' | 'reject',
+): Promise<SuggestionResult<Reconciliation>> {
+  if (!UUID.test(changeSetId)) return notFound();
+  const all = (await db.execute(sql`
+    SELECT ${COLUMNS} FROM suggestions s JOIN users u ON u.id = s.author_id
+     WHERE s.change_set_id = ${changeSetId} AND s.status = 'open' AND NOT s.conflict
+     ORDER BY s.created_at, s.id
+  `)) as unknown as Row[];
+  if (all.length === 0) return notFound();
+  const documentId = all[0]!.documentId;
+  const rows = all.filter((r) => r.documentId === documentId);
+  const doc = await readableLiveDoc(documentId, actor);
+  if (!doc) return notFound();
+  if (actor.kind !== 'person' || !canEdit(doc.role)) {
+    return {
+      ok: false,
+      status: 403,
+      refusal: { code: 'forbidden', message: 'Only a person who owns or edits the document can accept or reject suggestions.', fix: 'Ask the owner or an editor.' },
+    };
+  }
+  if (decision === 'reject') {
+    await docQueue(documentId)(async () => {
+      for (const row of rows) await close(row, actor, 'rejected');
+    });
+    return { ok: true, value: { docVersion: await currentDocVersion(documentId), outcomes: [] } };
+  }
+  const result = await applyPlan(documentId, originFor(actor), {
+    onConflict: 'refuse',
+    edits: rows.map(acceptEdit),
+    guard: async () => {
+      const [open] = (await db.execute(sql`
+        SELECT count(*)::int AS n FROM suggestions
+         WHERE id IN (${sql.join(rows.map((r) => sql`${r.id}`), sql`, `)}) AND status = 'open'
+      `)) as unknown as { n: number }[];
+      return open?.n === rows.length ? null : closedRefusal().refusal;
+    },
+    afterWrite: async (outcomes) => {
+      for (const o of outcomes) {
+        if (o.status === 'applied' || o.status === 'unchanged') await close(rows[o.index]!, actor, 'accepted');
+      }
+    },
+  });
+  return { ok: true, value: result };
+}
+
 /** Closes an open suggestion with `status`; false when it was not open. */
 async function close(row: Row, actor: AuthUser, status: 'accepted' | 'rejected' | 'withdrawn'): Promise<boolean> {
   return transactionWithEvents(async (tx, emit) => {

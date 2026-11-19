@@ -43,9 +43,9 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/runs', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/suggestions', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read' },
   { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read' },
-  { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
 
   { method: 'POST', path: '/api/upload', scope: 'documents:write' },
   { method: 'POST', path: '/api/convert/markdown', scope: 'documents:write' },
@@ -67,6 +67,11 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write' },
   { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write' },
+  // Copies owned by the caller: a private branch, a fork or remix (also
+  // "New from template"); and a branch proposed back as suggestions.
+  { method: 'POST', path: '/api/documents/:docId/branch', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/fork', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/propose', scope: 'documents:write' },
 
   { method: 'POST', path: '/api/versions/:versionId/threads', scope: 'comments:write' },
   { method: 'POST', path: '/api/threads/:threadId/comments', scope: 'comments:write' },
@@ -168,6 +173,8 @@ export const NOT_GRANTABLE: readonly { method: Method; path: string; reason: str
   { method: 'POST', path: '/api/runs/:runId/approve', reason: 'a person approves an agent\'s plan; agents never do' },
   { method: 'POST', path: '/api/suggestions/:id/accept', reason: 'a person decides a suggestion; agents never do' },
   { method: 'POST', path: '/api/suggestions/:id/reject', reason: 'a person decides a suggestion; agents never do' },
+  { method: 'POST', path: '/api/change-sets/:id/accept', reason: 'a person decides a change set; agents never do' },
+  { method: 'POST', path: '/api/change-sets/:id/reject', reason: 'a person decides a change set; agents never do' },
 ];
 
 function compile(path: string): RegExp {

@@ -6,6 +6,10 @@ export type MenuItemId =
   | 'export-markdown'
   | 'export-html'
   | 'export-print'
+  | 'branch'
+  | 'fork'
+  | 'propose'
+  | 'template'
   | 'notebooklm'
   | 'copy'
   | 'download'
@@ -22,13 +26,20 @@ export interface MenuInput {
   isUploader: boolean;
   /** Mobile collapses the Share button into the menu. */
   includeShare?: boolean;
-  /** Live documents export their content (Markdown or text, and HTML). */
+  /** Live documents export their content (Markdown or text, and HTML), and
+   *  can be branched and forked. */
   live?: boolean;
+  /** A branch: it can be proposed back to its parent. */
+  isBranch?: boolean;
+  /** Listed under Templates: forking it is "New from template". */
+  isTemplate?: boolean;
+  /** The viewer owns it (marks it as a template). */
+  isOwner?: boolean;
 }
 
 /** Pure function: given who's viewing, return the ordered menu items. The
  *  caller maps each item to a click handler. */
-export function buildMenuItems({ isUploader, includeShare = false, live = false }: MenuInput): MenuItem[] {
+export function buildMenuItems({ isUploader, includeShare = false, live = false, isBranch = false, isTemplate = false, isOwner = false }: MenuInput): MenuItem[] {
   const items: MenuItem[] = [];
   if (includeShare && isUploader) {
     items.push({ id: 'share', label: t('libDocumentActionsMenu.share') });
@@ -41,6 +52,15 @@ export function buildMenuItems({ isUploader, includeShare = false, live = false 
       { id: 'export-print', label: t('libDocumentActionsMenu.printPdf') },
       { id: 'separator' },
     );
+    if (isBranch) items.push({ id: 'propose', label: t('libDocumentActionsMenu.proposeBranch') });
+    items.push(
+      { id: 'branch', label: t('libDocumentActionsMenu.branch') },
+      { id: 'fork', label: t(isTemplate ? 'libDocumentActionsMenu.newFromTemplate' : 'libDocumentActionsMenu.fork') },
+    );
+    if (isOwner) {
+      items.push({ id: 'template', label: t(isTemplate ? 'libDocumentActionsMenu.unmarkTemplate' : 'libDocumentActionsMenu.markTemplate') });
+    }
+    items.push({ id: 'separator' });
   }
   items.push(
     { id: 'open-fullscreen', label: t('libDocumentActionsMenu.openFullScreen') },

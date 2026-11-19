@@ -211,7 +211,7 @@ function TabEditor({
           aria-pressed={suggestionsOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          {t('liveEditor.suggestions')}{suggestionCount > 0 ? ` (${suggestionCount})` : ''}
+          {suggestionCount > 0 ? t('liveEditor.suggestionsCount', { count: suggestionCount }) : t('liveEditor.suggestions')}
         </button>
         <button
           type="button"
@@ -362,3 +362,4 @@ function colorFor(name: string): string {
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return COLORS[Math.abs(hash) % COLORS.length]!;
 }
+

@@ -169,6 +169,13 @@
       "when": 1795119490250,
       "tag": "0023_certain_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795122060802,
+      "tag": "0024_branches_forks_templates",
+      "breakpoints": true
     }
   ]
 }
