@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
-import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
+import {
+  BlockNoteViewEditor,
+  SuggestionMenuController,
+  getDefaultReactSlashMenuItems,
+  useCreateBlockNote,
+} from '@blocknote/react';
+import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { VersioningSidebar } from '@blocknote/react/versioning';
 import { BlockNoteView } from '@blocknote/ariakit';
 import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
 import * as locales from '@blocknote/core/locales';
-import { commentMarkExtension, primerSchema } from '@primer/blocks';
+import { PrimerBlocksContext, commentMarkExtension, primerSchema } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
 import type { DocFileUploadResponse } from '@polygonlabs/primer-api-types';
@@ -14,10 +20,15 @@ import { createLiveProvider, type LiveProvider } from './provider.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
 import { TabStrip, useTabs } from './TabStrip.tsx';
 import { MAIN_TAB, tabFragmentName } from './tabs.ts';
+import { useBlockServices, type ChoiceStore } from './blockServices.ts';
+import { DecisionRegister } from './DecisionRegister.tsx';
+import './blocks.css';
 
 export type LiveEditorProps = {
   documentId: string;
   readOnly: boolean;
+  /** Whether this viewer may vote on choices (owner, editor or responder). */
+  canVote: boolean;
   theme: 'light' | 'dark';
   /** Shown on this viewer's cursor to everyone else. */
   userName: string;
@@ -48,18 +59,32 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   const [selected, setSelected] = useState(MAIN_TAB);
   // A tab someone else deleted falls back to the first.
   const active = tabs.some((t) => t.id === selected) ? selected : MAIN_TAB;
+  // Choice and task blocks reach the API through these (people pick; the
+  // browser is always a person's session).
+  const { services, store } = useBlockServices(props.documentId, { canPick: !props.readOnly, canVote: props.canVote });
   return (
-    <div className="flex h-full flex-col" data-live-editor={props.documentId}>
-      <ConnectionStatus provider={props.live.provider} />
-      <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
-      {/* One editor per tab fragment, mounted when its tab is opened. */}
-      <TabEditor key={active} tabId={active} {...props} />
-    </div>
+    <PrimerBlocksContext.Provider value={services}>
+      <div className="flex h-full flex-col" data-live-editor={props.documentId}>
+        <ConnectionStatus provider={props.live.provider} />
+        <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
+        {/* One editor per tab fragment, mounted when its tab is opened. */}
+        <TabEditor key={active} tabId={active} store={store} {...props} />
+      </div>
+    </PrimerBlocksContext.Provider>
   );
 }
 
-function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
+function TabEditor({
+  live,
+  tabId,
+  documentId,
+  readOnly,
+  theme,
+  userName,
+  store,
+}: LiveEditorProps & { live: LiveProvider; tabId: string; store: ChoiceStore }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [decisionsOpen, setDecisionsOpen] = useState(false);
 
   const editor = useCreateBlockNote(
     withCollaboration({
@@ -93,6 +118,14 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveE
       <div className="flex items-center justify-end gap-2 px-4 pt-2">
         <button
           type="button"
+          onClick={() => setDecisionsOpen((open) => !open)}
+          aria-pressed={decisionsOpen}
+          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          Decisions
+        </button>
+        <button
+          type="button"
           onClick={() => setHistoryOpen((open) => !open)}
           aria-pressed={historyOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
@@ -100,10 +133,28 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveE
           History
         </button>
       </div>
-      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} className="flex min-h-0 flex-1">
+      <BlockNoteView
+        editor={editor}
+        editable={!readOnly}
+        theme={theme}
+        renderEditor={false}
+        slashMenu={false}
+        className="flex min-h-0 flex-1"
+      >
         <div className="min-w-0 flex-1 overflow-y-auto py-4">
           <BlockNoteViewEditor />
         </div>
+        <SuggestionMenuController
+          triggerCharacter="/"
+          getItems={async (query) =>
+            filterSuggestionItems([...getDefaultReactSlashMenuItems(editor), ...primerSlashItems(editor)], query)
+          }
+        />
+        {decisionsOpen && (
+          <div className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 dark:border-neutral-800">
+            <DecisionRegister documentId={documentId} store={store} onClose={() => setDecisionsOpen(false)} />
+          </div>
+        )}
         {historyOpen && (
           <div className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 dark:border-neutral-800">
             <VersioningSidebar onClose={() => setHistoryOpen(false)} />
@@ -112,6 +163,33 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveE
       </BlockNoteView>
     </>
   );
+}
+
+/** Slash menu entries for Primer's own blocks. */
+function primerSlashItems(editor: unknown) {
+  const insert = (block: object) => () => insertOrUpdateBlockForSlashMenu(editor as never, block as never);
+  return [
+    {
+      title: 'Choice',
+      subtext: 'Options people vote on; one person decides',
+      aliases: ['choice', 'decision', 'vote', 'poll', 'options'],
+      group: 'Collaboration',
+      onItemClick: insert({
+        type: 'choice',
+        children: [
+          { type: 'choiceOption', children: [{ type: 'paragraph' }] },
+          { type: 'choiceOption', children: [{ type: 'paragraph' }] },
+        ],
+      }),
+    },
+    {
+      title: 'Task',
+      subtext: 'A tracked checklist item with an assignee',
+      aliases: ['task', 'todo', 'assign', 'action'],
+      group: 'Collaboration',
+      onItemClick: insert({ type: 'task' }),
+    },
+  ];
 }
 
 const COLORS = ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#4d7c0f'];

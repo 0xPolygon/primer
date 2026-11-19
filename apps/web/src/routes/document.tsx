@@ -94,6 +94,7 @@ export function DocumentSurface(props: {
   live: boolean;
   documentId: string;
   readOnly: boolean;
+  canVote: boolean;
   theme: 'light' | 'dark';
   userName: string;
   frame: () => ReactNode;
@@ -101,7 +102,13 @@ export function DocumentSurface(props: {
   if (!props.live) return <>{props.frame()}</>;
   return (
     <Suspense fallback={<div className="p-4 text-sm text-neutral-500">Loading editor…</div>}>
-      <LiveEditor documentId={props.documentId} readOnly={props.readOnly} theme={props.theme} userName={props.userName} />
+      <LiveEditor
+        documentId={props.documentId}
+        readOnly={props.readOnly}
+        canVote={props.canVote}
+        theme={props.theme}
+        userName={props.userName}
+      />
     </Suspense>
   );
 }
@@ -1031,6 +1038,7 @@ function DocumentPageInner() {
             live={liveView}
             documentId={docId!}
             readOnly={!canEdit}
+            canVote={canSubmitEventsDoc(docQuery.data?.myRole)}
             theme={theme}
             userName={me.data?.displayName ?? 'Someone'}
             frame={() =>

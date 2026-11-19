@@ -11,6 +11,9 @@ import type { LiveProvider } from './provider.ts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// The editor's block services follow the document's event stream; jsdom has no EventSource.
+vi.stubGlobal('EventSource', class { close() {} });
+
 // A provider that never connects, over a document that already holds a
 // heading: the editor must show what the Y.Doc holds.
 vi.mock('./provider.ts', async (importOriginal) => ({
@@ -72,7 +75,7 @@ describe('LiveEditor', () => {
   it('live document renders the editor and legacy renders the iframe', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
     const frame = () => createElement('iframe', { title: 'legacy-frame' });
-    const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', frame };
+    const props = { documentId: 'doc-1', readOnly: false, canVote: true, theme: 'light' as const, userName: 'Ana', frame };
 
     const live = await render(createElement(DocumentSurface, { ...props, live: true }));
     await until(() => live.querySelector('[contenteditable="true"].bn-editor')?.textContent?.includes('Seeded from the Y.Doc') === true);
