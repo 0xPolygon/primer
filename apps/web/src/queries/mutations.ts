@@ -60,19 +60,21 @@ function applyCommentToCache(
   });
 }
 
-export function useCreateThread(versionId: string) {
+/** `versionId` is per call: a new thread posts to the version its anchor
+ *  was captured on, which the caller carries with the anchor. */
+export function useCreateThread() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { anchor: AnchorData; body: string; mentions: string[] }) => {
+    mutationFn: async (input: { versionId: string; anchor: AnchorData; body: string; mentions: string[] }) => {
       const payload: CreateThreadRequest = { anchor: input.anchor, body: input.body, mentions: input.mentions };
-      const res = await api(`/api/versions/${versionId}/threads`, {
+      const res = await api(`/api/versions/${input.versionId}/threads`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
       return jsonOrThrow<ThreadDTO>(res);
     },
-    onSuccess: (newThread) => {
+    onSuccess: (newThread, { versionId }) => {
       mergeThreadIntoCache(qc, versionId, newThread);
       clearThreadsEtag(versionId);
       qc.invalidateQueries({ queryKey: ['threads', versionId] });

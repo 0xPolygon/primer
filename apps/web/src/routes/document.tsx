@@ -19,6 +19,7 @@ import type {
   EventRowDTO,
   TextRangeAnchor,
   ElementPathAnchor,
+  VersionsListResponse,
 } from '@polygonlabs/primer-api-types';
 import { useDocument, useDeleteDocument, useEditDocument } from '../queries/documents.ts';
 import { useMe } from '../queries/me.ts';
@@ -42,6 +43,9 @@ import {
   type VersionLatch,
 } from '../lib/viewedVersion.ts';
 import { useTheme } from '../lib/useTheme.ts';
+import { createDraftTracker, DraftReporterContext } from '../lib/drafts.ts';
+import { createVersionFollower, type FollowState } from '../lib/versionFollow.ts';
+import { useDocumentStatus } from '../queries/status.ts';
 import {
   commentsFilename,
   formatThreadsAsMarkdown,
@@ -72,6 +76,7 @@ import {
 } from '../lib/eventsGrant.ts';
 import { EventsGrantPrompt } from '../components/EventsGrantPrompt.tsx';
 import { api } from '../lib/fetch.ts';
+import { ApiError } from '../lib/apiError.ts';
 
 // First-submission grants (issue #78, security requirement 6): per
 // (viewer, document, artifact content version), fronted by an in-memory map
@@ -92,14 +97,18 @@ interface PendingGrant {
 import { DocDetailFolderControl } from '../components/DocDetailFolderControl.tsx';
 import { relativeTime } from '../lib/relativeTime.ts';
 
+// A pending anchor belongs to the version it was captured on: the new
+// thread posts there, never to whatever the page shows at submit time.
 interface PendingSelection {
   anchor: TextRangeAnchor;
   clientRects: SerializableRect[];
+  versionId: string;
 }
 
 interface PendingPick {
   anchor: ElementPathAnchor;
   clientRect: SerializableRect;
+  versionId: string;
 }
 
 /** Everything the NotebookLM modal needs, captured when it opens so the
@@ -163,7 +172,7 @@ function DocumentPageInner() {
 
   const threadsQuery = useThreadsQuery(currentVersionId);
   const threads = threadsQuery.data?.data.threads ?? [];
-  const createThread = useCreateThread(currentVersionId);
+  const createThread = useCreateThread();
 
   const editDoc = useEditDocument(docId ?? '');
   const deleteDoc = useDeleteDocument(docId ?? '');
@@ -223,6 +232,50 @@ function DocumentPageInner() {
   const send = useCallback((msg: OutboundProtocolMessage) => {
     senderRef.current?.(msg);
   }, []);
+
+  // Reply and edit inputs in the sidebar that hold unsent text (lib/drafts.ts).
+  const [drafts] = useState(createDraftTracker);
+
+  // What the page shows, for the new-version follower (lib/versionFollow.ts),
+  // which reads it after its refresh rather than when the event arrived.
+  const followStateRef = useRef<() => FollowState>(() => {
+    throw new Error('unreachable: assigned during render');
+  });
+  followStateRef.current = () => ({
+    docId,
+    path: window.location.pathname + window.location.search,
+    locationKey: location.key,
+    requestedNumber,
+    viewedVersionId: currentVersionId,
+    viewedVersionNumber: currentVersion?.versionNumber,
+    latestVersionNumber: queryClient.getQueryData<VersionsListResponse>(['versions', docId])?.versions[0]
+      ?.versionNumber,
+    hasUnsentDraft: composerDirtyRef.current || drafts.any(),
+  });
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  const workingNow = useDocumentStatus(docId ?? '');
+
+  // What the page does with Primer's own lifecycle events from the
+  // document's stream (comments, threads, working status): they replace
+  // polling. Kept in a ref so the long-lived feed always runs the latest
+  // closure. version.published goes to the follower (see the feed effect).
+  const onDocChangeRef = useRef<(row: EventRowDTO) => void>(() => {});
+  onDocChangeRef.current = (row: EventRowDTO) => {
+    if (row.type === 'status') {
+      void queryClient.invalidateQueries({ queryKey: ['status', docId] });
+      return;
+    }
+    // comment.created, thread.resolved, thread.updated
+    void queryClient.invalidateQueries({ queryKey: ['threads'] });
+  };
+  const onResyncRef = useRef<() => void>(() => {});
+  onResyncRef.current = () => {
+    void queryClient.invalidateQueries({ queryKey: ['threads'] });
+    void queryClient.invalidateQueries({ queryKey: ['versions', docId] });
+    void queryClient.invalidateQueries({ queryKey: ['status', docId] });
+  };
 
   const onComposerDirtyChange = useCallback((dirty: boolean) => {
     composerDirtyRef.current = dirty;
@@ -290,12 +343,21 @@ function DocumentPageInner() {
   useEffect(() => {
     if (!docId) return;
     relayedEventsRef.current = [];
+    const follower = createVersionFollower({
+      refreshVersions: () => queryClient.refetchQueries({ queryKey: ['versions', docId], exact: true }),
+      readState: () => followStateRef.current(),
+      // A new navigation re-latches the newest version (lib/viewedVersion.ts).
+      navigateToLatest: (id) => navigateRef.current(`/d/${id}`, { replace: true }),
+    });
     const feed = createEventsFeed({
       documentId: docId,
       onBatch: (rows) => {
         relayedEventsRef.current = relayedEventsRef.current.concat(rows);
         senderRef.current?.({ type: 'events', events: rows });
       },
+      onDocChange: (row) =>
+        row.type === 'version.published' ? follower.onVersionPublished() : onDocChangeRef.current(row),
+      onResync: () => onResyncRef.current(),
       fetchImpl: (url) => api(url),
       eventSourceFactory: browserEventSourceFactory,
     });
@@ -307,8 +369,9 @@ function DocumentPageInner() {
     return () => {
       window.document.removeEventListener('visibilitychange', onVisibility);
       feed.stop();
+      follower.dispose();
     };
-  }, [docId]);
+  }, [docId, queryClient]);
 
   useEffect(() => {
     setPositionsByAnchorId(new Map());
@@ -332,7 +395,7 @@ function DocumentPageInner() {
       switch (msg.type) {
         case 'selection_captured':
           if (!readMostly) {
-            setPendingSelection({ anchor: msg.anchor, clientRects: msg.clientRects });
+            setPendingSelection({ anchor: msg.anchor, clientRects: msg.clientRects, versionId: currentVersionId });
             setPendingPick(null);
           }
           break;
@@ -343,7 +406,7 @@ function DocumentPageInner() {
           break;
         case 'element_picked':
           if (!readMostly) {
-            setPendingPick({ anchor: msg.anchor, clientRect: msg.clientRect });
+            setPendingPick({ anchor: msg.anchor, clientRect: msg.clientRect, versionId: currentVersionId });
             setPendingSelection(null);
             setPickMode(false);
           }
@@ -606,13 +669,25 @@ function DocumentPageInner() {
   }, [threadsQuery.isSuccess, threads, onHighlight]);
 
   const submitPending = async (body: string, mentions: string[]) => {
-    const anchor: AnchorData | null = pendingSelection
-      ? pendingSelection.anchor
-      : pendingPick
-      ? pendingPick.anchor
-      : null;
-    if (!anchor) return;
-    await createThread.mutateAsync({ anchor, body, mentions });
+    const pending = pendingSelection ?? pendingPick;
+    if (!pending) return;
+    // Posts to the version the anchor was captured on; if that is no longer
+    // the latest the server refuses (not_latest_version) and the composer
+    // offers to switch.
+    try {
+      await createThread.mutateAsync({ versionId: pending.versionId, anchor: pending.anchor, body, mentions });
+    } catch (err) {
+      // The server's 404 carries no message: the version was deleted, or
+      // commenting access went away.
+      if (err instanceof ApiError && err.status === 404) {
+        throw new ApiError(
+          404,
+          "This comment can't be posted: the version it was started on is gone, or you can no longer comment on this document. Your text is still here.",
+          err.code,
+        );
+      }
+      throw err;
+    }
     setPendingSelection(null);
     setPendingPick(null);
   };
@@ -631,8 +706,8 @@ function DocumentPageInner() {
   };
 
   const composerPending = useMemo(
-    () => composerPendingFrom<AnchorData>({ pendingSelection, pendingPick }),
-    [pendingSelection, pendingPick],
+    () => composerPendingFrom<AnchorData>({ pendingSelection, pendingPick, viewedVersionId: currentVersionId }),
+    [pendingSelection, pendingPick, currentVersionId],
   );
 
   // The composer is no longer hidden when the viewed version stops being
@@ -739,6 +814,7 @@ function DocumentPageInner() {
   };
 
   return (
+    <DraftReporterContext.Provider value={drafts.report}>
     <div className="flex flex-col h-[calc(100vh-60px)]">
       <header className="border-b border-neutral-200 px-3 pb-2 pt-1 dark:border-neutral-800 sm:px-4 md:flex md:items-baseline md:justify-between md:gap-3">
         {/* Mobile top row: breadcrumb (or spacer) + compact actions. */}
@@ -869,6 +945,16 @@ function DocumentPageInner() {
           >
             Switch to latest
           </button>
+        </div>
+      )}
+
+      {workingNow.length > 0 && (
+        <div
+          role="status"
+          className="flex items-center gap-2 border-b border-sky-200 bg-sky-50 px-4 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-900/20 dark:text-sky-200"
+        >
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500" aria-hidden="true" />
+          {workingNow.map((s) => s.displayName).join(', ')} {workingNow.length === 1 ? 'is' : 'are'} revising…
         </div>
       )}
 
@@ -1013,5 +1099,6 @@ function DocumentPageInner() {
       )}
       {notebookLm && <NotebookLmModal {...notebookLm} onClose={() => setNotebookLm(null)} />}
     </div>
+    </DraftReporterContext.Provider>
   );
 }
