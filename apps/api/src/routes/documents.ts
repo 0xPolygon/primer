@@ -121,13 +121,28 @@ export function registerDocumentRoutes(
         createdAt: v.createdAt.toISOString(),
       },
       myRole: eff,
+      lastView: null,
     };
+    // Records this visit, returning the previous one for catch-up (read in
+    // the same statement, so a second open can't lose it in between).
     try {
-      await db.execute(sql`
-        INSERT INTO document_views (user_id, document_id)
-        VALUES (${user.id}, ${docId})
-        ON CONFLICT (user_id, document_id) DO UPDATE SET viewed_at = excluded.viewed_at
-      `);
+      const [prev] = (await db.execute(sql`
+        WITH prev AS (
+          SELECT viewed_at, last_doc_version FROM document_views WHERE user_id = ${user.id} AND document_id = ${docId}
+        ), up AS (
+          INSERT INTO document_views (user_id, document_id, last_doc_version)
+          VALUES (${user.id}, ${docId}, (SELECT max(id) FROM doc_updates WHERE document_id = ${docId}))
+          ON CONFLICT (user_id, document_id) DO UPDATE
+            SET viewed_at = excluded.viewed_at, last_doc_version = excluded.last_doc_version
+        )
+        SELECT viewed_at AS "at", last_doc_version AS "docVersion" FROM prev
+      `)) as unknown as { at: Date | string; docVersion: number | string | null }[];
+      if (prev) {
+        body.lastView = {
+          at: new Date(prev.at).toISOString(),
+          docVersion: prev.docVersion === null ? null : Number(prev.docVersion),
+        };
+      }
     } catch (err) {
       logger.warn({ err, docId, userId: user.id }, 'failed to upsert document_views');
     }
@@ -382,6 +397,7 @@ export function registerDocumentRoutes(
         sizeBytes: versions.sizeBytes,
         createdAt: versions.createdAt,
         bundleKey: versions.bundleKey,
+        docVersion: versions.docVersion,
       })
       .from(versions)
       .where(eq(versions.documentId, docId))
@@ -396,6 +412,7 @@ export function registerDocumentRoutes(
           sizeBytes: r.sizeBytes,
           createdAt: r.createdAt.toISOString(),
           bundled: r.bundleKey !== null,
+          ...(r.docVersion !== null ? { docVersion: r.docVersion } : {}),
         })),
       },
       200

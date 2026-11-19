@@ -77,7 +77,7 @@ export function attachPersistence(
   // Deleted content is garbage-collected before `update` fires, so the
   // touched ids are collected while the transaction is still intact.
   const onAfterTransaction = (tr: Y.Transaction) => {
-    tr.meta.set(TOUCHED, touchedBy(doc, tr));
+    tr.meta.set(TOUCHED, commentMarksOnly(doc, tr) ? [] : touchedBy(doc, tr));
   };
   const onUpdate = (update: Uint8Array, origin: unknown, _doc: Y.Doc, tr: Y.Transaction) => {
     if (state.failed) return;
@@ -177,6 +177,33 @@ const BLOCK_ELEMENTS = new Set([
   'blockContainer',
   ...Object.values(primerSchema.blockSpecs).flatMap((spec) => (spec.config.layoutOnly ? [spec.config.type] : [])),
 ]);
+
+const COMMENT_KEY = /^comment(--|$)/;
+
+/**
+ * Whether a transaction only places, moves or clears comment marks (the
+ * server anchoring a thread, or BlockNote flagging a resolved one): no
+ * content changed, so it touches no block for delta reads and catch-up.
+ */
+function commentMarksOnly(doc: Y.Doc, tr: Y.Transaction): boolean {
+  const isCommentFormat = (s: unknown) => s instanceof Y.Item && s.content instanceof Y.ContentFormat && COMMENT_KEY.test(s.content.key);
+  let any = false;
+  for (const [client, after] of tr.afterState) {
+    const before = tr.beforeState.get(client) ?? 0;
+    if (after <= before) continue;
+    const structs = doc.store.clients.get(client) ?? [];
+    for (let i = Y.findIndexSS(structs, before); i < structs.length && structs[i]!.id.clock < after; i++) {
+      if (!isCommentFormat(structs[i])) return false;
+      any = true;
+    }
+  }
+  let others = false;
+  Y.iterateDeletedStructs(tr, tr.deleteSet, (s) => {
+    if (isCommentFormat(s)) any = true;
+    else others = true;
+  });
+  return any && !others;
+}
 
 function touchedBy(doc: Y.Doc, tr: Y.Transaction): string[] {
   const touched = new Set<string>();

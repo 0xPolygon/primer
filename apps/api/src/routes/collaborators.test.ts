@@ -23,6 +23,7 @@ class SpyNotifier implements Notifier {
   async notifyExternalOtp() {}
   async notifyExternalFirstView() {}
   async notifyDocumentMention() {}
+  async notifyDigest() {}
 }
 
 async function withMultiUserApp<T>(

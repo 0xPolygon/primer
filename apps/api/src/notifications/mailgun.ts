@@ -10,6 +10,7 @@ import type {
   NotifyCollaboratorAddedArgs,
   NotifyExternalOtpArgs,
   NotifyDocumentMentionArgs,
+  NotifyDigestArgs,
   NotifyExternalFirstViewArgs,
 } from './notifier.ts';
 
@@ -293,6 +294,17 @@ export class MailgunNotifier implements Notifier {
     const html = `<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#171717;">
 <p>${escapeHtml(actorName)} mentioned you in '<strong>${escapeHtml(args.doc.title)}</strong>'.</p>
 <p><a href="${url}">Open the doc</a></p></body></html>`;
+    await this.send(recipient.email, subject, text, html);
+  }
+
+  async notifyDigest(args: NotifyDigestArgs): Promise<void> {
+    const [recipient] = (await db
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email, kind: users.kind })
+      .from(users)
+      .where(inArray(users.id, [args.userId]))) as UserRow[];
+    // Agents have no mailbox (auth/agents.ts).
+    if (!recipient || recipient.kind === 'agent') return;
+    const { subject, text, html } = await args.render(this.cfg.appBaseUrl);
     await this.send(recipient.email, subject, text, html);
   }
 

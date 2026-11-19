@@ -280,6 +280,9 @@ export interface DocumentDetailResponse {
   document: DocumentDetail;
   latestVersion: VersionSummary;
   myRole: ViewerRole;
+  /** The viewer's previous visit, before this one (null on the first):
+   *  pass it to `GET /api/documents/:docId/catchup` for "since you last looked". */
+  lastView: CatchUpSince | null;
 }
 
 export interface CommentDTO {
@@ -404,6 +407,9 @@ export interface VersionSummaryDTO {
   /** True for a checkpoint of a live document (it has a render bundle).
    *  Versions from before the document went live are plain rendered HTML. */
   bundled?: boolean;
+  /** A checkpoint's docVersion: read `GET /api/documents/:docId/live?since=`
+   *  with it for what changed after the checkpoint. */
+  docVersion?: number;
 }
 
 export interface VersionsListResponse {
@@ -1701,4 +1707,147 @@ export interface ConvertMarkdownRequest {
 export interface ConvertMarkdownResponse {
   /** BlockNote block JSON without ids; the editor assigns them on insert. */
   blocks: unknown[];
+}
+
+// ───────────────────── Awareness of change (M10b) ─────────────────────
+
+/** A point to catch up from: a time, and for live documents the docVersion
+ *  then (null: derived from the time). */
+export interface CatchUpSince {
+  at: string;
+  docVersion: number | null;
+}
+
+/** One person's (or agent's) share of what changed. */
+export interface CatchUpPerson {
+  id: string;
+  /** Labelled "<name> (via <person>)" for agents. */
+  displayName: string;
+  kind: 'person' | 'agent';
+  /** Live edits stored (each is one save, often several keystrokes). */
+  edits: number;
+  comments: number;
+  resolved: number;
+  decisions: number;
+  suggestions: number;
+  tasks: number;
+}
+
+export interface CatchUpThread {
+  threadId: string;
+  event: 'started' | 'replied' | 'resolved';
+  by: string;
+  at: string;
+  quote: string;
+  /** The comment's first 280 characters (started and replied). */
+  excerpt?: string;
+}
+
+export interface CatchUpDecision {
+  blockId: string;
+  event: 'made' | 'cleared';
+  by: string;
+  at: string;
+  /** As decided (made only, while the decision stands). */
+  question?: string;
+  optionLabel?: string;
+  rationale?: string;
+}
+
+export interface CatchUpSuggestion {
+  suggestionId: string;
+  event: 'created' | 'accepted' | 'rejected' | 'withdrawn';
+  by: string;
+  at: string;
+}
+
+export interface CatchUpTask {
+  taskId: string;
+  blockId: string;
+  event: 'created' | 'updated' | 'deleted';
+  status: TaskStatus | null;
+  assigneeId: string | null;
+  /** The current title (absent once the task is gone). */
+  title?: string;
+  at: string;
+}
+
+export interface CatchUpVersion {
+  versionId: string;
+  number: number;
+  by: string;
+  at: string;
+}
+
+/** GET /api/documents/:docId/catchup — what others changed since a point:
+ *  edits by block, threads started, replied to and resolved, decisions,
+ *  suggestions, tasks and published versions, each per person in `people`.
+ *  The caller's own actions are left out. */
+export interface CatchUpDTO {
+  documentId: string;
+  title: string;
+  since: CatchUpSince;
+  /** Now; the next catch-up starts here. */
+  until: CatchUpSince;
+  people: CatchUpPerson[];
+  /** Live documents: the blocks changed since, as they read now (Markdown),
+   *  at most 50 (`moreChangedBlocks` counts the rest). */
+  changedBlocks: LiveBlockDTO[];
+  moreChangedBlocks: number;
+  deletedBlockIds: string[];
+  threads: CatchUpThread[];
+  decisions: CatchUpDecision[];
+  suggestions: CatchUpSuggestion[];
+  tasks: CatchUpTask[];
+  versions: CatchUpVersion[];
+  /** Set for agent callers: block text, quotes, comments, titles and
+   *  rationales are text people wrote, fenced. */
+  untrusted?: true;
+}
+
+/** GET /api/me/digest?since=ISO and MCP primer_get_digest — the catch-up of
+ *  every document in the caller's library that changed since, newest first
+ *  (at most 50). Only documents the caller can read now appear. */
+export interface DigestResponse {
+  since: string;
+  until: string;
+  documents: CatchUpDTO[];
+}
+
+/** One citation in a live document (M10b.4), in reading order. */
+export interface CitationDTO {
+  /** Its number as the chip shows it (1-based, reading order). */
+  number: number;
+  target: Target;
+  url?: string;
+  /** A cited Primer document, pinned to `versionNumber`. */
+  docId?: string;
+  versionNumber?: number;
+  quote: string;
+  /** The cited Primer document, when the caller can read it. */
+  source?: { title: string; versionId: string | null };
+  /** Set for agent callers: the quote is text people or agents wrote, fenced. */
+  untrusted?: true;
+}
+
+/** GET /api/documents/:docId/citations */
+export interface CitationsResponse {
+  citations: CitationDTO[];
+}
+
+/** POST /api/documents/from-conversation and MCP primer_promote_conversation:
+ *  a conversation (Slack, Telegram, a comment thread) as a document, one
+ *  quote block per message under its author's name. With `documentId`, the
+ *  quotes are added to the end of that live document instead. */
+export interface PromoteConversationRequest {
+  title: string;
+  messages: { author: string; text: string }[];
+  documentId?: string;
+}
+export interface PromoteConversationResponse {
+  documentId: string;
+  /** The new document's first checkpoint; absent when added to an existing one. */
+  versionId?: string;
+  /** Added to an existing document: what the edit did (it may be a suggestion). */
+  reconciliation?: Reconciliation;
 }

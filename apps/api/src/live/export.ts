@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as Y from 'yjs';
-import { optionLabel } from '@primer/blocks';
+import { citationLabel, optionLabel, type CitationProps } from '@primer/blocks';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
 import { MAIN_TAB, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { sourcePreview } from './import.ts';
@@ -264,6 +264,7 @@ pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 table{border-collapse:collapse}td,th{border:1px solid #d4d4d4;padding:4px 8px}
 img,video{max-width:100%}
 .primer-chip{border-radius:4px;background:#ede9fe;color:#4c1d95;padding:0 4px}
+.bn-container{counter-reset:primer-citation}.primer-citation{display:inline-block;line-height:1.2;font-size:.75em;vertical-align:super}.primer-citation::before{counter-increment:primer-citation;content:"[" counter(primer-citation) "] "}
 .primer-callout{--callout:#6366f1;display:flex;gap:8px;margin:2px 0;padding:8px 12px;border-left:3px solid var(--callout);border-radius:6px;background:color-mix(in srgb,var(--callout) 12%,transparent)}
 .primer-callout[data-primer-callout="warning"]{--callout:#d97706}
 .primer-callout[data-primer-callout="success"]{--callout:#16a34a}
@@ -289,6 +290,7 @@ function chipText(node: { type: string; props?: Record<string, string> }): strin
   if (node.type === 'mention') return `@${node.props?.name ?? ''}`;
   if (node.type === 'date') return node.props?.date ?? '';
   if (node.type === 'dropdown') return node.props?.value ?? '';
+  if (node.type === 'citation') return `[${citationLabel(node.props as unknown as CitationProps)}]`;
   return '';
 }
 

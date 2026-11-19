@@ -16,6 +16,7 @@ class SpyNotifier implements Notifier {
   async notifyCollaboratorAdded() {}
   async notifyExternalOtp() {}
   async notifyExternalFirstView() {}
+  async notifyDigest() {}
   async notifyDocumentMention(args: NotifyDocumentMentionArgs) {
     this.mentions.push(args);
   }

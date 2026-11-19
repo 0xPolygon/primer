@@ -4,6 +4,7 @@ import { codeBlockOptions } from '@blocknote/code-block';
 import { createReactMathBlockSpec } from '@blocknote/math-block';
 import { createReactDiagramBlockSpec } from '@blocknote/diagram-block';
 import { dateChip, dropdownChip, mentionChip } from './chips.tsx';
+import { citationChip } from './citation.tsx';
 import { sourceBlock } from './source.tsx';
 import { pendingBlock } from './pending.tsx';
 import { choiceBlock, choiceOptionBlock } from './choice.tsx';
@@ -35,7 +36,7 @@ export const primerSchema = BlockNoteSchema.create({
     column: columnBlock(),
     embed: embedBlock(),
   },
-  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip, citation: citationChip },
 });
 
 export type PrimerSchema = typeof primerSchema;

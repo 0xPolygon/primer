@@ -165,6 +165,7 @@ describe('route scope table', () => {
       'primer_propose_pick',
       'primer_add_task',
       'primer_update_task',
+      'primer_promote_conversation',
     ]);
   });
 });

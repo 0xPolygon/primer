@@ -136,6 +136,20 @@ describe('agent runs', () => {
     }
   }, 60_000);
 
+  it('small batches add up: the edit past the threshold needs an approved plan', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('a', 'Alpha')]);
+    const run = await startedRun(id, agent);
+    // Batches of three, never large on their own, until the run reaches the threshold.
+    for (let b = 0; b < LARGE_RUN_EDITS / 3; b++) {
+      const out = await ops(id, agent, { runId: run.id, ops: [0, 1, 2].map((k) => addOne(`b${b}-${k}`)) });
+      expect(out.outcomes.every((o) => o.status === 'applied')).toBe(true);
+    }
+    const next = await ops(id, agent, { runId: run.id, ops: [addOne('one more')] });
+    expect(next.outcomes[0]).toMatchObject({ status: 'conflict', refusal: { code: 'approval_required' } });
+  });
+
   it('a large run needs an approved plan: of two concurrent batches crossing the threshold, exactly one applies', async () => {
     const agent = await makeAgent();
     const id = await createLiveDoc();

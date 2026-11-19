@@ -10,7 +10,7 @@ import { ThreadsSidebar } from '@blocknote/react';
 import { PrimerBlocksContext, primerSchema } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
-import type { DocFileUploadResponse, ViewerRole } from '@polygonlabs/primer-api-types';
+import type { CatchUpSince, DocFileUploadResponse, Target, ViewerRole } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { AgentStatus } from './AgentStatus.tsx';
@@ -26,6 +26,8 @@ import { commentDeleteGuard, type HeldDelete } from './commentDeleteGuard.ts';
 import { DeleteCommentedDialog } from './DeleteCommentedDialog.tsx';
 import { useThreadEvents } from './threadEvents.ts';
 import { SuggestionsPanel } from './SuggestionsPanel.tsx';
+import { ThreadActions } from './ThreadActions.tsx';
+import { CatchUpPanel, ChangeHighlights, useCheckpointChanges } from './changes.tsx';
 import { useBlockServices, type ChoiceStore } from './blockServices.ts';
 import { DecisionRegister } from './DecisionRegister.tsx';
 import { PageView } from './PageView.tsx';
@@ -43,6 +45,8 @@ export type LiveEditorProps = {
   role: ViewerRole;
   /** Opens a version from before the document went live in the version viewer. */
   onOpenLegacyVersion?: (versionNumber: number) => void;
+  /** The viewer's previous visit (document detail `lastView`): catch-up shows what changed since. */
+  lastView?: CatchUpSince | null;
 };
 
 /**
@@ -73,6 +77,9 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // Choice and task blocks reach the API through these (people pick; the
   // browser is always a person's session).
   const { services, store } = useBlockServices(props.documentId, { canPick: !props.readOnly, canVote: props.canVote });
+  // Taken once: a refetch of the document records a newer visit.
+  const [since] = useState(() => props.lastView ?? null);
+  const [catchUp, setCatchUp] = useState<Target[]>([]);
   // Page blocks render their frame and overlay through the block services.
   const { live, documentId, readOnly, theme, userId, role, userName } = props;
   const withPages = useMemo(() => {
@@ -93,8 +100,9 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
         <ConnectionStatus provider={props.live.provider} />
         <AgentStatus provider={props.live.provider} />
         <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
+        {since && <CatchUpPanel documentId={props.documentId} since={since} onBlocks={setCatchUp} />}
         {/* One editor per tab fragment, mounted when its tab is opened. */}
-        <TabEditor key={active} tabId={active} store={store} {...props} />
+        <TabEditor key={active} tabId={active} store={store} catchUp={catchUp} {...props} />
       </div>
     </PrimerBlocksContext.Provider>
   );
@@ -111,8 +119,11 @@ function TabEditor({
   role,
   onOpenLegacyVersion,
   store,
-}: LiveEditorProps & { live: LiveProvider; tabId: string; store: ChoiceStore }) {
+  catchUp,
+}: LiveEditorProps & { live: LiveProvider; tabId: string; store: ChoiceStore; catchUp: Target[] }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [changesOn, setChangesOn] = useState(false);
+  const sinceCheckpoint = useCheckpointChanges(documentId, tabId, changesOn);
   const [decisionsOpen, setDecisionsOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -212,6 +223,14 @@ function TabEditor({
         </button>
         <button
           type="button"
+          onClick={() => setChangesOn((on) => !on)}
+          aria-pressed={changesOn}
+          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          {t('liveEditor.changes')}
+        </button>
+        <button
+          type="button"
           onClick={() => setHistoryOpen((open) => !open)}
           aria-pressed={historyOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
@@ -219,6 +238,8 @@ function TabEditor({
           {t('liveEditor.history')}
         </button>
       </div>
+      <ChangeHighlights tone="catchup" blockIds={catchUp.filter((b) => b.tabId === tabId).map((b) => b.blockId)} />
+      {sinceCheckpoint && <ChangeHighlights tone="checkpoint" blockIds={sinceCheckpoint} />}
       <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} slashMenu={false} className="flex min-h-0 flex-1">
         <ChipMenus editor={editor} slashItems={primerSlashItems(editor)} />
         <div className="min-w-0 flex-1 overflow-y-auto py-4">
@@ -237,6 +258,7 @@ function TabEditor({
               <option value="all">{t('liveEditor.filterAll')}</option>
             </select>
             <ThreadsSidebar filter={filter} />
+            <ThreadActions store={threadStore} canPromote />
           </div>
         )}
         <div
