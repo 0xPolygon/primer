@@ -140,7 +140,7 @@ Reply in a thread as the signed-in user. Replying to a resolved thread reopens i
 
 ### `primer_resolve_thread`
 
-Resolve a thread. Only the document owner or the person who started the thread may.
+Resolve a thread. Only the document owner or the person who started the thread may, and an agent never resolves a thread a person wrote in: it is refused (`forbidden`) with the fix "Reply in the thread and ask a person to resolve it."
 
 - **Input:** `{ thread_id: string }`.
 - **Output:** `{ thread_id, resolved: true }`. Errors: `not_found`, `forbidden`.

@@ -580,7 +580,7 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
   },
   primer_resolve_thread: {
     description:
-      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it. Returns { thread_id, resolved }.',
+      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it, and an agent never resolves a thread a person wrote in (reply instead and ask a person to resolve it). Returns { thread_id, resolved }.',
     inputSchema: {
       thread_id: z.string(),
     },

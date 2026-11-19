@@ -952,10 +952,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const threadId = typeof args.thread_id === 'string' ? args.thread_id : '';
       if (!threadId) return err('bad_request', 'thread_id is required');
       const out = await resolveThread(user, threadId);
-      if (!out.ok) {
-        return err(out.status === 404 ? 'not_found' : 'forbidden',
-          out.status === 404 ? 'thread not found' : 'only the document owner or the thread starter can resolve it');
-      }
+      if (!out.ok) return refusalErr(out.refusal);
       return ok({ thread_id: threadId, resolved: true });
     },
   };
@@ -1213,7 +1210,7 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_resolve_thread: {
     description:
-      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it. Returns { thread_id, resolved }.',
+      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it, and an agent never resolves a thread a person wrote in (reply instead and ask a person to resolve it). Returns { thread_id, resolved }.',
     inputSchema: { thread_id: z.string() },
   },
   primer_send_events: {

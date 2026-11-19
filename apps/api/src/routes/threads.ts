@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 import { eq, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
-import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
+import { isTextRangeAnchor, isElementPathAnchor, type Refusal } from '@polygonlabs/primer-api-types';
 import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
 import { logger } from '../logger.ts';
 import type { CommentDTO, CreateThreadRequest, ThreadDTO, ThreadsListResponse } from '@polygonlabs/primer-api-types';
@@ -203,19 +203,14 @@ async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
 
 export type ResolveResult =
   | { ok: true; thread: ThreadDTO }
-  | { ok: false; status: 403 | 404; error: 'forbidden' | 'not_found' };
+  | { ok: false; status: 403 | 404; error: 'forbidden' | 'not_found'; refusal: Refusal };
 
-/** Resolves a thread as `user` (the document owner or the thread's starter).
- *  Shared by the REST route and the MCP resolve tool. */
+/** Resolves a thread as `user`. Shared by the REST route and the MCP
+ *  resolve tool; see authorizeThreadMutation for who may. */
 export async function resolveThread(user: AuthUser, threadId: string): Promise<ResolveResult> {
-  const ctx = await loadDocContextForThread(threadId);
-  if (!ctx.ok) return { ok: false, status: 404, error: 'not_found' };
-  const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
-  if (!canRead(ctx.visibility, eff)) return { ok: false, status: 404, error: 'not_found' };
-
-  const authz = await authorizeThreadMutation(threadId, user.id);
-  if (authz === 'not_found') return { ok: false, status: 404, error: 'not_found' };
-  if (authz === 'forbidden') return { ok: false, status: 403, error: 'forbidden' };
+  const authz = await authorizeThreadMutation(threadId, user);
+  if (!authz.ok) return authz;
+  const { ctx } = authz;
 
   await transactionWithEvents(async (tx, emit) => {
     await tx
@@ -230,7 +225,7 @@ export async function resolveThread(user: AuthUser, threadId: string): Promise<R
     });
   });
   const dto = await loadThreadDTO(threadId);
-  if (!dto) return { ok: false, status: 404, error: 'not_found' };
+  if (!dto) return { ok: false, status: 404, error: 'not_found', refusal: THREAD_NOT_FOUND };
   return { ok: true, thread: dto };
 }
 
@@ -450,22 +445,16 @@ export function registerThreadRoutes(
 
   app.post('/api/threads/:threadId/resolve', async (c) => {
     const out = await resolveThread(c.get('user'), c.req.param('threadId'));
-    if (!out.ok) return c.json({ error: out.error }, out.status);
+    if (!out.ok) return c.json({ error: out.error, refusal: out.refusal }, out.status);
     return c.json(out.thread, 200);
   });
 
   app.post('/api/threads/:threadId/reopen', async (c) => {
     const threadId = c.req.param('threadId');
-
-    const ctx = await loadDocContextForThread(threadId);
-    if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
-    const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
-    if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
-
-    const authz = await authorizeThreadMutation(threadId, user.id);
-    if (authz === 'not_found') return c.json({ error: 'not_found' }, 404);
-    if (authz === 'forbidden') return c.json({ error: 'forbidden' }, 403);
+    const authz = await authorizeThreadMutation(threadId, user);
+    if (!authz.ok) return c.json({ error: authz.error, refusal: authz.refusal }, authz.status);
+    const { ctx } = authz;
 
     await transactionWithEvents(async (tx, emit) => {
       await tx
@@ -485,31 +474,63 @@ export function registerThreadRoutes(
   });
 }
 
+const THREAD_NOT_FOUND: Refusal = {
+  code: 'not_found',
+  message: 'Thread not found.',
+  fix: 'Check the thread id; list threads with primer_get_comments.',
+};
+
 /**
- * Resolve/reopen are permitted for either the document uploader or the
- * thread's first-comment author (the thread starter).
+ * Who may resolve or reopen a thread: the document owner or the thread's
+ * starter (its first comment's author). An agent additionally may only when
+ * no person has written in the thread (deleted comments included): a
+ * person's feedback is closed by a person.
  */
 async function authorizeThreadMutation(
   threadId: string,
-  userId: string
-): Promise<'ok' | 'not_found' | 'forbidden'> {
-  const [row] = (await db.execute(sql`
-    SELECT d.uploader_id AS "uploaderId",
-           (
-             SELECT c.author_id FROM comments c
-             WHERE c.thread_id = t.id
-             ORDER BY c.created_at ASC
-             LIMIT 1
-           ) AS "firstAuthorId"
-    FROM threads t
-    INNER JOIN versions v ON v.id = t.version_id
-    INNER JOIN documents d ON d.id = v.document_id
-    WHERE t.id = ${threadId}
-    LIMIT 1
-  `)) as unknown as { uploaderId: string; firstAuthorId: string | null }[];
+  user: AuthUser,
+): Promise<
+  | { ok: true; ctx: { docId: string } }
+  | { ok: false; status: 403 | 404; error: 'forbidden' | 'not_found'; refusal: Refusal }
+> {
+  const ctx = await loadDocContextForThread(threadId);
+  const notFound = { ok: false, status: 404, error: 'not_found', refusal: THREAD_NOT_FOUND } as const;
+  if (!ctx.ok) return notFound;
+  const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility }, user);
+  if (!canRead(ctx.visibility, eff)) return notFound;
 
-  if (!row) return 'not_found';
-  if (row.uploaderId === userId) return 'ok';
-  if (row.firstAuthorId !== null && row.firstAuthorId === userId) return 'ok';
-  return 'forbidden';
+  const [row] = (await db.execute(sql`
+    SELECT
+      (SELECT c.author_id FROM comments c
+        WHERE c.thread_id = ${threadId}
+        ORDER BY c.created_at ASC
+        LIMIT 1) AS "firstAuthorId",
+      EXISTS (SELECT 1 FROM comments c
+                INNER JOIN users u ON u.id = c.author_id
+               WHERE c.thread_id = ${threadId} AND u.kind = 'person') AS "personWrote"
+  `)) as unknown as { firstAuthorId: string | null; personWrote: boolean }[];
+
+  if (user.kind === 'agent' && row.personWrote) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'forbidden',
+      refusal: {
+        code: 'forbidden',
+        message: 'A person wrote in this thread, so an agent cannot resolve or reopen it.',
+        fix: 'Reply in the thread and ask a person to resolve it.',
+      },
+    };
+  }
+  if (eff === 'owner' || row.firstAuthorId === user.id) return { ok: true, ctx };
+  return {
+    ok: false,
+    status: 403,
+    error: 'forbidden',
+    refusal: {
+      code: 'forbidden',
+      message: 'Only the document owner or the person who started the thread can resolve or reopen it.',
+      fix: 'Reply in the thread instead.',
+    },
+  };
 }
