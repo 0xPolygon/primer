@@ -45,8 +45,11 @@ export type PlannedEdit = {
  * moved, enough to put it back:
  * - `prior`: the block's whole subtree (blockContainer JSON) before the edit,
  *   null when the edit created it;
- * - `afterVersion`: the block's content version (`contentVersion`) right
- *   after the edit, null when the edit removed it; undo's precondition;
+ * - `afterVersion`: right after the edit, null when the edit removed it;
+ *   undo's precondition. For a block the edit created it is the whole
+ *   subtree's `blockVersion` (undo removes the subtree, so a person's later
+ *   edit anywhere in it must stop that); otherwise the block's own content
+ *   (`contentVersion`), so undoing a child never makes its parent stale;
  * - `place`: where the block was (parent, previous and next sibling ids),
  *   set when the edit removed or moved it.
  * Only the topmost block of a created or removed subtree is recorded.
@@ -245,7 +248,7 @@ function blockDiff(before: PmNode, after: PmNode, moved: Set<string>) {
     const parent = now.place.parentId;
     if (parent !== null && a.has(parent) && !b.has(parent)) continue;
     touched.push({ node: now.node, parentId: now.place.parentId, depth: now.depth });
-    inverses.push({ blockId: id, prior: null, afterVersion: contentVersion(now.node), place: null });
+    inverses.push({ blockId: id, prior: null, afterVersion: blockVersion(now.node), place: null });
   }
   return { inverses, touched };
 }

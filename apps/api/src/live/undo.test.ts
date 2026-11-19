@@ -110,6 +110,19 @@ describe('undoRun', () => {
     expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta']);
   });
 
+  it("undo keeps a person's later edit inside a block the run created", async () => {
+    const { agent, id, runId } = await setup();
+    const added = await ops(id, agent, { runId, ops: [{ op: 'add', at: main('a'), position: 'after', blocks: ['- one\n  - nested'] }] });
+    const one = added.outcomes[0]!.blocks![0]!.target.blockId;
+    const v = await versions(id, agent);
+    const nested = Object.keys(v).find((k) => !['a', 'b', 'c', 'd', one].includes(k))!;
+    await ops(id, owner, { ops: [{ op: 'update', target: main(nested), block: '- nested, by a person', expectVersion: v[nested] }] });
+
+    const result = await undo(runId);
+    expect(result.outcomes[0]).toMatchObject({ status: 'conflict', refusal: { code: 'target_changed' } });
+    expect(await markdownOf(id, agent)).toContain('* nested, by a person');
+  });
+
   it('undo of a delete puts the blocks back in place', async () => {
     const { agent, id, runId } = await setup();
     const v = await versions(id, agent);

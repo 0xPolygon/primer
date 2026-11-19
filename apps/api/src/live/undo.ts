@@ -6,7 +6,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canEdit } from '../lib/permissions.ts';
-import { findBlock } from './blocks.ts';
+import { blockVersion, findBlock } from './blocks.ts';
 import { serverEditor } from './editor.ts';
 import { removeBlock } from './ops.ts';
 import { originFor } from './origin.ts';
@@ -74,7 +74,7 @@ function toEdit(row: InverseRow): PlannedEdit {
       if (prior === null) {
         // The run created this block: remove it, unless someone changed it.
         if (!at) return;
-        if (contentVersion(at.node) !== row.afterVersion) return changedSince(row.target);
+        if (blockVersion(at.node) !== row.afterVersion) return changedSince(row.target);
         return removeBlock(tr, at);
       }
       if (row.afterVersion === null) {

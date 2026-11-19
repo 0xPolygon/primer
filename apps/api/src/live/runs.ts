@@ -151,12 +151,7 @@ export async function listAgentRuns(agent: AuthUser, opts: { documentId?: string
        ${opts.status ? sql`AND status = ${opts.status}` : sql`AND status in ('queued', 'running')`}
      ORDER BY created_at LIMIT 100
   `)) as unknown as RunRow[];
-  return rows.map((row) => {
-    const dto = toDTO(row);
-    const viewer = { ...row.request.viewer };
-    if (viewer.unsentText !== undefined) viewer.unsentText = fenceUntrusted(viewer.unsentText);
-    return { ...dto, request: { ...row.request, prompt: fenceUntrusted(row.request.prompt), viewer } };
-  });
+  return rows.map((row) => toDTOFor(agent, 'stranger', row));
 }
 
 type Transition = {
@@ -389,7 +384,7 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
 export async function runViewer(documentId: string, agent: AuthUser, runId: string) {
   const run = await loadRun(runId);
   if (!run || run.agentId !== agent.id || run.documentId !== documentId) return null;
-  return run.request.viewer;
+  return fencedRequest(run.request).viewer;
 }
 
 export async function loadRun(runId: string): Promise<RunRow | null> {
@@ -406,10 +401,12 @@ function iso(d: Date | string | null): string | null {
  * A run as `user` may see it. Every run returned to a caller goes through
  * here: the request (prompt, unsent text, selection) is the requester's, so
  * only they, the run's agent and the document owner get it; others see
- * status and progress with `request: null`.
+ * status and progress with `request: null`. The agent gets it fenced: it is
+ * text written by people, data rather than instructions.
  */
 export function toDTOFor(user: AuthUser, role: EffectiveRole, row: RunRow): AgentRunDTO {
   const dto = toDTO(row);
+  if (row.agentId === user.id) return { ...dto, request: fencedRequest(row.request) };
   const mayRead = row.requestedBy === user.id || row.agentId === user.id || role === 'owner';
   return mayRead ? dto : { ...dto, request: null };
 }
@@ -434,6 +431,12 @@ function toDTO(row: RunRow): AgentRunDTO & { request: AgentRunRequest } {
     startedAt: iso(row.startedAt),
     finishedAt: iso(row.finishedAt),
   };
+}
+
+function fencedRequest(request: AgentRunRequest): AgentRunRequest {
+  const viewer = { ...request.viewer };
+  if (viewer.unsentText !== undefined) viewer.unsentText = fenceUntrusted(viewer.unsentText);
+  return { ...request, prompt: fenceUntrusted(request.prompt), viewer };
 }
 
 /** Text written by people, fenced for an agent's context. */
