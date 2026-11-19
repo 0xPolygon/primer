@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
 import type { Context } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
@@ -541,8 +541,18 @@ export function registerDocumentRoutes(
   // Served from the app's origin with the viewer's session, so nothing here
   // may run: a sandboxing CSP and nosniff always, and inline display only for
   // media types a browser shows passively.
+  //
+  // `?doc=` names the document whose content references the file, and the
+  // file must belong to it: ids come from block props, which any editor can
+  // write, so a file id copied from another document is never served here.
   app.get('/api/files/:fileId', async (c) => {
-    const [file] = await db.select().from(docFiles).where(eq(docFiles.id, c.req.param('fileId')));
+    const docId = c.req.query('doc') ?? '';
+    const fileId = c.req.param('fileId');
+    if (!UUID.test(docId) || !UUID.test(fileId)) return c.json({ error: 'not_found' }, 404);
+    const [file] = await db
+      .select()
+      .from(docFiles)
+      .where(and(eq(docFiles.id, fileId), eq(docFiles.documentId, docId)));
     if (!file) return c.json({ error: 'not_found' }, 404);
     if (!(await docAccess(file.documentId, c.get('user')))) return c.json({ error: 'not_found' }, 404);
     const inline = INLINE_TYPES.has(file.contentType);
@@ -558,6 +568,8 @@ export function registerDocumentRoutes(
     });
   });
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const INLINE_TYPES = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml',

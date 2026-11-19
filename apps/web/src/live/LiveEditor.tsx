@@ -64,7 +64,9 @@ function LiveEditorView({ live, documentId, readOnly, theme, userName }: LiveEdi
         return ((await res.json()) as DocFileUploadResponse).url;
       },
       resolveFileUrl: async (url: string) =>
-        url.startsWith('primer-blob://') ? `/api/files/${encodeURIComponent(url.slice('primer-blob://'.length))}` : url,
+        url.startsWith('primer-blob://')
+          ? `/api/files/${encodeURIComponent(url.slice('primer-blob://'.length))}?doc=${encodeURIComponent(documentId)}`
+          : url,
     }),
     [live],
   );

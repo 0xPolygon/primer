@@ -1,7 +1,7 @@
 import * as Y from 'yjs';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { comments, threads } from '../db/schema.ts';
+import { comments, docFiles, threads } from '../db/schema.ts';
 import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { readBlocks } from './editor.ts';
@@ -60,7 +60,7 @@ export async function renderBundle(
       'export.html': html,
       'static.html': served.html,
       'threads.json': JSON.stringify(await openThreads(opts.documentId)),
-      'files.json': JSON.stringify(referencedFiles(doc)),
+      'files.json': JSON.stringify(await referencedFiles(doc, opts.documentId)),
     };
     const manifest: BundleManifest = { versionId: opts.versionId, format, files: Object.keys(files) };
     files['manifest.json'] = JSON.stringify(manifest);
@@ -129,11 +129,20 @@ export function quoteOf(anchor: { type: string; selectorText?: string; innerText
 
 const BLOB = /primer-blob:\/\/([0-9a-f-]{36})/g;
 
-/** File ids (`primer-blob://<id>`) referenced anywhere in reachable content. */
-function referencedFiles(doc: Y.Doc): string[] {
+/**
+ * Ids of this document's files (`primer-blob://<id>`) referenced in its tabs.
+ * Block props are editor-writable, so an id that belongs to another document
+ * is left out.
+ */
+async function referencedFiles(doc: Y.Doc, documentId: string): Promise<string[]> {
   const ids = new Set<string>();
   for (const tab of tabsOf(doc)) {
     for (const match of JSON.stringify(readBlocks(doc, tab.id)).matchAll(BLOB)) ids.add(match[1]!);
   }
-  return [...ids];
+  if (ids.size === 0) return [];
+  const own = await db
+    .select({ id: docFiles.id })
+    .from(docFiles)
+    .where(and(eq(docFiles.documentId, documentId), inArray(docFiles.id, [...ids])));
+  return own.map((f) => f.id);
 }
