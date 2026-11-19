@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import * as Y from 'yjs';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
 import { BlockNoteEditor } from '@blocknote/core';
 import { blocksToYXmlFragment } from '@blocknote/core/yjs';
@@ -10,6 +11,9 @@ import { primerSchema } from '@primer/blocks';
 import type { LiveProvider } from './provider.ts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// The editor's block services follow the document's event stream; jsdom has no EventSource.
+vi.stubGlobal('EventSource', class { close() {} });
 
 // A provider that never connects, over a document that already holds a
 // heading: the editor must show what the Y.Doc holds.
@@ -52,7 +56,7 @@ async function render(node: React.ReactNode): Promise<HTMLElement> {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  await act(async () => root!.render(node));
+  await act(async () => root!.render(createElement(QueryClientProvider, { client: new QueryClient() }, node)));
   return host;
 }
 
@@ -72,7 +76,7 @@ describe('LiveEditor', () => {
   it('live document renders the editor and legacy renders the iframe', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
     const frame = () => createElement('iframe', { title: 'legacy-frame' });
-    const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, frame };
+    const props = { documentId: 'doc-1', readOnly: false, canVote: true, theme: 'light' as const, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, frame };
 
     const live = await render(createElement(DocumentSurface, { ...props, live: true }));
     await until(() => live.querySelector('[contenteditable="true"].bn-editor')?.textContent?.includes('Seeded from the Y.Doc') === true);
@@ -89,6 +93,18 @@ describe('LiveEditor', () => {
     const legacy = await render(createElement(DocumentSurface, { ...props, live: false }));
     expect(legacy.querySelector('iframe[title="legacy-frame"]')).not.toBeNull();
     expect(legacy.querySelector('.bn-editor')).toBeNull();
+  });
+
+  it('editor uses the dark theme when Primer is dark', async () => {
+    const { DocumentSurface } = await import('../routes/document.tsx');
+    const props = { documentId: 'doc-1', readOnly: false, canVote: true, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, frame: () => null, live: true };
+    const dark = await render(createElement(DocumentSurface, { ...props, theme: 'dark' as const }));
+    await until(() => dark.querySelector('.bn-editor') !== null);
+    expect(dark.querySelector('.bn-container')!.getAttribute('data-color-scheme')).toBe('dark');
+    await act(async () => root!.unmount());
+    const light = await render(createElement(DocumentSurface, { ...props, theme: 'light' as const }));
+    await until(() => light.querySelector('.bn-editor') !== null);
+    expect(light.querySelector('.bn-container')!.getAttribute('data-color-scheme')).toBe('light');
   });
 
   it('connection indicator shows reconnecting, unsaved and save-failed states', async () => {

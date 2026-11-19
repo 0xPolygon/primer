@@ -12,6 +12,7 @@ import {
   primaryKey,
   index,
   boolean,
+  date,
   customType,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
@@ -678,5 +679,153 @@ export const suggestions = pgTable(
   },
   (t) => ({
     byDoc: index('suggestions_document_id_idx').on(t.documentId, t.status, t.createdAt),
+  }),
+);
+
+// ── Shared records (per-document storage for pages and agents) ──────────
+// Not part of the Y.Doc and never tied to page versions: a republish or a
+// restore leaves them alone. `doc_record_changes` is the append-only audit and
+// undo log. Every write takes a per-document lock (records/store.ts), so change
+// ids follow commit order within a document.
+export const docRecords = pgTable(
+  'doc_records',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    collection: text('collection').notNull(),
+    recordId: text('record_id').notNull(),
+    scope: text('scope', { enum: ['shared', 'personal'] }).notNull(),
+    // Set for personal records (the viewer or agent they belong to); null for shared.
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    data: jsonb('data').notNull(),
+    // Everyone whose writes shaped the current data: a full set resets it to
+    // the writer, an update merge adds the writer, a revert carries the
+    // restored content's contributors plus the reverter. An agent reads the
+    // record as untrusted when anyone but itself is in it.
+    contributors: text('contributors').array().notNull(),
+    version: integer('version').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text('updated_by').notNull().references(() => users.id),
+  },
+  (t) => ({
+    key: uniqueIndex('doc_records_key').on(
+      t.documentId,
+      t.collection,
+      t.scope,
+      sql`coalesce(${t.ownerUserId}, '')`,
+      t.recordId,
+    ),
+  }),
+);
+
+export const docRecordChanges = pgTable(
+  'doc_record_changes',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    collection: text('collection').notNull(),
+    recordId: text('record_id').notNull(),
+    scope: text('scope', { enum: ['shared', 'personal'] }).notNull(),
+    ownerUserId: text('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    op: text('op', { enum: ['set', 'update', 'delete'] }).notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    // Contributors of the before and after data (see doc_records.contributors).
+    beforeContributors: text('before_contributors').array(),
+    afterContributors: text('after_contributors').array(),
+    actorId: text('actor_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDoc: index('doc_record_changes_doc_idx').on(t.documentId, t.id),
+  }),
+);
+
+/**
+ * Tracked tasks: an index of the task blocks in live documents, never written
+ * any other way. The live-update hook (live/tasks.ts) keeps it in sync from
+ * block props, and `rebuildTaskIndex` recreates it from the Y.Doc.
+ */
+export const docTasks = pgTable(
+  'doc_tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    tabId: text('tab_id').notNull(),
+    blockId: text('block_id').notNull(),
+    title: text('title').notNull(),
+    // Checked against users when indexed: the document is client-writable.
+    assigneeId: text('assignee_id').references(() => users.id, { onDelete: 'set null' }),
+    dueDate: date('due_date', { mode: 'string' }),
+    status: text('status', { enum: ['open', 'done'] }).notNull(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    block: uniqueIndex('doc_tasks_block').on(t.documentId, t.blockId),
+    assignee: index('doc_tasks_assignee').on(t.assigneeId),
+  }),
+);
+
+/**
+ * Decisions on choice blocks, written only by the pick route after its
+ * edit-rights check (live/choices.ts). A row applies to a block only when the
+ * block's `decisionId` prop equals `decision_id`, a nonce the server minted at
+ * the pick: a block id used again never inherits a decision. Rows are never
+ * deleted because content changed: one whose block or option is gone is
+ * `archived_at` and comes back when an undo or restore brings the block back.
+ * Only clearing (a person with pick rights) removes one.
+ */
+export const docDecisions = pgTable(
+  'doc_decisions',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    blockId: text('block_id').notNull(),
+    decisionId: uuid('decision_id').notNull(),
+    optionId: text('option_id').notNull(),
+    // What was decided, as it read then: the block's text may change later.
+    question: text('question').notNull(),
+    optionLabel: text('option_label').notNull(),
+    rationale: text('rationale').notNull(),
+    evidence: jsonb('evidence').notNull(),
+    openQuestions: jsonb('open_questions').notNull(),
+    decidedBy: text('decided_by')
+      .notNull()
+      .references(() => users.id),
+    decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.documentId, t.blockId] }),
+  }),
+);
+
+/**
+ * Mentions already announced: one row per (block, person) a mention chip in a
+ * live document names. Kept from the document by live/mentions.ts so each
+ * mention notifies once; rebuildable, never authority.
+ */
+export const docMentions = pgTable(
+  'doc_mentions',
+  {
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    blockId: text('block_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.documentId, t.blockId, t.userId] }),
   }),
 );

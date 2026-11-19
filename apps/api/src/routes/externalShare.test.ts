@@ -16,6 +16,12 @@ import { generateShareToken } from '../external/tokens.ts';
 import { _resetRateLimiterForTests } from '../lib/rateLimiter.ts';
 import { artifactCsp } from '../lib/pagePolicy.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
+import { MOCK_USER } from '../auth/resolver.ts';
+import { publishDocument } from '../lib/publish.ts';
+import { readBlocks } from '../live/editor.ts';
+import { withLiveDoc } from '../live/live.testlib.ts';
+import { originFor } from '../live/origin.ts';
+import { applyPlan } from '../live/pipeline.ts';
 
 class CaptureNotifier extends NoopNotifier {
   override readonly emailEnabled = true;
@@ -185,6 +191,51 @@ describe('external share public routes', () => {
       await f.app.request(`/api/share/${f.shareToken}/content`, { headers: { cookie } });
       expect((await db.select().from(externalViews).where(eq(externalViews.recipientId, f.recipientId))).length).toBe(2);
       expect(f.notifier.firstViews.length).toBe(1);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it('share link of a live doc serves the published checkpoint, not live state', async () => {
+    const f = await fixture();
+    try {
+      const storage = new FilesystemStorage(f.root);
+      const published = await publishDocument(storage, {
+        actor: MOCK_USER,
+        title: 'Live plan',
+        filename: 'plan.md',
+        format: 'markdown',
+        content: new TextEncoder().encode('# Plan\n\nShip the editor first.\n'),
+      });
+      if (!published.ok) throw new Error('publish refused');
+      const checkpoint = await f.app.request(`/api/documents/${published.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const { versionId } = (await checkpoint.json()) as { versionId: string };
+
+      // The document moves on after the share was published.
+      const blockId = await withLiveDoc(published.documentId, (doc) => readBlocks(doc, 'main').find((b) => JSON.stringify(b.content).includes('Ship'))!.id);
+      await applyPlan(published.documentId, originFor(MOCK_USER), {
+        onConflict: 'refuse',
+        edits: [{
+          target: { tabId: 'main', blockId },
+          inverse: false,
+          build: (tr, at) => {
+            tr.replaceWith(at!.pos + 2, at!.pos + at!.node.firstChild!.nodeSize, tr.doc.type.schema.text('Secret draft change.'));
+          },
+        }],
+      });
+
+      const shareToken = generateShareToken();
+      const shareId = uuidv7();
+      await db.insert(externalShares).values({ id: shareId, documentId: published.documentId, shareToken, createdBy: 'mock-user-1', publishedVersionId: versionId });
+      await db.insert(externalRecipients).values({
+        id: uuidv7(), shareId, email: 'client@example.com', addedBy: 'mock-user-1',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      const cookie = await authenticate({ ...f, shareToken });
+      const content = await f.app.request(`/api/share/${shareToken}/content`, { headers: { cookie } });
+      expect(content.status).toBe(200);
+      const html = await content.text();
+      expect(html).toContain('Ship the editor first.');
+      expect(html).not.toContain('Secret draft change.');
+      expect(content.headers.get('content-security-policy')).toBe(artifactCsp('standard'));
     } finally { await rm(f.root, { recursive: true, force: true }); }
   });
 

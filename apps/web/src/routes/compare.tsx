@@ -7,6 +7,7 @@ import { useDocument } from '../queries/documents.ts';
 import { useTheme } from '../lib/useTheme.ts';
 import { api } from '../lib/fetch.ts';
 import { extractText } from '../lib/extractText.ts';
+import { t } from '../i18n/index.ts';
 import {
   parseViewParam,
   resolveCompareParams,
@@ -114,7 +115,7 @@ export default function ComparePage() {
     <div className="flex items-center justify-between gap-4 border-b border-neutral-200 px-6 py-3 dark:border-neutral-800">
       <div className="flex items-center gap-3">
         <Link to={`/d/${docId}`} className="text-xs text-neutral-500 underline">
-          ← Back
+          {t('compare.back')}
         </Link>
         {docQuery.data?.document.title && (
           <span className="truncate text-sm font-medium text-neutral-700 dark:text-neutral-300">
@@ -123,7 +124,7 @@ export default function ComparePage() {
         )}
         {resolution.kind === 'ok' && (
           <span className="font-mono text-sm text-neutral-700 dark:text-neutral-300">
-            v{resolution.from.versionNumber} → v{resolution.to.versionNumber}
+            {t('compare.versionRange', { from: resolution.from.versionNumber, to: resolution.to.versionNumber })}
           </span>
         )}
       </div>
@@ -138,7 +139,7 @@ export default function ComparePage() {
               : 'bg-white text-neutral-700 dark:bg-neutral-900 dark:text-neutral-300'
           }`}
         >
-          Split
+          {t('compare.split')}
         </button>
         <button
           type="button"
@@ -150,7 +151,7 @@ export default function ComparePage() {
               : 'bg-white text-neutral-700 dark:bg-neutral-900 dark:text-neutral-300'
           }`}
         >
-          Unified
+          {t('compare.unified')}
         </button>
       </div>
     </div>
@@ -160,7 +161,7 @@ export default function ComparePage() {
     return (
       <div>
         {header}
-        <div className="p-6 text-sm text-neutral-500">Loading versions…</div>
+        <div className="p-6 text-sm text-neutral-500">{t('compare.loadingVersions')}</div>
       </div>
     );
   }
@@ -170,13 +171,13 @@ export default function ComparePage() {
       <div>
         {header}
         <div className="p-6 text-sm text-red-600 dark:text-red-400">
-          <p>Failed to load versions.</p>
+          <p>{t('compare.loadVersionsFailed')}</p>
           <button
             type="button"
             onClick={() => versionsQuery.refetch()}
             className="mt-2 underline"
           >
-            Retry
+            {t('compare.retry')}
           </button>
         </div>
       </div>
@@ -188,9 +189,9 @@ export default function ComparePage() {
       <div>
         {header}
         <div className="p-6 text-sm text-neutral-700 dark:text-neutral-300">
-          <p>Invalid compare URL.</p>
+          <p>{t('compare.invalidUrl')}</p>
           <Link to={`/d/${docId}/compare`} className="mt-2 inline-block underline">
-            Pick versions to compare →
+            {t('compare.pickVersions')}
           </Link>
         </div>
       </div>
@@ -202,9 +203,9 @@ export default function ComparePage() {
       <div>
         {header}
         <div className="p-6 text-sm text-neutral-700 dark:text-neutral-300">
-          <p>Version v{resolution.missing} not found.</p>
+          <p>{t('compare.versionNotFound', { number: resolution.missing })}</p>
           <Link to={`/d/${docId}/compare`} className="mt-2 inline-block underline">
-            Pick versions to compare →
+            {t('compare.pickVersions')}
           </Link>
         </div>
       </div>
@@ -216,9 +217,9 @@ export default function ComparePage() {
       <div>
         {header}
         <div className="p-6 text-sm text-neutral-700 dark:text-neutral-300">
-          <p>These two versions render to identical text.</p>
+          <p>{t('compare.identical')}</p>
           <Link to={`/d/${docId}/compare`} className="mt-2 inline-block underline">
-            Pick versions to compare →
+            {t('compare.pickVersions')}
           </Link>
         </div>
       </div>
@@ -229,7 +230,7 @@ export default function ComparePage() {
     return (
       <div>
         {header}
-        <div className="p-6 text-sm text-neutral-500">Loading diff…</div>
+        <div className="p-6 text-sm text-neutral-500">{t('compare.loadingDiff')}</div>
       </div>
     );
   }
@@ -239,7 +240,7 @@ export default function ComparePage() {
       <div>
         {header}
         <div className="p-6 text-sm text-red-600 dark:text-red-400">
-          <p>Failed to load version content.</p>
+          <p>{t('compare.loadContentFailed')}</p>
           <button
             type="button"
             onClick={() => {
@@ -248,7 +249,7 @@ export default function ComparePage() {
             }}
             className="mt-2 underline"
           >
-            Retry
+            {t('compare.retry')}
           </button>
         </div>
       </div>
@@ -260,9 +261,9 @@ export default function ComparePage() {
       <div>
         {header}
         <div className="p-6 text-sm text-neutral-700 dark:text-neutral-300">
-          <p>These two versions render to identical text.</p>
+          <p>{t('compare.identical')}</p>
           <Link to={`/d/${docId}/compare`} className="mt-2 inline-block underline">
-            Pick versions to compare →
+            {t('compare.pickVersions')}
           </Link>
         </div>
       </div>
@@ -280,8 +281,8 @@ export default function ComparePage() {
           compareMethod={DiffMethod.WORDS}
           showDiffOnly={false}
           useDarkTheme={isDark}
-          leftTitle={`v${resolution.from.versionNumber}`}
-          rightTitle={`v${resolution.to.versionNumber}`}
+          leftTitle={t('compare.versionLabel', { number: resolution.from.versionNumber })}
+          rightTitle={t('compare.versionLabel', { number: resolution.to.versionNumber })}
           styles={diffStylesFromTheme(isDark)}
         />
       </div>

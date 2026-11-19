@@ -43,10 +43,12 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/runs', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/suggestions', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read' },
   { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read' },
 
   { method: 'POST', path: '/api/upload', scope: 'documents:write' },
+  { method: 'POST', path: '/api/convert/markdown', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/versions', scope: 'documents:write' },
   // Title/description, and visibility only towards private: a scoped token
   // asking for `visibility: 'org'` is refused in the handler
@@ -88,6 +90,34 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/documents/:docId/collaborators', scope: 'collaborators:manage' },
   { method: 'PATCH', path: '/api/documents/:docId/collaborators/:userId', scope: 'collaborators:manage' },
   { method: 'DELETE', path: '/api/documents/:docId/collaborators/:userId', scope: 'collaborators:manage' },
+
+  { method: 'POST', path: '/api/documents/:docId/records/get', scope: 'records:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/list', scope: 'records:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/query', scope: 'records:read' },
+  { method: 'GET', path: '/api/documents/:docId/records/changes', scope: 'records:read' },
+  { method: 'GET', path: '/api/versions/:versionId/page', scope: 'documents:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/set', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/update', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/delete', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/batch', scope: 'records:write' },
+  { method: 'POST', path: '/api/record-changes/:changeId/revert', scope: 'records:write' },
+  // Destroys other people's data: never implied by records:write.
+  { method: 'POST', path: '/api/documents/:docId/records/purge-personal', scope: 'records:manage' },
+
+  { method: 'GET', path: '/api/documents/:docId/decisions', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/choices/:blockId/votes', scope: 'documents:read' },
+  { method: 'POST', path: '/api/documents/:docId/choices', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/choices/:blockId/propose', scope: 'documents:write' },
+  // A decision: people with edit rights only (checked in live/choices.ts).
+  { method: 'POST', path: '/api/documents/:docId/choices/:blockId/pick', scope: 'documents:write' },
+  { method: 'DELETE', path: '/api/documents/:docId/choices/:blockId/decision', scope: 'documents:write' },
+  // Votes are shared records.
+  { method: 'POST', path: '/api/documents/:docId/choices/:blockId/vote', scope: 'records:write' },
+  { method: 'GET', path: '/api/tasks', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/tasks', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/assignees', scope: 'documents:read' },
+  { method: 'POST', path: '/api/documents/:docId/tasks', scope: 'documents:write' },
+  { method: 'PATCH', path: '/api/documents/:docId/tasks/:blockId', scope: 'documents:write' },
 
   { method: 'GET', path: '/api/users/lookup', scope: 'users:read' },
   { method: 'GET', path: '/api/users', scope: 'users:read' },

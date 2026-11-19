@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useEffect, useMemo, useState } from 'react';
 import type { AnchorData, ThreadDTO } from '@polygonlabs/primer-api-types';
 import { anchorLabel } from '@polygonlabs/primer-api-types';
@@ -129,7 +130,7 @@ export function CommentSidebar({
       <div className="flex h-full w-9 flex-col items-center gap-2 border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 py-2">
         <button
           type="button"
-          aria-label="Expand sidebar"
+          aria-label={t('commentSidebar.expandSidebar')}
           onClick={() => setCollapsed(false)}
           className="flex h-6 w-6 items-center justify-center rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800"
         >
@@ -162,7 +163,7 @@ export function CommentSidebar({
     <aside className="flex h-full w-[300px] flex-col border-l border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       <header className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-3 py-2 text-xs text-neutral-600 dark:text-neutral-400">
         <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-          {visibleThreads.length} thread{visibleThreads.length === 1 ? '' : 's'}
+          {visibleThreads.length === 1 ? t('commentSidebar.threadOne', { count: 1 }) : t('commentSidebar.threadMany', { count: visibleThreads.length })}
         </span>
         <div className="flex items-center gap-3">
           <label className="flex cursor-pointer select-none items-center gap-1">
@@ -172,11 +173,11 @@ export function CommentSidebar({
               onChange={(e) => setHideResolved(e.target.checked)}
               className="h-3 w-3"
             />
-            Hide resolved
+            {t('commentSidebar.hideResolved')}
           </label>
           <button
             type="button"
-            aria-label="Collapse sidebar"
+            aria-label={t('commentSidebar.collapseSidebar')}
             onClick={() => setCollapsed(true)}
             className="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
           >
@@ -196,7 +197,7 @@ export function CommentSidebar({
                 : 'border border-neutral-300 bg-white text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300'
             }`}
           >
-            {addCommentActive ? 'Cancel' : '+ Add comment'}
+            {addCommentActive ? t('commentSidebar.cancel') : t('commentSidebar.addComment')}
           </button>
         </div>
       )}
@@ -242,7 +243,7 @@ export function CommentSidebar({
         })}
         {visible.length === 0 && (
           <div className="px-3 py-4 text-xs text-neutral-500">
-            {visibleThreads.length === 0 ? 'No comments yet.' : 'No active threads (all resolved).'}
+            {visibleThreads.length === 0 ? t('commentSidebar.noComments') : t('commentSidebar.noActiveThreads')}
           </div>
         )}
       </div>

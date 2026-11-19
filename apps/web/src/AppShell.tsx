@@ -2,6 +2,7 @@ import { Outlet, Link } from 'react-router-dom';
 import { UserMenu } from './components/UserMenu.tsx';
 import { ThemeToggle } from './components/ThemeToggle.tsx';
 import { PrimerIcon } from './components/PrimerIcon.tsx';
+import { t } from './i18n/index.ts';
 
 export function AppShell() {
   return (
@@ -12,7 +13,7 @@ export function AppShell() {
           className="flex items-center gap-2 font-semibold text-neutral-800 dark:text-neutral-200"
         >
           <PrimerIcon size={22} className="text-neutral-700 dark:text-neutral-300" />
-          <span>Primer</span>
+          <span>{t('appShell.appName')}</span>
         </Link>
         <div className="flex items-center gap-1">
           <ThemeToggle />

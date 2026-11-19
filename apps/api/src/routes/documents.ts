@@ -9,14 +9,16 @@ import type {
   CheckpointResponse, DocFileUploadResponse, ExportFormat, Refusal, RestoreCheckpointResponse,
 } from '@polygonlabs/primer-api-types';
 import { docFiles, documents, versions, users } from '../db/schema.ts';
-import { exportFileOf, readBundleFile } from '../live/bundle.ts';
+import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/bundle.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
+import { exportDecisions } from '../live/choices.ts';
 import { withLiveDocument } from '../live/instance.ts';
 import { ensureSigningKey } from '../live/signing.ts';
 import { MAX_BYTES } from '../upload/validate.ts';
 import { db } from '../db/client.ts';
 import { actorName } from '../lib/actors.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import {
@@ -360,6 +362,7 @@ export function registerDocumentRoutes(
         versionNote: versions.versionNote,
         sizeBytes: versions.sizeBytes,
         createdAt: versions.createdAt,
+        bundleKey: versions.bundleKey,
       })
       .from(versions)
       .where(eq(versions.documentId, docId))
@@ -373,6 +376,7 @@ export function registerDocumentRoutes(
           versionNote: r.versionNote,
           sizeBytes: r.sizeBytes,
           createdAt: r.createdAt.toISOString(),
+          bundled: r.bundleKey !== null,
         })),
       },
       200
@@ -516,8 +520,13 @@ export function registerDocumentRoutes(
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
       await ensureSigningKey(deps.storage);
+      const decisions = await exportDecisions(docId);
       body = await withLiveDocument(docId, (doc) =>
-        format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
+        format === 'html'
+          ? exportHtml(doc, access.title, decisions)
+          : format === 'text'
+            ? exportText(doc, docId)
+            : exportMarkdown(doc, docId, decisions),
       );
     }
     const ext = format === 'html' ? 'html' : format === 'text' ? 'txt' : 'md';
@@ -528,6 +537,45 @@ export function registerDocumentRoutes(
         'content-type': `${type}; charset=utf-8`,
         'content-disposition': `attachment; filename="${fileName(access.title)}.${ext}"`,
         'x-content-type-options': 'nosniff',
+        'cache-control': 'private, no-store',
+      },
+    });
+  });
+
+  // The page behind "Print / PDF" (M10d): the static rendering, made printable
+  // and served like any version's content (sandboxed frame, artifact CSP).
+  // Without `?version=<n>` it renders the live state now, by the same code that
+  // renders a checkpoint's `static.html`; with it, that checkpoint's bundle.
+  app.get('/api/documents/:docId/print', async (c) => {
+    const docId = c.req.param('docId');
+    const access = await docAccess(docId, c.get('user'));
+    if (!access) return c.json({ error: 'not_found' }, 404);
+    if (!access.format) return notLive(c);
+    const versionParam = c.req.query('version');
+    let html: string;
+    if (versionParam !== undefined) {
+      const number = Number(versionParam);
+      const [version] = Number.isInteger(number)
+        ? await db
+            .select({ bundleKey: versions.bundleKey })
+            .from(versions)
+            .where(and(eq(versions.documentId, docId), eq(versions.versionNumber, number)))
+        : [];
+      if (!version?.bundleKey) return c.json({ error: 'not_found' }, 404);
+      html = new TextDecoder().decode(await readBundleFile(deps.storage, version.bundleKey, 'static.html'));
+    } else {
+      await ensureSigningKey(deps.storage);
+      const decisions = await exportDecisions(docId);
+      html = (await withLiveDocument(docId, (doc) => renderStatic(doc, access.title, decisions))).served;
+    }
+    return new Response(printable(html), {
+      status: 200,
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'content-security-policy': artifactCsp('standard'),
+        'x-frame-options': 'SAMEORIGIN',
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'no-referrer',
         'cache-control': 'private, no-store',
       },
     });

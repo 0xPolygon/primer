@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import * as Y from 'yjs';
 import { absolutePositionToRelativePosition, ySyncPluginKey } from 'y-prosemirror';
 import type { BlockNoteEditor } from '@blocknote/core';
@@ -140,7 +141,7 @@ export class PrimerThreadStore extends ThreadStore {
   };
 
   deleteThread = async (): Promise<void> => {
-    throw new Error('Threads are resolved, not deleted.');
+    throw new Error(t('threads.notDeleted'));
   };
 
   resolveThread = async (options: { threadId: string }): Promise<void> => {
@@ -229,7 +230,7 @@ function json(method: string, body: unknown): RequestInit {
 
 async function refusalOf(res: Response): Promise<string> {
   const body = (await res.json().catch(() => null)) as { refusal?: { message: string; fix: string } } | null;
-  return body?.refusal ? `${body.refusal.message} ${body.refusal.fix}` : `Request failed (${res.status}).`;
+  return body?.refusal ? `${body.refusal.message} ${body.refusal.fix}` : t('threads.requestFailed', { status: res.status });
 }
 
 function toBase64(bytes: Uint8Array): string {

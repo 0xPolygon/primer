@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { AUDIENCE_MEANING, type GrantEnvelope } from '../lib/eventsGrant.ts';
+import { t } from '../i18n';
 
 interface Props {
   envelope: GrantEnvelope;
@@ -45,22 +46,22 @@ export function EventsGrantPrompt({ envelope, documentTitle, onAllow, onDeny }: 
     >
       <div className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl dark:bg-neutral-900">
         <h2 id="events-grant-title" className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-          Allow this artifact to submit data as you?
+          {t('eventsGrantPrompt.title')}
         </h2>
         <p className="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
-          The interactive artifact in <span className="font-medium">“{documentTitle}”</span> wants
-          to submit{' '}
+          {t('eventsGrantPrompt.intro')} <span className="font-medium">“{documentTitle}”</span>{' '}
+          {t('eventsGrantPrompt.wantsToSubmit')}{' '}
           <span className="font-medium">
-            {envelope.eventCount} {envelope.eventCount === 1 ? 'event' : 'events'}
+            {envelope.eventCount} {envelope.eventCount === 1 ? t('eventsGrantPrompt.eventOne') : t('eventsGrantPrompt.eventMany')}
           </span>{' '}
-          in your name (namespace{envelope.namespaces.length === 1 ? '' : 's'}:{' '}
+          {envelope.namespaces.length === 1 ? t('eventsGrantPrompt.inYourNameOne') : t('eventsGrantPrompt.inYourNameMany')}{' '}
           {envelope.namespaces.map((ns, i) => (
             <span key={ns}>
               {i > 0 && ', '}
               <code className="rounded bg-neutral-100 px-1 text-xs dark:bg-neutral-800">{ns}</code>
             </span>
           ))}
-          ). Who will see it:
+          {t('eventsGrantPrompt.whoWillSee')}
         </p>
         <ul className="mt-3 space-y-2">
           {envelope.audiences.map((audience) => (
@@ -73,9 +74,7 @@ export function EventsGrantPrompt({ envelope, documentTitle, onAllow, onDeny }: 
           ))}
         </ul>
         <p className="mt-3 text-xs text-neutral-500">
-          Allowing covers future submissions by this version of the artifact up to the same
-          audience scope. A new version of the artifact, or a submission to a broader audience,
-          will ask again. The submitted data is recorded under your name.
+          {t('eventsGrantPrompt.scopeNote')}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -83,14 +82,14 @@ export function EventsGrantPrompt({ envelope, documentTitle, onAllow, onDeny }: 
             onClick={onDeny}
             className="rounded border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
-            Don’t allow
+            {t('eventsGrantPrompt.deny')}
           </button>
           <button
             type="button"
             onClick={onAllow}
             className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
-            Allow
+            {t('eventsGrantPrompt.allow')}
           </button>
         </div>
       </div>
