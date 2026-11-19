@@ -21,6 +21,7 @@ import { withLiveDoc } from './live.testlib.ts';
 import { originFor } from './origin.ts';
 import { applyPlan } from './pipeline.ts';
 import { tabsOf } from './reach.ts';
+import { createLegacyDocument } from '../testing/legacy.ts';
 
 const SOURCE = '# Plan\n\nShip the editor first.\n';
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -120,7 +121,7 @@ describe('tabs', () => {
   it('deleting a tab orphans its threads', async () => {
     await withStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
-      const legacy = await publish(storage, '<!doctype html><html><body><p>Open questions here.</p></body></html>', { format: 'html' });
+      const legacy = await createLegacyDocument(storage, '<!doctype html><html><body><p>Open questions here.</p></body></html>');
       const created = await app.request(`/api/versions/${legacy.versionId}/threads`, {
         method: 'POST',
         headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },

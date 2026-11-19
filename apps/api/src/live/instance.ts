@@ -4,8 +4,8 @@ import { attachPersistence, loadYDoc, persistedUpTo, touchedOf } from './persist
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
 import { sanitizeClientAwareness } from './awareness.ts';
-import { cancelOrphanSync, scheduleOrphanSync } from './orphans.ts';
 import { SYSTEM_ORIGIN, originOf, type LiveOrigin } from './origin.ts';
+import { cancelOrphanSync, scheduleOrphanSync } from './orphans.ts';
 
 const NAME = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 

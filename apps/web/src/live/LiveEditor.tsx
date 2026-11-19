@@ -30,6 +30,7 @@ import { ThreadActions } from './ThreadActions.tsx';
 import { CatchUpPanel, ChangeHighlights, useCheckpointChanges } from './changes.tsx';
 import { useBlockServices, type ChoiceStore } from './blockServices.ts';
 import { DecisionRegister } from './DecisionRegister.tsx';
+import { PageView } from './PageView.tsx';
 import './blocks.css';
 
 export type LiveEditorProps = {
@@ -79,8 +80,22 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // Taken once: a refetch of the document records a newer visit.
   const [since] = useState(() => props.lastView ?? null);
   const [catchUp, setCatchUp] = useState<Target[]>([]);
+  // Page blocks render their frame and overlay through the block services.
+  const { live, documentId, readOnly, theme, userId, role, userName } = props;
+  const withPages = useMemo(() => {
+    const context = {
+      doc: live.doc,
+      documentId,
+      tabId: active,
+      canEdit: !readOnly,
+      theme,
+      viewer: { id: userId, isOwner: role === 'owner', canComment: role !== 'stranger', name: userName },
+    };
+    const BoundPageView = (p: { blockId: string; title: string }) => <PageView {...context} {...p} />;
+    return { ...services, PageView: BoundPageView };
+  }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName]);
   return (
-    <PrimerBlocksContext.Provider value={services}>
+    <PrimerBlocksContext.Provider value={withPages}>
       <div className="flex h-full flex-col" data-live-editor={props.documentId}>
         <ConnectionStatus provider={props.live.provider} />
         <AgentStatus provider={props.live.provider} />
@@ -196,7 +211,7 @@ function TabEditor({
           aria-pressed={suggestionsOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          {suggestionCount > 0 ? t('liveEditor.suggestionsCount', { count: suggestionCount }) : t('liveEditor.suggestions')}
+          {t('liveEditor.suggestions')}{suggestionCount > 0 ? ` (${suggestionCount})` : ''}
         </button>
         <button
           type="button"

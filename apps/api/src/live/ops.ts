@@ -23,6 +23,7 @@ import { applyPlan, dryRun, type AppliedBlock, type Located, type PlannedEdit } 
 import { appliedBlockDTO } from './read.ts';
 import { rebaseUpdate, type UpdateInput } from './rebase.ts';
 import { activeRequestedRunIds, finishDirectRun, runHooks, startDirectRun } from './runs.ts';
+import { setPidText } from '../page/text.ts';
 
 export type { BlockInput, LiveOp, ApplyOpsRequest } from '@polygonlabs/primer-api-types';
 
@@ -43,6 +44,7 @@ type Prepared =
   | { op: 'update'; target: Target; expectVersion: string; input: UpdateInput; raw: BlockInput }
   | { op: 'replaceRange'; from: Target; to: Target; expectVersions: Record<string, string>; nodes: PmNode[]; input: BlockInput[] }
   | { op: 'delete'; target: Target; expectVersion: string }
+  | { op: 'pageText'; target: Target; expectVersion: string; text: string }
   | { op: 'move'; target: Target; at: Target; position: 'before' | 'after'; expectVersion: string };
 
 /**
@@ -219,8 +221,12 @@ async function prepareOp(raw: unknown): Promise<Prepared | { error: string; fix:
   const target = (name: string): Target | { error: string; fix: string } => {
     const t = op[name];
     if (!isTarget(t)) return { error: `\`${name}\` must be a target { tabId, blockId }.`, fix: 'Use the target of a block from primer_get_doc.' };
+    if (t.pid && name === 'target' && op.op === 'update') return { tabId: t.tabId, blockId: t.blockId, pid: t.pid };
     if (t.pid || t.textId || t.embedId) {
-      return { error: 'Page text, embed and widget fragments are not editable by ops yet.', fix: 'Edit document blocks (tabId and blockId only).' };
+      return {
+        error: 'Page text is edited only with `update` (plain text); embeds and widget labels are not editable by ops yet.',
+        fix: 'Send { op: "update", target: { tabId, blockId, pid }, expectVersion, block: "the new text" }.',
+      };
     }
     return { tabId: t.tabId, blockId: t.blockId };
   };
@@ -253,6 +259,13 @@ async function prepareOp(raw: unknown): Promise<Prepared | { error: string; fix:
       const t = target('target');
       if ('error' in t) return t;
       if (!version(op.expectVersion)) return missingVersion('expectVersion');
+      if (t.pid) {
+        // Page text is plain text (newlines are line breaks): the page owns its markup.
+        if (typeof op.block !== 'string' || op.block.length > 10_000) {
+          return { error: 'Page text takes `block` as a plain-text string (up to 10,000 characters).', fix: 'Send the element\'s new text as a string.' };
+        }
+        return { op: 'pageText', target: t, expectVersion: op.expectVersion as string, text: op.block };
+      }
       const converted = await convert(op.block as BlockInput);
       if ('error' in converted) return converted;
       if (converted.nodes.length !== 1 || converted.nodes[0]!.childCount > 1) {
@@ -352,6 +365,10 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
           if (note) ctx.note(note);
         }),
       };
+    case 'pageText': {
+      const edit = setPidText(p.target, p.text);
+      return { ...base, target: p.target, expectVersion: p.expectVersion, build: guarded(p.target, edit.build) };
+    }
     case 'delete':
       return {
         ...base,

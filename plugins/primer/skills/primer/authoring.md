@@ -70,4 +70,10 @@ When someone asks you on a document, it arrives as a run (`primer_list_runs`).
 
 ## HTML pages
 
-An arbitrary HTML page is allowed: publish it as a document (`primer_create_document` with `format: "html"`).
+An arbitrary HTML page is allowed: publish it as a document (`primer_create_document` with `format: "html"`). It becomes one page block: your page in its sandboxed frame, with its text editable by people.
+
+- **Editable text.** Every element whose children are only text (and `<br>`) gets a `data-pid` at publish. People edit that text in place; your markup, styles and scripts stay as you wrote them.
+- **Keep every `data-pid` when you republish.** Read the page with `primer_get_doc`, edit it, and publish it again (`primer_add_version`, `format: "html"`) with the `data-pid` attributes intact. Then text people changed on elements you left alone is carried over, and where you both changed an element your text wins and theirs comes back to them as a suggestion. Without the pids Primer matches elements by tag, position and text; repeated labels ("Learn more" ×3) can't be matched safely, so people's text on them becomes suggestions too.
+- **Small text edits** need no republish: `primer_apply_ops` with `{ op: "update", target: { tabId, blockId, pid }, expectVersion, block: "the new text" }` (plain text; a newline is a line break).
+- **Script-drawn text is read-only.** Text your scripts write or rewrite (chart labels, counters) is not editable by people; write text people should edit into the HTML.
+- **Primer blocks inside a page.** `<primer-table>`, `<primer-code lang="…">`, `<primer-mermaid>` and `<primer-math>` render read-only in the page from the document's block state, and people edit them in Primer's block editor. Give each a unique literal `data-embed-id` written in the HTML (not set by a script); a missing or repeated id is refused (`invalid_op`).

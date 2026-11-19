@@ -3,7 +3,7 @@ import diff from 'fast-diff';
 import type { SuggestedEditDTO, SuggestionDTO, SuggestionsResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { useThreadEvents } from './threadEvents.ts';
-import { t, type MessageKey } from '../i18n/index.ts';
+import { t } from '../i18n/index.ts';
 
 const SUGGESTION_EVENTS: ReadonlySet<string> = new Set(['suggestion.created', 'suggestion.decided']);
 
@@ -77,11 +77,11 @@ export function SuggestionsPanel(props: {
   );
 }
 
-const KIND_LABEL: Record<SuggestedEditDTO['kind'], MessageKey> = {
-  replace: 'suggestions.kindReplace',
-  insert: 'suggestions.kindInsert',
-  delete: 'suggestions.kindDelete',
-  move: 'suggestions.kindMove',
+const KIND_LABEL: Record<SuggestedEditDTO['kind'], string> = {
+  replace: 'Change',
+  insert: 'Add',
+  delete: 'Delete',
+  move: 'Move',
 };
 
 /** One block's change: the current text against the proposed text. */
@@ -91,7 +91,7 @@ function EditDiff({ edit, onShow }: { edit: SuggestedEditDTO; onShow?: (blockId:
   return (
     <div className="mt-1">
       <button type="button" className="text-neutral-500 hover:underline" onClick={() => onShow?.(edit.target.blockId)}>
-        {t(KIND_LABEL[edit.kind])}
+        {KIND_LABEL[edit.kind]}
       </button>
       <p className="mt-0.5 whitespace-pre-wrap break-words" data-diff>
         {diff(before, after).map(([op, text], i) =>

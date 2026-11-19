@@ -128,7 +128,23 @@ export interface MsgRecordsChanged {
   toChangeId: number;
 }
 
+/** Feature `page-text`: people's current text for stamped elements. The
+ *  bridge sets only the text (`\n` as <br>) of elements carrying that
+ *  `data-pid`, never markup. */
+export interface MsgSetPageTexts {
+  type: 'set_page_texts';
+  texts: Record<string, string>;
+}
+/** Feature `embeds`: each `<primer-*>` block's static HTML, rendered by the
+ *  host from the document's block state; the page shows it read-only. */
+export interface MsgSetEmbeds {
+  type: 'set_embeds';
+  embeds: Record<string, string>;
+}
+
 export type OutboundProtocolMessage =
+  | MsgSetPageTexts
+  | MsgSetEmbeds
   | MsgInit
   | MsgUpdateAnchors
   | MsgEnterPickMode
@@ -223,7 +239,35 @@ export interface MsgRecordsCancel {
   callId: string;
 }
 
+/** Feature `page-text` (and `embeds`): every stamped element's DOM text and
+ *  rect, sent once after the page loaded and before the host sets any text
+ *  (so a script-drawn pid shows text other than its source), with each
+ *  embed's rect. Rects are in the frame's viewport. */
+export interface MsgPageElements {
+  type: 'page_elements';
+  elements: { pid: string; text: string; rect: SerializableRect }[];
+  embeds: { embedId: string; rect: SerializableRect }[];
+}
+/** The same elements' rects again, after a scroll, resize or text change. */
+export interface MsgPageRects {
+  type: 'page_rects';
+  rects: Record<string, SerializableRect>;
+  embedRects: Record<string, SerializableRect>;
+}
+export interface MsgPidClicked {
+  type: 'pid_clicked';
+  pid: string;
+}
+export interface MsgEmbedClicked {
+  type: 'embed_clicked';
+  embedId: string;
+}
+
 export type InboundProtocolMessage =
+  | MsgPageElements
+  | MsgPageRects
+  | MsgPidClicked
+  | MsgEmbedClicked
   | MsgSelectionCaptured
   | MsgSelectionCleared
   | MsgElementPicked
@@ -353,9 +397,56 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
     case 'records_cancel':
       if (!isCallId(raw.callId)) return null;
       return { type: 'records_cancel', callId: raw.callId };
+    case 'page_elements': {
+      if (!Array.isArray(raw.elements) || raw.elements.length > MAX_PAGE_ELEMENTS) return null;
+      if (!Array.isArray(raw.embeds) || raw.embeds.length > MAX_PAGE_ELEMENTS) return null;
+      const elements: MsgPageElements['elements'] = [];
+      for (const e of raw.elements) {
+        if (!isObject(e) || !isPageId(e.pid) || !isString(e.text) || e.text.length > MAX_PAGE_TEXT || !isRect(e.rect)) return null;
+        elements.push({ pid: e.pid, text: e.text, rect: e.rect });
+      }
+      const embeds: MsgPageElements['embeds'] = [];
+      for (const e of raw.embeds) {
+        if (!isObject(e) || !isPageId(e.embedId) || !isRect(e.rect)) return null;
+        embeds.push({ embedId: e.embedId, rect: e.rect });
+      }
+      return { type: 'page_elements', elements, embeds };
+    }
+    case 'page_rects': {
+      const rects = parseRects(raw.rects);
+      const embedRects = parseRects(raw.embedRects);
+      if (!rects || !embedRects) return null;
+      return { type: 'page_rects', rects, embedRects };
+    }
+    case 'pid_clicked':
+      if (!isPageId(raw.pid)) return null;
+      return { type: 'pid_clicked', pid: raw.pid };
+    case 'embed_clicked':
+      if (!isPageId(raw.embedId)) return null;
+      return { type: 'embed_clicked', embedId: raw.embedId };
     default:
       return null;
   }
+}
+
+const MAX_PAGE_ELEMENTS = 20_000;
+const MAX_PAGE_TEXT = 100_000;
+
+/** Pids and embed ids as the server stamps and accepts them. */
+function isPageId(v: unknown): v is string {
+  return isString(v) && /^[A-Za-z0-9_-]{1,64}$/.test(v);
+}
+
+function parseRects(raw: unknown): Record<string, SerializableRect> | null {
+  if (!isObject(raw) || Array.isArray(raw)) return null;
+  const entries = Object.entries(raw);
+  if (entries.length > MAX_PAGE_ELEMENTS) return null;
+  const out: Record<string, SerializableRect> = {};
+  for (const [id, rect] of entries) {
+    if (!isPageId(id) || !isRect(rect)) return null;
+    out[id] = rect;
+  }
+  return out;
 }
 
 const RECORDS_CALL_VERBS: readonly string[] = [...RECORD_VERBS, 'changesSince'];

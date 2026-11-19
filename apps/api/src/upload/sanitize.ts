@@ -17,6 +17,8 @@ const SVG_TAGS = [
   'clipPath', 'mask', 'pattern', 'filter',
 ];
 
+const PRIMER_TAGS = ['primer-table', 'primer-code', 'primer-mermaid', 'primer-math'];
+
 const SVG_PRESENTATION_ATTRS = [
   'fill', 'fill-opacity', 'fill-rule',
   'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray',
@@ -65,6 +67,9 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     'button', 'input', 'select', 'option', 'optgroup', 'textarea',
     'label', 'fieldset', 'legend',
     ...SVG_TAGS,
+    // Primer blocks inside pages (page/embeds.ts): rendered read-only from the
+    // document's block state and edited in Primer's own window.
+    ...PRIMER_TAGS,
   ],
   allowedAttributes: {
     a: ['href', 'name', 'target', 'rel'],
@@ -89,6 +94,7 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
       'required', 'maxlength', 'minlength', 'wrap', 'autofocus',
     ],
     label: ['for'],
+    ...Object.fromEntries(PRIMER_TAGS.map((tag) => [tag, ['lang']])),
     fieldset: ['disabled', 'name'],
     svg: ['viewBox', 'xmlns', 'preserveAspectRatio', 'width', 'height',
           'role', 'aria-label', 'aria-labelledby', 'aria-describedby'],

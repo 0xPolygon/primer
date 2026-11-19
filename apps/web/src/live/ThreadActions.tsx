@@ -30,7 +30,7 @@ export function ThreadActions({ store, canPromote }: { store: PrimerThreadStore;
     });
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as { refusal?: { message: string } } | null;
-      setMessage(body?.refusal?.message ?? t('common.requestFailed', { status: res.status }));
+      setMessage(body?.refusal?.message ?? t('request.failed', { status: res.status }));
     }
     await store.refresh();
   };
@@ -39,7 +39,7 @@ export function ThreadActions({ store, canPromote }: { store: PrimerThreadStore;
     setMessage(null);
     const res = await api(`/api/threads/${encodeURIComponent(id)}/promote`, { method: 'POST' });
     if (!res.ok) {
-      setMessage(t('common.requestFailed', { status: res.status }));
+      setMessage(t('request.failed', { status: res.status }));
       return;
     }
     const body = (await res.json()) as { documentId: string };

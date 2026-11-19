@@ -16,3 +16,4 @@ export {
 export { dropdownOptions } from './chips.tsx';
 export { citationHref, citationLabel, type CitationProps } from './citation.tsx';
 export { BLOCK_TEXT_EN, type BlockText } from './text.ts';
+export { pageBlock } from './page.tsx';
