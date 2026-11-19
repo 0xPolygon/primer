@@ -27,7 +27,7 @@ html.dark { color-scheme: dark; }
 
 /* BlockNote's theme follows Primer's tokens (neutral greys, violet accent);
    BlockNoteView sets data-color-scheme from Primer's light/dark choice. */
-.bn-container[data-color-scheme='light'] {
+html .bn-container[data-color-scheme='light'] {
   --bn-colors-editor-text: #171717;
   --bn-colors-editor-background: #ffffff;
   --bn-colors-menu-text: #171717;
@@ -44,7 +44,7 @@ html.dark { color-scheme: dark; }
   --bn-colors-border: #e5e5e5;
   --bn-colors-side-menu: #a3a3a3;
 }
-.bn-container[data-color-scheme='dark'] {
+html .bn-container[data-color-scheme='dark'] {
   --bn-colors-editor-text: #e5e5e5;
   --bn-colors-editor-background: #0a0a0a;
   --bn-colors-menu-text: #e5e5e5;
