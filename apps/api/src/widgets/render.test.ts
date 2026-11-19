@@ -151,14 +151,18 @@ export default function render({ tokens }) {
   const evil = { [k]: 'fill: url(https://example.com/x)' };
   const fo = ['foreign', 'Object'].join('');
   const leak = { mask: 'url(https://example.com/m.svg#a)', filter: 'url( #x ) url(https://example.com/f)' };
-  return <svg viewBox="0 0 10 10"><rect {...evil} fill={tokens.fg} /><rect {...leak} />{__h(fo, null)}</svg>;
+  const sneaky = { mask: 'URL(https://example.com/a)', filter: 'url (https://example.com/b)', 'clip-path': '\\\\75 rl(https://example.com/c)', 'marker-end': '&#117;rl(https://example.com/d)' };
+  return <svg viewBox="0 0 10 10"><rect {...evil} fill={tokens.fg} /><rect {...leak} /><rect {...sneaky} />{__h(fo, null)}</svg>;
 }`;
     expect(validateWidget(source)).toEqual({ ok: true });
     const out = await renderWidget(source, [], 'light');
     expect(errorsOf(out)).toContain('has a style attribute');
     expect(errorsOf(out)).toContain('<foreignObject> is not an element');
-    expect(errorsOf(out)).toContain('mask on <rect> references "url(https://example.com/m.svg#a)"');
-    expect(errorsOf(out)).toContain('filter on <rect> references');
+    expect(errorsOf(out)).toContain('mask on <rect> has "url(https://example.com/m.svg#a)"');
+    expect(errorsOf(out)).toContain('filter on <rect> has "url( #x ) url(https://example.com/f)"');
+    for (const v of ['URL(https://example.com/a)', 'url (https://example.com/b)', '\\75 rl(https://example.com/c)', '&#117;rl(https://example.com/d)']) {
+      expect(errorsOf(out)).toContain(`has "${v}"`);
+    }
   });
 
   it('runtime refuses literal colours, copied text ids and unknown rows the source hid', async () => {
