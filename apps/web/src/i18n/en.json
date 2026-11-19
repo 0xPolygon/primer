@@ -546,7 +546,7 @@
   "slash.calloutHint": "Highlighted text: info, warning, success or note",
   "slash.columns": "Columns",
   "slash.columnsHint": "Place blocks side by side",
-  "slash.embed": "Embed",
+  "slash.embed": "Link card",
   "slash.embedHint": "A link card or another Primer document",
   "register.close": "Close decisions",
   "register.loading": "Loading…",

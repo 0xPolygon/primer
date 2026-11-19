@@ -546,7 +546,7 @@
   "slash.calloutHint": "Texte mis en avant : info, avertissement, succès ou note",
   "slash.columns": "Colonnes",
   "slash.columnsHint": "Placer des blocs côte à côte",
-  "slash.embed": "Intégration",
+  "slash.embed": "Carte de lien",
   "slash.embedHint": "Une carte de lien ou un autre document Primer",
   "register.close": "Fermer les décisions",
   "register.loading": "Chargement…",

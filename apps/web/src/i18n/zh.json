@@ -546,7 +546,7 @@
   "slash.calloutHint": "高亮文本：信息、警告、成功或备注",
   "slash.columns": "分栏",
   "slash.columnsHint": "将区块并排放置",
-  "slash.embed": "嵌入",
+  "slash.embed": "链接卡片",
   "slash.embedHint": "链接卡片或另一个 Primer 文档",
   "register.close": "关闭决策",
   "register.loading": "加载中…",

@@ -546,7 +546,7 @@
   "slash.calloutHint": "Texto resaltado: información, advertencia, éxito o nota",
   "slash.columns": "Columnas",
   "slash.columnsHint": "Coloca bloques uno al lado de otro",
-  "slash.embed": "Incrustar",
+  "slash.embed": "Tarjeta de enlace",
   "slash.embedHint": "Una tarjeta de enlace u otro documento de Primer",
   "register.close": "Cerrar decisiones",
   "register.loading": "Cargando…",

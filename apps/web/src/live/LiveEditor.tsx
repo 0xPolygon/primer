@@ -201,7 +201,7 @@ function primerSlashItems(editor: unknown) {
     {
       title: t('slash.embed'),
       subtext: t('slash.embedHint'),
-      aliases: ['embed', 'link', 'card', 'bookmark', 'document', 'unfurl'],
+      aliases: ['link card', 'link', 'card', 'bookmark', 'document', 'unfurl', 'embed document'],
       group: t('slash.blocksGroup'),
       onItemClick: insert({ type: 'embed' }),
     },

@@ -546,7 +546,7 @@
   "slash.calloutHint": "強調テキスト（情報・警告・成功・メモ）",
   "slash.columns": "列",
   "slash.columnsHint": "ブロックを横に並べる",
-  "slash.embed": "埋め込み",
+  "slash.embed": "リンクカード",
   "slash.embedHint": "リンクカードまたは別の Primer 文書",
   "register.close": "決定事項を閉じる",
   "register.loading": "読み込み中…",
