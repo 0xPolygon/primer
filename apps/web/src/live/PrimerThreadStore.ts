@@ -32,6 +32,9 @@ export class PrimerThreadStore extends ThreadStore {
     private readonly tabId: string,
     viewer: StoreViewer,
     private readonly fetcher: Fetch = api,
+    /** A sub-fragment's store (the page-text overlay): its threads, anchored
+     *  in that fragment, rather than the tab's. */
+    private readonly scope: { blockId: string; pid: string } | null = null,
   ) {
     super(new PrimerThreadStoreAuth(viewer));
   }
@@ -45,6 +48,8 @@ export class PrimerThreadStore extends ThreadStore {
     const next = new Map<string, ThreadData>();
     for (const dto of body.threads) {
       if (!('target' in dto.anchor) || dto.anchor.target.tabId !== this.tabId) continue;
+      const t = dto.anchor.target;
+      if (this.scope ? t.pid !== this.scope.pid || t.blockId !== this.scope.blockId : t.pid || t.embedId || t.textId) continue;
       next.set(dto.id, this.toThreadData(dto));
     }
     this.threads = next;
@@ -111,7 +116,7 @@ export class PrimerThreadStore extends ThreadStore {
     const blockId = editor.getTextCursorPosition().block.id;
     const anchor: LiveAnchor = {
       type: 'prose',
-      target: { tabId: this.tabId, blockId },
+      target: this.scope ? { tabId: this.tabId, ...this.scope } : { tabId: this.tabId, blockId },
       quote: editor.prosemirrorState.doc.textBetween(from, to, '\n') || ' ',
     };
     const res = await this.fetcher(`/api/documents/${this.documentId}/threads`, json('POST', {

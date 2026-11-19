@@ -42,7 +42,7 @@ describe('GET /api/versions/:versionId/content', () => {
       expect(res.headers.get('referrer-policy')).toBe('no-referrer');
 
       const html = await res.text();
-      expect(html).toContain('<h1>Sample</h1>');
+      expect(html).toContain('<h1 data-pid="p1">Sample</h1>');
       expect(html).toContain('<script src="/companion/v1.js"');
     } finally {
       await rm(root, { recursive: true, force: true });

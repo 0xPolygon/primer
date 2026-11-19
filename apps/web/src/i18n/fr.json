@@ -621,5 +621,8 @@
   "suggestions.kindReplace": "Modification",
   "suggestions.kindInsert": "Ajout",
   "suggestions.kindDelete": "Suppression",
-  "suggestions.kindMove": "Déplacement"
+  "suggestions.kindMove": "Déplacement",
+  "overlay.editText": "Modifier le texte de la page",
+  "overlay.editBlock": "Modifier le bloc",
+  "page.readOnlyText": "Ce texte est dessiné par le script de la page : il ne peut pas être modifié ici."
 }

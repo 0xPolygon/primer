@@ -621,5 +621,8 @@
   "suggestions.kindReplace": "Änderung",
   "suggestions.kindInsert": "Hinzufügen",
   "suggestions.kindDelete": "Löschen",
-  "suggestions.kindMove": "Verschieben"
+  "suggestions.kindMove": "Verschieben",
+  "overlay.editText": "Seitentext bearbeiten",
+  "overlay.editBlock": "Block bearbeiten",
+  "page.readOnlyText": "Dieser Text wird vom Skript der Seite gezeichnet und kann hier nicht bearbeitet werden."
 }

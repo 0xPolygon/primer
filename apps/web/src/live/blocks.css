@@ -180,6 +180,12 @@
   list-style: disc;
 }
 
+/* The page-text overlay sits exactly over the element it edits. */
+.primer-overlay .bn-editor {
+  padding-inline: 8px;
+  padding-block: 4px;
+}
+
 /* Callouts, columns and embeds. Tints are translucent so they read in light and dark. */
 .primer-callout {
   --callout: #6366f1;

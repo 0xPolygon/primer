@@ -63,7 +63,7 @@ describe('external sharing: full lifecycle over HTTP', () => {
 
       const view = await app.request(`/api/share/${share.shareToken}/content`, { headers: { cookie } });
       expect(view.status).toBe(200);
-      expect(await view.text()).toContain('<h1>Deal Deck</h1>');
+      expect(await view.text()).toContain('<h1 data-pid="p1">Deal Deck</h1>');
       expect(notifier.firstViews.length).toBe(1);
       expect(notifier.firstViews[0].sharerUserId).toBe('mock-user-1');
 
