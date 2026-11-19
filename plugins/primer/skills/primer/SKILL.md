@@ -12,6 +12,8 @@ Workflow brain over the Primer MCP tools. Use the five steps below in order; dee
 
 **Disk round-tripping:** when the Primer MCP server runs locally (`@polygonlabs/primer-mcp` over stdio — its content tools list `contentPath` / `toDisk` params in their input schemas), keep the document body out of your context in **both** directions: upload with `contentPath` (absolute path the server reads) whenever the artifact already exists as a file, and fetch with `toDisk: true` whenever the content is large, has embedded images, or is destined for disk — the server saves to a fresh temp file it owns and returns its `savedTo` path; move it into place with your own file tools. Byte-perfect and orders of magnitude cheaper than inline. The remote connector (HTTP) has no filesystem access; with it, content is always inline. Details and thresholds: `reference.md` → Disk round-tripping.
 
+**Live documents:** a document with blocks that people and agents edit together is read with `primer_get_doc` and edited block by block with `primer_apply_ops`, never by publishing a new version. Read `authoring.md` (also served as the MCP resource `primer://skills/authoring`) before editing one, or when someone asks you to work on a document (`primer_list_runs`).
+
 If the user reports the MCP tools aren't available, tell them to install/reconnect the Primer connector in their Claude client (Settings → Connectors → Primer), then re-run the request. Auth is one-time browser OAuth at install; there is no login flow inside the agent.
 
 ## 1. Auth preflight
