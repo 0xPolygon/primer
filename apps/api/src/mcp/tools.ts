@@ -10,7 +10,7 @@ import { resolveThread } from '../routes/threads.ts';
 import { markdownToHtml } from '../upload/markdown.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
-import { carryOpenThreads } from '../lib/threadCarry.ts';
+import { carryOpenThreads, loadCarryOrigins } from '../lib/threadCarry.ts';
 import { logger } from '../logger.ts';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope } from '@polygonlabs/primer-api-types';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
@@ -613,6 +613,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       `)) as unknown as { max_n: number }[];
       const nextNumber = (maxRow?.max_n ?? 0) + 1;
 
+      const origins = await loadCarryOrigins(deps.storage, documentId);
+
       await deps.storage.put(storageKey, transformedBytes);
 
       try {
@@ -625,7 +627,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
             sizeBytes: transformedBytes.byteLength,
             versionNote,
           });
-          await carryOpenThreads(tx, deps.storage, { documentId, versionId, html: transformed.html });
+          await carryOpenThreads(tx, deps.storage, { documentId, versionId, html: transformed.html, origins });
         });
       } catch (e) {
         try { await deps.storage.delete(storageKey); } catch {}

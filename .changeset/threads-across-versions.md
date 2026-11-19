@@ -16,7 +16,8 @@ move forward with the next version published.
 
 The MCP servers gain `primer_reply_to_thread` and `primer_resolve_thread`, so an
 agent can answer feedback in the thread it was left in. `primer_get_comments`
-now returns JSON: the markdown summary (with thread ids) plus one record per
+now returns JSON (the stdio server used to return raw Markdown, so a consumer that
+reads the whole text must read `.markdown` instead): the markdown summary (with thread ids) plus one record per
 comment with `thread_id`, `comment_id`, `author_id`, `anchor_text`,
 `version_number`, `resolved` and `context_changed`. `ThreadDTO` gains
 `versionNumber` (the version the thread was started on) and `contextChanged`.

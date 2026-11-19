@@ -10,12 +10,13 @@
 //
 // The match runs on the version's <body> text as the companion's text walk sees
 // it (every text node in document order, script and style text included), with
-// whitespace runs collapsed, so reformatting the HTML never moves a thread.
+// whitespace ignored in the comparison, so neither reformatting the HTML nor the
+// line breaks of a selection across blocks move a thread.
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { AnchorData, TextRangeAnchor } from '@polygonlabs/primer-api-types';
 import { isElementPathAnchor, isTextRangeAnchor } from '@polygonlabs/primer-api-types';
-import type { db } from '../db/client.ts';
+import { db } from '../db/client.ts';
 import { threadPlacements, threads, versions } from '../db/schema.ts';
 import type { Storage } from '../storage/types.ts';
 
@@ -67,6 +68,36 @@ function collapse(s: string): string {
   return s.replace(/\s+/g, ' ');
 }
 
+function squeeze(s: string): string {
+  return s.replace(/\s+/g, '');
+}
+
+/** The body text with all whitespace removed, and for each of its characters
+ *  the index in `BodyText.text`. Matching runs on this form because a browser
+ *  selection spanning blocks carries line breaks the DOM text walk never has
+ *  (`<p>a</p><p>b</p>` is "ab" there, "a\n\nb" in the selection), so the two
+ *  can only be compared modulo whitespace. */
+interface Squeezed {
+  text: string;
+  at: number[];
+}
+
+const squeezed = new WeakMap<BodyText, Squeezed>();
+
+function squeezedOf(body: BodyText): Squeezed {
+  let sq = squeezed.get(body);
+  if (!sq) {
+    sq = { text: '', at: [] };
+    for (let i = 0; i < body.text.length; i++) {
+      if (body.text[i] === ' ') continue;
+      sq.text += body.text[i];
+      sq.at.push(i);
+    }
+    squeezed.set(body, sq);
+  }
+  return sq;
+}
+
 function occurrences(haystack: string, needle: string): number[] {
   const out: number[] = [];
   if (needle.length === 0) return out;
@@ -74,55 +105,58 @@ function occurrences(haystack: string, needle: string): number[] {
   return out;
 }
 
-/** First index in `text` whose raw offset is >= `raw`. */
-function collapsedIndex(body: BodyText, raw: number): number {
+/** First index in `list` whose value is >= `value` (list is ascending). */
+function lowerBound(list: number[], value: number): number {
   let lo = 0;
-  let hi = body.rawOffset.length;
+  let hi = list.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (body.rawOffset[mid] < raw) lo = mid + 1;
+    if (list[mid] < value) lo = mid + 1;
     else hi = mid;
   }
   return lo;
 }
 
-/** The quote with its context on the originating version, or null when the
- *  anchor can't be pinned to one place there. */
+/** The quote with its context on the originating version, all whitespace-free,
+ *  or null when the anchor can't be pinned to one place there. */
 function quoteInOrigin(
   anchor: TextRangeAnchor,
   origin: BodyText,
 ): { prefix: string; quote: string; suffix: string } | null {
-  const quote = collapse(anchor.selectorText).trim();
+  const quote = squeeze(anchor.selectorText);
   if (quote.length === 0) return null;
 
   // Legacy anchors carry their own context.
   if (typeof anchor.prefix === 'string' && typeof anchor.suffix === 'string') {
     return {
-      prefix: collapse(anchor.prefix).slice(-CONTEXT_CHARS),
+      prefix: squeeze(collapse(anchor.prefix).slice(-CONTEXT_CHARS)),
       quote,
-      suffix: collapse(anchor.suffix).slice(0, CONTEXT_CHARS),
+      suffix: squeeze(collapse(anchor.suffix).slice(0, CONTEXT_CHARS)),
     };
   }
 
   // Position anchors: the offsets index the live DOM text, which matches the
   // stored HTML unless the document's scripts changed it. Use the offsets when
   // they point at the quote; else the quote's only occurrence; else give up.
+  const sq = squeezedOf(origin);
   let at = -1;
   if (typeof anchor.start === 'number' && typeof anchor.end === 'number') {
-    const from = collapsedIndex(origin, anchor.start);
-    const to = collapsedIndex(origin, anchor.end);
-    const slice = origin.text.slice(from, to);
-    if (slice.trim() === quote) at = from + (slice.length - slice.trimStart().length);
+    const from = lowerBound(sq.at, lowerBound(origin.rawOffset, anchor.start));
+    const to = lowerBound(sq.at, lowerBound(origin.rawOffset, anchor.end));
+    if (sq.text.slice(from, to) === quote) at = from;
   }
   if (at === -1) {
-    const hits = occurrences(origin.text, quote);
+    const hits = occurrences(sq.text, quote);
     if (hits.length !== 1) return null;
     at = hits[0];
   }
+  // Context is CONTEXT_CHARS of the collapsed text, then compared without whitespace.
+  const from = sq.at[at];
+  const to = sq.at[at + quote.length - 1] + 1;
   return {
-    prefix: origin.text.slice(Math.max(0, at - CONTEXT_CHARS), at),
+    prefix: squeeze(origin.text.slice(Math.max(0, from - CONTEXT_CHARS), from)),
     quote,
-    suffix: origin.text.slice(at + quote.length, at + quote.length + CONTEXT_CHARS),
+    suffix: squeeze(origin.text.slice(to, to + CONTEXT_CHARS)),
   };
 }
 
@@ -130,11 +164,13 @@ function quoteInOrigin(
  * Places a text-range anchor from its originating version onto a target
  * version. Returns the anchor to store for the target, or null when there
  * isn't exactly one occurrence of the quote with its preceding or following
- * context unchanged ("context changed").
+ * context unchanged ("context changed"). Whitespace, including the line breaks
+ * a selection across blocks carries, is ignored in the comparison.
  *
  * The returned anchor uses the context shape (`prefix`/`selectorText`/`suffix`
- * with `containerPath: 'body'`), which the companion resolves by searching the
- * live text, so it can never highlight different words than the ones matched.
+ * with `containerPath: 'body'`) built from the target's own text, which the
+ * companion resolves by searching the live text, so it can never highlight
+ * different words than the ones matched.
  */
 export function placeTextRange(
   anchor: TextRangeAnchor,
@@ -143,19 +179,46 @@ export function placeTextRange(
 ): TextRangeAnchor | null {
   const q = quoteInOrigin(anchor, origin);
   if (!q) return null;
+  const sq = squeezedOf(target);
   const candidates = new Set([
-    ...occurrences(target.text, q.prefix + q.quote).map((i) => i + q.prefix.length),
-    ...occurrences(target.text, q.quote + q.suffix),
+    ...occurrences(sq.text, q.prefix + q.quote).map((i) => i + q.prefix.length),
+    ...occurrences(sq.text, q.quote + q.suffix),
   ]);
   if (candidates.size !== 1) return null;
-  const [at] = candidates;
+  const [k] = candidates;
+  const from = sq.at[k];
+  const to = sq.at[k + q.quote.length - 1] + 1;
   return {
     type: 'text-range',
-    selectorText: q.quote,
-    prefix: target.text.slice(Math.max(0, at - CONTEXT_CHARS), at),
-    suffix: target.text.slice(at + q.quote.length, at + q.quote.length + CONTEXT_CHARS),
+    selectorText: target.text.slice(from, to),
+    prefix: target.text.slice(Math.max(0, from - CONTEXT_CHARS), from),
+    suffix: target.text.slice(to, to + CONTEXT_CHARS),
     containerPath: 'body',
   };
+}
+
+const OPEN_THREADS_WHERE = (documentId: string) =>
+  and(
+    eq(threads.documentId, documentId),
+    isNull(threads.resolvedAt),
+    sql`EXISTS (SELECT 1 FROM comments c WHERE c.thread_id = ${threads.id} AND c.deleted_at IS NULL)`,
+  );
+
+/** The text of the versions the document's open threads were started on. Read
+ *  before the publish transaction opens so blob reads stay out of it; a thread
+ *  started in between is read on demand by `carryOpenThreads`. */
+export async function loadCarryOrigins(
+  storage: Storage,
+  documentId: string,
+): Promise<Map<string, BodyText>> {
+  const origins = await db
+    .selectDistinct({ id: threads.versionId, storageKey: versions.storageKey })
+    .from(threads)
+    .innerJoin(versions, eq(versions.id, threads.versionId))
+    .where(OPEN_THREADS_WHERE(documentId));
+  const texts = new Map<string, BodyText>();
+  for (const o of origins) texts.set(o.id, bodyText(await new Response(await storage.get(o.storageKey)).text()));
+  return texts;
 }
 
 /**
@@ -167,7 +230,7 @@ export function placeTextRange(
 export async function carryOpenThreads(
   tx: Tx,
   storage: Storage,
-  args: { documentId: string; versionId: string; html: string },
+  args: { documentId: string; versionId: string; html: string; origins: Map<string, BodyText> },
 ): Promise<void> {
   const open = await tx
     .select({
@@ -178,27 +241,20 @@ export async function carryOpenThreads(
     })
     .from(threads)
     .innerJoin(versions, eq(versions.id, threads.versionId))
-    .where(
-      and(
-        eq(threads.documentId, args.documentId),
-        isNull(threads.resolvedAt),
-        sql`EXISTS (SELECT 1 FROM comments c WHERE c.thread_id = ${threads.id} AND c.deleted_at IS NULL)`,
-      ),
-    );
+    .where(OPEN_THREADS_WHERE(args.documentId));
   if (open.length === 0) return;
 
   const target = bodyText(args.html);
-  const originTexts = new Map<string, BodyText>();
   const rows: { threadId: string; versionId: string; anchor: AnchorData | null }[] = [];
   for (const t of open) {
     let anchor: AnchorData | null = null;
     if (isElementPathAnchor(t.anchor)) {
       anchor = t.anchor;
     } else if (isTextRangeAnchor(t.anchor)) {
-      let origin = originTexts.get(t.originVersionId);
+      let origin = args.origins.get(t.originVersionId);
       if (!origin) {
         origin = bodyText(await new Response(await storage.get(t.originStorageKey)).text());
-        originTexts.set(t.originVersionId, origin);
+        args.origins.set(t.originVersionId, origin);
       }
       anchor = placeTextRange(t.anchor, origin, target);
     }
