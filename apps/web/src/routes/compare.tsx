@@ -13,16 +13,27 @@ import {
   type CompareView,
 } from '../lib/compareParams.ts';
 
-function useVersionContent(versionId: string | undefined) {
+/**
+ * The text compared for one version. A checkpoint of a live document diffs
+ * its bundle's export (Markdown or text, exactly as exported); an HTML
+ * version, including those a document had before it went live, diffs the
+ * text of its rendered page.
+ */
+function useVersionText(docId: string, version: { id: string; versionNumber: number } | undefined, live: boolean | undefined) {
   return useQuery({
-    queryKey: ['version-content', versionId ?? ''],
+    queryKey: ['version-text', docId, version?.id ?? '', live],
     queryFn: async ({ signal }): Promise<string> => {
-      if (!versionId) throw new Error('versionId required');
-      const res = await api(`/api/versions/${versionId}/content`, { signal });
+      if (!version) throw new Error('version required');
+      if (live) {
+        const res = await api(`/api/documents/${docId}/export?version=${version.versionNumber}`, { signal });
+        if (res.ok) return res.text();
+        if (res.status !== 404) throw new Error(`export fetch failed: ${res.status}`);
+      }
+      const res = await api(`/api/versions/${version.id}/content`, { signal });
       if (!res.ok) throw new Error(`content fetch failed: ${res.status}`);
-      return res.text();
+      return extractText(await res.text());
     },
-    enabled: !!versionId,
+    enabled: !!version && live !== undefined,
     staleTime: 60_000,
   });
 }
@@ -82,21 +93,13 @@ export default function ComparePage() {
     [versions, fromV, toV],
   );
 
-  const fromId = resolution.kind === 'ok' ? resolution.from.id : undefined;
-  const toId = resolution.kind === 'ok' ? resolution.to.id : undefined;
-  const fromContent = useVersionContent(fromId);
-  const toContent = useVersionContent(toId);
-
-  const fromText = useMemo(
-    () => extractText(fromContent.data ?? ''),
-    [fromContent.data],
-  );
-  const toText = useMemo(
-    () => extractText(toContent.data ?? ''),
-    [toContent.data],
-  );
-
   const docQuery = useDocument(docId);
+  const live = docQuery.data ? docQuery.data.document.format !== null : undefined;
+  const fromContent = useVersionText(docId, resolution.kind === 'ok' ? resolution.from : undefined, live);
+  const toContent = useVersionText(docId, resolution.kind === 'ok' ? resolution.to : undefined, live);
+  const fromText = fromContent.data ?? '';
+  const toText = toContent.data ?? '';
+
   const { effective } = useTheme();
   const isDark = effective === 'dark';
 
