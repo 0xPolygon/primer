@@ -596,5 +596,8 @@
   "suggestions.none": "没有待处理的建议。",
   "suggestions.changedSince": "此后已更改",
   "suggestions.reject": "拒绝",
-  "suggestions.accept": "接受"
+  "suggestions.accept": "接受",
+  "overlay.editText": "编辑页面文本",
+  "overlay.editBlock": "编辑块",
+  "page.readOnlyText": "此文本由页面脚本绘制，无法在此编辑。"
 }

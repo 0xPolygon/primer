@@ -2,6 +2,7 @@ import { t } from '../i18n/index.ts';
 import { useEffect, useRef, useState } from 'react';
 import type {
   Anchor,
+  BridgeFeature,
   InboundProtocolMessage,
   OutboundProtocolMessage,
   Theme,
@@ -29,6 +30,20 @@ interface Props {
   /** Scale content down (to at most 0.5×) when the artifact is intrinsically
    * wider than the container. Enabled by the document route on mobile. */
   fitToWidth?: boolean;
+  /** A live page's text and Primer blocks (live/PageView.tsx): the bridge
+   *  features it grants and the messages it handles. */
+  page?: PageFrame;
+  /** The iframe element, for positioning overlays over the page. */
+  frameRef?: (el: HTMLIFrameElement | null) => void;
+}
+
+/** What a live page adds to its frame's bridge. */
+export interface PageFrame {
+  features: BridgeFeature[];
+  /** Handles a page message; true when it was one (never forwarded). */
+  handle(msg: InboundProtocolMessage): boolean;
+  /** The port to the page once init went out; null when it closes. */
+  attach(post: ((msg: OutboundProtocolMessage) => void) | null): void;
 }
 
 /** A record-reading page that keeps navigating itself is left revoked and
@@ -49,7 +64,7 @@ const MAX_BREACH_RELOADS = 3;
 // Both tokens are scoped to the iframe's opaque origin: they do not grant
 // access to parent cookies, storage, or DOM and do not open the
 // fake-SSO-popup vector that the three forbidden tokens above would.
-export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender, fitToWidth }: Props) {
+export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender, fitToWidth, page, frameRef }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const portRef = useRef<MessagePort | null>(null);
   // Bumped to reload a record-reading page from Primer after it navigated itself.
@@ -66,6 +81,8 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
   const themeRef = useRef(theme);
   const onMessageRef = useRef(onMessage);
   const registerSenderRef = useRef(registerSender);
+  const pageRef = useRef(page);
+  useEffect(() => { pageRef.current = page; }, [page]);
   useEffect(() => { anchorsRef.current = anchors; }, [anchors]);
   useEffect(() => { themeRef.current = theme; }, [theme]);
   useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
@@ -132,6 +149,7 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
         const parsed = parseInboundMessage(event.data);
         if (!parsed) return;
         if (pageHost.handle(parsed)) return;
+        if (pageRef.current?.handle(parsed)) return;
         // Record-reading pages never reach outside Primer.
         if (parsed.type === 'open_external' && !pageHost.allowsOutbound) return;
         if (parsed.type === 'content_metrics') {
@@ -152,12 +170,13 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
           type: 'init',
           anchors: anchorsRef.current,
           theme: themeRef.current,
-          features: pageHost.features,
+          features: [...pageHost.features, ...(pageRef.current?.features ?? [])],
         } satisfies OutboundProtocolMessage,
         '*',
         [channel.port2],
       );
       pageHost.attach((msg) => port.postMessage(msg));
+      pageRef.current?.attach((msg) => port.postMessage(msg));
 
       // Wire the sender for the parent route. The cleanup function
       // deregisters this sender BEFORE closing the port, so callers can rely
@@ -192,6 +211,7 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
       // Deregister the sender BEFORE closing the port so any caller still
       // holding a reference to the sender cannot post to a dead port.
       registerSenderRef.current?.(null);
+      pageRef.current?.attach(null);
       portRef.current?.close();
       portRef.current = null;
     };
@@ -237,7 +257,10 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
     >
       <iframe
         key={`${src}#${reload}`}
-        ref={iframeRef}
+        ref={(el) => {
+          iframeRef.current = el;
+          frameRef?.(el);
+        }}
         src={src}
         onLoad={onFrameLoad}
         sandbox="allow-scripts allow-forms allow-modals allow-downloads"

@@ -596,5 +596,8 @@
   "suggestions.none": "No hay sugerencias abiertas.",
   "suggestions.changedSince": "Cambiado desde entonces",
   "suggestions.reject": "Rechazar",
-  "suggestions.accept": "Aceptar"
+  "suggestions.accept": "Aceptar",
+  "overlay.editText": "Editar el texto de la página",
+  "overlay.editBlock": "Editar bloque",
+  "page.readOnlyText": "Este texto lo dibuja el script de la página, así que no se puede editar aquí."
 }

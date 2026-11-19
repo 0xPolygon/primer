@@ -27,12 +27,15 @@ import { t } from '../i18n/index.ts';
 export type PageBinding = PageInfoResponse | 'none' | 'unknown';
 
 const VERSION_SRC = /^\/api\/versions\/([0-9a-f-]{36})\/content$/i;
+/** A live page block's frame (M6). */
+const PAGE_SRC = /^\/api\/documents\/([0-9a-f-]{36})\/pages\/([A-Za-z0-9_-]{1,64})\/content$/;
 
 export async function loadPageBinding(src: string, fetchImpl: (url: string) => Promise<Response>): Promise<PageBinding> {
   const m = VERSION_SRC.exec(src);
-  if (!m) return 'none';
+  const page = PAGE_SRC.exec(src);
+  if (!m && !page) return 'none';
   try {
-    const res = await fetchImpl(`/api/versions/${m[1]}/page`);
+    const res = await fetchImpl(m ? `/api/versions/${m[1]}/page` : `/api/documents/${page![1]}/pages/${page![2]}`);
     if (!res.ok) return 'unknown';
     return (await res.json()) as PageInfoResponse;
   } catch {

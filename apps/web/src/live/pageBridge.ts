@@ -38,3 +38,84 @@ export function editablePids(
   }
   return editable;
 }
+
+/** ProseMirror JSON as y-prosemirror reads a fragment. */
+type PmJson = { type: string; text?: string; attrs?: Record<string, unknown>; content?: PmJson[] };
+
+/** A page text fragment's text, by the server's rule (page/text.ts docText):
+ *  text blocks joined by `\n`, hard breaks as `\n`. */
+export function fragmentText(json: PmJson): string {
+  const blocks: string[] = [];
+  const walk = (node: PmJson): void => {
+    if (isTextblock(node)) {
+      blocks.push((node.content ?? []).map((c) => (c.type === 'text' ? (c.text ?? '') : c.type === 'hardBreak' ? '\n' : '')).join(''));
+      return;
+    }
+    for (const child of node.content ?? []) walk(child);
+  };
+  walk(json);
+  return blocks.join('\n');
+}
+
+const TEXTBLOCKS = new Set(['paragraph', 'heading', 'codeBlock', 'diagram', 'mathBlock', 'tableParagraph', 'quote', 'bulletListItem', 'numberedListItem', 'checkListItem', 'toggleListItem']);
+const isTextblock = (node: PmJson) => TEXTBLOCKS.has(node.type);
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * The static HTML a `<primer-*>` block shows in the page (read-only; people
+ * edit it in the overlay): built from its fragment as text only, so nothing
+ * anyone wrote in the block becomes markup.
+ */
+export function embedHtml(json: PmJson): string {
+  const out: string[] = [];
+  const walk = (node: PmJson): void => {
+    switch (node.type) {
+      case 'table': {
+        const rows = collect(node, 'tableRow').map(
+          (row) =>
+            '<tr>' +
+            (row.content ?? [])
+              .map((cell) => {
+                const tag = cell.type === 'tableHeader' ? 'th' : 'td';
+                return `<${tag}>${escapeHtml(fragmentText(cell)).replace(/\n/g, '<br>')}</${tag}>`;
+              })
+              .join('') +
+            '</tr>',
+        );
+        out.push(`<table>${rows.join('')}</table>`);
+        return;
+      }
+      case 'codeBlock':
+        out.push(`<pre><code>${escapeHtml(fragmentText(node))}</code></pre>`);
+        return;
+      case 'diagram':
+        out.push(`<pre class="mermaid">${escapeHtml(fragmentText(node))}</pre>`);
+        return;
+      case 'mathBlock':
+        out.push(`<pre class="primer-math">${escapeHtml(fragmentText(node))}</pre>`);
+        return;
+      default:
+        if (isTextblock(node)) {
+          const text = fragmentText(node);
+          if (text) out.push(`<p>${escapeHtml(text).replace(/\n/g, '<br>')}</p>`);
+          return;
+        }
+        for (const child of node.content ?? []) walk(child);
+    }
+  };
+  walk(json);
+  return out.join('');
+}
+
+function collect(node: PmJson, type: string): PmJson[] {
+  const found: PmJson[] = [];
+  const walk = (n: PmJson) => {
+    if (n.type === type) found.push(n);
+    else for (const c of n.content ?? []) walk(c);
+  };
+  walk(node);
+  return found;
+}

@@ -596,5 +596,8 @@
   "suggestions.none": "未処理の提案はありません。",
   "suggestions.changedSince": "その後変更あり",
   "suggestions.reject": "却下",
-  "suggestions.accept": "承認"
+  "suggestions.accept": "承認",
+  "overlay.editText": "ページのテキストを編集",
+  "overlay.editBlock": "ブロックを編集",
+  "page.readOnlyText": "このテキストはページのスクリプトが描画しているため、ここでは編集できません。"
 }

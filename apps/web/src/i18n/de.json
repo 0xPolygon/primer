@@ -596,5 +596,8 @@
   "suggestions.none": "Keine offenen Vorschläge.",
   "suggestions.changedSince": "Seitdem geändert",
   "suggestions.reject": "Ablehnen",
-  "suggestions.accept": "Annehmen"
+  "suggestions.accept": "Annehmen",
+  "overlay.editText": "Seitentext bearbeiten",
+  "overlay.editBlock": "Block bearbeiten",
+  "page.readOnlyText": "Dieser Text wird vom Skript der Seite gezeichnet und kann hier nicht bearbeitet werden."
 }
