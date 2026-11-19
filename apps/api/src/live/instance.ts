@@ -3,6 +3,7 @@ import { Hocuspocus } from '@hocuspocus/server';
 import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
+import { sanitizeClientAwareness } from './awareness.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
 import { cancelOrphanSync, scheduleOrphanSync } from './orphans.ts';
 
@@ -48,6 +49,12 @@ export function liveInstance(): Hocuspocus {
       if (access === 'none') throw new Error('forbidden');
       connectionConfig.readOnly = access !== 'write';
       return { user: auth.user, documentId } satisfies LiveContext;
+    },
+    // Awareness is client-writable; only the server sets agent states.
+    async beforeHandleAwareness({ context, documentName, states, removedClients }) {
+      const user = (context as LiveContext | undefined)?.user;
+      const documentId = documentIdOf(documentName);
+      if (user && documentId) sanitizeClientAwareness(documentId, user, states, removedClients);
     },
     async onLoadDocument({ document, documentName }) {
       const documentId = documentIdOf(documentName);

@@ -1121,3 +1121,15 @@ export interface PrimerEventPayloads {
 }
 
 export type PrimerEventType = keyof PrimerEventPayloads;
+
+/** The Yjs awareness client id the server uses for an agent's cursor and
+ *  status on live documents (fnv1a32 of the agent's id). Clients trust an
+ *  agent state only under this id. */
+export function agentClientId(agentId: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < agentId.length; i++) {
+    hash ^= agentId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
+}

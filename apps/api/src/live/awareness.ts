@@ -1,5 +1,6 @@
 import * as Y from 'yjs';
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness';
+import { agentClientId } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { findBlock } from './blocks.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -31,14 +32,36 @@ export function agentAwareness(documentId: string, agentId: string): Awareness |
   return active.get(`${documentId}:${agentId}`);
 }
 
-export function agentClientId(agentId: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < agentId.length; i++) {
-    hash ^= agentId.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+/** Fields only the server's agent states may carry. */
+const AGENT_FIELDS = ['agentId', 'status'] as const;
+
+/**
+ * Cleans a client's inbound awareness update (awareness is client-writable):
+ * a person can't pose as an agent or as someone else. Agent fields are
+ * stripped, the name shown on the cursor is the connection's own, and a
+ * state or removal for a running agent's client id is dropped.
+ */
+export function sanitizeClientAwareness(
+  documentId: string,
+  user: { displayName: string },
+  states: Map<number, Record<string, any>>,
+  removed: Set<number>,
+): void {
+  const agentIds = new Set(
+    [...active.keys()].filter((k) => k.startsWith(`${documentId}:`)).map((k) => agentClientId(k.slice(documentId.length + 1))),
+  );
+  for (const [clientId, state] of states) {
+    if (agentIds.has(clientId)) {
+      states.delete(clientId);
+      continue;
+    }
+    for (const field of AGENT_FIELDS) delete state[field];
+    if (state.user && typeof state.user === 'object') state.user.name = user.displayName;
   }
-  return hash;
+  for (const clientId of removed) if (agentIds.has(clientId)) removed.delete(clientId);
 }
+
+export { agentClientId };
 
 export async function setAgentAwareness(documentId: string, agent: AuthUser, state: AgentAwarenessState | null): Promise<void> {
   const key = `${documentId}:${agent.id}`;
