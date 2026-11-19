@@ -9,6 +9,7 @@
 // (`records/changes?since=`), which is the complete record.
 import { transactionWithEvents } from '../lib/events.ts';
 import { logger } from '../logger.ts';
+import { refreshBoundWidgets } from '../widgets/records.ts';
 
 export const DATA_CHANGED_WINDOW_MS = 2_000;
 
@@ -72,6 +73,10 @@ async function emit(key: string): Promise<void> {
     // The document may be gone; readers catch up from the change log anyway.
     logger.warn({ error: String(err), documentId: entry.documentId }, 'records: data.changed not written');
   }
+  // Charts bound to these collections redraw from the new records.
+  await refreshBoundWidgets(entry.documentId, [...entry.collections]).catch((err: unknown) =>
+    logger.warn({ error: String(err), documentId: entry.documentId }, 'records: bound widgets not redrawn'),
+  );
 }
 
 /** Writes every open window now (tests, shutdown). */

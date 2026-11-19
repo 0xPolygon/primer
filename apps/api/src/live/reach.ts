@@ -17,6 +17,17 @@ export function fragmentName(target: Target): string {
   return tabFragmentName(target.tabId);
 }
 
+/** The Target of a sub-fragment name (`page/…`, `embed/…`, `widget/…`), or
+ *  null for a tab fragment. The inverse of `fragmentName`. */
+export function targetOfFragment(name: string, tabId: string = MAIN_TAB): Target | null {
+  const [kind, blockId, sub] = name.split('/');
+  if (!blockId || !sub) return null;
+  if (kind === 'page') return { tabId, blockId, pid: sub };
+  if (kind === 'embed') return { tabId, blockId, embedId: sub };
+  if (kind === 'widget') return { tabId, blockId, textId: sub };
+  return null;
+}
+
 export function fragmentFor(doc: Y.Doc, target: Target): Y.XmlFragment {
   return doc.getXmlFragment(fragmentName(target));
 }
@@ -108,5 +119,22 @@ export function reachableFragments(doc: Y.Doc): string[] {
     for (const pid of page.pids) names.push(fragmentName({ tabId: page.tabId, blockId: page.blockId, pid }));
     for (const embedId of page.embeds) names.push(fragmentName({ tabId: page.tabId, blockId: page.blockId, embedId }));
   }
+  for (const tab of tabsOf(doc)) widgetLabelFragments(doc.getXmlFragment(tabFragmentName(tab.id)), names);
   return names;
+}
+
+/** The label fragments (`widget/<blockId>/<textId>`) of the widget blocks in
+ *  a tab: each block lists its published text ids in its `textIds` prop. */
+export function widgetLabelFragments(fragment: Y.XmlFragment | Y.XmlElement, out: string[] = []): string[] {
+  for (const child of fragment.toArray()) {
+    if (!(child instanceof Y.XmlElement)) continue;
+    if (child.nodeName === 'widget') {
+      const blockId = (child.parent as Y.XmlElement | null)?.getAttribute('id');
+      const textIds = String(child.getAttribute('textIds') ?? '').split(' ').filter(Boolean);
+      if (blockId) for (const textId of textIds) out.push(fragmentName({ tabId: '', blockId, textId }));
+    } else {
+      widgetLabelFragments(child, out);
+    }
+  }
+  return out;
 }

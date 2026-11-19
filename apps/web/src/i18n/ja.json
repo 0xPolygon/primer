@@ -669,5 +669,15 @@
   "suggestions.rejectAll": "すべて却下",
   "suggestions.conflict": "競合",
   "suggestions.versionNow": "現在",
-  "suggestions.versionProposed": "提案"
+  "suggestions.versionProposed": "提案",
+  "overlay.editLabel": "ラベルを編集",
+  "widget.drawing": "エージェントがこのウィジェットを描画しています。",
+  "widget.unavailable": "このウィジェットは現在表示できません。",
+  "widget.comments": "このウィジェットへのコメント",
+  "widget.replies": "ほか {count} 件",
+  "widget.commentOn": "{name} にコメント",
+  "widget.commentPlaceholder": "コメントを追加",
+  "widget.comment": "コメント",
+  "widget.cancel": "キャンセル",
+  "widget.commentFailed": "コメントを保存できませんでした。もう一度お試しください。"
 }

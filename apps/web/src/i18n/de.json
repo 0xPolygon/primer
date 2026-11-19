@@ -669,5 +669,15 @@
   "suggestions.rejectAll": "Alle ablehnen",
   "suggestions.conflict": "Konflikt",
   "suggestions.versionNow": "Aktuell",
-  "suggestions.versionProposed": "Vorgeschlagen"
+  "suggestions.versionProposed": "Vorgeschlagen",
+  "overlay.editLabel": "Beschriftung bearbeiten",
+  "widget.drawing": "Der Agent zeichnet dieses Widget.",
+  "widget.unavailable": "Dieses Widget kann gerade nicht angezeigt werden.",
+  "widget.comments": "Kommentare zu diesem Widget",
+  "widget.replies": "{count} weitere",
+  "widget.commentOn": "Kommentar zu {name}",
+  "widget.commentPlaceholder": "Kommentar hinzufügen",
+  "widget.comment": "Kommentieren",
+  "widget.cancel": "Abbrechen",
+  "widget.commentFailed": "Der Kommentar wurde nicht gespeichert. Bitte erneut versuchen."
 }

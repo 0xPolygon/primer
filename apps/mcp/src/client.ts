@@ -38,6 +38,11 @@ import type {
   PromoteConversationRequest,
   PromoteConversationResponse,
 } from '@polygonlabs/primer-api-types';
+import type { Refusal, WidgetDTO, WidgetDraftRequest, WidgetDraftResponse, WidgetPublishResponse } from '@polygonlabs/primer-api-types';
+
+/** A widget call's answer: its value, or the server's refusal with its details
+ *  (a draft's errors, each with a line and a fix). */
+export type WidgetCall<T> = { ok: true; value: T } | { ok: false; refusal: Refusal };
 
 /**
  * Machine-checkable error codes returned by every PrimerApiError.
@@ -308,6 +313,44 @@ export class PrimerClient {
       path: `/api/threads/${encodeURIComponent(threadId)}/reanchor`,
       json: input,
     });
+  }
+
+  /** Drafts a widget; the answer carries base64 PNG previews. */
+  draftWidget(documentId: string, req: WidgetDraftRequest): Promise<WidgetCall<WidgetDraftResponse>> {
+    return this.widgetCall('POST', `/api/documents/${encodeURIComponent(documentId)}/widgets/draft`, req);
+  }
+
+  publishWidget(widgetId: string, previewHash: string): Promise<WidgetCall<WidgetPublishResponse>> {
+    return this.widgetCall('POST', `/api/widgets/${encodeURIComponent(widgetId)}/publish`, { previewHash });
+  }
+
+  getWidget(widgetId: string): Promise<WidgetCall<WidgetDTO>> {
+    return this.widgetCall('GET', `/api/widgets/${encodeURIComponent(widgetId)}`);
+  }
+
+  /** The live widget as people see it, as a base64 PNG (light theme). */
+  async widgetPng(widgetId: string): Promise<string> {
+    const res = await this.send({ method: 'GET', path: `/api/widgets/${encodeURIComponent(widgetId)}/image?format=png` });
+    return Buffer.from(await res.arrayBuffer()).toString('base64');
+  }
+
+  /** Widget refusals come back as data, not exceptions: a draft's errors are
+   *  what the agent fixes next. Auth and network failures still throw. */
+  private async widgetCall<T>(method: 'GET' | 'POST', path: string, json?: unknown): Promise<WidgetCall<T>> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${this.token}`, ...(json === undefined ? {} : { 'content-type': 'application/json' }) },
+        body: json === undefined ? undefined : JSON.stringify(json),
+      });
+    } catch (err) {
+      throw new PrimerApiError('network', err instanceof Error ? err.message : String(err));
+    }
+    if (res.ok) return { ok: true, value: (await res.json()) as T };
+    const body = (await res.json().catch(() => null)) as { message?: string; refusal?: Refusal } | null;
+    if (body?.refusal && res.status !== 401) return { ok: false, refusal: body.refusal };
+    throw new PrimerApiError(statusToCode(res.status), body?.message ?? `HTTP ${res.status}`, res.status);
   }
 
   /** Resolves a thread (document owner or thread starter only). */

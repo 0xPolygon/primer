@@ -669,5 +669,15 @@
   "suggestions.rejectAll": "Rechazar todo",
   "suggestions.conflict": "Conflicto",
   "suggestions.versionNow": "Ahora",
-  "suggestions.versionProposed": "Propuesto"
+  "suggestions.versionProposed": "Propuesto",
+  "overlay.editLabel": "Editar etiqueta",
+  "widget.drawing": "El agente está dibujando este widget.",
+  "widget.unavailable": "Este widget no se puede mostrar ahora.",
+  "widget.comments": "Comentarios sobre este widget",
+  "widget.replies": "{count} más",
+  "widget.commentOn": "Comentar en {name}",
+  "widget.commentPlaceholder": "Añade un comentario",
+  "widget.comment": "Comentar",
+  "widget.cancel": "Cancelar",
+  "widget.commentFailed": "El comentario no se guardó. Inténtalo de nuevo."
 }

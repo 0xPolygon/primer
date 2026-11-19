@@ -10,6 +10,7 @@ import { exportDecisions } from './choices.ts';
 import { tabsOf } from './reach.ts';
 import { trustedMeta } from './sources.ts';
 import { currentPageHtml } from '../page/publish.ts';
+import { bundleWidgets } from '../widgets/bundle.ts';
 
 /**
  * A checkpoint's render bundle (C11): everything shares, previews, print,
@@ -24,9 +25,12 @@ import { currentPageHtml } from '../page/publish.ts';
  *   counts, so the checkpoint keeps its discussion context;
  * - `files.json`: the ids of the files the content references.
  *
+ * - `widgets/<id>.light.svg`, `.dark.svg` and `.json`: each published widget
+ *   as it looked, and what restore republishes it from (widgets/bundle.ts).
+ *
  * A page document's stamped source is stored once with the checkpoint that
  * published it (page/publish.ts `sourceKeyOf`), not copied into each bundle.
- * Later milestones add `widgets/` and `records.json`.
+ * Later milestones add `records.json`.
  */
 export type BundleManifest = { versionId: string; format: string; files: string[] };
 
@@ -58,8 +62,10 @@ export async function renderStatic(
   title: string,
   decisions: ExportDecisions = new Map(),
   page: string | null = null,
+  /** Puts each widget's SVG in place of its block (widgets/bundle.ts `bundleWidgets`). */
+  embedWidgets: (html: string) => string = (html) => html,
 ): Promise<{ html: string; served: string }> {
-  const html = page ?? (await exportHtml(doc, title, decisions));
+  const html = page ?? embedWidgets(await exportHtml(doc, title, decisions));
   const served = transformHtml(html, { themeManaged: page === null });
   if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
   return { html, served: served.html };
@@ -97,7 +103,8 @@ export async function renderBundle(
     const decisions = await exportDecisions(opts.documentId);
     const page = format === 'html' ? await currentPageHtml(storage, opts.documentId, doc) : null;
     if (format === 'html' && page === null) throw new Error('page document has no readable page');
-    const { html, served } = await renderStatic(doc, opts.title, decisions, page);
+    const widgets = await bundleWidgets(doc, opts.documentId);
+    const { html, served } = await renderStatic(doc, opts.title, decisions, page, widgets.embed);
     const exported =
       format === 'html' ? html : format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
@@ -107,6 +114,7 @@ export async function renderBundle(
       'static.html': served,
       'threads.json': JSON.stringify(await openThreads(opts.documentId)),
       'files.json': JSON.stringify(await referencedFiles(doc, opts.documentId)),
+      ...widgets.files,
     };
     const manifest: BundleManifest = { versionId: opts.versionId, format, files: Object.keys(files) };
     files['manifest.json'] = JSON.stringify(manifest);
@@ -142,9 +150,19 @@ export function bundleFileKeys(bundleKey: string): string[] {
   return names.map((name) => bundleKey + name);
 }
 
+/** Every storage key of a bundle: the files its manifest lists (widgets
+ *  included) and the fixed names, for a bundle whose manifest never landed. */
+export async function bundleStorageKeys(storage: Storage, bundleKey: string): Promise<string[]> {
+  const listed = await readBundleFile(storage, bundleKey, 'manifest.json')
+    .then((bytes) => (JSON.parse(new TextDecoder().decode(bytes)) as BundleManifest).files)
+    .catch(() => [] as string[]);
+  const safe = listed.filter((name) => /^[A-Za-z0-9_./-]+$/.test(name) && !name.split('/').includes('..'));
+  return [...new Set([...bundleFileKeys(bundleKey), ...safe.map((name) => bundleKey + name)])];
+}
+
 /** Deletes what `renderBundle` stored (a checkpoint that failed to commit). */
 export async function deleteBundle(storage: Storage, bundleKey: string): Promise<void> {
-  for (const key of bundleFileKeys(bundleKey)) await storage.delete(key).catch(() => undefined);
+  for (const key of await bundleStorageKeys(storage, bundleKey)) await storage.delete(key).catch(() => undefined);
 }
 
 async function openThreads(documentId: string): Promise<BundleThread[]> {
