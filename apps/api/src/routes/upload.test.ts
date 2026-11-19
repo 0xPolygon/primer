@@ -146,7 +146,7 @@ describe('POST /api/upload — error paths', () => {
 });
 
 describe('POST /api/upload — markdown', () => {
-  it('converts a .md upload to HTML and stores it as an artifact', async () => {
+  it('a .md upload becomes a live document whose checkpoint renders as an artifact', async () => {
     await withTmpStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
       const md = '---\ntitle: From Frontmatter\n---\n\n# Hello\n\nWorld.';
@@ -159,6 +159,8 @@ describe('POST /api/upload — markdown', () => {
 
       const docRows = await db.select().from(documents).where(eq(documents.id, body.documentId));
       expect(docRows[0].title).toBe('My Title');
+      expect(docRows[0].format).toBe('markdown');
+      expect(docRows[0].metadata).toEqual({ title: 'From Frontmatter' });
 
       const versionRows = await db.select().from(versions).where(eq(versions.id, body.versionId));
       const stream = await storage.get(versionRows[0].storageKey);
@@ -169,9 +171,8 @@ describe('POST /api/upload — markdown', () => {
         if (done) break;
         combined += new TextDecoder().decode(value);
       }
-      expect(combined).toContain('<h1>Hello</h1>');
-      expect(combined).toContain('<p>World.</p>');
-      expect(combined).toContain('data-theme="light"');
+      expect(combined).toMatch(/<h1[^>]*>Hello<\/h1>/);
+      expect(combined).toMatch(/<p[^>]*>World\.<\/p>/);
       // Primer authored this HTML, so it carries the theme-ownership marker
       // that lets the companion follow the app's light/dark theme.
       expect(combined).toContain('data-primer-theme="managed"');

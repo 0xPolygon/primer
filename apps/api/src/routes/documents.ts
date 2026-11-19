@@ -1,8 +1,19 @@
 import type { Hono } from 'hono';
-import { eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
-import type { DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary } from '@polygonlabs/primer-api-types';
-import { documents, versions, users } from '../db/schema.ts';
+import type { Context } from 'hono';
+import { v7 as uuidv7 } from 'uuid';
+import type {
+  DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary,
+  CheckpointResponse, DocFileUploadResponse, ExportFormat, Refusal, RestoreCheckpointResponse,
+} from '@polygonlabs/primer-api-types';
+import { docFiles, documents, versions, users } from '../db/schema.ts';
+import { exportFileOf, readBundleFile } from '../live/bundle.ts';
+import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
+import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
+import { withLiveDocument } from '../live/instance.ts';
+import { ensureSigningKey } from '../live/signing.ts';
+import { MAX_BYTES } from '../upload/validate.ts';
 import { db } from '../db/client.ts';
 import { actorName } from '../lib/actors.ts';
 import { logger } from '../logger.ts';
@@ -402,4 +413,205 @@ export function registerDocumentRoutes(
     };
     return c.json(response, 201);
   });
+
+  // ─────────────── Live documents: checkpoints, export, files ───────────────
+
+  app.post('/api/documents/:docId/checkpoints', async (c) => {
+    const docId = c.req.param('docId');
+    const access = await docAccess(docId, c.get('user'));
+    if (!access) return c.json({ error: 'not_found' }, 404);
+    if (!canEdit(access.role)) return c.json({ error: 'forbidden' }, 403);
+    if (!access.format) return notLive(c);
+    let note: string | null = null;
+    const raw = await c.req.text();
+    if (raw.trim().length > 0) {
+      let body: { note?: unknown };
+      try {
+        body = JSON.parse(raw) as { note?: unknown };
+      } catch {
+        return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
+      }
+      if (body.note !== undefined && body.note !== null && typeof body.note !== 'string') {
+        return c.json({ error: 'invalid_body', message: 'note must be a string' }, 400);
+      }
+      note = typeof body.note === 'string' && body.note.trim().length > 0 ? body.note.trim().slice(0, 500) : null;
+    }
+    await ensureSigningKey(deps.storage);
+    const checkpoint: CheckpointResponse = await createCheckpoint(deps.storage, docId, c.get('user'), note);
+    return c.json(checkpoint, 201);
+  });
+
+  app.post('/api/versions/:versionId/restore', async (c) => {
+    const version = await checkpointOf(c.req.param('versionId'));
+    if (!version) return c.json({ error: 'not_found' }, 404);
+    const access = await docAccess(version.documentId, c.get('user'));
+    if (!access) return c.json({ error: 'not_found' }, 404);
+    if (!canEdit(access.role)) return c.json({ error: 'forbidden' }, 403);
+    const result: RestoreCheckpointResponse = await restoreCheckpoint(deps.storage, version, c.get('user'));
+    return c.json(result, 200);
+  });
+
+  // The frozen Y.Doc state of a checkpoint (BlockNote's version preview).
+  app.get('/api/versions/:versionId/ydoc', async (c) => {
+    const version = await checkpointOf(c.req.param('versionId'));
+    if (!version) return c.json({ error: 'not_found' }, 404);
+    if (!(await docAccess(version.documentId, c.get('user')))) return c.json({ error: 'not_found' }, 404);
+    const bytes = await readBundleFile(deps.storage, version.bundleKey, 'state.ydoc');
+    return new Response(bytes, {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, max-age=31536000, immutable' },
+    });
+  });
+
+  // ?format=markdown|text|html (default: the document's own), and
+  // ?version=<n> for a checkpoint's bundle instead of the live state.
+  app.get('/api/documents/:docId/export', async (c) => {
+    const docId = c.req.param('docId');
+    const access = await docAccess(docId, c.get('user'));
+    if (!access) return c.json({ error: 'not_found' }, 404);
+    if (!access.format) return notLive(c);
+    const format = (c.req.query('format') ?? (access.format === 'text' ? 'text' : 'markdown')) as ExportFormat;
+    if (format !== 'markdown' && format !== 'text' && format !== 'html') {
+      return c.json({ error: 'invalid_query', message: 'format must be markdown, text or html' }, 400);
+    }
+    const versionParam = c.req.query('version');
+    let body: string | Uint8Array<ArrayBuffer>;
+    if (versionParam !== undefined) {
+      const number = Number(versionParam);
+      const [version] = Number.isInteger(number)
+        ? await db
+            .select({ bundleKey: versions.bundleKey })
+            .from(versions)
+            .where(sql`${versions.documentId} = ${docId} AND ${versions.versionNumber} = ${number}`)
+        : [];
+      if (!version?.bundleKey) return c.json({ error: 'not_found' }, 404);
+      const own = exportFileOf(access.format);
+      const file = format === 'html' ? 'export.html' : own;
+      if (format !== 'html' && file !== (format === 'text' ? 'export.txt' : 'export.md')) {
+        return c.json({ error: 'invalid_query', message: `checkpoints keep ${own} and export.html` }, 400);
+      }
+      body = await readBundleFile(deps.storage, version.bundleKey, file);
+    } else {
+      await ensureSigningKey(deps.storage);
+      body = await withLiveDocument(docId, (doc) =>
+        format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
+      );
+    }
+    const ext = format === 'html' ? 'html' : format === 'text' ? 'txt' : 'md';
+    const type = format === 'html' ? 'text/html' : format === 'text' ? 'text/plain' : 'text/markdown';
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'content-type': `${type}; charset=utf-8`,
+        'content-disposition': `attachment; filename="${fileName(access.title)}.${ext}"`,
+        'x-content-type-options': 'nosniff',
+        'cache-control': 'private, no-store',
+      },
+    });
+  });
+
+  // A file placed in a live document (image, video, audio, file blocks). The
+  // document stores the opaque `primer-blob://<id>`, never a link.
+  app.post('/api/documents/:docId/files', async (c) => {
+    const docId = c.req.param('docId');
+    const user = c.get('user');
+    const access = await docAccess(docId, user);
+    if (!access) return c.json({ error: 'not_found' }, 404);
+    if (!canEdit(access.role)) return c.json({ error: 'forbidden' }, 403);
+    if (!access.format) return notLive(c);
+    const form = await c.req.parseBody();
+    const file = form['file'];
+    if (!(file instanceof File)) return c.json({ error: 'invalid_body', message: 'file is required' }, 400);
+    if (file.size > MAX_BYTES) return c.json({ error: 'too_large', message: `File exceeds the ${MAX_BYTES}-byte limit.` }, 400);
+    const fileId = uuidv7();
+    const storageKey = `files/${docId}/${fileId}`;
+    await deps.storage.put(storageKey, new Uint8Array(await file.arrayBuffer()));
+    await db.insert(docFiles).values({
+      id: fileId,
+      documentId: docId,
+      storageKey,
+      contentType: file.type || 'application/octet-stream',
+      sizeBytes: file.size,
+      uploadedBy: user.id,
+    });
+    const response: DocFileUploadResponse = { fileId, url: `primer-blob://${fileId}` };
+    return c.json(response, 201);
+  });
+
+  // Served from the app's origin with the viewer's session, so nothing here
+  // may run: a sandboxing CSP and nosniff always, and inline display only for
+  // media types a browser shows passively.
+  //
+  // `?doc=` names the document whose content references the file, and the
+  // file must belong to it: ids come from block props, which any editor can
+  // write, so a file id copied from another document is never served here.
+  app.get('/api/files/:fileId', async (c) => {
+    const docId = c.req.query('doc') ?? '';
+    const fileId = c.req.param('fileId');
+    if (!UUID.test(docId) || !UUID.test(fileId)) return c.json({ error: 'not_found' }, 404);
+    const [file] = await db
+      .select()
+      .from(docFiles)
+      .where(and(eq(docFiles.id, fileId), eq(docFiles.documentId, docId)));
+    if (!file) return c.json({ error: 'not_found' }, 404);
+    if (!(await docAccess(file.documentId, c.get('user')))) return c.json({ error: 'not_found' }, 404);
+    const inline = INLINE_TYPES.has(file.contentType);
+    return new Response(await deps.storage.get(file.storageKey), {
+      status: 200,
+      headers: {
+        'content-type': inline ? file.contentType : 'application/octet-stream',
+        'content-disposition': inline ? 'inline' : 'attachment',
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        'x-content-type-options': 'nosniff',
+        'cache-control': 'private, max-age=31536000, immutable',
+      },
+    });
+  });
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const INLINE_TYPES = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml',
+  'video/mp4', 'video/webm', 'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm', 'application/pdf',
+]);
+
+/** The viewer's role on a document they can read, or null (not found). */
+async function docAccess(docId: string, user: AppVariables['user']) {
+  const [doc] = await db
+    .select({
+      uploaderId: documents.uploaderId,
+      visibility: documents.visibility,
+      deletedAt: documents.deletedAt,
+      format: documents.format,
+      title: documents.title,
+    })
+    .from(documents)
+    .where(eq(documents.id, docId));
+  if (!doc || doc.deletedAt !== null) return null;
+  const role = await loadEffectiveRole({ id: docId, uploaderId: doc.uploaderId, visibility: doc.visibility as Visibility }, user);
+  if (!canRead(doc.visibility as Visibility, role)) return null;
+  return { role, format: doc.format, title: doc.title };
+}
+
+/** A checkpoint of a live document, or null. */
+async function checkpointOf(versionId: string) {
+  const [row] = await db
+    .select({ documentId: versions.documentId, bundleKey: versions.bundleKey })
+    .from(versions)
+    .where(eq(versions.id, versionId));
+  return row?.bundleKey ? { documentId: row.documentId, bundleKey: row.bundleKey } : null;
+}
+
+function notLive(c: Context<{ Variables: AppVariables }>) {
+  const refusal: Refusal = {
+    code: 'bad_request',
+    message: 'This document is version-only HTML, not a live document.',
+    fix: 'Open its versions instead; live documents are created from Markdown or text uploads.',
+  };
+  return c.json({ error: 'not_live', message: refusal.message, refusal }, 409);
+}
+
+function fileName(title: string): string {
+  return title.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'document';
 }

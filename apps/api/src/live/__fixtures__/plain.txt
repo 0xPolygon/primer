@@ -1,0 +1,8 @@
+Plain text notes
+with Windows line endings.
+
+
+Second paragraph   with  spaces.
+  Indented line.
+
+Last line without a newline
