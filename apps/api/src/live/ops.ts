@@ -1,4 +1,5 @@
 import { pinCitations } from './citations.ts';
+import { writesDecisionProp } from './choices.ts';
 import { Fragment, type Node as PmNode } from '@tiptap/pm/model';
 import type { Transform } from '@tiptap/pm/transform';
 import { sql } from 'drizzle-orm';
@@ -86,6 +87,14 @@ export async function applyOps(documentId: string, actor: AuthUser, raw: unknown
   const prepared: Prepared[] = [];
   const errors: OpError[] = [];
   for (const [index, op] of (req.ops as unknown[]).entries()) {
+    const decisionProp = actor.kind === 'agent' ? writesDecisionProp(op) : null;
+    if (decisionProp) {
+      errors.push({
+        index,
+        refusal: invalid(`${decisionProp} is set only when a person decides a choice.`, 'Propose an option with primer_propose_pick instead.'),
+      });
+      continue;
+    }
     const unpinned = await pinCitations(actor, op);
     if (unpinned) {
       errors.push({ index, refusal: invalid(unpinned, 'Cite a document you can read (docId, optionally versionNumber) or an http(s) url.') });

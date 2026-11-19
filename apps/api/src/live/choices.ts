@@ -492,3 +492,28 @@ export async function exportDecisions(documentId: string): Promise<ExportDecisio
   `)) as unknown as ({ blockId: string } & ExportDecision)[];
   return new Map(rows.map(({ blockId, ...d }) => [blockId, d]));
 }
+
+/** Choice props only the pick and proposal routes write (their checks and
+ *  attribution are there): an agent's block input naming one is refused. */
+const DECISION_PROPS = new Set(['decisionId', 'decidedOptionId', 'decidedLabel', 'decidedQuestion', 'decisionChanged', 'decidedByName', 'proposedBy']);
+
+/** The decision prop an agent's op input writes, if any (any `props` object in it). */
+export function writesDecisionProp(input: unknown): string | null {
+  if (Array.isArray(input)) {
+    for (const v of input) {
+      const hit = writesDecisionProp(v);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (!input || typeof input !== 'object') return null;
+  for (const [key, value] of Object.entries(input)) {
+    if (key === 'props' && value && typeof value === 'object') {
+      const hit = Object.keys(value).find((k) => DECISION_PROPS.has(k));
+      if (hit) return hit;
+    }
+    const nested = writesDecisionProp(value);
+    if (nested) return nested;
+  }
+  return null;
+}

@@ -6,6 +6,7 @@ import { docDecisions, docRecords, documentCollaborators, events } from '../db/s
 import { yXmlFragmentToProsemirrorJSON } from 'y-prosemirror';
 import { findBlock } from './blocks.ts';
 import { applyPlan } from './pipeline.ts';
+import { applyOps } from './ops.ts';
 import { recordsApi } from '../records/store.ts';
 import { AGENT, OWNER, READER, VIEWER, seedRecordsDoc } from '../records/records.testlib.ts';
 import { addChoice, choiceTally, clearDecision, exportDecisions, flushDecisionSync, listDecisions, pick, proposePick, vote } from './choices.ts';
@@ -272,6 +273,15 @@ describe('choice blocks', () => {
     expect((await clearDecision(OWNER, doc, target.blockId)).ok).toBe(true);
     const after = await listDecisions(OWNER, doc);
     expect(after.ok && after.value.decisions[0]?.status).toBe('open');
+  });
+
+  it("an agent's ops can't write a choice's decision props", async () => {
+    const doc = await liveDoc();
+    const { target, optionIds } = await choiceIn(doc);
+    const out = await applyOps(doc, AGENT, {
+      ops: [{ op: 'update', target, block: { json: { type: 'choice', props: { question: 'Which database?', decisionId: uuidv7(), decidedOptionId: optionIds[0] } } } }],
+    });
+    expect(!out.ok && out.errors?.[0]?.refusal).toMatchObject({ code: 'invalid_op', message: expect.stringContaining('decisionId') });
   });
 
   it('an editor collaborator decides; a reader sees the register', async () => {
