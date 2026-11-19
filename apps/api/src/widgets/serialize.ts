@@ -193,3 +193,12 @@ export function withLabels(svg: string, labels: Record<string, string>): string 
       Object.hasOwn(labels, id) ? `${open}${escapeText(labels[id]!)}${close}` : whole,
   );
 }
+
+/** Each label's words in a serialized widget SVG, by text id. */
+export function labelsOf(svg: string): Record<string, string> {
+  const labels: Record<string, string> = {};
+  for (const m of svg.matchAll(/<(\w+)[^>]*\sdata-text-id="([^"]+)"[^>]*>([^<]*)<\/\1>/g)) {
+    labels[m[2]!] = m[3]!.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  }
+  return labels;
+}

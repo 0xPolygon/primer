@@ -310,7 +310,10 @@ export type RefusalCode =
   /** A live edit's target block changed (or is gone) since the version it read. */
   | 'target_changed'
   /** Publishing a new version onto a live document is not supported yet. */
-  | 'republish_unsupported';
+  | 'republish_unsupported'
+  /** A widget draft has errors, or a publish names a preview that is not the
+   *  current draft's. */
+  | 'widget_invalid';
 
 export interface Refusal {
   code: RefusalCode;
@@ -884,4 +887,83 @@ export interface DocumentStatusDTO {
 /** GET /api/documents/:id/status — who is working on the document now. */
 export interface DocumentStatusResponse {
   statuses: DocumentStatusDTO[];
+}
+
+// ───────────────────── Widgets ─────────────────────
+// An agent-drawn SVG diagram or chart in a live document (a `widget` block).
+// The agent drafts a module, sees PNG previews, then publishes exactly that
+// preview; a draft with errors never replaces the live publish.
+
+/** One problem in a widget module: its line (0 = the rendered output or the
+ *  rows), what is wrong, and what to do. */
+export interface WidgetError {
+  line: number;
+  message: string;
+  fix: string;
+}
+
+/** A row a widget draws from; `id` is its stable identity (a mark's
+ *  `data-row`), so comments stay on their row when rows re-sort. */
+export type WidgetRowInput = Record<string, unknown> & { id: string | number };
+
+/** POST /api/documents/:docId/widgets/draft. Without `widgetId` a new widget
+ *  block is placed after `afterBlockId` (or at the end of the tab). */
+export interface WidgetDraftRequest {
+  widgetId?: string;
+  tabId?: string;
+  afterBlockId?: string;
+  source: string;
+  rows?: WidgetRowInput[];
+}
+
+/** A label whose words people edited, at publish: their edit is `carried`
+ *  (the agent left that label unchanged) or `kept` over the agent's different
+ *  new words (to replace it anyway, edit the label itself). Labels people
+ *  never edited take the agent's words and are not listed. */
+export interface WidgetLabelOutcome {
+  textId: string;
+  status: 'carried' | 'kept';
+  text: string;
+  agentText: string;
+}
+
+export interface WidgetDraftResponse {
+  widgetId: string;
+  blockId: string;
+  /** Pass it to publish: the publish happens only if the draft still renders
+   *  exactly this preview. */
+  previewHash: string;
+  /** Base64 PNGs of the draft as people will see it once published. */
+  png: { light: string; dark: string };
+  /** Tags and attributes the allowlist dropped from the output. */
+  warnings: string[];
+  labels: WidgetLabelOutcome[];
+}
+
+/** POST /api/widgets/:widgetId/publish */
+export interface WidgetPublishRequest {
+  previewHash: string;
+}
+
+export interface WidgetPublishResponse {
+  widgetId: string;
+  blockId: string;
+  publishedHash: string;
+  docVersion: number;
+  labels: WidgetLabelOutcome[];
+}
+
+/** GET /api/widgets/:widgetId */
+export interface WidgetDTO {
+  id: string;
+  documentId: string;
+  blockId: string;
+  /** The live publish (null before the first publish). */
+  source: string | null;
+  rows: WidgetRowInput[] | null;
+  publishedHash: string | null;
+  /** Each label's current words (people's edits included), by text id. */
+  labels: Record<string, string>;
+  draft: { source: string; rows: WidgetRowInput[] | null; errors: WidgetError[] | null } | null;
+  updatedAt: string;
 }

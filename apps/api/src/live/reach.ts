@@ -39,5 +39,24 @@ export function tabsOf(doc: Y.Doc): { id: string; title: string }[] {
  * are unreachable.
  */
 export function reachableFragments(doc: Y.Doc): string[] {
-  return tabsOf(doc).map((tab) => tabFragmentName(tab.id));
+  return tabsOf(doc).flatMap((tab) => {
+    const name = tabFragmentName(tab.id);
+    return [name, ...widgetLabelFragments(doc.getXmlFragment(name))];
+  });
+}
+
+/** The label fragments (`widget/<blockId>/<textId>`) of the widget blocks in
+ *  a tab: each block lists its published text ids in its `textIds` prop. */
+export function widgetLabelFragments(fragment: Y.XmlFragment | Y.XmlElement, out: string[] = []): string[] {
+  for (const child of fragment.toArray()) {
+    if (!(child instanceof Y.XmlElement)) continue;
+    if (child.nodeName === 'widget') {
+      const blockId = (child.parent as Y.XmlElement | null)?.getAttribute('id');
+      const textIds = String(child.getAttribute('textIds') ?? '').split(' ').filter(Boolean);
+      if (blockId) for (const textId of textIds) out.push(fragmentName({ tabId: '', blockId, textId }));
+    } else {
+      widgetLabelFragments(child, out);
+    }
+  }
+  return out;
 }
