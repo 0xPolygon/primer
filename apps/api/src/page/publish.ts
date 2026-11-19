@@ -9,6 +9,7 @@ import { updateYFragment } from 'y-prosemirror';
 import { v7 as uuidv7 } from 'uuid';
 import type { Reconciliation, Refusal } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
+import { effectiveAgentMode } from '../lib/permissions.ts';
 import { db } from '../db/client.ts';
 import { findBlock } from '../live/blocks.ts';
 import { serverEditor } from '../live/editor.ts';
@@ -162,10 +163,18 @@ export async function republishPage(
   const sourceKey = sourceKeyOf(documentId, versionId);
   await storage.put(sourceKey, new TextEncoder().encode(prepared.stamped));
 
+  // An agent that may only suggest here proposes new text for the page's
+  // existing elements; the page itself (its source, elements and embeds)
+  // changes only by someone who may edit.
+  const suggesting = actor.kind === 'agent' && (await effectiveAgentMode(documentId, actor.id)) === 'suggest';
+  const known = new Set(previous.map((p) => p.pid));
+  const next = suggesting ? prepared.pids.filter((p) => known.has(p.pid)) : prepared.pids;
+
   const decisions: CarryDecision[] = [];
   const props = pageProps(sourceKey, page.title, prepared);
-  const edits: PlannedEdit[] = [
-    ...planCarry({ tabId: page.tabId, blockId: page.blockId, previous, next: prepared.pids, uncertain: prepared.uncertain, decisions }),
+  const carried = planCarry({ tabId: page.tabId, blockId: page.blockId, previous, next, uncertain: prepared.uncertain, decisions });
+  const edits: PlannedEdit[] = suggesting ? carried : [
+    ...carried,
     ...(await seedPage({ tabId: page.tabId, blockId: page.blockId, stamped: prepared.stamped, pids: [] })),
     {
       target: { tabId: page.tabId, blockId: page.blockId },
@@ -178,6 +187,10 @@ export async function republishPage(
     },
   ];
   const reconciliation = await applyPlan(documentId, originFor(actor), { edits, onConflict: 'refuse' });
+  // The block points at the new source only once its switch applied.
+  if (suggesting || reconciliation.outcomes[edits.length - 1]?.status !== 'applied') {
+    await storage.delete(sourceKey).catch(() => undefined);
+  }
 
   // People's text the agent's replaced comes back as their suggestion.
   const lost = decisions.filter((d, i) => d.suggest !== null && reconciliation.outcomes[i]?.status === 'applied');
