@@ -190,6 +190,14 @@ export default function render({ tokens }) {
     });
   });
 
+  it('a 100k-digit transform is refused at once', () => {
+    const value = `translate(${'1'.repeat(100_000)}x)`;
+    const started = performance.now();
+    expect(isWidgetAttributeValue('transform', value)).toBe(false);
+    expect(isWidgetAttributeValue('transform', `translate(${'1'.repeat(200)}x)`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
   it('every hostile attribute value is refused, and good ones pass', () => {
     for (const [name, value] of HOSTILE_VALUES) {
       expect(isWidgetAttributeValue(name, value), `${name}="${value}"`).toBe(false);

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
+import { isWidgetAttributeValue } from '@polygonlabs/primer-api-types';
 import { anchorAt, applyLabels, parseSafeSvg } from './WidgetView.tsx';
 import { HOSTILE_VALUES } from '../../../api/src/widgets/hostile.testlib.ts';
 
@@ -57,6 +58,14 @@ describe('WidgetView', () => {
     ]) {
       expect(parseSafeSvg(bad), bad).toBeNull();
     }
+  });
+
+  it('a 100k-digit transform is refused at once', () => {
+    const value = `translate(${'1'.repeat(100_000)}x)`;
+    const started = performance.now();
+    expect(isWidgetAttributeValue('transform', value)).toBe(false);
+    expect(isWidgetAttributeValue('transform', `translate(${'1'.repeat(200)}x)`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(50);
   });
 
   it('every hostile attribute value refuses the widget', () => {
