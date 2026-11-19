@@ -1,6 +1,7 @@
 CREATE TABLE "doc_decisions" (
 	"document_id" uuid NOT NULL,
 	"block_id" text NOT NULL,
+	"decision_id" uuid NOT NULL,
 	"option_id" text NOT NULL,
 	"question" text NOT NULL,
 	"option_label" text NOT NULL,
@@ -9,6 +10,7 @@ CREATE TABLE "doc_decisions" (
 	"open_questions" jsonb NOT NULL,
 	"decided_by" text NOT NULL,
 	"decided_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"archived_at" timestamp with time zone,
 	CONSTRAINT "doc_decisions_document_id_block_id_pk" PRIMARY KEY("document_id","block_id")
 );
 --> statement-breakpoint

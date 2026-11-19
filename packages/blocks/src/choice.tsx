@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
 import {
-  parseEvidence,
-  parseOpenQuestions,
+  useBlockText,
   usePrimerBlockServices,
   type Evidence,
   type ChoiceTally,
   type PrimerBlockServices,
 } from './services.ts';
+import { BLOCK_TEXT_EN, fill } from './text.ts';
 
 /**
  * A choice: a question and its options, which people vote on and one person
@@ -15,26 +15,27 @@ import {
  * whose children are `choiceOption` blocks, so each option is ordinary rich
  * text with its own block id: votes and comments address an option by it.
  *
- * Votes are shared records (`primer.choice/<choiceId>`), never in the
- * document. The decision (the picked option, rationale, evidence and open
- * questions) is written to these props only by the API's pick route, which
- * admits people with edit rights; an agent may only fill the `proposed*`
- * props. The decision register is a projection over these blocks.
+ * Votes are shared records (`primer.choice/<choiceId>`) and the decision is
+ * the API's record, neither in the document. The block carries only the
+ * decision's nonce (`decisionId`, written by the API's pick route), which ties
+ * the record to this block. The `decided*` props are render slots the server
+ * fills from its record for exports and static renders; nothing the document
+ * holds there is shown. An agent may only fill the `proposed*` props.
  */
 export const choiceBlock = createReactBlockSpec(
   {
     type: 'choice',
     propSchema: {
       question: { default: '' },
+      /** The recorded decision's nonce. */
+      decisionId: { default: '' },
+      // Render slots, filled by the server at export (live/export.ts).
       decidedOptionId: { default: '' },
+      decidedLabel: { default: '' },
+      decidedQuestion: { default: '' },
+      decisionChanged: { default: '' },
       rationale: { default: '' },
-      /** JSON `[{ label, url? , docId? }]`. */
-      evidence: { default: '[]' },
-      /** JSON `string[]`. */
-      openQuestions: { default: '[]' },
-      decidedBy: { default: '' },
       decidedByName: { default: '' },
-      decidedAt: { default: '' },
       proposedOptionId: { default: '' },
       proposedBy: { default: '' },
       proposalNote: { default: '' },
@@ -50,17 +51,19 @@ export const choiceBlock = createReactBlockSpec(
     toExternalHTML: (props) => {
       const block = props.block as unknown as AnyBlock;
       const p = block.props as Record<string, string>;
-      const decided = block.children.find((o) => o.id === p.decidedOptionId);
+      const text = BLOCK_TEXT_EN;
       return (
         <div data-primer-choice="">
           <p>
             <strong>Choice:</strong> {p.question}
           </p>
           <ul ref={props.childrenRef} />
-          {decided && (
+          {p.decidedOptionId && (
             <p>
-              <strong>Decision:</strong> {optionLabel(decided)}
+              <strong>{fill(text.decision, { label: p.decidedLabel ?? '' })}</strong>
+              {p.decidedByName ? ` ${fill(text.by, { name: p.decidedByName })}` : ''}
               {p.rationale ? ` (${p.rationale})` : ''}
+              {p.decisionChanged ? ` ${text.changed} ${p.decidedQuestion}` : ''}
             </p>
           )}
         </div>
@@ -131,15 +134,14 @@ function useDecision(block: AnyBlock, services: PrimerBlockServices | null): Dec
   // Exports and static renders: the server fills these props from its record
   // (live/export.ts) and drops whatever the document held.
   const p = block.props as Record<string, string>;
-  const option = block.children.find((o) => o.id === p.decidedOptionId);
-  if (!option) return null;
+  if (!p.decidedOptionId) return null;
   return {
-    label: optionLabel(option),
+    label: p.decidedLabel ?? '',
     rationale: p.rationale ?? '',
-    evidence: parseEvidence(p.evidence),
-    openQuestions: parseOpenQuestions(p.openQuestions),
+    evidence: [],
+    openQuestions: [],
     decidedByName: p.decidedByName ?? '',
-    changedSinceDecided: false,
+    changedSinceDecided: p.decisionChanged === 'true',
   };
 }
 
@@ -155,30 +157,31 @@ type DecisionView = {
 };
 
 function ChoiceFrame({ block, editor, slotRef }: ChoiceFrameProps) {
+  const text = useBlockText();
   const services = usePrimerBlockServices();
   const p = block.props as Record<string, string>;
   const decided = useDecision(block, services);
   return (
     <div className="primer-choice" data-primer-choice="" data-decided={decided ? 'true' : 'false'}>
       <div className="primer-choice-head" contentEditable={false}>
-        <span className="primer-choice-badge">{decided ? 'Decided' : 'Open choice'}</span>
+        <span className="primer-choice-badge">{decided ? text.decided : text.openChoice}</span>
         {editor.isEditable && !decided ? (
           <input
             className="primer-choice-question"
-            aria-label="Question"
-            placeholder="What are we deciding?"
+            aria-label={text.question}
+            placeholder={text.questionPlaceholder}
             value={p.question}
             onChange={(e) => editor.updateBlock(block.id, { props: { question: e.target.value } })}
           />
         ) : (
-          <span className="primer-choice-question">{p.question || 'Untitled choice'}</span>
+          <span className="primer-choice-question">{p.question || text.untitledChoice}</span>
         )}
       </div>
       <div className="primer-choice-options" ref={slotRef} />
       <div className="primer-choice-foot" contentEditable={false}>
         {services && editor.isEditable && !decided && (
           <button type="button" className="primer-choice-add" onClick={() => addOption(editor, block.id)}>
-            + Add option
+            {text.addOption}
           </button>
         )}
         {decided ? (
@@ -200,13 +203,14 @@ function addOption(editor: Editor, choiceId: string) {
 }
 
 function Decision({ decision }: { decision: DecisionView }) {
+  const text = useBlockText();
   const { evidence, openQuestions: questions } = decision;
   return (
     <div className="primer-choice-decision" data-primer-decision="">
       <div>
-        <strong>Decision:</strong> {decision.label}
-        {decision.decidedByName && <span className="primer-choice-meta"> by {decision.decidedByName}</span>}
-        {decision.changedSinceDecided && <span className="primer-choice-meta"> (changed since decided)</span>}
+        <strong>{fill(text.decision, { label: decision.label })}</strong>
+        {decision.decidedByName && <span className="primer-choice-meta"> {fill(text.by, { name: decision.decidedByName })}</span>}
+        {decision.changedSinceDecided && <span className="primer-choice-meta"> {text.changed}</span>}
       </div>
       {decision.rationale && <p className="primer-choice-rationale">{decision.rationale}</p>}
       {evidence.length > 0 && (
@@ -218,7 +222,7 @@ function Decision({ decision }: { decision: DecisionView }) {
       )}
       {questions.length > 0 && (
         <div className="primer-choice-questions">
-          <strong>Open questions</strong>
+          <strong>{text.openQuestions}</strong>
           <ul>
             {questions.map((q, i) => (
               <li key={i}>{q}</li>
@@ -231,6 +235,7 @@ function Decision({ decision }: { decision: DecisionView }) {
 }
 
 function Undecided({ block, services }: { block: AnyBlock; services: PrimerBlockServices | null }) {
+  const text = useBlockText();
   const [open, setOpen] = useState(false);
   const p = block.props as Record<string, string>;
   const proposed = block.children.find((o) => o.id === p.proposedOptionId);
@@ -238,13 +243,13 @@ function Undecided({ block, services }: { block: AnyBlock; services: PrimerBlock
     <>
       {proposed && (
         <div className="primer-choice-proposal">
-          {p.proposedBy || 'An agent'} proposes <strong>{optionLabel(proposed)}</strong>
+          {fill(text.proposes, { by: p.proposedBy || text.anAgent, label: optionLabel(proposed) })}
           {p.proposalNote && <span>: {p.proposalNote}</span>}
         </div>
       )}
       {services?.canPick && !open && (
         <button type="button" className="primer-choice-decide" onClick={() => setOpen(true)}>
-          Decide…
+          {text.decide}
         </button>
       )}
       {services?.canPick && open && (
@@ -255,6 +260,7 @@ function Undecided({ block, services }: { block: AnyBlock; services: PrimerBlock
 }
 
 function PickForm(props: { block: AnyBlock; services: PrimerBlockServices; initial?: string; onDone: () => void }) {
+  const text = useBlockText();
   const options = props.block.children;
   const [optionId, setOptionId] = useState(props.initial ?? options[0]?.id ?? '');
   const [rationale, setRationale] = useState('');
@@ -284,34 +290,34 @@ function PickForm(props: { block: AnyBlock; services: PrimerBlockServices; initi
       }}
     >
       <label>
-        Option
-        <select value={optionId} onChange={(e) => setOptionId(e.target.value)} aria-label="Option">
+        {text.option}
+        <select value={optionId} onChange={(e) => setOptionId(e.target.value)} aria-label={text.option}>
           {options.map((o) => (
             <option key={o.id} value={o.id}>
-              {optionLabel(o) || 'Untitled option'}
+              {optionLabel(o) || text.untitledOption}
             </option>
           ))}
         </select>
       </label>
       <label>
-        Rationale
-        <textarea aria-label="Rationale" value={rationale} onChange={(e) => setRationale(e.target.value)} rows={2} />
+        {text.rationale}
+        <textarea aria-label={text.rationale} value={rationale} onChange={(e) => setRationale(e.target.value)} rows={2} />
       </label>
       <label>
-        Evidence (one per line: label, then a link)
-        <textarea aria-label="Evidence" value={evidence} onChange={(e) => setEvidence(e.target.value)} rows={2} />
+        {text.evidence}
+        <textarea aria-label={text.evidence} value={evidence} onChange={(e) => setEvidence(e.target.value)} rows={2} />
       </label>
       <label>
-        Open questions (one per line)
-        <textarea aria-label="Open questions" value={questions} onChange={(e) => setQuestions(e.target.value)} rows={2} />
+        {text.openQuestionsField}
+        <textarea aria-label={text.openQuestionsField} value={questions} onChange={(e) => setQuestions(e.target.value)} rows={2} />
       </label>
       {error && <div role="alert">{error}</div>}
       <div className="primer-choice-pick-actions">
         <button type="submit" disabled={!optionId}>
-          Record decision
+          {text.recordDecision}
         </button>
         <button type="button" onClick={props.onDone}>
-          Cancel
+          {text.cancel}
         </button>
       </div>
     </form>
@@ -350,6 +356,7 @@ function OptionFrame({ block, editor, slotRef }: OptionFrameProps) {
 }
 
 function VoteButton(props: { services: PrimerBlockServices; choiceId: string; optionId: string; locked: boolean }) {
+  const text = useBlockText();
   const tally = props.services.useTally(props.choiceId);
   const count = tally?.counts[props.optionId] ?? 0;
   const mine = tally?.mine === props.optionId;
@@ -358,7 +365,7 @@ function VoteButton(props: { services: PrimerBlockServices; choiceId: string; op
       type="button"
       className="primer-choice-vote-button"
       aria-pressed={mine}
-      aria-label={`Vote (${count})`}
+      aria-label={fill(text.vote, { count })}
       disabled={!props.services.canVote || props.locked}
       onClick={() => void props.services.vote(props.choiceId, props.optionId).catch(() => undefined)}
     >

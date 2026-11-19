@@ -10,6 +10,7 @@ import { ArtifactIframe } from '../components/ArtifactIframe.tsx';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
 import { handleOpenExternal, isSafeExternalUrl } from '../companion/client.ts';
 import { useTheme } from '../lib/useTheme.ts';
+import { t } from '../i18n/index.ts';
 
 interface LogEntry {
   ts: number;
@@ -153,7 +154,7 @@ export function DevHarnessPage() {
         </div>
         <div className="space-y-4 overflow-y-auto" style={{ height: 'calc(100vh - 120px)' }}>
           <section>
-            <h2 className="font-semibold mb-1">Current selection</h2>
+            <h2 className="font-semibold mb-1">{t('devHarness.currentSelection')}</h2>
             {pendingSelection ? (
               <div className="rounded border border-neutral-200 p-2 dark:border-neutral-800">
                 <pre className="text-xs whitespace-pre-wrap break-words">
@@ -161,21 +162,21 @@ export function DevHarnessPage() {
                 </pre>
                 <div className="mt-2 flex gap-2">
                   <button onClick={saveSelection} className="rounded bg-neutral-900 px-3 py-1 text-white dark:bg-neutral-100 dark:text-neutral-900">
-                    Save as anchor
+                    {t('devHarness.saveAsAnchor')}
                   </button>
                   <button onClick={() => setPendingSelection(null)} className="rounded border px-3 py-1">
-                    Clear
+                    {t('devHarness.clear')}
                   </button>
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-neutral-500">No selection captured yet.</p>
+              <p className="text-sm text-neutral-500">{t('devHarness.noSelection')}</p>
             )}
           </section>
 
           <section>
-            <h2 className="font-semibold mb-1">Saved anchors ({anchors.length})</h2>
-            {anchors.length === 0 && <p className="text-sm text-neutral-500">None yet.</p>}
+            <h2 className="font-semibold mb-1">{t('devHarness.savedAnchors', { count: anchors.length })}</h2>
+            {anchors.length === 0 && <p className="text-sm text-neutral-500">{t('devHarness.noneYet')}</p>}
             <ul className="space-y-1">
               {anchors.map((a) => (
                 <li key={a.id} className="rounded border border-neutral-200 p-2 text-xs dark:border-neutral-800">
@@ -187,10 +188,10 @@ export function DevHarnessPage() {
                   </div>
                   <div className="mt-1 flex gap-2">
                     <button onClick={() => highlight(a.id)} className="rounded border px-2">
-                      Highlight
+                      {t('devHarness.highlight')}
                     </button>
                     <button onClick={() => dropAnchor(a.id)} className="rounded border px-2">
-                      Drop
+                      {t('devHarness.drop')}
                     </button>
                   </div>
                 </li>
@@ -199,12 +200,12 @@ export function DevHarnessPage() {
           </section>
 
           <section>
-            <h2 className="font-semibold mb-1">Pick mode</h2>
+            <h2 className="font-semibold mb-1">{t('devHarness.pickMode')}</h2>
             <button
               onClick={togglePickMode}
               className={`rounded px-3 py-1 ${pickMode ? 'bg-red-600 text-white' : 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'}`}
             >
-              {pickMode ? 'Exit pick mode' : 'Enter pick mode'}
+              {pickMode ? t('devHarness.exitPickMode') : t('devHarness.enterPickMode')}
             </button>
             {pendingPick && (
               <div className="mt-2 rounded border border-neutral-200 p-2 dark:border-neutral-800">
@@ -212,14 +213,14 @@ export function DevHarnessPage() {
                   {JSON.stringify(pendingPick.anchor, null, 2)}
                 </pre>
                 <button onClick={savePick} className="mt-2 rounded bg-neutral-900 px-3 py-1 text-white dark:bg-neutral-100 dark:text-neutral-900">
-                  Save as anchor
+                  {t('devHarness.saveAsAnchor')}
                 </button>
               </div>
             )}
           </section>
 
           <section>
-            <h2 className="font-semibold mb-1">Message log</h2>
+            <h2 className="font-semibold mb-1">{t('devHarness.messageLog')}</h2>
             <ul className="space-y-1">
               {log.map((e, i) => (
                 <li key={i} className="rounded border border-neutral-200 p-1 text-xs dark:border-neutral-800">
@@ -230,7 +231,7 @@ export function DevHarnessPage() {
                     {e.dir === 'in' ? '←' : '→'} {e.type}
                   </span>
                   <details>
-                    <summary className="text-neutral-500">payload</summary>
+                    <summary className="text-neutral-500">{t('devHarness.payload')}</summary>
                     <pre className="whitespace-pre-wrap break-words">
                       {JSON.stringify(e.payload, null, 2)}
                     </pre>

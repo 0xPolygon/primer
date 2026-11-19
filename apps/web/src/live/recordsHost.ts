@@ -19,6 +19,8 @@ import { PRIMER_EVENT_NAMESPACE, type EventRowDTO, type PageInfoResponse, type P
 import type { BridgeFeature, InboundProtocolMessage, OutboundProtocolMessage } from '../companion/protocol.ts';
 import type { EventSourceLike } from '../lib/eventsFeed.ts';
 import { createRecordsCapability, type RecordsCapability } from './recordsCapability.ts';
+import { t } from '../i18n/index.ts';
+
 
 /** The page's binding: a version page's info, `none` for frames that are not
  *  version pages (shares, the dev harness), `unknown` when the lookup failed. */
@@ -76,7 +78,7 @@ export function createRecordsHost(binding: PageBinding, deps: RecordsHostDeps): 
       ok: false,
       refusal: {
         code: 'records_unavailable',
-        message: 'This page has no record access.',
+        message: t('records.noAccess'),
         fix: 'Add <meta name="primer-records" content="read"> to the page head and publish it again.',
       },
     });

@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import { BLOCK_TEXT_EN, type BlockText } from './text.ts';
 
 /** One choice's votes, as this viewer sees them. */
 export type ChoiceTally = {
@@ -48,12 +49,19 @@ export type PrimerBlockServices = {
   vote(choiceId: string, optionId: string): Promise<void>;
   pick(choiceId: string, input: PickInput): Promise<void>;
   assignees: Assignee[];
+  /** The blocks' strings in the viewer's locale. */
+  text: BlockText;
 };
 
 export const PrimerBlocksContext = createContext<PrimerBlockServices | null>(null);
 
 export function usePrimerBlockServices(): PrimerBlockServices | null {
   return useContext(PrimerBlocksContext);
+}
+
+/** The blocks' strings: the editor's locale, English in exports. */
+export function useBlockText(): BlockText {
+  return useContext(PrimerBlocksContext)?.text ?? BLOCK_TEXT_EN;
 }
 
 /** A JSON array prop, read defensively: the document is client-writable. */

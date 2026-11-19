@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useState, useRef, useEffect } from 'react';
 import type { LibraryDocument, FolderDTO } from '@polygonlabs/primer-api-types';
 import { FolderPickerMenu } from './FolderPickerMenu.tsx';
@@ -51,7 +52,7 @@ export function DocKebabMenu({ doc, folders, variant = 'plain' }: DocKebabMenuPr
     <div ref={ref} className="relative">
       <button
         type="button"
-        aria-label="More"
+        aria-label={t('docKebabMenu.more')}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();

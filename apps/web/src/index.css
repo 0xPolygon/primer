@@ -3,3 +3,61 @@
 
 :root { color-scheme: light; }
 html.dark { color-scheme: dark; }
+
+/* Inline chips (mentions, dates, dropdowns) in the live editor. */
+.primer-chip {
+  display: inline-block;
+  border-radius: 4px;
+  background: #ede9fe;
+  color: #4c1d95;
+  padding: 0 4px;
+}
+.dark .primer-chip {
+  background: #3b2a6b;
+  color: #ddd6fe;
+}
+.primer-chip input,
+.primer-chip select {
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  border: 0;
+  padding: 0;
+}
+
+/* BlockNote's theme follows Primer's tokens (neutral greys, violet accent);
+   BlockNoteView sets data-color-scheme from Primer's light/dark choice. */
+html .bn-container[data-color-scheme='light'] {
+  --bn-colors-editor-text: #171717;
+  --bn-colors-editor-background: #ffffff;
+  --bn-colors-menu-text: #171717;
+  --bn-colors-menu-background: #ffffff;
+  --bn-colors-tooltip-text: #171717;
+  --bn-colors-tooltip-background: #f5f5f5;
+  --bn-colors-hovered-text: #171717;
+  --bn-colors-hovered-background: #f5f5f5;
+  --bn-colors-selected-text: #ffffff;
+  --bn-colors-selected-background: #6d28d9;
+  --bn-colors-disabled-text: #a3a3a3;
+  --bn-colors-disabled-background: #f5f5f5;
+  --bn-colors-shadow: #e5e5e5;
+  --bn-colors-border: #e5e5e5;
+  --bn-colors-side-menu: #a3a3a3;
+}
+html .bn-container[data-color-scheme='dark'] {
+  --bn-colors-editor-text: #e5e5e5;
+  --bn-colors-editor-background: #0a0a0a;
+  --bn-colors-menu-text: #e5e5e5;
+  --bn-colors-menu-background: #171717;
+  --bn-colors-tooltip-text: #e5e5e5;
+  --bn-colors-tooltip-background: #262626;
+  --bn-colors-hovered-text: #e5e5e5;
+  --bn-colors-hovered-background: #262626;
+  --bn-colors-selected-text: #ffffff;
+  --bn-colors-selected-background: #7c3aed;
+  --bn-colors-disabled-text: #737373;
+  --bn-colors-disabled-background: #171717;
+  --bn-colors-shadow: #262626;
+  --bn-colors-border: #404040;
+  --bn-colors-side-menu: #737373;
+}

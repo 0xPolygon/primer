@@ -278,6 +278,9 @@ export interface VersionSummaryDTO {
   versionNote: string | null;
   sizeBytes: number;
   createdAt: string;
+  /** True for a checkpoint of a live document (it has a render bundle).
+   *  Versions from before the document went live are plain rendered HTML. */
+  bundled?: boolean;
 }
 
 export interface VersionsListResponse {
@@ -906,6 +909,13 @@ export interface PrimerDecisionMadePayload {
   decided_by: string;
 }
 
+/** A person with edit rights cleared a choice's decision. */
+export interface PrimerDecisionClearedPayload {
+  document_id: string;
+  block_id: string;
+  cleared_by: string;
+}
+
 /** A task block was added (or first indexed). */
 export interface PrimerTaskCreatedPayload {
   document_id: string;
@@ -937,6 +947,7 @@ export interface PrimerEventPayloads {
   'comment.created': PrimerCommentCreatedPayload;
   'data.changed': PrimerDataChangedPayload;
   'decision.made': PrimerDecisionMadePayload;
+  'decision.cleared': PrimerDecisionClearedPayload;
   'task.created': PrimerTaskCreatedPayload;
   'task.updated': PrimerTaskUpdatedPayload;
   'task.deleted': PrimerTaskDeletedPayload;
@@ -1278,4 +1289,14 @@ export interface AssigneeDTO {
 /** GET /api/documents/:docId/assignees — people with access, and their agents. */
 export interface AssigneesResponse {
   assignees: AssigneeDTO[];
+}
+
+/** POST /api/convert/markdown: Markdown to BlockNote blocks by the importer's
+ *  parser (what an upload uses), so a paste lands as the same blocks. */
+export interface ConvertMarkdownRequest {
+  markdown: string;
+}
+export interface ConvertMarkdownResponse {
+  /** BlockNote block JSON without ids; the editor assigns them on insert. */
+  blocks: unknown[];
 }

@@ -5,7 +5,7 @@ import type { Context, Hono } from 'hono';
 import type { Refusal } from '@polygonlabs/primer-api-types';
 import type { AppVariables } from '../app.ts';
 import type { Result } from '../live/blockTools.ts';
-import { addChoice, choiceTally, listDecisions, pick, proposePick, vote } from '../live/choices.ts';
+import { addChoice, choiceTally, clearDecision, listDecisions, pick, proposePick, vote } from '../live/choices.ts';
 
 type C = Context<{ Variables: AppVariables }>;
 
@@ -59,6 +59,11 @@ export function registerChoiceRoutes(app: Hono<{ Variables: AppVariables }>): vo
     if (!body) return badBody(c);
     return respond(c, await pick(c.get('user'), c.req.param('docId'), c.req.param('blockId'), body as never));
   });
+
+  // Clearing a decision: people with edit rights only (checked in live/choices.ts).
+  app.delete('/api/documents/:docId/choices/:blockId/decision', async (c) =>
+    respond(c, await clearDecision(c.get('user'), c.req.param('docId'), c.req.param('blockId'))),
+  );
 
   app.post('/api/documents/:docId/choices/:blockId/propose', async (c) => {
     const body = await jsonBody(c);

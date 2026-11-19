@@ -5,7 +5,8 @@ import {
   type ChoiceTallyResponse,
   type EventRowDTO,
 } from '@polygonlabs/primer-api-types';
-import type { Assignee, ChoiceTally, PickInput, PrimerBlockServices } from '@primer/blocks';
+import { BLOCK_TEXT_EN, type Assignee, type BlockText, type ChoiceTally, type PickInput, type PrimerBlockServices } from '@primer/blocks';
+import { t, type MessageKey } from '../i18n/index.ts';
 import { api } from '../lib/fetch.ts';
 import { browserEventSourceFactory, type EventSourceLike } from '../lib/eventsFeed.ts';
 
@@ -119,6 +120,11 @@ async function failure(res: Response): Promise<Error> {
   }
 }
 
+/** The blocks' strings in the viewer's locale (keys `blocks.<name>`). */
+const blockText = Object.fromEntries(
+  Object.keys(BLOCK_TEXT_EN).map((key) => [key, t(`blocks.${key}` as MessageKey)]),
+) as BlockText;
+
 /** The services the web editor gives Primer's blocks, and the choice store
  *  behind them (the decision register reads it too). */
 export function useBlockServices(
@@ -147,6 +153,7 @@ export function useBlockServices(
       canPick: access.canPick,
       canVote: access.canVote,
       assignees,
+      text: blockText,
       useTally(choiceId: string) {
         return useSyncExternalStore(
           (listener) => store.subscribe(choiceId, listener),

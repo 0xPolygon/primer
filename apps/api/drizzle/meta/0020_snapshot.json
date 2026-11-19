@@ -1,5 +1,5 @@
 {
-  "id": "47916355-b592-4552-abe4-468d7534e244",
+  "id": "927817e6-2c3c-49e6-a1d4-669501c02588",
   "prevId": "7a9819db-fdfb-4b5f-8ec9-d6dd1333ff43",
   "version": "7",
   "dialect": "postgresql",
@@ -388,6 +388,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "decision_id": {
+          "name": "decision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "option_id": {
           "name": "option_id",
           "type": "text",
@@ -436,6 +442,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

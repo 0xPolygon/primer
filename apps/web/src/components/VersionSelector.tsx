@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
+import { t } from '../i18n';
 
 interface Props {
   docId: string;
@@ -14,13 +15,13 @@ function relativeTime(iso: string): string {
   const d = new Date(iso);
   const diffMs = Date.now() - d.getTime();
   const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return 'just now';
+  if (sec < 60) return t('versionSelector.justNow');
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return t('versionSelector.minutesAgo', { count: min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
+  if (hr < 24) return t('versionSelector.hoursAgo', { count: hr });
   const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
+  if (day < 7) return t('versionSelector.daysAgo', { count: day });
   return d.toLocaleDateString();
 }
 
@@ -46,8 +47,8 @@ export function VersionSelector({
   }, [open]);
 
   const label = isViewingLatest
-    ? `v${currentVersionNumber} · latest`
-    : `v${currentVersionNumber} of ${latestNumber}`;
+    ? t('versionSelector.labelLatest', { number: currentVersionNumber })
+    : t('versionSelector.labelOf', { number: currentVersionNumber, latest: latestNumber });
 
   function pick(v: VersionSummaryDTO) {
     setOpen(false);
@@ -83,7 +84,7 @@ export function VersionSelector({
               }}
               className="block w-full border-b border-neutral-200 px-3 py-2 text-left text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800"
             >
-              Compare…
+              {t('versionSelector.compare')}
             </button>
           )}
           {onAddVersion && (
@@ -95,7 +96,7 @@ export function VersionSelector({
               }}
               className="block w-full border-b border-neutral-200 px-3 py-2 text-left text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-800"
             >
-              + Add version
+              {t('versionSelector.addVersion')}
             </button>
           )}
           <ul role="listbox" className="max-h-72 overflow-y-auto">
@@ -111,15 +112,15 @@ export function VersionSelector({
                   className={`flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-neutral-50 dark:hover:bg-neutral-800 ${isCurrent ? 'bg-yellow-50 dark:bg-amber-900/20' : ''}`}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="font-mono text-neutral-700 dark:text-neutral-300">v{v.versionNumber}</div>
+                    <div className="font-mono text-neutral-700 dark:text-neutral-300">{t('versionSelector.versionNumber', { number: v.versionNumber })}</div>
                     <div className="truncate text-neutral-500">
-                      {v.versionNote ? v.versionNote : <span className="italic text-neutral-400 dark:text-neutral-500">no note</span>}
+                      {v.versionNote ? v.versionNote : <span className="italic text-neutral-400 dark:text-neutral-500">{t('versionSelector.noNote')}</span>}
                     </div>
                     <div className="text-[10px] text-neutral-400 dark:text-neutral-500">{relativeTime(v.createdAt)}</div>
                   </div>
                   {isLatest && (
                     <span className="shrink-0 rounded-full bg-neutral-900 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white dark:bg-neutral-100 dark:text-neutral-900">
-                      Latest
+                      {t('versionSelector.latest')}
                     </span>
                   )}
                 </li>

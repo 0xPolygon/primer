@@ -2,17 +2,47 @@ import { describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
-import { docRecords, documentCollaborators, events } from '../db/schema.ts';
+import { docDecisions, docRecords, documentCollaborators, events } from '../db/schema.ts';
+import { yXmlFragmentToProsemirrorJSON } from 'y-prosemirror';
+import { findBlock } from './blocks.ts';
 import { applyPlan } from './pipeline.ts';
 import { recordsApi } from '../records/store.ts';
 import { AGENT, OWNER, READER, VIEWER, seedRecordsDoc } from '../records/records.testlib.ts';
-import { addChoice, choiceTally, exportDecisions, flushDecisionSync, listDecisions, pick, proposePick, vote } from './choices.ts';
+import { addChoice, choiceTally, clearDecision, exportDecisions, flushDecisionSync, listDecisions, pick, proposePick, vote } from './choices.ts';
 import { exportHtml, exportMarkdown } from './export.ts';
 import { serverEditor } from './editor.ts';
 import { withLiveDoc } from './live.testlib.ts';
 import type { Target } from '@polygonlabs/primer-api-types';
 
 const EDITOR = { kind: 'person' as const, actorId: OWNER.id, runId: null };
+
+async function removeBlock(doc: string, target: Target, origin: Parameters<typeof applyPlan>[1]) {
+  await applyPlan(doc, origin, {
+    onConflict: 'refuse',
+    edits: [{ target, inverse: false, build: (tr, at) => void tr.delete(at!.pos, at!.pos + at!.node.nodeSize) }],
+  });
+}
+
+async function insertAtEnd(doc: string, json: unknown) {
+  const node = serverEditor().editor.pmSchema.nodeFromJSON(json as never);
+  await applyPlan(doc, { kind: 'system', actorId: 'system', runId: null }, {
+    onConflict: 'refuse',
+    edits: [{ target: { tabId: 'main', blockId: '' }, inverse: false, build: (tr) => void tr.insert(1 + tr.doc.firstChild!.content.size, node) }],
+  });
+}
+
+/** A block's ProseMirror JSON, as an undo would bring it back. */
+async function blockJson(doc: string, blockId: string): Promise<unknown> {
+  return withLiveDoc(doc, (d) => {
+    const pm = serverEditor().editor.pmSchema.nodeFromJSON(yXmlFragmentToProsemirrorJSON(d.getXmlFragment('document-store')));
+    return findBlock(pm, blockId)!.node.toJSON();
+  });
+}
+
+async function archived(doc: string): Promise<boolean> {
+  const [row] = await db.select().from(docDecisions).where(eq(docDecisions.documentId, doc));
+  return row!.archivedAt !== null;
+}
 
 /** Rewrites a choice's props the way an editor's client can. */
 async function setChoiceProps(doc: string, target: Target, props: Record<string, string>) {
@@ -180,20 +210,20 @@ describe('choice blocks', () => {
     expect(entry?.question).toBe('Which cache?');
     expect(entry?.decided).toMatchObject({ question: 'Which database?', label: 'Postgres', changedSinceDecided: true });
     expect(entry?.options[0]?.label).toBe('Redis');
+    // Exports show what was actually decided, flagged as changed since.
+    const markdown = await withLiveDoc(doc, async (d) => exportMarkdown(d, doc, await exportDecisions(doc)));
+    expect(markdown).toContain('Decision: Postgres');
+    expect(markdown).toContain('(changed since decided) Which database?');
   });
 
-  it('deleting a decided choice and reusing its id leaves it undecided', async () => {
+  it('a new block that reuses a decided choice id is undecided', async () => {
     const doc = await liveDoc();
     const { target, optionIds } = await choiceIn(doc);
     await pick(OWNER, doc, target.blockId, { optionId: optionIds[0]! });
-    // Remove the block, as any editor can.
-    await applyPlan(doc, EDITOR, {
-      onConflict: 'refuse',
-      edits: [{ target, inverse: false, build: (tr, at) => void tr.delete(at!.pos, at!.pos + at!.node.nodeSize) }],
-    });
+    await removeBlock(doc, target, EDITOR);
     await flushDecisionSync();
-    expect((await listDecisions(OWNER, doc)).ok).toBe(true);
-    // The same ids come back (pasted or written by a client).
+    // The same block and option ids come back without the decision's nonce
+    // (written by a client, which can't know it).
     const node = serverEditor().editor.pmSchema.nodeFromJSON({
       type: 'choice',
       attrs: { id: target.blockId, question: 'Which database?' },
@@ -203,15 +233,45 @@ describe('choice blocks', () => {
         content: [{ type: 'blockContainer', attrs: { id: `${id}-p` }, content: [{ type: 'paragraph', content: [{ type: 'text', text: `Option ${i}` }] }] }],
       })),
     });
-    await applyPlan(doc, EDITOR, {
-      onConflict: 'refuse',
-      edits: [{ target: { tabId: 'main', blockId: '' }, inverse: false, build: (tr) => void tr.insert(1 + tr.doc.firstChild!.content.size, node) }],
-    });
+    await insertAtEnd(doc, node.toJSON());
     await flushDecisionSync();
     const register = await listDecisions(OWNER, doc);
     expect(register.ok && register.value.decisions.map((d) => [d.target.blockId, d.status])).toEqual([[target.blockId, 'open']]);
     const tally = await choiceTally(OWNER, doc, target.blockId);
     expect(tally.ok && tally.value.decision).toBeNull();
+  });
+
+  it('deleting a decided choice archives its decision; undo brings it back', async () => {
+    const doc = await liveDoc();
+    const { target, optionIds } = await choiceIn(doc);
+    await pick(OWNER, doc, target.blockId, { optionId: optionIds[1]!, rationale: 'Small' });
+    const saved = await blockJson(doc, target.blockId);
+    await removeBlock(doc, target, EDITOR);
+    await flushDecisionSync();
+    expect(await archived(doc)).toBe(true);
+    await insertAtEnd(doc, saved);
+    await flushDecisionSync();
+    expect(await archived(doc)).toBe(false);
+    const register = await listDecisions(OWNER, doc);
+    expect(register.ok && register.value.decisions[0]?.decided).toMatchObject({ label: 'SQLite', rationale: 'Small' });
+  });
+
+  it("an agent's edit never archives or clears a decision", async () => {
+    const doc = await liveDoc();
+    const { target, optionIds } = await choiceIn(doc);
+    await pick(OWNER, doc, target.blockId, { optionId: optionIds[0]! });
+    const saved = await blockJson(doc, target.blockId);
+    await removeBlock(doc, target, { kind: 'agent', actorId: AGENT.id, runId: null });
+    await flushDecisionSync();
+    expect(await archived(doc)).toBe(false);
+    expect(await clearDecision(AGENT, doc, target.blockId)).toMatchObject({ ok: false, refusal: { code: 'forbidden' } });
+    await insertAtEnd(doc, saved);
+    const register = await listDecisions(OWNER, doc);
+    expect(register.ok && register.value.decisions[0]?.status).toBe('decided');
+    // A person clears it explicitly.
+    expect((await clearDecision(OWNER, doc, target.blockId)).ok).toBe(true);
+    const after = await listDecisions(OWNER, doc);
+    expect(after.ok && after.value.decisions[0]?.status).toBe('open');
   });
 
   it('an editor collaborator decides; a reader sees the register', async () => {

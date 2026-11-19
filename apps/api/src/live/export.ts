@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as Y from 'yjs';
+import { optionLabel } from '@primer/blocks';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
 import { MAIN_TAB, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { sourcePreview } from './import.ts';
@@ -63,17 +64,25 @@ export async function exportHtml(doc: Y.Doc, title = '', decisions: ExportDecisi
   }
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
-    `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style></head>` +
+    `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style><style>${STATIC_CSS}</style></head>` +
     `<body><div class="bn-root bn-container"><div class="bn-default-styles">${body}</div></div></body></html>`
   );
 }
 
 /** A choice's recorded decision, as exports show it. */
-export type ExportDecision = { optionId: string; rationale: string; decidedByName: string };
+export type ExportDecision = {
+  decisionId: string;
+  optionId: string;
+  question: string;
+  label: string;
+  rationale: string;
+  decidedByName: string;
+};
 /** Recorded decisions by choice block id (`exportDecisions` in live/choices.ts). */
 export type ExportDecisions = Map<string, ExportDecision>;
 
-const DECISION_PROPS = ['decidedOptionId', 'rationale', 'evidence', 'openQuestions', 'decidedBy', 'decidedByName', 'decidedAt'];
+/** The choice's render-only decision props (the server fills them here). */
+const DECISION_PROPS = ['decidedOptionId', 'decidedLabel', 'decidedQuestion', 'decisionChanged', 'rationale', 'decidedByName'];
 
 /**
  * Choice blocks with their decision props filled from the server's record
@@ -85,10 +94,22 @@ function withDecisions(blocks: PrimerBlock[], decisions: ExportDecisions): Prime
     const children = withDecisions(block.children as PrimerBlock[], decisions);
     if (block.type !== 'choice') return children === block.children ? block : ({ ...block, children } as PrimerBlock);
     const props: Record<string, unknown> = { ...block.props };
-    for (const key of DECISION_PROPS) props[key] = key === 'evidence' || key === 'openQuestions' ? '[]' : '';
+    for (const key of DECISION_PROPS) props[key] = '';
+    // A decision applies only to the block carrying its nonce, with the option still there.
     const d = decisions.get(block.id);
-    if (d && (block.children as { id: string }[]).some((o) => o.id === d.optionId)) {
-      Object.assign(props, { decidedOptionId: d.optionId, rationale: d.rationale, decidedByName: d.decidedByName });
+    const option = d && block.props.decisionId === d.decisionId
+      ? (block.children as PrimerBlock[]).find((o) => o.id === d.optionId)
+      : undefined;
+    if (d && option) {
+      const changed = d.question !== String(block.props.question ?? '') || d.label !== optionLabel(option as never);
+      Object.assign(props, {
+        decidedOptionId: d.optionId,
+        decidedLabel: d.label,
+        decidedQuestion: d.question,
+        decisionChanged: changed ? 'true' : '',
+        rationale: d.rationale,
+        decidedByName: d.decidedByName,
+      });
     }
     return { ...block, props, children } as PrimerBlock;
   });
@@ -219,13 +240,47 @@ export function plainText(block: PrimerBlock): string {
       }
       return '';
     }
-    return (content as { type: string; text?: string; content?: unknown }[])
-      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : ''))
+    return (content as { type: string; text?: string; content?: unknown; props?: Record<string, string> }[])
+      .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : chipText(n)))
       .join('');
   };
   const own = isSource(block) ? String((block.props as { markdown: string }).markdown).replace(/\n+$/, '') : inline(block.content);
   const children = (block.children as PrimerBlock[]).map(plainText).filter((t) => t.length > 0);
   return [own, ...children].filter((t) => t.length > 0).join('\n');
+}
+
+/**
+ * What the static rendering needs beyond BlockNote's structural stylesheet,
+ * which ships no colours: a readable page, and light or dark to match
+ * wherever it is shown. In Primer the companion sets `data-theme` on `<html>`;
+ * a share opened on its own follows the viewer's colour scheme.
+ */
+const STATIC_CSS = `
+body{margin:0;padding:24px 16px;background:#fff;color:#171717;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+.bn-container{max-width:760px;margin:0 auto}
+.primer-tab-title{margin:2.2em 0 .6em}
+a{color:#6d28d9}
+pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+table{border-collapse:collapse}td,th{border:1px solid #d4d4d4;padding:4px 8px}
+img,video{max-width:100%}
+.primer-chip{border-radius:4px;background:#ede9fe;color:#4c1d95;padding:0 4px}
+html[data-theme="dark"] body{background:#0a0a0a;color:#e5e5e5}
+html[data-theme="dark"] a{color:#c4b5fd}
+html[data-theme="dark"] td,html[data-theme="dark"] th{border-color:#404040}
+html[data-theme="dark"] .primer-chip{background:#3b2a6b;color:#ddd6fe}
+@media (prefers-color-scheme: dark){
+html:not([data-theme]) body{background:#0a0a0a;color:#e5e5e5}
+html:not([data-theme]) a{color:#c4b5fd}
+html:not([data-theme]) td,html:not([data-theme]) th{border-color:#404040}
+html:not([data-theme]) .primer-chip{background:#3b2a6b;color:#ddd6fe}
+}`;
+
+/** What a chip reads as in text: `@name`, the date, the chosen value. */
+function chipText(node: { type: string; props?: Record<string, string> }): string {
+  if (node.type === 'mention') return `@${node.props?.name ?? ''}`;
+  if (node.type === 'date') return node.props?.date ?? '';
+  if (node.type === 'dropdown') return node.props?.value ?? '';
+  return '';
 }
 
 let css: string | null = null;

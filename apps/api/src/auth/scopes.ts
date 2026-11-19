@@ -38,10 +38,12 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/status', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read', upcoming: true },
+  { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read', upcoming: true },
   { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read', upcoming: true },
 
   { method: 'POST', path: '/api/upload', scope: 'documents:write' },
+  { method: 'POST', path: '/api/convert/markdown', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/versions', scope: 'documents:write' },
   // Title/description, and visibility only towards private: a scoped token
   // asking for `visibility: 'org'` is refused in the handler
@@ -87,6 +89,7 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/documents/:docId/choices/:blockId/propose', scope: 'documents:write' },
   // A decision: people with edit rights only (checked in live/choices.ts).
   { method: 'POST', path: '/api/documents/:docId/choices/:blockId/pick', scope: 'documents:write' },
+  { method: 'DELETE', path: '/api/documents/:docId/choices/:blockId/decision', scope: 'documents:write' },
   // Votes are shared records.
   { method: 'POST', path: '/api/documents/:docId/choices/:blockId/vote', scope: 'records:write' },
   { method: 'GET', path: '/api/tasks', scope: 'documents:read' },

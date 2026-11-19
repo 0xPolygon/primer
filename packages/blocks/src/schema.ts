@@ -1,8 +1,9 @@
-import { BlockNoteSchema, createCodeBlockSpec, createExtension, defaultBlockSpecs } from '@blocknote/core';
+import { BlockNoteSchema, createCodeBlockSpec, createExtension, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
 import { CommentMark } from '@blocknote/core/comments';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { createReactMathBlockSpec } from '@blocknote/math-block';
 import { createReactDiagramBlockSpec } from '@blocknote/diagram-block';
+import { dateChip, dropdownChip, mentionChip } from './chips.tsx';
 import { sourceBlock } from './source.tsx';
 import { choiceBlock, choiceOptionBlock } from './choice.tsx';
 import { taskBlock } from './task.tsx';
@@ -23,6 +24,7 @@ export const primerSchema = BlockNoteSchema.create({
     choiceOption: choiceOptionBlock(),
     task: taskBlock(),
   },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: mentionChip, date: dateChip, dropdown: dropdownChip },
 });
 
 export type PrimerSchema = typeof primerSchema;

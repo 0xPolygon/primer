@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react';
-import {
-  BlockNoteViewEditor,
-  SuggestionMenuController,
-  getDefaultReactSlashMenuItems,
-  useCreateBlockNote,
-} from '@blocknote/react';
-import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
+import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
+import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { VersioningSidebar } from '@blocknote/react/versioning';
 import { BlockNoteView } from '@blocknote/ariakit';
 import { withCollaboration, YjsVersioningExtension } from '@blocknote/core/yjs';
-import * as locales from '@blocknote/core/locales';
 import { PrimerBlocksContext, commentMarkExtension, primerSchema } from '@primer/blocks';
 import '@blocknote/core/fonts/inter.css';
 import '@blocknote/ariakit/style.css';
@@ -17,6 +11,9 @@ import type { DocFileUploadResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
+import { editorDictionary, t } from '../i18n/index.ts';
+import { ChipMenus } from './ChipMenus.tsx';
+import { routeMarkdownPasteToServer } from './paste.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
 import { TabStrip, useTabs } from './TabStrip.tsx';
 import { MAIN_TAB, tabFragmentName } from './tabs.ts';
@@ -32,6 +29,8 @@ export type LiveEditorProps = {
   theme: 'light' | 'dark';
   /** Shown on this viewer's cursor to everyone else. */
   userName: string;
+  /** Opens a version from before the document went live in the version viewer. */
+  onOpenLegacyVersion?: (versionNumber: number) => void;
 };
 
 /**
@@ -81,6 +80,7 @@ function TabEditor({
   readOnly,
   theme,
   userName,
+  onOpenLegacyVersion,
   store,
 }: LiveEditorProps & { live: LiveProvider; tabId: string; store: ChoiceStore }) {
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -91,13 +91,13 @@ function TabEditor({
       schema: primerSchema,
       // Until comments ship, the comment mark must still be known, or
       // y-prosemirror would delete commented text.
-      extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId) })],
+      extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId, onOpenLegacyVersion) })],
       collaboration: {
         provider: { awareness: live.provider.awareness ?? undefined },
         fragment: live.doc.getXmlFragment(tabFragmentName(tabId)),
         user: { name: userName, color: colorFor(userName) },
       },
-      dictionary: dictionaryFor(typeof navigator === 'undefined' ? 'en' : navigator.language),
+      dictionary: editorDictionary(),
       uploadFile: async (file: File) => {
         const form = new FormData();
         form.append('file', file);
@@ -112,6 +112,7 @@ function TabEditor({
     }),
     [live, tabId],
   );
+  useEffect(() => routeMarkdownPasteToServer(editor), [editor]);
 
   return (
     <>
@@ -122,7 +123,7 @@ function TabEditor({
           aria-pressed={decisionsOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          Decisions
+          {t('liveEditor.decisions')}
         </button>
         <button
           type="button"
@@ -130,26 +131,14 @@ function TabEditor({
           aria-pressed={historyOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          History
+          {t('liveEditor.history')}
         </button>
       </div>
-      <BlockNoteView
-        editor={editor}
-        editable={!readOnly}
-        theme={theme}
-        renderEditor={false}
-        slashMenu={false}
-        className="flex min-h-0 flex-1"
-      >
+      <BlockNoteView editor={editor} editable={!readOnly} theme={theme} renderEditor={false} slashMenu={false} className="flex min-h-0 flex-1">
+        <ChipMenus editor={editor} slashItems={primerSlashItems(editor)} />
         <div className="min-w-0 flex-1 overflow-y-auto py-4">
           <BlockNoteViewEditor />
         </div>
-        <SuggestionMenuController
-          triggerCharacter="/"
-          getItems={async (query) =>
-            filterSuggestionItems([...getDefaultReactSlashMenuItems(editor), ...primerSlashItems(editor)], query)
-          }
-        />
         {decisionsOpen && (
           <div className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 dark:border-neutral-800">
             <DecisionRegister documentId={documentId} store={store} onClose={() => setDecisionsOpen(false)} />
@@ -170,10 +159,10 @@ function primerSlashItems(editor: unknown) {
   const insert = (block: object) => () => insertOrUpdateBlockForSlashMenu(editor as never, block as never);
   return [
     {
-      title: 'Choice',
-      subtext: 'Options people vote on; one person decides',
+      title: t('slash.choice'),
+      subtext: t('slash.choiceHint'),
       aliases: ['choice', 'decision', 'vote', 'poll', 'options'],
-      group: 'Collaboration',
+      group: t('slash.group'),
       onItemClick: insert({
         type: 'choice',
         children: [
@@ -183,10 +172,10 @@ function primerSlashItems(editor: unknown) {
       }),
     },
     {
-      title: 'Task',
-      subtext: 'A tracked checklist item with an assignee',
+      title: t('slash.task'),
+      subtext: t('slash.taskHint'),
       aliases: ['task', 'todo', 'assign', 'action'],
-      group: 'Collaboration',
+      group: t('slash.group'),
       onItemClick: insert({ type: 'task' }),
     },
   ];
@@ -198,9 +187,4 @@ function colorFor(name: string): string {
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
   return COLORS[Math.abs(hash) % COLORS.length]!;
-}
-
-function dictionaryFor(language: string) {
-  const all = locales as unknown as Record<string, typeof locales.en>;
-  return all[language.toLowerCase().split('-')[0] ?? 'en'] ?? locales.en;
 }

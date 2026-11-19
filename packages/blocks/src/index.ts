@@ -12,3 +12,5 @@ export {
   type PickInput,
   type PrimerBlockServices,
 } from './services.ts';
+export { dropdownOptions } from './chips.tsx';
+export { BLOCK_TEXT_EN, type BlockText } from './text.ts';

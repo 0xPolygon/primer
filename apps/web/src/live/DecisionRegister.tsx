@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { DecisionDTO, DecisionsResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
+import { t } from '../i18n/index.ts';
 import type { ChoiceStore } from './blockServices.ts';
 
 /**
@@ -26,27 +27,27 @@ export function DecisionRegister(props: { documentId: string; store: ChoiceStore
   }, [props.documentId, version]);
 
   return (
-    <aside className="primer-register" aria-label="Decisions" data-decision-register="">
+    <aside className="primer-register" aria-label={t('liveEditor.decisions')} data-decision-register="">
       <div className="primer-register-head">
-        <strong>Decisions</strong>
-        <button type="button" onClick={props.onClose} aria-label="Close decisions">
+        <strong>{t('liveEditor.decisions')}</strong>
+        <button type="button" onClick={props.onClose} aria-label={t('register.close')}>
           ×
         </button>
       </div>
-      {decisions === null && <p className="primer-register-empty">Loading…</p>}
-      {decisions?.length === 0 && <p className="primer-register-empty">No choices in this document yet.</p>}
+      {decisions === null && <p className="primer-register-empty">{t('register.loading')}</p>}
+      {decisions?.length === 0 && <p className="primer-register-empty">{t('register.empty')}</p>}
       <ol>
         {decisions?.map((d) => (
           <li key={d.target.blockId} data-status={d.status}>
-            <div className="primer-register-question">{d.question || 'Untitled choice'}</div>
+            <div className="primer-register-question">{d.question || t('blocks.untitledChoice')}</div>
             {d.decided ? (
               <>
                 <div>
                   <strong>{d.decided.label}</strong>
-                  <span className="primer-register-meta"> · {d.decided.decidedByName}, {new Date(d.decided.decidedAt).toLocaleDateString()}</span>
+                  <span className="primer-register-meta"> · {t('register.byOn', { name: d.decided.decidedByName, date: new Date(d.decided.decidedAt).toLocaleDateString() })}</span>
                 </div>
                 {d.decided.changedSinceDecided && (
-                  <div className="primer-register-meta">Changed since decided. Decided on: “{d.decided.question}”</div>
+                  <div className="primer-register-meta">{t('register.changed', { question: d.decided.question })}</div>
                 )}
                 {d.decided.rationale && <p>{d.decided.rationale}</p>}
                 {d.decided.evidence.length > 0 && (
@@ -68,7 +69,7 @@ export function DecisionRegister(props: { documentId: string; store: ChoiceStore
                 )}
                 {d.decided.openQuestions.length > 0 && (
                   <div>
-                    <em>Open questions</em>
+                    <em>{t('blocks.openQuestions')}</em>
                     <ul>
                       {d.decided.openQuestions.map((q, i) => (
                         <li key={i}>{q}</li>
@@ -79,8 +80,8 @@ export function DecisionRegister(props: { documentId: string; store: ChoiceStore
               </>
             ) : (
               <div className="primer-register-meta">
-                Open · {d.options.map((o) => `${o.label || 'Untitled'} (${o.votes})`).join(', ')}
-                {d.proposed && ` · ${d.proposed.by} proposes ${d.proposed.label}`}
+                {t('register.openTally', { tally: d.options.map((o) => `${o.label || t('blocks.untitledOption')} (${o.votes})`).join(', ') })}
+                {d.proposed && ` · ${t('register.proposes', { by: d.proposed.by, label: d.proposed.label })}`}
               </div>
             )}
           </li>

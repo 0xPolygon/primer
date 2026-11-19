@@ -1,5 +1,6 @@
 import { createReactBlockSpec } from '@blocknote/react';
-import { usePrimerBlockServices } from './services.ts';
+import { useBlockText, usePrimerBlockServices } from './services.ts';
+import { fill } from './text.ts';
 
 /** Task statuses. */
 export const TASK_STATUSES = ['open', 'done'] as const;
@@ -49,6 +50,7 @@ type TaskViewProps = {
 
 function TaskView({ block, editor, contentRef }: TaskViewProps) {
   const services = usePrimerBlockServices();
+  const text = useBlockText();
   const p = block.props;
   const done = p.status === 'done';
   const assignees = services?.assignees ?? [];
@@ -59,7 +61,7 @@ function TaskView({ block, editor, contentRef }: TaskViewProps) {
       <input
         type="checkbox"
         className="primer-task-check"
-        aria-label={done ? 'Reopen task' : 'Complete task'}
+        aria-label={done ? text.reopenTask : text.completeTask}
         checked={done}
         disabled={!editor.isEditable}
         contentEditable={false}
@@ -69,15 +71,15 @@ function TaskView({ block, editor, contentRef }: TaskViewProps) {
       <span className="primer-task-meta" contentEditable={false}>
         {editor.isEditable ? (
           <select
-            aria-label="Assignee"
+            aria-label={text.assignee}
             value={p.assigneeId}
             onChange={(e) => set({ assigneeId: e.target.value })}
           >
-            <option value="">Unassigned</option>
+            <option value="">{text.unassigned}</option>
             {!assignee && p.assigneeId && <option value={p.assigneeId}>{p.assigneeId}</option>}
             {assignees.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.kind === 'agent' ? `${a.name} (agent)` : a.name}
+                {a.kind === 'agent' ? fill(text.agentName, { name: a.name }) : a.name}
               </option>
             ))}
           </select>
@@ -85,9 +87,9 @@ function TaskView({ block, editor, contentRef }: TaskViewProps) {
           p.assigneeId && <span className="primer-task-assignee">{assignee?.name ?? p.assigneeId}</span>
         )}
         {editor.isEditable ? (
-          <input type="date" aria-label="Due" value={p.due} onChange={(e) => set({ due: e.target.value })} />
+          <input type="date" aria-label={text.due} value={p.due} onChange={(e) => set({ due: e.target.value })} />
         ) : (
-          p.due && <span>due {p.due}</span>
+          p.due && <span>{fill(text.dueOn, { date: p.due })}</span>
         )}
         {p.progress && !done && <span className="primer-task-progress">{p.progress}</span>}
       </span>
