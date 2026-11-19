@@ -12,7 +12,7 @@ import { actorName, authorColumns } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import type { Visibility } from '../lib/permissions.ts';
-import { loadEffectiveRole, canRead, canComment } from '../lib/permissions.ts';
+import { loadEffectiveRole, canRead, canComment, ownerPersonOf } from '../lib/permissions.ts';
 
 async function loadDocContextForVersion(
   versionId: string,
@@ -354,7 +354,7 @@ export function registerThreadRoutes(
              v.id AS version_id,
              d.id AS doc_id,
              d.title AS doc_title,
-             d.uploader_id AS uploader_id
+             ${ownerPersonOf(sql`d.uploader_id`)} AS uploader_id
       FROM versions v
       INNER JOIN documents d ON d.id = v.document_id
       INNER JOIN versions v2 ON v2.document_id = d.id

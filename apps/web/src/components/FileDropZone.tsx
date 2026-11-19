@@ -22,8 +22,9 @@ function validate(file: File, maxBytes: number): string | null {
   const ok =
     lowerName.endsWith('.html') ||
     lowerName.endsWith('.md') ||
-    lowerName.endsWith('.markdown');
-  if (!ok) return 'Only .html, .md, or .markdown files are accepted.';
+    lowerName.endsWith('.markdown') ||
+    lowerName.endsWith('.txt');
+  if (!ok) return 'Only .html, .md, .markdown, or .txt files are accepted.';
   if (file.size > maxBytes) {
     return `This file is ${formatSize(file.size)} — limit is ${formatSize(maxBytes)}.`;
   }
@@ -137,7 +138,7 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
         <input
           ref={inputRef}
           type="file"
-          accept=".html,text/html,.md,.markdown,text/markdown,text/x-markdown"
+          accept=".html,text/html,.md,.markdown,text/markdown,text/x-markdown,.txt,text/plain"
           className="hidden"
           onChange={(e) => handlePick(e.target.files?.[0] ?? null)}
         />

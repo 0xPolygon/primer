@@ -17,19 +17,20 @@ import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { generateToken } from '../auth/tokens.ts';
 import { ensureOAuthAgent } from '../auth/oauth/bearer.ts';
-import { NoopNotifier } from '../notifications/notifier.ts';
+import { NoopNotifier, type Notifier, type NotifyCommentArgs } from '../notifications/notifier.ts';
+import { buildEngagement } from '../services/adminStats.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
 
 type App = ReturnType<typeof createApp>;
 
-async function withApp<T>(fn: (app: App) => Promise<T>): Promise<T> {
+async function withApp<T>(fn: (app: App) => Promise<T>, notifier: Notifier = new NoopNotifier()): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-agents-'));
   try {
     const app = createApp({
       storage: new FilesystemStorage(root),
-      notifier: new NoopNotifier(),
+      notifier,
       // Bearers first; anything else is mock-user-1 ("Mock User").
       userResolver: composeResolvers(makeOAuthBearerResolver(), makeBearerResolver(), mockResolver),
     });
@@ -241,4 +242,92 @@ describe('agents', () => {
     const [svc] = await db.select().from(users).where(sql`${users.id} = 'service-claude'`);
     expect(svc.kind).toBe('agent');
   });
+
+  it("a person's owner stream wakes for their agent's documents, and the agent follows it too", async () => {
+    await withApp(async (app) => {
+      const { token } = await agentToken(app);
+      const personStream = await app.request('/api/events/stream?scope=me', { headers: CSRF_HEADERS });
+      const agentStream = await app.request('/api/events/stream?scope=me', { headers: bearer(token) });
+      expect(personStream.status).toBe(200);
+      expect(agentStream.status).toBe(200);
+      const personFrames = readFrames(personStream, 2000, 1);
+      const agentFrames = readFrames(agentStream, 2000, 1);
+      const up = await app.request('/api/upload', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: htmlForm() });
+      expect(up.status).toBe(200);
+      expect(await personFrames).toHaveLength(1);
+      expect(await agentFrames).toHaveLength(1);
+    });
+  });
+
+  it("an agent reads author-audience events on its person's documents", async () => {
+    await withApp(async (app) => {
+      const doc = await uploadFixture(app);
+      const sent = await app.request(`/api/documents/${doc.documentId}/events`, {
+        method: 'POST',
+        headers: json,
+        body: JSON.stringify({ events: [{ namespace: 'example', type: 'note', payload: {}, audience: 'author' }] }),
+      });
+      expect(sent.status).toBe(201);
+      const { token } = await agentToken(app);
+      const res = await app.request(`/api/documents/${doc.documentId}/events?namespace=example`, { headers: bearer(token) });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { events: { type: string }[] }).events.map((e) => e.type)).toEqual(['note']);
+    });
+  });
+
+  it('comment emails go to the person when their agent uploaded the document; admin stats label the agent', async () => {
+    const calls: NotifyCommentArgs[] = [];
+    const notifier = Object.assign(new NoopNotifier(), {
+      notifyComment: async (args: NotifyCommentArgs) => {
+        calls.push(args);
+      },
+    });
+    await withApp(async (app) => {
+      const { token } = await agentToken(app);
+      const up = await app.request('/api/upload', { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: htmlForm() });
+      const { versionId } = (await up.json()) as { versionId: string };
+      const res = await app.request(`/api/versions/${versionId}/threads`, {
+        method: 'POST',
+        headers: bearer(token),
+        body: JSON.stringify({
+          anchor: { type: 'text-range', selectorText: 'v', prefix: '', suffix: '', containerPath: 'body' },
+          body: 'Agent note.',
+        }),
+      });
+      expect(res.status).toBe(201);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(calls[0]?.uploaderUserId).toBe('mock-user-1');
+      const stats = await buildEngagement();
+      expect(stats.topCommenters.map((t) => t.displayName)).toContain('Claude (via Mock User)');
+    }, notifier);
+  });
 });
+
+/** Reads SSE frame ids for up to `ms`, or until `max` frames. */
+async function readFrames(res: Response, ms: number, max = Infinity): Promise<number[]> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const ids: number[] = [];
+  let buffer = '';
+  const deadline = Date.now() + ms;
+  try {
+    while (ids.length < max) {
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      const next = await Promise.race([
+        reader.read(),
+        new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), left)),
+      ]);
+      if (next === 'timeout' || next.done) break;
+      buffer += decoder.decode(next.value, { stream: true });
+      for (let sep = buffer.indexOf('\n\n'); sep !== -1; sep = buffer.indexOf('\n\n')) {
+        const idLine = buffer.slice(0, sep).split('\n').find((l) => l.startsWith('id:'));
+        buffer = buffer.slice(sep + 2);
+        if (idLine) ids.push(Number(idLine.slice(3).trim()));
+      }
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return ids;
+}

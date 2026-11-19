@@ -71,6 +71,13 @@ export function libraryOwnerId(actor: AuthUser): string {
   return actor.kind === 'agent' && actor.viaUserId ? actor.viaUserId : actor.id;
 }
 
+/** SQL: the person who owns a document whose uploader is `column`: the
+ *  uploader itself, or the person an uploading agent acts via. For "tell the
+ *  owner" paths (notifications). */
+export function ownerPersonOf(column: AnyColumn | SQL): SQL<string> {
+  return sql<string>`COALESCE((SELECT o.via_user_id FROM users o WHERE o.id = ${column} AND o.kind = 'agent'), ${column})`;
+}
+
 export function canRead(visibility: Visibility, role: EffectiveRole): boolean {
   if (visibility === 'org') return true;
   return role !== 'stranger';

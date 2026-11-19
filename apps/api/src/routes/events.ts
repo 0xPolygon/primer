@@ -45,6 +45,7 @@ import type { Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
 import type { AppVariables } from '../app.ts';
+import { libraryOwnerId } from '../lib/permissions.ts';
 import {
   type DocumentStatusResponse,
   type EventRowDTO,
@@ -245,9 +246,11 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     const parsed = parseStreamParams(c);
     if (!parsed.ok) return c.json({ error: 'bad_request', message: parsed.message }, 400);
     const { filters } = parsed;
+    // An agent follows its person's owner stream (lib/permissions.ts).
+    const ownerId = libraryOwnerId(user);
     const reader = (afterId: number) =>
-      listOwnedEvents({ userId: user.id, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
-    const subscribe = (wake: () => void) => subscribeOwnerWakes(user.id, wake);
+      listOwnedEvents({ userId: ownerId, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
+    const subscribe = (wake: () => void) => subscribeOwnerWakes(ownerId, wake);
     return runEventStream(c, parsed.resumeFrom, subscribe, reader, async () => reader);
   });
 

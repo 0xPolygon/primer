@@ -15,6 +15,7 @@ import {
   type Visibility,
   loadEffectiveRole, canRead,
   canComment,
+  ownerPersonOf,
 } from '../lib/permissions.ts';
 
 /** `primer.thread.updated`: a comment in the thread was edited, deleted or
@@ -217,7 +218,7 @@ export async function replyToThread(
   // Load thread context (existence check + doc/version info for notifier).
   const [threadCtx] = (await db.execute(sql`
     SELECT d.id AS doc_id, d.title AS doc_title,
-           d.uploader_id AS uploader_id,
+           ${ownerPersonOf(sql`d.uploader_id`)} AS uploader_id,
            v.id AS version_id, v.version_number::int AS version_number
     FROM threads t
     INNER JOIN versions v ON v.id = t.version_id

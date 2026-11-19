@@ -40,6 +40,7 @@ import {
 } from '@polygonlabs/primer-api-types';
 import {
   canRead,
+  isSelfOrAgentOf,
   loadEffectiveRole,
   type EffectiveRole,
   type Visibility,
@@ -117,12 +118,20 @@ export async function gateEventAccess(documentId: string, actor: AuthUser): Prom
   if (!doc) return { status: 'not_found' };
   const eff = await loadEffectiveRole(doc, actor);
   if (!canRead(doc.visibility, eff)) return { status: 'not_found' };
+  // An agent reads its person's documents as the owner does (every audience),
+  // though it acts there with at most editor rights.
+  const readsAsOwner =
+    eff === 'owner' ||
+    (actor.kind === 'agent' &&
+      actor.viaUserId !== null &&
+      (await loadEffectiveRole(doc, { id: actor.viaUserId, email: '', displayName: '', kind: 'person', viaUserId: null })) ===
+        'owner');
   return {
     status: 'ok',
     doc,
     identity: {
       userId: actor.id,
-      isOwner: eff === 'owner',
+      isOwner: readsAsOwner,
       isCollaborator: eff !== 'owner' && eff !== 'stranger',
     },
     mayWrite: canWriteEvents(eff),
@@ -340,9 +349,15 @@ async function insertEventsLocked(
 ): Promise<{ rows: EventRowDTO[]; touched: Touched }> {
   // Read before taking the lock, so the lock still covers only the inserts.
   const docIds = [...new Set(rows.map((r) => r.documentId))];
+  // A document's owner stream is its uploader's and, when the uploader is an
+  // agent, its person's (a person owns what their agents create).
   const touched = (await tx.execute(sql`
-    SELECT id AS "documentId", uploader_id AS "ownerId" FROM documents
-    WHERE id IN (${sql.join(docIds.map((id) => sql`${id}::uuid`), sql`, `)})
+    SELECT d.id AS "documentId", o.owner AS "ownerId"
+    FROM documents d
+    JOIN users u ON u.id = d.uploader_id
+    CROSS JOIN LATERAL (VALUES (d.uploader_id), (u.via_user_id)) AS o(owner)
+    WHERE d.id IN (${sql.join(docIds.map((id) => sql`${id}::uuid`), sql`, `)})
+      AND o.owner IS NOT NULL
   `)) as unknown as Touched;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_ORDER_LOCK_KEY})`);
   const out: EventRowDTO[] = [];
@@ -582,8 +597,9 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
   };
 }
 
-/** One bounded page of ascending-id rows across every live document the
- *  caller owns (owners read every audience on their own documents). The
+/** One bounded page of ascending-id rows across every live document
+ *  `userId` owns, their agents' uploads included (owners read every audience
+ *  on their own documents). An agent passes its person (libraryOwnerId). The
  *  ownership join runs on every read, so a deleted document drops out at
  *  once. Backs `GET /api/events/stream?scope=me`. */
 export async function listOwnedEvents(args: {
@@ -595,7 +611,7 @@ export async function listOwnedEvents(args: {
   const { userId, filters, afterId, limit } = args;
   const conditions = [
     sql`e.id > ${afterId}`,
-    sql`d.uploader_id = ${userId}`,
+    isSelfOrAgentOf(sql`d.uploader_id`, userId),
     sql`d.deleted_at IS NULL`,
     ...filterConditions(filters),
   ];
