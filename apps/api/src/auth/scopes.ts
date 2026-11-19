@@ -72,6 +72,7 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/documents/:docId/records/list', scope: 'records:read' },
   { method: 'POST', path: '/api/documents/:docId/records/query', scope: 'records:read' },
   { method: 'GET', path: '/api/documents/:docId/records/changes', scope: 'records:read' },
+  { method: 'GET', path: '/api/versions/:versionId/page', scope: 'documents:read' },
   { method: 'POST', path: '/api/documents/:docId/records/set', scope: 'records:write' },
   { method: 'POST', path: '/api/documents/:docId/records/update', scope: 'records:write' },
   { method: 'POST', path: '/api/documents/:docId/records/delete', scope: 'records:write' },
