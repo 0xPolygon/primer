@@ -94,6 +94,22 @@ describe('catch-up', () => {
       });
       if (!thread.ok) throw new Error(thread.refusal.message);
       expect((await resolveThread(OWNER, thread.value.id)).ok).toBe(true);
+      // BlockNote in an open editor then flags the resolved thread's mark: still not an edit.
+      await applyPlan(id, originFor(OWNER), {
+        onConflict: 'refuse',
+        edits: [
+          {
+            target: { tabId: 'main', blockId: third },
+            inverse: false,
+            build: (tr, at) => {
+              const mark = tr.doc.type.schema.marks.comment!;
+              const from = at!.pos + 2;
+              const to = at!.pos + 1 + at!.node.firstChild!.nodeSize - 1;
+              tr.removeMark(from, to, mark).addMark(from, to, mark.create({ threadId: thread.value.id, orphan: true }));
+            },
+          },
+        ],
+      });
 
       const { lastView } = await open(app, VIEWER, id);
       expect(lastView).not.toBeNull();
@@ -102,7 +118,7 @@ describe('catch-up', () => {
         { headers: asUser(VIEWER.id) },
       );
       const catchUp = (await res.json()) as CatchUpDTO;
-      // Only A's edit after the visit; the comment mark on the third block is not an edit.
+      // Only A's edit after the visit; the comment marks on the third block are not edits.
       expect(catchUp.changedBlocks.map((b) => [b.target.blockId, b.markdown])).toEqual([[second, 'Second point. Edited while B was away.']]);
       expect(catchUp.threads.map((t) => [t.event, t.quote, t.by])).toEqual([
         ['started', 'Third point.', OWNER.id],
