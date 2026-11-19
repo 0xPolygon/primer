@@ -72,7 +72,7 @@ describe('suggestions', () => {
     expect(list[1]!.edits[0]).toMatchObject({ kind: 'delete', current: { markdown: 'Gamma' }, proposed: null });
     // The same suggestions reach an agent fenced, without JSON.
     const fenced = await open(id, agent);
-    expect(fenced[0]!.edits[0]!.proposed).toEqual({ markdown: '<untrusted-content>\nAlpha, reworded\n</untrusted-content>' });
+    expect(fenced[0]!.edits[0]!.proposed!.markdown).toMatch(/^<(untrusted-content-[0-9a-f]{16})>\nAlpha, reworded\n<\/\1>$/);
 
     expect(await decideSuggestion(list[0]!.id, owner, 'accept')).toMatchObject({ ok: true, value: { outcomes: [{ status: 'applied' }] } });
     expect(await decideSuggestion(list[1]!.id, owner, 'reject')).toMatchObject({ ok: true });
