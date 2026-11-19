@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useEffect, useState } from 'react';
 import type { HocuspocusProvider } from '@hocuspocus/provider';
 import { CLOSE_FORBIDDEN, CLOSE_SAVE_FAILED } from './provider.ts';
@@ -50,12 +51,12 @@ export function ConnectionStatus({ provider }: { provider: HocuspocusProvider })
       : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200';
   return (
     <div role="status" data-connection={view.kind} className={`flex items-center gap-2 border-b px-4 py-1.5 text-xs ${tone}`}>
-      {view.kind === 'reconnecting' && <span>Reconnecting…</span>}
-      {view.kind === 'unsaved' && <span>Unsaved changes</span>}
-      {view.kind === 'forbidden' && <span>You no longer have access to edit this document.</span>}
+      {view.kind === 'reconnecting' && <span>{t('connectionStatus.reconnecting')}</span>}
+      {view.kind === 'unsaved' && <span>{t('connectionStatus.unsaved')}</span>}
+      {view.kind === 'forbidden' && <span>{t('connectionStatus.forbidden')}</span>}
       {view.kind === 'save-failed' && (
         <>
-          <span>Changes not saved.</span>
+          <span>{t('connectionStatus.notSaved')}</span>
           <button
             type="button"
             className="rounded border border-current px-2 py-0.5"
@@ -64,7 +65,7 @@ export function ConnectionStatus({ provider }: { provider: HocuspocusProvider })
               void provider.connect();
             }}
           >
-            Retry
+            {t('connectionStatus.retry')}
           </button>
         </>
       )}

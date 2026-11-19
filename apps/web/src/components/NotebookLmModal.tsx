@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { copyText, type CopyResult } from '../lib/clipboardCopy.ts';
 import { countWords, NOTEBOOKLM_URL } from '../lib/notebookLm.ts';
+import { t } from '../i18n';
 
 type CopyStatus = 'copying' | 'copied' | 'failed';
 
@@ -101,11 +102,11 @@ export function NotebookLmModal({
       >
         <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
           <h2 id="notebooklm-title" className="text-base font-semibold">
-            Send to NotebookLM
+            {t('notebookLmModal.title')}
           </h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t('notebookLmModal.close')}
             onClick={onClose}
             className="rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800"
           >
@@ -117,28 +118,27 @@ export function NotebookLmModal({
           <div role="status" aria-live="polite" className="flex items-start gap-2">
             {loadFailed ? (
               <p className="text-red-600 dark:text-red-400">
-                Couldn't load this version. Close this and try again.
+                {t('notebookLmModal.loadFailed')}
               </p>
             ) : copyStatus === 'copying' ? (
-              <p className="text-neutral-500">Copying the document…</p>
+              <p className="text-neutral-500">{t('notebookLmModal.copying')}</p>
             ) : copyStatus === 'copied' ? (
               <p>
                 <span aria-hidden="true" className="mr-1 text-green-600 dark:text-green-400">
                   ✓
                 </span>
-                Copied the document to your clipboard
-                {words !== null && ` (${words.toLocaleString()} words)`}.
+                {words === null ? t('notebookLmModal.copied') : t('notebookLmModal.copiedWithWords', { count: words.toLocaleString() })}
               </p>
             ) : (
               <div className="flex w-full items-center justify-between gap-2">
-                <p>Couldn't copy automatically.</p>
+                <p>{t('notebookLmModal.copyFailed')}</p>
                 <button
                   type="button"
                   disabled={source === null}
                   onClick={() => source !== null && void copy(source)}
                   className="shrink-0 rounded border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
                 >
-                  Copy text
+                  {t('notebookLmModal.copyText')}
                 </button>
               </div>
             )}
@@ -152,18 +152,18 @@ export function NotebookLmModal({
                 disabled={html === null}
                 onChange={(e) => toggleComments(e.target.checked)}
               />
-              Include comment threads ({commentCount} comment{commentCount === 1 ? '' : 's'})
+              {t(commentCount === 1 ? 'notebookLmModal.includeCommentsOne' : 'notebookLmModal.includeCommentsMany', { count: commentCount })}
             </label>
           )}
 
           {!loadFailed && (
             <ol className="list-decimal space-y-1 pl-5 text-xs text-neutral-600 dark:text-neutral-400">
-              <li>Open NotebookLM and create a notebook.</li>
+              <li>{t('notebookLmModal.step1')}</li>
               <li>
-                Under <strong>Add sources</strong>, choose <strong>Copied text</strong> and paste.
+                {t('notebookLmModal.step2Under')} <strong>{t('notebookLmModal.step2AddSources')}</strong>{t('notebookLmModal.step2Choose')} <strong>{t('notebookLmModal.step2CopiedText')}</strong> {t('notebookLmModal.step2Paste')}
               </li>
               <li>
-                Use <strong>Audio Overview</strong> for a two-host podcast, or ask it questions.
+                {t('notebookLmModal.step3Use')} <strong>{t('notebookLmModal.step3AudioOverview')}</strong> {t('notebookLmModal.step3Rest')}
               </li>
             </ol>
           )}
@@ -175,7 +175,7 @@ export function NotebookLmModal({
               disabled={source === null}
               className="text-xs text-neutral-500 underline hover:text-neutral-800 disabled:opacity-50 dark:hover:text-neutral-200"
             >
-              Download as Markdown instead
+              {t('notebookLmModal.downloadMarkdown')}
             </button>
             <a
               href={NOTEBOOKLM_URL}
@@ -183,14 +183,13 @@ export function NotebookLmModal({
               rel="noopener noreferrer"
               className="inline-flex items-center rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
             >
-              Open NotebookLM ↗
+              {t('notebookLmModal.open')}
             </a>
           </div>
         </div>
 
         <footer className="border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-400 dark:border-neutral-800">
-          Use your Polygon Google account. Charts or tables the document draws with scripts may not
-          come through as text.
+          {t('notebookLmModal.footer')}
         </footer>
       </div>
     </div>

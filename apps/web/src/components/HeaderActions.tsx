@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import { VersionSelector } from './VersionSelector.tsx';
 import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
+import { t } from '../i18n';
 
 export interface ActionFeedback {
   kind: 'success' | 'error';
@@ -33,7 +34,7 @@ interface Props {
   /** Live documents: saves a checkpoint of the current state. */
   onSaveCheckpoint?: () => Promise<ActionFeedback>;
   /** Live documents: downloads the content in a format. */
-  onExport?: (format: 'markdown' | 'html') => void;
+  onExport?: (format: 'markdown' | 'html' | 'print') => void;
 }
 
 type MenuState = 'closed' | 'menu' | 'confirm';
@@ -114,7 +115,7 @@ export function HeaderActions({
           if (fb) showFeedback(fb);
         })
         .catch(() =>
-          showFeedback({ kind: 'error', message: 'Download failed. Try again.' }),
+          showFeedback({ kind: 'error', message: t('headerActions.downloadFailed') }),
         );
     },
     notebooklm: () => {
@@ -126,7 +127,7 @@ export function HeaderActions({
       void onCopyComments()
         .then((fb) => showFeedback(fb))
         .catch(() =>
-          showFeedback({ kind: 'error', message: 'Copy failed. Try Download instead.' }),
+          showFeedback({ kind: 'error', message: t('headerActions.copyFailed') }),
         );
     },
     download: () => {
@@ -140,6 +141,10 @@ export function HeaderActions({
     'export-html': () => {
       setMenuState('closed');
       onExport?.('html');
+    },
+    'export-print': () => {
+      setMenuState('closed');
+      onExport?.('print');
     },
     delete: () => setMenuState('confirm'),
   };
@@ -158,10 +163,10 @@ export function HeaderActions({
       {variant === 'desktop' && onSaveCheckpoint && (
         <button
           type="button"
-          onClick={() => void onSaveCheckpoint().then(showFeedback, () => showFeedback({ kind: 'error', message: 'Saving the checkpoint failed.' }))}
+          onClick={() => void onSaveCheckpoint().then(showFeedback, () => showFeedback({ kind: 'error', message: t('headerActions.saveCheckpointFailed') }))}
           className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          Save checkpoint
+          {t('headerActions.saveCheckpoint')}
         </button>
       )}
       {variant === 'desktop' && isUploader && (
@@ -170,14 +175,14 @@ export function HeaderActions({
           onClick={onShare}
           className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          Share
+          {t('headerActions.share')}
         </button>
       )}
       <div className="relative" ref={menuRef}>
         <button
           type="button"
           onClick={() => setMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))}
-          aria-label="More actions"
+          aria-label={t('headerActions.moreActions')}
           aria-haspopup="menu"
           aria-expanded={menuState === 'menu'}
           className="inline-flex h-7 items-center justify-center rounded border border-neutral-300 bg-white px-2 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
@@ -226,7 +231,7 @@ export function HeaderActions({
         {menuState === 'confirm' && (
           <div className="absolute right-0 z-10 mt-1 w-64 rounded border border-neutral-200 bg-white p-3 shadow-md dark:border-neutral-800 dark:bg-neutral-900">
             <p className="text-xs text-neutral-700 dark:text-neutral-300">
-              Delete this document? You can restore it within 30 days from the home page.
+              {t('headerActions.deleteConfirm')}
             </p>
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -234,7 +239,7 @@ export function HeaderActions({
                 onClick={() => setMenuState('closed')}
                 className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
               >
-                Cancel
+                {t('headerActions.cancel')}
               </button>
               <button
                 type="button"
@@ -244,13 +249,13 @@ export function HeaderActions({
                     if (mountedRef.current) setMenuState('closed');
                   } catch {
                     if (mountedRef.current) {
-                      showFeedback({ kind: 'error', message: 'Delete failed. Try again.' });
+                      showFeedback({ kind: 'error', message: t('headerActions.deleteFailed') });
                     }
                   }
                 }}
                 className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-700"
               >
-                Delete
+                {t('headerActions.delete')}
               </button>
             </div>
           </div>

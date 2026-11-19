@@ -30,6 +30,7 @@ class NullNotifier implements Notifier {
   async notifyCollaboratorAdded(): Promise<void> {}
   async notifyExternalOtp(): Promise<void> {}
   async notifyExternalFirstView(): Promise<void> {}
+  async notifyDocumentMention() {}
 }
 
 const OWNER = 'mock-user-1'; // uploadFixture uploads as the default mock user
@@ -856,7 +857,7 @@ describe('publish flow primitives (issue #78 identity requirements)', () => {
         headers: asUser(OWNER),
       });
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ id: COLLAB });
+      expect(await res.json()).toEqual({ id: COLLAB, email: 'two@p.t', displayName: 'User Two' });
 
       const miss = await app.request('/api/users/lookup?email=nobody@p.t', {
         headers: asUser(OWNER),
