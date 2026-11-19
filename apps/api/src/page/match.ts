@@ -11,6 +11,7 @@
 // same-tag elements on either side ("Learn more" ×3) or when a runner-up
 // scores within 0.1 of it. People's text on an uncertain match is never
 // carried silently: it becomes a suggestion (carry.ts).
+import { normalizeText as norm, similarity, similarityCost } from '../lib/similarity.ts';
 import type { PageElement, PidInfo } from './stamp.ts';
 
 export type PidMatch = { pid: string; uncertain: boolean };
@@ -20,48 +21,13 @@ const STAGES = [
   { samePath: false, min: 0.8 },
 ];
 const RUNNER_UP = 0.1;
-
-export function norm(text: string): string {
-  return text.trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
-/** `1 - levenshtein(norm(a), norm(b)) / max(len, 1)`. */
-export function similarity(a: string, b: string): number {
-  const x = norm(a);
-  const y = norm(b);
-  const len = Math.max(x.length, y.length, 1);
-  return 1 - levenshtein(x, y) / len;
-}
-
-/** Similarity, or 0 when it can't reach `min` (the length ratio bounds it). */
-function score(a: string, b: string, min: number): number {
-  const x = norm(a);
-  const y = norm(b);
-  if (x === y) return 1;
-  const len = Math.max(x.length, y.length, 1);
-  if (Math.min(x.length, y.length) / len < min) return 0;
-  const s = 1 - levenshtein(x, y) / len;
-  return s >= min ? s : 0;
-}
-
-function levenshtein(a: string, b: string): number {
-  if (a === b) return 0;
-  if (a.length === 0) return b.length;
-  if (b.length === 0) return a.length;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  let cur = new Array<number>(b.length + 1);
-  for (let i = 1; i <= a.length; i++) {
-    cur[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-    [prev, cur] = [cur, prev];
-  }
-  return prev[b.length];
-}
+/** Character pairs the similarity stages may compare in one republish (the
+ *  page is untrusted input); past it the remaining elements get fresh pids. */
+export const MATCH_BUDGET = 20_000_000;
 
 /** The pid of each element of `next` (same order). */
-export function matchPids(previous: PidInfo[], next: PageElement[]): PidMatch[] {
+export function matchPids(previous: PidInfo[], next: PageElement[], budget = MATCH_BUDGET): PidMatch[] {
+  let spent = 0;
   const result: (PidMatch | null)[] = next.map(() => null);
   const used = new Set<string>();
   const prevByPid = new Map(previous.map((p) => [p.pid, p]));
@@ -91,8 +57,14 @@ export function matchPids(previous: PidInfo[], next: PageElement[]): PidMatch[] 
       if (result[i]) return;
       previous.forEach((p, j) => {
         if (used.has(p.pid) || p.tag !== e.tag || (stage.samePath && p.path !== e.path)) return;
-        const s = score(p.text, e.text, stage.min);
-        if (s > 0) pairs.push({ i, j, s });
+        const [x, y] = [p.text.length, e.text.length];
+        // Edit distance is at least the length difference: skip hopeless pairs.
+        if (Math.min(x, y) < stage.min * Math.max(x, y)) return;
+        const cost = similarityCost(p.text, e.text, stage.min);
+        if (spent + cost > budget) return;
+        spent += cost;
+        const s = similarity(p.text, e.text, stage.min);
+        if (s >= stage.min) pairs.push({ i, j, s });
       });
     });
     // The two best scores of each element on either side, for the runner-up test.
