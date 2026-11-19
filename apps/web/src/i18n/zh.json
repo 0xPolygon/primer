@@ -599,5 +599,15 @@
   "suggestions.accept": "接受",
   "overlay.editText": "编辑页面文本",
   "overlay.editBlock": "编辑块",
-  "page.readOnlyText": "此文本由页面脚本绘制，无法在此编辑。"
+  "page.readOnlyText": "此文本由页面脚本绘制，无法在此编辑。",
+  "overlay.editLabel": "编辑标签",
+  "widget.drawing": "代理正在绘制此小组件。",
+  "widget.unavailable": "此小组件暂时无法显示。",
+  "widget.comments": "对此小组件的评论",
+  "widget.replies": "另外 {count} 条",
+  "widget.commentOn": "评论 {name}",
+  "widget.commentPlaceholder": "添加评论",
+  "widget.comment": "评论",
+  "widget.cancel": "取消",
+  "widget.commentFailed": "评论未保存，请重试。"
 }

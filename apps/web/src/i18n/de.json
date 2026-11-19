@@ -599,5 +599,15 @@
   "suggestions.accept": "Annehmen",
   "overlay.editText": "Seitentext bearbeiten",
   "overlay.editBlock": "Block bearbeiten",
-  "page.readOnlyText": "Dieser Text wird vom Skript der Seite gezeichnet und kann hier nicht bearbeitet werden."
+  "page.readOnlyText": "Dieser Text wird vom Skript der Seite gezeichnet und kann hier nicht bearbeitet werden.",
+  "overlay.editLabel": "Beschriftung bearbeiten",
+  "widget.drawing": "Der Agent zeichnet dieses Widget.",
+  "widget.unavailable": "Dieses Widget kann gerade nicht angezeigt werden.",
+  "widget.comments": "Kommentare zu diesem Widget",
+  "widget.replies": "{count} weitere",
+  "widget.commentOn": "Kommentar zu {name}",
+  "widget.commentPlaceholder": "Kommentar hinzufügen",
+  "widget.comment": "Kommentieren",
+  "widget.cancel": "Abbrechen",
+  "widget.commentFailed": "Der Kommentar wurde nicht gespeichert. Bitte erneut versuchen."
 }

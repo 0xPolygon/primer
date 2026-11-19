@@ -1,5 +1,5 @@
-import { createContext, useContext, type ComponentType } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
+import { usePrimerBlockServices } from './services.ts';
 
 /**
  * Props of a `widget` block: an agent-drawn SVG diagram or chart. The widget
@@ -9,12 +9,6 @@ import { createReactBlockSpec } from '@blocknote/react';
  * Each label's words live in the fragment `widget/<blockId>/<textId>`.
  */
 export type WidgetBlockProps = { widgetId: string; hash: string; textIds: string };
-
-export type WidgetViewProps = { blockId: string; props: WidgetBlockProps; editable: boolean };
-
-/** The view a host app draws a widget with (the web app's live view, with
- *  label editing and comments). Without one, a placeholder renders. */
-export const WidgetViewContext = createContext<ComponentType<WidgetViewProps> | null>(null);
 
 export const widgetBlock = createReactBlockSpec(
   {
@@ -27,9 +21,7 @@ export const widgetBlock = createReactBlockSpec(
     content: 'none',
   },
   {
-    render: ({ block, editor }) => (
-      <WidgetSlot blockId={block.id} props={block.props as WidgetBlockProps} editable={editor.isEditable} />
-    ),
+    render: ({ block }) => <WidgetSlot blockId={block.id} props={block.props as WidgetBlockProps} />,
     // Markdown and external HTML keep a reference, never nothing: a fenced
     // `primer-widget` block naming the widget.
     toExternalHTML: ({ block }) => (
@@ -40,8 +32,11 @@ export const widgetBlock = createReactBlockSpec(
   },
 );
 
-function WidgetSlot(props: WidgetViewProps) {
-  const View = useContext(WidgetViewContext);
-  if (View) return <View {...props} />;
+/** The web app draws the widget through `WidgetView` (its SVG, label editing
+ *  and comments); elsewhere (the server editor, static renders) a placeholder
+ *  renders, which a checkpoint's static rendering swaps for the SVG. */
+function WidgetSlot(props: { blockId: string; props: WidgetBlockProps }) {
+  const WidgetView = usePrimerBlockServices()?.WidgetView;
+  if (WidgetView) return <WidgetView {...props} />;
   return <div className="primer-widget" data-widget-id={props.props.widgetId} />;
 }

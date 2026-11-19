@@ -16,4 +16,4 @@ export {
 export { dropdownOptions } from './chips.tsx';
 export { BLOCK_TEXT_EN, type BlockText } from './text.ts';
 export { pageBlock } from './page.tsx';
-export { widgetBlock, WidgetViewContext, type WidgetBlockProps, type WidgetViewProps } from './widget.tsx';
+export { widgetBlock, type WidgetBlockProps } from './widget.tsx';

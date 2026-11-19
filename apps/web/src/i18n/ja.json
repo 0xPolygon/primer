@@ -599,5 +599,15 @@
   "suggestions.accept": "承認",
   "overlay.editText": "ページのテキストを編集",
   "overlay.editBlock": "ブロックを編集",
-  "page.readOnlyText": "このテキストはページのスクリプトが描画しているため、ここでは編集できません。"
+  "page.readOnlyText": "このテキストはページのスクリプトが描画しているため、ここでは編集できません。",
+  "overlay.editLabel": "ラベルを編集",
+  "widget.drawing": "エージェントがこのウィジェットを描画しています。",
+  "widget.unavailable": "このウィジェットは現在表示できません。",
+  "widget.comments": "このウィジェットへのコメント",
+  "widget.replies": "ほか {count} 件",
+  "widget.commentOn": "{name} にコメント",
+  "widget.commentPlaceholder": "コメントを追加",
+  "widget.comment": "コメント",
+  "widget.cancel": "キャンセル",
+  "widget.commentFailed": "コメントを保存できませんでした。もう一度お試しください。"
 }

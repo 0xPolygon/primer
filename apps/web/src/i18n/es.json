@@ -599,5 +599,15 @@
   "suggestions.accept": "Aceptar",
   "overlay.editText": "Editar el texto de la página",
   "overlay.editBlock": "Editar bloque",
-  "page.readOnlyText": "Este texto lo dibuja el script de la página, así que no se puede editar aquí."
+  "page.readOnlyText": "Este texto lo dibuja el script de la página, así que no se puede editar aquí.",
+  "overlay.editLabel": "Editar etiqueta",
+  "widget.drawing": "El agente está dibujando este widget.",
+  "widget.unavailable": "Este widget no se puede mostrar ahora.",
+  "widget.comments": "Comentarios sobre este widget",
+  "widget.replies": "{count} más",
+  "widget.commentOn": "Comentar en {name}",
+  "widget.commentPlaceholder": "Añade un comentario",
+  "widget.comment": "Comentar",
+  "widget.cancel": "Cancelar",
+  "widget.commentFailed": "El comentario no se guardó. Inténtalo de nuevo."
 }

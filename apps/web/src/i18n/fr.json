@@ -599,5 +599,15 @@
   "suggestions.accept": "Accepter",
   "overlay.editText": "Modifier le texte de la page",
   "overlay.editBlock": "Modifier le bloc",
-  "page.readOnlyText": "Ce texte est dessiné par le script de la page : il ne peut pas être modifié ici."
+  "page.readOnlyText": "Ce texte est dessiné par le script de la page : il ne peut pas être modifié ici.",
+  "overlay.editLabel": "Modifier le libellé",
+  "widget.drawing": "L'agent dessine ce widget.",
+  "widget.unavailable": "Ce widget ne peut pas être affiché pour le moment.",
+  "widget.comments": "Commentaires sur ce widget",
+  "widget.replies": "{count} de plus",
+  "widget.commentOn": "Commenter {name}",
+  "widget.commentPlaceholder": "Ajouter un commentaire",
+  "widget.comment": "Commenter",
+  "widget.cancel": "Annuler",
+  "widget.commentFailed": "Le commentaire n'a pas été enregistré. Réessayez."
 }
