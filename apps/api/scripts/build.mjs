@@ -24,9 +24,10 @@ const external = [
   ...Object.keys(pkg.dependencies ?? {}),
   // Sub-paths of declared deps also count as external. Node will resolve them.
 ];
-// @polygonlabs/primer-api-types is a workspace package whose entry points are
-// .ts files — it must be bundled, not external.
-const externalFiltered = external.filter((d) => d !== '@polygonlabs/primer-api-types');
+// Workspace packages whose entry points are .ts/.tsx source
+// (@polygonlabs/primer-api-types, @primer/blocks) must be bundled, not external.
+const bundledWorkspace = new Set(['@polygonlabs/primer-api-types', '@primer/blocks']);
+const externalFiltered = external.filter((d) => !bundledWorkspace.has(d));
 
 const common = {
   bundle: true,
@@ -37,6 +38,8 @@ const common = {
   // node:fs etc. are auto-external on platform: 'node'.
   sourcemap: true,
   logLevel: 'info',
+  // @primer/blocks renders its custom blocks with React (automatic runtime).
+  jsx: 'automatic',
   // Each entry point keeps its file extension via outExtension; default is fine.
 };
 
