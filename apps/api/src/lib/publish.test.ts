@@ -45,6 +45,7 @@ function html(content: string, extra: Partial<PublishInput> = {}): PublishInput 
 async function publishOk(storage: Storage, input: PublishInput) {
   const r = await publishDocument(storage, input);
   if (!r.ok) throw new Error(`publish refused: ${r.refusal.code}`);
+  if (r.versionId === undefined) throw new Error('publish made no version');
   return r;
 }
 

@@ -25,4 +25,7 @@ instead of a refusal: groups nobody edited take the new file's text (a
 reworded paragraph keeps its block and comments), groups people edited keep
 their text and get the new one as a suggestion, removed groups are deleted
 unless edited, new ones are inserted in place. The new version keeps the
-uploaded file, and the response carries a `reconciliation`.
+uploaded file, and the response carries a `reconciliation`. A republish that
+applies nothing (an agent in suggest mode gets every change as a suggestion)
+makes no version: the response is `{ url, reconciliation }` with no
+`versionId` or `versionNumber` (REST status 200).
