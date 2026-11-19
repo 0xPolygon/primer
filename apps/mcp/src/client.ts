@@ -1,6 +1,8 @@
 import type {
   AddVersionResponse,
+  Collaborator,
   CollaboratorRole,
+  CollaboratorsListResponse,
   CommentDTO,
   DocumentDetailResponse,
   EventInput,
@@ -276,11 +278,19 @@ export class PrimerClient {
   }
 
   /** Adds a user as a document collaborator (owner-only operation). */
-  addCollaborator(documentId: string, userId: string, role: CollaboratorRole): Promise<void> {
-    return this.request<void>({
+  addCollaborator(documentId: string, userId: string, role: CollaboratorRole): Promise<Collaborator> {
+    return this.request<Collaborator>({
       method: 'POST',
       path: `/api/documents/${encodeURIComponent(documentId)}/collaborators`,
       json: { userId, role },
+    });
+  }
+
+  /** Lists a document's collaborators (owner-only operation). */
+  listCollaborators(documentId: string): Promise<CollaboratorsListResponse> {
+    return this.request<CollaboratorsListResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/collaborators`,
     });
   }
 
