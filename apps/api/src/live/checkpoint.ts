@@ -13,7 +13,7 @@ import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
-import { tabFragmentName, tabsOf } from './reach.ts';
+import { tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { pmDocOf } from './sources.ts';
 
 /** A live document's state frozen at one docVersion. */
@@ -110,7 +110,9 @@ export async function writeCheckpoint(
  * Restores a checkpoint as a new edit by `actor` (C12 restore column): every
  * tab's content is replaced by the bundle's through the pipeline, which
  * writes only what differs, so untouched blocks keep their Yjs identity and
- * marks. Later history stays: the restore is one more update.
+ * marks. Later history stays: the restore is one more update. The tab list
+ * is restored first (a tab deleted since comes back, one added since goes),
+ * as an edit by the same person.
  */
 export async function restoreCheckpoint(
   storage: Storage,
@@ -119,6 +121,7 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
+    await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {
@@ -147,4 +150,23 @@ export function markedThreads(state: Uint8Array): Set<string> {
   }
   doc.destroy();
   return ids;
+}
+
+/** Sets the live tab list to `tabs` when it differs. The pipeline writes
+ *  fragments only, so the list is written in its own transaction. */
+async function restoreTabs(documentId: string, tabs: Tab[], actor: AuthUser): Promise<void> {
+  const connection = await liveInstance().openDirectConnection(liveDocName(documentId), originFor(actor));
+  try {
+    const doc = connection.document!;
+    if (JSON.stringify(tabsOf(doc)) === JSON.stringify(tabs)) return;
+    await docQueue(documentId)(() =>
+      connection.transact(() => {
+        const array = doc.getArray<Tab>('tabs');
+        array.delete(0, array.length);
+        array.push(tabs);
+      }),
+    );
+  } finally {
+    await connection.disconnect({ unloadImmediately: false });
+  }
 }

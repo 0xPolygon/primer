@@ -12,6 +12,8 @@ import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
 import { PrimerVersionStorage } from './versionStorage.ts';
+import { TabStrip, useTabs } from './TabStrip.tsx';
+import { MAIN_TAB, tabFragmentName } from './tabs.ts';
 
 export type LiveEditorProps = {
   documentId: string;
@@ -22,7 +24,7 @@ export type LiveEditorProps = {
 };
 
 /**
- * A live document in BlockNote, synced over `/collab`: stock blocks, the
+ * A live document in BlockNote, synced over `/collab`, one editor per tab: stock blocks, the
  * Ariakit UI (slash menu, formatting toolbar, side menu, table handles, file
  * panel), collaboration cursors and BlockNote's version history over Primer's
  * checkpoints. Files upload to the document and are stored as opaque
@@ -41,7 +43,22 @@ export default function LiveEditor(props: LiveEditorProps) {
   return <LiveEditorView key={live.doc.guid} live={live} {...props} />;
 }
 
-function LiveEditorView({ live, documentId, readOnly, theme, userName }: LiveEditorProps & { live: LiveProvider }) {
+function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
+  const tabs = useTabs(props.live.doc);
+  const [selected, setSelected] = useState(MAIN_TAB);
+  // A tab someone else deleted falls back to the first.
+  const active = tabs.some((t) => t.id === selected) ? selected : MAIN_TAB;
+  return (
+    <div className="flex h-full flex-col" data-live-editor={props.documentId}>
+      <ConnectionStatus provider={props.live.provider} />
+      <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
+      {/* One editor per tab fragment, mounted when its tab is opened. */}
+      <TabEditor key={active} tabId={active} {...props} />
+    </div>
+  );
+}
+
+function TabEditor({ live, tabId, documentId, readOnly, theme, userName }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const editor = useCreateBlockNote(
@@ -52,7 +69,7 @@ function LiveEditorView({ live, documentId, readOnly, theme, userName }: LiveEdi
       extensions: [commentMarkExtension, YjsVersioningExtension({ storage: new PrimerVersionStorage(documentId) })],
       collaboration: {
         provider: { awareness: live.provider.awareness ?? undefined },
-        fragment: live.doc.getXmlFragment('document-store'),
+        fragment: live.doc.getXmlFragment(tabFragmentName(tabId)),
         user: { name: userName, color: colorFor(userName) },
       },
       dictionary: dictionaryFor(typeof navigator === 'undefined' ? 'en' : navigator.language),
@@ -68,12 +85,11 @@ function LiveEditorView({ live, documentId, readOnly, theme, userName }: LiveEdi
           ? `/api/files/${encodeURIComponent(url.slice('primer-blob://'.length))}?doc=${encodeURIComponent(documentId)}`
           : url,
     }),
-    [live],
+    [live, tabId],
   );
 
   return (
-    <div className="flex h-full flex-col" data-live-editor={documentId}>
-      <ConnectionStatus provider={live.provider} />
+    <>
       <div className="flex items-center justify-end gap-2 px-4 pt-2">
         <button
           type="button"
@@ -94,7 +110,7 @@ function LiveEditorView({ live, documentId, readOnly, theme, userName }: LiveEdi
           </div>
         )}
       </BlockNoteView>
-    </div>
+    </>
   );
 }
 

@@ -2,34 +2,62 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as Y from 'yjs';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
-import { MAIN_TAB, tabFragmentName } from './reach.ts';
+import { MAIN_TAB, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { sourcePreview } from './import.ts';
 import { groupVersion, pmDocOf, trustedMeta, trustedSources } from './sources.ts';
 
 /**
  * The document as Markdown (M2b.2): untouched groups are their source lines,
  * byte for byte; only changed or new blocks are serialised. An untouched
- * document exports exactly the uploaded file.
+ * document exports exactly the uploaded file. Tabs after `main` follow in
+ * order, each under a `# <title>` heading.
  */
 export async function exportMarkdown(doc: Y.Doc, documentId: string): Promise<string> {
-  const parts = planTab(doc, documentId, MAIN_TAB);
-  const texts = await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(p.run) : null)));
-  return assemble(parts, texts);
+  const tabs: string[] = [];
+  for (const tab of tabsOf(doc)) {
+    const parts = planTab(doc, documentId, tab.id);
+    tabs.push(assemble(parts, await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(p.run) : null)))));
+  }
+  return joinTabs(tabsOf(doc), tabs, (title) => `# ${title}`);
 }
 
-/** The document as plain text, by the same rule. */
+/** The document as plain text, by the same rule; tabs follow under their title. */
 export function exportText(doc: Y.Doc, documentId: string): string {
-  const parts = planTab(doc, documentId, MAIN_TAB);
-  return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
+  const tabs = tabsOf(doc).map((tab) => {
+    const parts = planTab(doc, documentId, tab.id);
+    return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
+  });
+  return joinTabs(tabsOf(doc), tabs, (title) => title);
+}
+
+/** Main's text, then each later tab under its heading, a blank line between. */
+function joinTabs(tabs: Tab[], texts: string[], heading: (title: string) => string): string {
+  let out = texts[0] ?? '';
+  tabs.slice(1).forEach((tab, k) => {
+    if (out.length > 0) out = out.replace(/\n*$/, '\n\n');
+    const body = texts[k + 1]!.replace(/\n+$/, '');
+    out += heading(oneLine(tab.title) || 'Untitled') + '\n' + (body ? `\n${body}\n` : '');
+  });
+  return out;
+}
+
+function oneLine(title: string): string {
+  return title.replace(/\s+/g, ' ').trim();
 }
 
 /**
  * The static rendering (C11 `static.html`): BlockNote's full HTML inside its
  * own container, with its stylesheet inlined. Source blocks show a preview
- * rendered again from their Markdown (the stored preview is editor-writable). Shares, previews, print and email all use this.
+ * rendered again from their Markdown (the stored preview is editor-writable).
+ * Tabs after `main` follow under their titles. Shares, previews, print and
+ * email all use this.
  */
 export async function exportHtml(doc: Y.Doc, title = ''): Promise<string> {
-  const body = await htmlOf(readBlocks(doc, MAIN_TAB));
+  let body = '';
+  for (const tab of tabsOf(doc)) {
+    if (tab.id !== MAIN_TAB) body += `<h1 class="primer-tab-title">${escapeHtml(oneLine(tab.title) || 'Untitled')}</h1>`;
+    body += await htmlOf(readBlocks(doc, tab.id));
+  }
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style></head>` +
