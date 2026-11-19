@@ -15,6 +15,7 @@ import { readBlocks } from '../live/editor.ts';
 import { reachableFragments } from '../live/reach.ts';
 import { labelEdit, readLabel } from './labels.ts';
 import { draftWidget, getWidget, publishWidget, widgetImage } from './store.ts';
+import { renderBoth, widgetIdPrefix } from './render.ts';
 
 const owner: AuthUser = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock', kind: 'person', viaUserId: null };
 
@@ -143,6 +144,46 @@ describe('widgets in checkpoints', () => {
       await restoreCheckpoint(storage, { documentId, bundleKey: version!.bundleKey! }, owner);
       const dto = await getWidget(owner, draft.widgetId);
       expect(dto.ok && dto.value.labels).toEqual({ review: 'Peer review', merge: 'Merge' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a widget id from another document is neither bundled nor restored onto it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-widget-scope-'));
+    const storage = new FilesystemStorage(root);
+    try {
+      const docB = await createLiveDoc();
+      await seedBlocks(docB, [paragraph('intro', 'Intro')]);
+      const b = (await draftAndPublish(docB, flow('Secret plan'))).draft;
+      const [before] = await db.select().from(widgets).where(eq(widgets.id, b.widgetId));
+
+      // An editor of A writes blocks naming B's widget (with B's block id) and a traversal-shaped id.
+      const docA = await createLiveDoc();
+      await seedBlocks(docA, [
+        { id: b.blockId, type: 'widget', props: { widgetId: b.widgetId, hash: before!.publishedHash!, textIds: 'review' } },
+        { id: 'evil', type: 'widget', props: { widgetId: `../../${docB}/x`, hash: 'h', textIds: '' } },
+      ] as never);
+      const checkpoint = await createCheckpoint(storage, docA, owner, null);
+      const [version] = await db.select().from(versions).where(eq(versions.id, checkpoint.versionId));
+      const bundleKey = version!.bundleKey!;
+      const manifest = new TextDecoder().decode(await readBundleFile(storage, bundleKey, 'manifest.json'));
+      expect(manifest).not.toContain('widgets/');
+      const staticHtml = new TextDecoder().decode(await readBundleFile(storage, bundleKey, 'static.html'));
+      expect(staticHtml).not.toContain('Secret plan');
+      expect(staticHtml).toContain('Widget unavailable');
+
+      // A crafted bundle entry for B's widget (one that renders its kept hash) is never applied to B through A's restore.
+      const crafted = await renderBoth(flow('Overwritten'), [], widgetIdPrefix(b.widgetId));
+      if ('errors' in crafted) throw new Error('crafted render failed');
+      await storage.put(
+        `${bundleKey}widgets/${b.widgetId}.json`,
+        new TextEncoder().encode(JSON.stringify({ widgetId: b.widgetId, blockId: b.blockId, hash: crafted.hash, source: flow('Overwritten'), rows: null })),
+      );
+      await restoreCheckpoint(storage, { documentId: docA, bundleKey }, owner);
+      const [after] = await db.select().from(widgets).where(eq(widgets.id, b.widgetId));
+      expect(after!.publishedSource).toBe(before!.publishedSource);
+      expect(after!.documentId).toBe(docB);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

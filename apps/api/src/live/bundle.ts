@@ -54,7 +54,7 @@ export async function renderBundle(
   Y.applyUpdate(doc, opts.state);
   try {
     const { format } = trustedMeta(doc, opts.documentId);
-    const widgets = await bundleWidgets(doc);
+    const widgets = await bundleWidgets(doc, opts.documentId);
     const html = widgets.embed(await exportHtml(doc, opts.title));
     const served = transformHtml(html, { themeManaged: true });
     if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);

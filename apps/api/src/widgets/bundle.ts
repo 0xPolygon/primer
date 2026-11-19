@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { widgets } from '../db/schema.ts';
 import { tabFragmentName, tabsOf } from '../live/reach.ts';
@@ -14,6 +14,14 @@ type PlacedWidget = { blockId: string; widgetId: string; hash: string; textIds: 
 /** What a checkpoint keeps of a widget (`widgets/<id>.json`): enough to republish it. */
 type BundledWidget = { widgetId: string; blockId: string; hash: string; source: string; rows: WidgetRow[] | null };
 
+/** Ids read from a Y.Doc are client-written: only a UUID may name a widget
+ *  (a lookup, or a storage key) and only a plain name a block. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const BLOCK_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The widget blocks in a document state whose ids are well formed. Their
+ *  ids still say nothing about which document owns the widget: every lookup
+ *  by them is also scoped by the document id. */
 function placedWidgets(doc: Y.Doc): PlacedWidget[] {
   const out: PlacedWidget[] = [];
   const walk = (node: Y.XmlFragment | Y.XmlElement) => {
@@ -24,7 +32,7 @@ function placedWidgets(doc: Y.Doc): PlacedWidget[] {
         const widgetId = String(child.getAttribute('widgetId') ?? '');
         const hash = String(child.getAttribute('hash') ?? '');
         const textIds = String(child.getAttribute('textIds') ?? '').split(' ').filter(Boolean);
-        if (blockId && widgetId && hash) out.push({ blockId, widgetId, hash, textIds });
+        if (blockId && BLOCK_ID.test(blockId) && UUID.test(widgetId) && hash) out.push({ blockId, widgetId, hash, textIds });
       } else walk(child);
     }
   };
@@ -38,13 +46,20 @@ function placedWidgets(doc: Y.Doc): PlacedWidget[] {
  * were, and `widgets/<id>.json` to republish it on restore. `embed` puts both
  * themes' SVG in place of the blocks' placeholders in the static rendering.
  */
-export async function bundleWidgets(doc: Y.Doc): Promise<{ files: Record<string, string>; embed: (html: string) => string }> {
+export async function bundleWidgets(doc: Y.Doc, documentId: string): Promise<{ files: Record<string, string>; embed: (html: string) => string }> {
   const placed = placedWidgets(doc);
-  const rows = placed.length === 0 ? [] : await db.select().from(widgets).where(inArray(widgets.id, placed.map((w) => w.widgetId)));
+  const rows =
+    placed.length === 0
+      ? []
+      : await db
+          .select()
+          .from(widgets)
+          .where(and(inArray(widgets.id, placed.map((w) => w.widgetId)), eq(widgets.documentId, documentId)));
   const files: Record<string, string> = {};
   const svgs = new Map<string, { light: string; dark: string }>();
   for (const widget of placed) {
-    const row = rows.find((r) => r.id === widget.widgetId);
+    // A block naming another document's widget, or another block's, draws nothing.
+    const row = rows.find((r) => r.id === widget.widgetId && r.blockId === widget.blockId);
     if (!row?.publishedSvgLight || !row.publishedSvgDark || !row.publishedSource) continue;
     const labels = labelsOf(row.publishedSvgLight);
     for (const textId of widget.textIds) labels[textId] = readLabel(doc, widget.blockId, textId) ?? labels[textId] ?? '';
@@ -63,10 +78,12 @@ export async function bundleWidgets(doc: Y.Doc): Promise<{ files: Record<string,
     files[`widgets/${widget.widgetId}.json`] = JSON.stringify(kept);
   }
   const embed = (html: string) => {
-    if (svgs.size === 0) return html;
+    if (!html.includes('class="primer-widget"')) return html;
     const replaced = html.replace(/<div class="primer-widget" data-widget-id="([^"]+)"><\/div>/g, (whole, id: string) => {
       const svg = svgs.get(id);
-      return svg ? `<div class="primer-widget"><div class="primer-widget-light">${svg.light}</div><div class="primer-widget-dark">${svg.dark}</div></div>` : whole;
+      return svg
+        ? `<div class="primer-widget"><div class="primer-widget-light">${svg.light}</div><div class="primer-widget-dark">${svg.dark}</div></div>`
+        : '<div class="primer-widget"><p>Widget unavailable</p></div>';
     });
     return replaced.replace('</head>', `<style>${THEME_CSS}</style></head>`);
   };
@@ -84,7 +101,7 @@ const THEME_CSS =
  * (C12): the kept source and rows are rendered again and become the live
  * publish when they give the kept hash. A pending draft is left alone.
  */
-export async function restoreWidgets(storage: Storage, bundleKey: string, frozen: Y.Doc): Promise<void> {
+export async function restoreWidgets(storage: Storage, bundleKey: string, frozen: Y.Doc, documentId: string): Promise<void> {
   for (const widget of placedWidgets(frozen)) {
     let kept: BundledWidget;
     try {
@@ -92,6 +109,7 @@ export async function restoreWidgets(storage: Storage, bundleKey: string, frozen
     } catch {
       continue; // a checkpoint taken before the widget was ever published
     }
+    if (kept.widgetId !== widget.widgetId || kept.blockId !== widget.blockId) continue;
     const rendered = await renderBoth(kept.source, kept.rows ?? [], widgetIdPrefix(kept.widgetId));
     if ('errors' in rendered || rendered.hash !== kept.hash) continue;
     await db
@@ -104,6 +122,6 @@ export async function restoreWidgets(storage: Storage, bundleKey: string, frozen
         rows: kept.rows,
         updatedAt: new Date(),
       })
-      .where(eq(widgets.id, kept.widgetId));
+      .where(and(eq(widgets.id, kept.widgetId), eq(widgets.documentId, documentId), eq(widgets.blockId, kept.blockId)));
   }
 }

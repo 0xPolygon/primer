@@ -136,9 +136,9 @@ export async function restoreCheckpoint(
       const content = pmDocOf(frozen.getXmlFragment(name)).content;
       edits.push({ target, inverse: false, build: (tr) => void tr.replaceWith(0, tr.doc.content.size, content) });
     }
-    const result = await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
-    await restoreWidgets(storage, checkpoint.bundleKey, frozen);
-    return result;
+    // Widget rows first, as a publish does: viewers refetch when the block's hash changes.
+    await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
+    return await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
   } finally {
     frozen.destroy();
   }
