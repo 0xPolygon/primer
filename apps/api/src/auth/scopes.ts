@@ -19,9 +19,6 @@ export interface ScopedRoute {
   method: Method;
   path: string;
   scope: ApiTokenScope | null;
-  /** Decided ahead of the route itself (live documents land their scope rows
-   *  before their routes). Exempt from the stale-row check until registered. */
-  upcoming?: true;
 }
 
 export const ROUTE_SCOPES: readonly ScopedRoute[] = [
