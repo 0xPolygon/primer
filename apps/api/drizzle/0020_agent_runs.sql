@@ -11,6 +11,7 @@ CREATE TABLE "agent_runs" (
 	"edits_applied" integer DEFAULT 0 NOT NULL,
 	"blocks_removed" integer DEFAULT 0 NOT NULL,
 	"plan" text,
+	"plan_hash" text,
 	"plan_approved_by" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"started_at" timestamp with time zone,

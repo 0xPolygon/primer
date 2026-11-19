@@ -606,6 +606,8 @@ export const agentRuns = pgTable(
     editsApplied: integer('edits_applied').notNull().default(0),
     blocksRemoved: integer('blocks_removed').notNull().default(0),
     plan: text('plan'),
+    // sha256 of `plan`: an approval names the plan it approves.
+    planHash: text('plan_hash'),
     planApprovedBy: text('plan_approved_by').references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp('started_at', { withTimezone: true }),

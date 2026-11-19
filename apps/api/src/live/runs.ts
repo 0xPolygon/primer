@@ -7,7 +7,7 @@ import { db } from '../db/client.ts';
 import { runInverses } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
-import { canComment, canEdit } from '../lib/permissions.ts';
+import { canComment, canEdit, loadEffectiveRole } from '../lib/permissions.ts';
 import { setAgentAwareness } from './awareness.ts';
 import type { BlockInverse } from './pipeline.ts';
 import { docQueue } from './queue.ts';
@@ -33,6 +33,7 @@ type RunRow = {
   editsApplied: number;
   blocksRemoved: number;
   plan: string | null;
+  planHash: string | null;
   planApprovedBy: string | null;
   createdAt: Date | string;
   startedAt: Date | string | null;
@@ -42,7 +43,7 @@ type RunRow = {
 const RUN_COLUMNS = sql`
   id, document_id AS "documentId", agent_id AS "agentId", requested_by AS "requestedBy", status, request,
   status_line AS "statusLine", error, edits_applied AS "editsApplied", blocks_removed AS "blocksRemoved",
-  plan, plan_approved_by AS "planApprovedBy", created_at AS "createdAt", started_at AS "startedAt",
+  plan, plan_hash AS "planHash", plan_approved_by AS "planApprovedBy", created_at AS "createdAt", started_at AS "startedAt",
   finished_at AS "finishedAt"`;
 
 const fail = (status: 400 | 403 | 404 | 409, code: Refusal['code'], message: string, fix: string): RunResult<never> => ({
@@ -125,14 +126,23 @@ async function insertRun(documentId: string, agentId: string, requestedBy: strin
   return toDTO((await loadRun(id))!);
 }
 
-/** Runs on a document, newest first (readers). */
+/** Runs on a document, newest first (readers). The request (prompt, unsent
+ *  text, selection) is the requester's: only they, the run's agent and the
+ *  owner see it; other readers see status and progress. */
 export async function listDocumentRuns(user: AuthUser, documentId: string): Promise<RunResult<AgentRunDTO[]>> {
   const doc = await readableLiveDoc(documentId, user);
   if (!doc) return fail(404, 'not_found', 'Live document not found.', 'Check the document id.');
   const rows = (await db.execute(sql`
     SELECT ${RUN_COLUMNS} FROM agent_runs WHERE document_id = ${documentId} ORDER BY created_at DESC LIMIT 100
   `)) as unknown as RunRow[];
-  return { ok: true, value: rows.map(toDTO) };
+  return {
+    ok: true,
+    value: rows.map((row) => {
+      const dto = toDTO(row);
+      const mayRead = row.requestedBy === user.id || row.agentId === user.id || doc.role === 'owner';
+      return mayRead ? dto : { ...dto, request: null };
+    }),
+  };
 }
 
 /** The calling agent's runs (active by default), oldest first, optionally
@@ -147,9 +157,9 @@ export async function listAgentRuns(agent: AuthUser, opts: { documentId?: string
   `)) as unknown as RunRow[];
   return rows.map((row) => {
     const dto = toDTO(row);
-    const viewer = { ...dto.request.viewer };
+    const viewer = { ...row.request.viewer };
     if (viewer.unsentText !== undefined) viewer.unsentText = fenceUntrusted(viewer.unsentText);
-    return { ...dto, request: { ...dto.request, prompt: fenceUntrusted(dto.request.prompt), viewer } };
+    return { ...dto, request: { ...row.request, prompt: fenceUntrusted(row.request.prompt), viewer } };
   });
 }
 
@@ -221,7 +231,9 @@ export async function updateRunStatus(
   const sets = [
     ...(statusLine !== null ? [sql`status_line = ${statusLine}`] : []),
     // A new plan needs a new approval.
-    ...(plan !== null ? [sql`plan = ${plan}`, sql`plan_approved_by = NULL`] : []),
+    ...(plan !== null
+      ? [sql`plan = ${plan}`, sql`plan_hash = ${createHash('sha256').update(plan).digest('hex')}`, sql`plan_approved_by = NULL`]
+      : []),
   ];
   const out = await transition(run, agent, { from: ACTIVE, set: sql.join(sets, sql`, `) });
   if (out.ok && statusLine !== null) await setAgentAwareness(run.documentId, agent, { status: statusLine, cursorBlockId: null });
@@ -260,18 +272,23 @@ export async function cancelRun(user: AuthUser, runId: string): Promise<RunResul
   return out;
 }
 
+/** A new run with the same request, asked by `user` now: the same checks as
+ *  a new ask (access, the agent, the thread), and never by the agent itself. */
 export async function retryRun(user: AuthUser, runId: string): Promise<RunResult<AgentRunDTO>> {
   const run = await steerable(user, runId);
   if ('ok' in run) return run;
+  if (user.id === run.agentId) {
+    return fail(403, 'forbidden', 'An agent can\'t retry its own run.', 'Finish with an error; a person can retry it.');
+  }
   if (run.status === 'queued' || run.status === 'running') {
     return fail(409, 'bad_request', 'The run is still active.', 'Cancel it first, or wait for it to finish.');
   }
-  return { ok: true, value: await insertRun(run.documentId, run.agentId, user.id, run.request) };
+  return requestRun(user, run.documentId, { agentId: run.agentId, request: run.request });
 }
 
 /** A person (owner or editor) approves the run's plan, so it may pass the
  *  large-edit threshold. On the document queue, like cancel. */
-export async function approveRun(user: AuthUser, runId: string): Promise<RunResult<AgentRunDTO>> {
+export async function approveRun(user: AuthUser, runId: string, body: { planHash?: unknown } = {}): Promise<RunResult<AgentRunDTO>> {
   const run = await loadRun(runId);
   if (!run) return runNotFound();
   const doc = await readableLiveDoc(run.documentId, user);
@@ -280,7 +297,20 @@ export async function approveRun(user: AuthUser, runId: string): Promise<RunResu
   if (user.kind !== 'person' || !canEdit(doc.role)) {
     return fail(403, 'forbidden', 'Only a person who owns or edits the document can approve a plan.', 'Ask the owner or an editor.');
   }
-  return transition(run, user, { from: ACTIVE, set: sql`plan_approved_by = ${user.id}`, extra: sql`AND plan IS NOT NULL` });
+  const planHash = typeof body.planHash === 'string' ? body.planHash : '';
+  if (!planHash) return fail(400, 'bad_request', 'Send the planHash of the plan you approve.', 'Read the run and send its planHash.');
+  const out = await transition(run, user, {
+    from: ACTIVE,
+    set: sql`plan_approved_by = ${user.id}`,
+    extra: sql`AND plan IS NOT NULL AND plan_hash = ${planHash}`,
+  });
+  if (!out.ok && out.refusal.code === 'bad_request') {
+    const now = (await loadRun(runId))!;
+    if (now.planHash && now.planHash !== planHash) {
+      return fail(409, 'plan_changed', 'The agent replaced the plan since you read it.', 'Read the new plan and approve that one.');
+    }
+  }
+  return out;
 }
 
 /**
@@ -296,6 +326,21 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
   const run = await loadRun(runId);
   if (!run || run.agentId !== actor.id || run.documentId !== documentId) {
     return { code: 'not_found', message: 'Run not found for this agent and document.', fix: 'Pass a runId from primer_list_runs for this document, or none.' } as Refusal;
+  }
+  // A run acts for its requester: it never edits more than they could (read
+  // now, so a requester who lost access stops the run's edits too).
+  const [doc] = (await db.execute(sql`
+    SELECT id, uploader_id AS "uploaderId", visibility FROM documents WHERE id = ${documentId}
+  `)) as unknown as { id: string; uploaderId: string; visibility: 'org' | 'private' }[];
+  const [requester] = (await db.execute(sql`
+    SELECT id, email, display_name AS "displayName", kind, via_user_id AS "viaUserId" FROM users WHERE id = ${run.requestedBy}
+  `)) as unknown as AuthUser[];
+  if (!doc || !requester || !canEdit(await loadEffectiveRole(doc, requester))) {
+    return {
+      code: 'requester_cannot_edit',
+      message: 'The person who asked for this run can\'t edit the document, so the run can\'t either.',
+      fix: 'Answer by commenting (primer_create_thread or primer_reply_to_thread), not by editing.',
+    } as Refusal;
   }
   return {
     guard: async (work: { edits: number; removals: number }): Promise<Refusal | null> => {
@@ -374,6 +419,7 @@ export function toDTO(row: RunRow): AgentRunDTO {
     editsApplied: row.editsApplied,
     blocksRemoved: row.blocksRemoved,
     plan: row.plan,
+    planHash: row.planHash,
     planApprovedBy: row.planApprovedBy,
     createdAt: iso(row.createdAt)!,
     startedAt: iso(row.startedAt),

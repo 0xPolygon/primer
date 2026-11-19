@@ -1,5 +1,5 @@
 {
-  "id": "e8268eef-0cb5-446a-887e-7f3d089900c6",
+  "id": "596d3442-9c2f-4b7d-8f74-67678c86ec41",
   "prevId": "29762db3-e465-4df7-8da0-0877847ee69a",
   "version": "7",
   "dialect": "postgresql",
@@ -79,6 +79,12 @@
         },
         "plan": {
           "name": "plan",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plan_hash": {
+          "name": "plan_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false

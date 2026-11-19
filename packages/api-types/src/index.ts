@@ -439,7 +439,12 @@ export type RefusalCode =
   | 'invalid_op'
   /** The run's edits would pass the large-edit threshold: post a plan and
    *  wait for a person to approve it. */
-  | 'approval_required';
+  | 'approval_required'
+  /** The person who asked for the run can't edit the document, so the run
+   *  can't either (it may comment). */
+  | 'requester_cannot_edit'
+  /** An approval named a plan the agent has since replaced. */
+  | 'plan_changed';
 
 export interface Refusal {
   code: RefusalCode;
@@ -591,17 +596,26 @@ export interface AgentRunDTO {
   agentId: string;
   requestedBy: string;
   status: AgentRunStatus;
-  request: AgentRunRequest;
+  /** Null for viewers other than the requester, the agent and the owner:
+   *  the prompt and unsent text are the requester's. */
+  request: AgentRunRequest | null;
   statusLine: string | null;
   error: string | null;
   editsApplied: number;
   blocksRemoved: number;
   /** A large run's plan; ops past the threshold need `planApprovedBy`. */
   plan: string | null;
+  /** sha256 of `plan`; approving sends it, so only that plan is approved. */
+  planHash: string | null;
   planApprovedBy: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
+}
+
+/** POST /api/runs/:runId/approve */
+export interface ApproveRunRequest {
+  planHash: string;
 }
 
 /** POST /api/documents/:docId/runs */

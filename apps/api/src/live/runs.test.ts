@@ -7,7 +7,7 @@ import { agentAwareness, agentClientId } from './awareness.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { applyOps } from './ops.ts';
 import { comment, createLiveDoc, makeAgent, markdownOf, ops, paragraph, seedBlocks, startTestHub, until, versions } from './live.testlib.ts';
-import { approveRun, cancelRun, claimRun, finishRun, LARGE_RUN_EDITS, requestRun, retryRun, updateRunStatus } from './runs.ts';
+import { approveRun, cancelRun, claimRun, finishRun, LARGE_RUN_EDITS, listDocumentRuns, requestRun, retryRun, updateRunStatus } from './runs.ts';
 
 const owner: AuthUser = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User', kind: 'person', viaUserId: null };
 const main = (blockId: string) => ({ tabId: 'main', blockId });
@@ -48,13 +48,14 @@ describe('agent runs', () => {
     const agent = await makeAgent();
     const id = await createLiveDoc();
     const run = await startedRun(id, agent);
-    await updateRunStatus(agent, run.id, { plan: 'Rewrite every section.' });
+    const planned = await updateRunStatus(agent, run.id, { plan: 'Rewrite every section.' });
+    const planHash = planned.ok ? planned.value.planHash : null;
 
     // An agent never approves a plan, even with its person's editor role.
-    expect(await approveRun(agent, run.id)).toMatchObject({ ok: false, status: 403 });
+    expect(await approveRun(agent, run.id, { planHash })).toMatchObject({ ok: false, status: 403 });
 
     expect((await cancelRun(owner, run.id)).ok).toBe(true);
-    expect(await approveRun(owner, run.id)).toMatchObject({ ok: false, status: 409, refusal: { code: 'run_cancelled' } });
+    expect(await approveRun(owner, run.id, { planHash })).toMatchObject({ ok: false, status: 409, refusal: { code: 'run_cancelled' } });
   });
 
   it('cancel stops further ops', async () => {
@@ -93,11 +94,12 @@ describe('agent runs', () => {
 
     for (let i = 0; i < 100; i++) {
       const run = await startedRun(id, agent, `race ${i}`);
-      await updateRunStatus(agent, run.id, { plan: 'A plan.' });
+      const planned = await updateRunStatus(agent, run.id, { plan: 'A plan.' });
+      const planHash = planned.ok ? planned.value.planHash : null;
       const [applied, cancelled, approved] = await Promise.all([
         jitter().then(() => applyOps(id, agent, { baseVersion: 0, runId: run.id, ops: [addOne(`R${i} one`), addOne(`R${i} two`)] })),
         jitter().then(() => cancelRun(owner, run.id)),
-        jitter().then(() => approveRun(owner, run.id)),
+        jitter().then(() => approveRun(owner, run.id, { planHash })),
       ]);
       expect(cancelled.ok).toBe(true);
       if (!applied.ok) throw new Error(JSON.stringify(applied));
@@ -137,8 +139,8 @@ describe('agent runs', () => {
     const held = results.filter((r) => r.outcomes.every((o) => o.refusal?.code === 'approval_required'));
     expect([passed.length, held.length]).toEqual([1, 1]);
 
-    await updateRunStatus(agent, run.id, { plan: 'Add the remaining sections.' });
-    expect((await approveRun(owner, run.id)).ok).toBe(true);
+    const planned = await updateRunStatus(agent, run.id, { plan: 'Add the remaining sections.' });
+    expect((await approveRun(owner, run.id, { planHash: planned.ok ? planned.value.planHash : null })).ok).toBe(true);
     const after = await ops(id, agent, { runId: run.id, ops: batch('z') });
     expect(after.outcomes.every((o) => o.status === 'applied')).toBe(true);
   });
@@ -170,6 +172,77 @@ describe('agent runs', () => {
     const v = await versions(a, agent);
     const deleted = await ops(a, agent, { ops: [{ op: 'delete', target: main('x'), expectVersion: v.x }] });
     expect(deleted.outcomes[0]!.status).toBe('applied');
+  });
+});
+
+describe('runs act for their requester', () => {
+  async function commenterSetup() {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('a', 'Alpha')]);
+    await db.execute(sql`INSERT INTO users (id, email, display_name) VALUES ('collab-user', 'c@example.com', 'Collab') ON CONFLICT DO NOTHING`);
+    for (const [userId, role] of [['collab-user', 'commenter'], [agent.id, 'editor']] as const) {
+      await db.execute(sql`
+        INSERT INTO document_collaborators (id, document_id, user_id, role, granted_by)
+        VALUES (gen_random_uuid(), ${id}, ${userId}, ${role}, 'mock-user-1')
+      `);
+    }
+    const commenter: AuthUser = { id: 'collab-user', email: 'c@example.com', displayName: 'Collab', kind: 'person', viaUserId: null };
+    return { agent, id, commenter };
+  }
+
+  it("a commenter's run can't apply a direct edit", async () => {
+    const { agent, id, commenter } = await commenterSetup();
+    const asked = await requestRun(commenter, id, { agentId: agent.id, request: ask() });
+    if (!asked.ok) throw new Error(asked.refusal.message);
+    await claimRun(agent, asked.value.id);
+
+    const out = await applyOps(id, agent, { baseVersion: 0, runId: asked.value.id, ops: [addOne('Not allowed')] });
+    expect(out).toMatchObject({ ok: false, status: 403, refusal: { code: 'requester_cannot_edit' } });
+    expect(await markdownOf(id, agent)).toEqual(['Alpha']);
+  });
+
+  it('a user who lost access can\'t retry', async () => {
+    const { agent, id, commenter } = await commenterSetup();
+    const asked = await requestRun(commenter, id, { agentId: agent.id, request: ask() });
+    if (!asked.ok) throw new Error(asked.refusal.message);
+    await claimRun(agent, asked.value.id);
+    await finishRun(agent, asked.value.id, { error: 'stopped' });
+    // The agent itself never retries.
+    expect(await retryRun(agent, asked.value.id)).toMatchObject({ ok: false, status: 403 });
+
+    await db.execute(sql`DELETE FROM document_collaborators WHERE document_id = ${id} AND user_id = 'collab-user'`);
+    expect(await retryRun(commenter, asked.value.id)).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it('approving a stale plan fails', async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc();
+    const run = await startedRun(id, agent);
+    const first = await updateRunStatus(agent, run.id, { plan: 'Trim the intro.' });
+    const staleHash = first.ok ? first.value.planHash : null;
+    await updateRunStatus(agent, run.id, { plan: 'Delete every section.' });
+
+    expect(await approveRun(owner, run.id, { planHash: staleHash })).toMatchObject({ ok: false, status: 409, refusal: { code: 'plan_changed' } });
+    const runs = await listDocumentRuns(owner, id);
+    expect(runs.ok && runs.value[0]!.planApprovedBy).toBeNull();
+  });
+
+  it("a reader doesn't see another user's unsent text", async () => {
+    const agent = await makeAgent();
+    const id = await createLiveDoc({ visibility: 'org' });
+    await db.execute(sql`INSERT INTO users (id, email, display_name) VALUES ('reader-user', 'r@example.com', 'Reader') ON CONFLICT DO NOTHING`);
+    const reader: AuthUser = { id: 'reader-user', email: 'r@example.com', displayName: 'Reader', kind: 'person', viaUserId: null };
+    await requestRun(owner, id, {
+      agentId: agent.id,
+      request: { ...ask('Private ask'), viewer: { tabId: 'main', selectedBlockIds: [], cursorBlockId: null, unsentText: 'my draft' } },
+    });
+
+    const seen = await listDocumentRuns(reader, id);
+    expect(seen.ok && seen.value[0]).toMatchObject({ status: 'queued', request: null });
+    expect(JSON.stringify(seen)).not.toContain('my draft');
+    const mine = await listDocumentRuns(owner, id);
+    expect(mine.ok && mine.value[0]!.request!.viewer.unsentText).toBe('my draft');
   });
 });
 

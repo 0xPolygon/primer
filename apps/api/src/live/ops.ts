@@ -87,7 +87,9 @@ export async function applyOps(documentId: string, actor: AuthUser, raw: unknown
   let hooks: RunHooks | null = null;
   if (typeof req.runId === 'string') {
     const out = await runHooks(documentId, actor, req.runId);
-    if ('code' in out) return { ok: false, status: out.code === 'not_found' ? 404 : 409, refusal: out };
+    if ('code' in out) {
+      return { ok: false, status: out.code === 'not_found' ? 404 : out.code === 'requester_cannot_edit' ? 403 : 409, refusal: out };
+    }
     hooks = out;
   }
 
