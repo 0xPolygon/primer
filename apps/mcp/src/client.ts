@@ -1,5 +1,7 @@
 import type {
   Target,
+  LiveDocDTO,
+  LiveReadFormat,
   AddVersionResponse,
   CollaboratorRole,
   CommentDTO,
@@ -172,6 +174,26 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/threads/${encodeURIComponent(threadId)}/comments`,
       json: { body },
+    });
+  }
+
+  /** Reads a live document's blocks (see primer_get_doc). */
+  getLiveDoc(
+    documentId: string,
+    opts: { format?: LiveReadFormat; tabId?: string; since?: number; range?: { from: Target; to: Target } } = {},
+  ): Promise<LiveDocDTO> {
+    const q = new URLSearchParams();
+    if (opts.format) q.set('format', opts.format);
+    if (opts.tabId) q.set('tabId', opts.tabId);
+    if (opts.since !== undefined) q.set('since', String(opts.since));
+    if (opts.range) {
+      q.set('from', opts.range.from.blockId);
+      q.set('to', opts.range.to.blockId);
+    }
+    const qs = q.toString();
+    return this.request<LiveDocDTO>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/live${qs ? `?${qs}` : ''}`,
     });
   }
 

@@ -27,6 +27,7 @@ import { registerUserRoutes } from './routes/users.ts';
 import { registerDeviceRoutes } from './routes/device.ts';
 import { registerTokenRoutes } from './routes/tokens.ts';
 import { registerAgentRoutes } from './routes/agents.ts';
+import { registerLiveRoutes } from './routes/live.ts';
 import { parseAdminEmails } from './auth/admin.ts';
 import { registerCollaboratorRoutes } from './routes/collaborators.ts';
 import { registerExternalShareAdminRoutes } from './routes/externalShareAdmin.ts';
@@ -111,6 +112,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerCompanionRoute(app);
   registerMermaidAssetRoute(app);
   registerThreadRoutes(app, deps);
+  registerLiveRoutes(app);
   registerCommentRoutes(app, deps);
   registerEventRoutes(app, { resolver });
   registerFolderRoutes(app);

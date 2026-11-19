@@ -502,6 +502,31 @@ export interface Reconciliation {
   outcomes: EditOutcome[];
 }
 
+/** The format of a live read's blocks. */
+export type LiveReadFormat = 'markdown' | 'html' | 'json';
+
+/** What the person who asked an agent was looking at (M4 runs). */
+export interface ViewerContext {
+  tabId: string;
+  selectedBlockIds: string[];
+  cursorBlockId: string | null;
+  unsentText?: string;
+}
+
+/** GET /api/documents/:docId/live: one tab's blocks, flattened depth-first
+ *  (children follow their parent with `depth + 1`). With `since`, only the
+ *  blocks changed after that docVersion, plus the ids of deleted ones. */
+export interface LiveDocDTO {
+  documentId: string;
+  docVersion: number;
+  at: 'live';
+  format: LiveReadFormat;
+  tabId: string;
+  blocks: LiveBlockDTO[];
+  deletedIds?: string[];
+  viewer?: ViewerContext;
+}
+
 /** POST /api/documents/:docId/checkpoints */
 export interface CreateCheckpointRequest {
   note?: string | null;
