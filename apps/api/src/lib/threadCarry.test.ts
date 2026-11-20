@@ -204,10 +204,31 @@ describe('selections across block boundaries', () => {
         for (const anchor of [withOffsets, noOffsets]) {
           const placed = placeTextRange(anchor, origin, target);
           expect(placed, `${c.name} on ${html}`).not.toBeNull();
-          // The stored quote is the live text, so the companion can find it.
-          expect(target.text).toContain(placed!.selectorText);
+          // The stored quote is the live DOM text (no block-boundary spaces), so the companion can find it.
+          const dom = [...target.text].filter((_, i) => !target.synthetic[i]).join('');
+          expect(dom).toContain(placed!.selectorText);
           expect(placed!.selectorText.replace(/\s/g, '')).toBe(c.text.replace(/\s/g, ''));
         }
+      }
+    });
+  }
+
+  // Word boundaries are part of the quote: a split or a join is a changed text.
+  const wording = [
+    { name: 'a split word joined', before: 'Please approve now here today.', quote: 'now here', after: 'Please approve nowhere today.' },
+    { name: 'a joined word split', before: 'Please approve nowhere today.', quote: 'nowhere', after: 'Please approve now here today.' },
+    { name: 'a space inserted in a word', before: 'Ship the roll out today.', quote: 'roll out', after: 'Ship the rollout today.' },
+  ];
+  for (const w of wording) {
+    it(`reports ${w.name} as context changed`, () => {
+      const origin = bodyText(`<p>${w.before}</p>`);
+      const start = origin.text.indexOf(w.quote);
+      const target = bodyText(`<p>${w.after}</p>`);
+      for (const anchor of [
+        { type: 'text-range' as const, selectorText: w.quote, start, end: start + w.quote.length },
+        { type: 'text-range' as const, selectorText: w.quote },
+      ]) {
+        expect(placeTextRange(anchor, origin, target)).toBeNull();
       }
     });
   }
