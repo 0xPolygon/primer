@@ -342,7 +342,7 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
         try {
           const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'primer-'));
           const savedTo = path.join(dir, 'content.html');
-          fs.writeFileSync(savedTo, content, { encoding: 'utf8', flag: 'wx' });
+          fs.writeFileSync(savedTo, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
           return ok({ ...meta, savedTo });
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
