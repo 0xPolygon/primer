@@ -15,6 +15,7 @@ import { buildMcpToolHandlers } from '../mcp/tools.ts';
 import type { EventRowDTO, EventsListResponse } from '@polygonlabs/primer-api-types';
 import { asUser, asUserJson } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
+import { createLegacyDocument } from '../testing/legacy.ts';
 
 type App = ReturnType<typeof createApp>;
 const OWNER = 'mock-user-1';
@@ -157,10 +158,10 @@ describe('lifecycle events with threads across versions', () => {
     });
   });
 
-  it('a publish over REST or MCP carries open threads and writes its version row in the same commit', async () => {
+  it('an HTML version makes a legacy document a live page, its threads and version row in the same commit', async () => {
     await withApp(async (app, storage) => {
       const mcp = buildMcpToolHandlers({ storage, notifier: new NoopNotifier(), apiBaseUrl: 'https://primer.example.com' });
-      const { documentId, versionId } = await uploadFixture(app);
+      const { documentId, versionId } = await createLegacyDocument(storage, '<html><body><h1>fixture</h1></body></html>', { uploaderId: OWNER });
       const thread = await newThread(app, versionId, OWNER);
 
       const fd = new FormData();
@@ -175,15 +176,12 @@ describe('lifecycle events with threads across versions', () => {
       expect(v3.isError).toBeFalsy();
       const v3Id = (JSON.parse(v3.content[0].text) as { versionId: string }).versionId;
 
+      // The legacy document's open thread is listed on every version since.
       const placements = await db.select().from(threadPlacements).where(eq(threadPlacements.threadId, thread.id));
-      const byVersion = new Map(placements.map((p) => [p.versionId, p.anchor]));
-      expect([...byVersion.keys()].sort()).toEqual([versionId, v2Id, v3Id].sort());
-      expect(byVersion.get(v2Id)).toMatchObject({ type: 'text-range', selectorText: 't' });
-      expect(byVersion.get(v3Id)).toMatchObject({ type: 'text-range', selectorText: 't' });
+      expect(placements.map((p) => p.versionId).sort()).toEqual([versionId, v2Id, v3Id].sort());
 
       const rows = await primerRows(app, documentId, READER);
       expect(rows.map((r) => [r.type, r.versionId])).toEqual([
-        ['version.published', versionId],
         ['comment.created', versionId],
         ['version.published', v2Id],
         ['version.published', v3Id],

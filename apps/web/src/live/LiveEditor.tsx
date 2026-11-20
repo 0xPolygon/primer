@@ -28,6 +28,7 @@ import { useThreadEvents } from './threadEvents.ts';
 import { SuggestionsPanel } from './SuggestionsPanel.tsx';
 import { useBlockServices, type ChoiceStore } from './blockServices.ts';
 import { DecisionRegister } from './DecisionRegister.tsx';
+import { PageView } from './PageView.tsx';
 import './blocks.css';
 
 export type LiveEditorProps = {
@@ -73,8 +74,22 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // Choice and task blocks reach the API through these (people pick; the
   // browser is always a person's session).
   const { services, store } = useBlockServices(props.documentId, { canPick: !props.readOnly, canVote: props.canVote });
+  // Page blocks render their frame and overlay through the block services.
+  const { live, documentId, readOnly, theme, userId, role, userName, canComment } = props;
+  const withPages = useMemo(() => {
+    const context = {
+      doc: live.doc,
+      documentId,
+      tabId: active,
+      canEdit: !readOnly,
+      theme,
+      viewer: { id: userId, isOwner: role === 'owner', canComment, name: userName },
+    };
+    const BoundPageView = (p: { blockId: string; title: string }) => <PageView {...context} {...p} />;
+    return { ...services, PageView: BoundPageView };
+  }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName, canComment]);
   return (
-    <PrimerBlocksContext.Provider value={services}>
+    <PrimerBlocksContext.Provider value={withPages}>
       <div className="flex h-full flex-col" data-live-editor={props.documentId}>
         <ConnectionStatus provider={props.live.provider} />
         <AgentStatus provider={props.live.provider} />

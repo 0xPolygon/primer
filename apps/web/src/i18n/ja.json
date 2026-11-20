@@ -621,5 +621,8 @@
   "suggestions.kindReplace": "変更",
   "suggestions.kindInsert": "追加",
   "suggestions.kindDelete": "削除",
-  "suggestions.kindMove": "移動"
+  "suggestions.kindMove": "移動",
+  "overlay.editText": "ページのテキストを編集",
+  "overlay.editBlock": "ブロックを編集",
+  "page.readOnlyText": "このテキストはページのスクリプトが描画しているため、ここでは編集できません。"
 }

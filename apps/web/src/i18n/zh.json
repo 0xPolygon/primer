@@ -621,5 +621,8 @@
   "suggestions.kindInsert": "添加",
   "suggestions.kindDelete": "删除",
   "suggestions.kindMove": "移动",
-  "request.failed": "请求失败（{status}）。"
+  "request.failed": "请求失败（{status}）。",
+  "overlay.editText": "编辑页面文本",
+  "overlay.editBlock": "编辑块",
+  "page.readOnlyText": "此文本由页面脚本绘制，无法在此编辑。"
 }

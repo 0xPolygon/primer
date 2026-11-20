@@ -16,6 +16,7 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import type { Storage } from '../storage/types.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
 import { publishDocument, type PublishInput } from './publish.ts';
+import { createLegacyDocument } from '../testing/legacy.ts';
 
 async function withStorage<T>(fn: (storage: FilesystemStorage) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-publish-test-'));
@@ -142,7 +143,7 @@ describe('publishDocument', () => {
   it('legacy Markdown doc converts and re-anchors open threads by quote', async () => {
     await withStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
-      const legacy = await publishOk(storage, html('<p>Revenue grew in March.</p><p>Churn fell.</p>'));
+      const legacy = await createLegacyDocument(storage, '<!doctype html><html><body><p>Revenue grew in March.</p><p>Churn fell.</p></body></html>');
       const thread = async (quote: string) => {
         const res = await app.request(`/api/versions/${legacy.versionId}/threads`, {
           method: 'POST',

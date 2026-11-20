@@ -19,3 +19,4 @@ export {
 export { dropdownOptions } from './chips.tsx';
 export { pendingBlock } from './pending.tsx';
 export { BLOCK_TEXT_EN, type BlockText } from './text.ts';
+export { pageBlock } from './page.tsx';

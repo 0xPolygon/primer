@@ -214,7 +214,7 @@ function prepare(doc: Y.Doc, plan: Plan, suggestMode: boolean) {
   /** Diffs a scratch transform into a stored suggestion; false when it
    *  changes no block. */
   const propose = (index: number, edit: PlannedEdit, scratch: Transform, moved: Set<string>, conflict: boolean): boolean => {
-    const edits = forwardDiff(scratch.before, scratch.doc, moved, edit.target.tabId);
+    const edits = forwardDiff(scratch.before, scratch.doc, moved, edit.target);
     if (edits.length === 0) return false;
     const id = uuidv7();
     proposals.push({ id, tabId: edit.target.tabId, edits, conflict });
@@ -380,11 +380,14 @@ function blockDiff(before: PmNode, after: PmNode, moved: Set<string>) {
  * content version), moved ones `move`. Only the topmost block of a created or
  * removed subtree is recorded.
  */
-function forwardDiff(before: PmNode, after: PmNode, moved: Set<string>, tabId: string): SuggestedEdit[] {
+function forwardDiff(before: PmNode, after: PmNode, moved: Set<string>, at: Target): SuggestedEdit[] {
   const b = indexBlocks(before);
   const a = indexBlocks(after);
   const out: SuggestedEdit[] = [];
-  const target = (blockId: string): Target => ({ tabId, blockId });
+  // Page text keeps its fragment: its one paragraph has the page block's id
+  // (page/text.ts), so the target names both the fragment and the block.
+  const sub = at.pid ? { pid: at.pid } : {};
+  const target = (blockId: string): Target => ({ tabId: at.tabId, blockId, ...sub });
   for (const [id, old] of b) {
     const now = a.get(id);
     if (!now) {

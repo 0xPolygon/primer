@@ -67,7 +67,7 @@ describe('POST /api/upload — happy path', () => {
         if (done) break;
         combined += new TextDecoder().decode(value);
       }
-      expect(combined).toContain('<h1>Hi</h1>');
+      expect(combined).toContain('<h1 data-pid="p1">Hi</h1>');
       expect(combined).not.toContain('<iframe');
       expect(combined).toContain('<script src="/companion/v1.js"');
       expect(combined).toContain(STORAGE_POLYFILL_JS);

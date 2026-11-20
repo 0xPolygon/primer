@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, type ComponentType } from 'react';
 import { BLOCK_TEXT_EN, type BlockText } from './text.ts';
 
 /** One choice's votes, as this viewer sees them. */
@@ -64,6 +64,8 @@ export type PrimerBlockServices = {
   useEmbed(blockId: string, url: string, documentId: string): EmbedState;
   /** The blocks' strings in the viewer's locale. */
   text: BlockText;
+  /** Renders a page block's frame and overlay (the web editor). */
+  PageView?: ComponentType<{ blockId: string; title: string }>;
 };
 
 export const PrimerBlocksContext = createContext<PrimerBlockServices | null>(null);

@@ -8,6 +8,7 @@ import { sourceBlock } from './source.tsx';
 import { pendingBlock } from './pending.tsx';
 import { choiceBlock, choiceOptionBlock } from './choice.tsx';
 import { taskBlock } from './task.tsx';
+import { pageBlock } from './page.tsx';
 import { calloutBlock } from './callout.tsx';
 import { columnBlock, columnListBlock } from './columns.tsx';
 import { embedBlock } from './embed.tsx';
@@ -28,6 +29,7 @@ export const primerSchema = BlockNoteSchema.create({
     choice: choiceBlock(),
     choiceOption: choiceOptionBlock(),
     task: taskBlock(),
+    page: pageBlock(),
     callout: calloutBlock(),
     columnList: columnListBlock(),
     column: columnBlock(),

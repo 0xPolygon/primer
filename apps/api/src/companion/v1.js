@@ -423,6 +423,7 @@
 
     features = Array.isArray(incoming.features) ? incoming.features.filter((f) => typeof f === 'string') : [];
     flushRecordCalls();
+    startPage();
 
     if (Array.isArray(incoming.anchors)) {
       knownAnchors = incoming.anchors;
@@ -520,6 +521,12 @@
       case 'records_result':
         settleRecordCall(msg);
         break;
+      case 'set_page_texts':
+        if (hasFeature('page-text') && msg.texts && typeof msg.texts === 'object') setPageTexts(msg.texts);
+        break;
+      case 'set_embeds':
+        if (hasFeature('embeds') && msg.embeds && typeof msg.embeds === 'object') setEmbeds(msg.embeds);
+        break;
       case 'records_changed':
         // Others changed shared records. Untrusted data like any record:
         // the page re-reads what it shows (or catches up with changesSince).
@@ -573,6 +580,131 @@
       return;
     }
     port.postMessage({ type: 'open_external', url });
+  }
+
+  // ── Page text and Primer blocks (features `page-text`, `embeds`) ───
+  // A live page's text lives in Primer's document, not in the page: people
+  // edit it in an editor Primer draws over the element, in its own window,
+  // so no keystroke reaches the page's scripts. The bridge only reports each
+  // stamped element (`data-pid`) with its DOM text and rect, reports clicks,
+  // and sets text the host sends, as text: `\n` becomes <br>, nothing else
+  // is ever parsed. `<primer-*>` blocks (`data-embed-id`) show the static HTML
+  // the host renders from the document's block state.
+  const EMBED_SELECTOR = 'primer-table,primer-code,primer-mermaid,primer-math';
+
+  function hasFeature(name) {
+    return features !== null && features.indexOf(name) !== -1;
+  }
+
+  /** The stamped elements, outside embeds. */
+  function pidElements() {
+    return Array.prototype.filter.call(document.querySelectorAll('[data-pid]'), (el) => !el.closest(EMBED_SELECTOR));
+  }
+
+  function embedElements() {
+    return Array.prototype.filter.call(document.querySelectorAll(EMBED_SELECTOR), (el) => el.hasAttribute('data-embed-id'));
+  }
+
+  /** An element's text by the server's rule (page/stamp.ts pageText): <br>
+   *  is a newline; outside <pre> each line's whitespace collapses. */
+  function pidText(el) {
+    let raw = '';
+    el.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) raw += node.nodeValue;
+      else if (node.nodeName === 'BR') raw += '\n';
+      else if (node.nodeType === Node.ELEMENT_NODE) raw += node.textContent || '';
+    });
+    if (el.closest('pre')) return raw;
+    return raw
+      .split('\n')
+      .map((line) => line.replace(/[ \t\r\f]+/g, ' ').trim())
+      .join('\n');
+  }
+
+  function rectOf(el) {
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  }
+
+  let pageStarted = false;
+  let rectsQueued = false;
+
+  function startPage() {
+    if (pageStarted || !(hasFeature('page-text') || hasFeature('embeds'))) return;
+    pageStarted = true;
+    // After the page's own load handlers ran, so text a script draws on load
+    // is reported as drawn.
+    const report = () =>
+      setTimeout(() => {
+        if (!port) return;
+        port.postMessage({
+          type: 'page_elements',
+          elements: hasFeature('page-text')
+            ? pidElements().map((el) => ({ pid: el.getAttribute('data-pid'), text: pidText(el), rect: rectOf(el) }))
+            : [],
+          embeds: hasFeature('embeds')
+            ? embedElements().map((el) => ({ embedId: el.getAttribute('data-embed-id'), rect: rectOf(el) }))
+            : [],
+        });
+        window.addEventListener('scroll', queuePageRects, true);
+        window.addEventListener('resize', queuePageRects);
+        document.addEventListener('click', onPageClick, true);
+      }, 0);
+    if (document.readyState === 'complete') report();
+    else window.addEventListener('load', report, { once: true });
+  }
+
+  function queuePageRects() {
+    if (rectsQueued) return;
+    rectsQueued = true;
+    requestAnimationFrame(() => {
+      rectsQueued = false;
+      if (!port) return;
+      const rects = {};
+      if (hasFeature('page-text')) pidElements().forEach((el) => { rects[el.getAttribute('data-pid')] = rectOf(el); });
+      const embedRects = {};
+      if (hasFeature('embeds')) embedElements().forEach((el) => { embedRects[el.getAttribute('data-embed-id')] = rectOf(el); });
+      port.postMessage({ type: 'page_rects', rects, embedRects });
+    });
+  }
+
+  function onPageClick(event) {
+    if (!port || !(event.target instanceof Element)) return;
+    const embed = hasFeature('embeds') ? event.target.closest(EMBED_SELECTOR) : null;
+    if (embed && embed.hasAttribute('data-embed-id')) {
+      port.postMessage({ type: 'embed_clicked', embedId: embed.getAttribute('data-embed-id') });
+      return;
+    }
+    const el = hasFeature('page-text') ? event.target.closest('[data-pid]') : null;
+    if (el) port.postMessage({ type: 'pid_clicked', pid: el.getAttribute('data-pid') });
+  }
+
+  function setPageTexts(texts) {
+    Object.keys(texts).forEach((pid) => {
+      const text = texts[pid];
+      if (typeof text !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(pid)) return;
+      document.querySelectorAll('[data-pid="' + pid + '"]').forEach((el) => {
+        if (el.closest(EMBED_SELECTOR) || pidText(el) === text) return;
+        el.textContent = '';
+        text.split('\n').forEach((line, i) => {
+          if (i > 0) el.appendChild(document.createElement('br'));
+          if (line) el.appendChild(document.createTextNode(line));
+        });
+      });
+    });
+    queuePageRects();
+  }
+
+  function setEmbeds(embeds) {
+    Object.keys(embeds).forEach((id) => {
+      const html = embeds[id];
+      if (typeof html !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return;
+      embedElements().forEach((el) => {
+        if (el.getAttribute('data-embed-id') === id) el.innerHTML = html;
+      });
+    });
+    renderAllMermaidBlocks().catch((e) => log.warn('mermaid embed render error:', e && e.message ? e.message : e));
+    queuePageRects();
   }
 
   // ── Shared records (feature `records`) ────────────────────────────

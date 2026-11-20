@@ -1,18 +1,22 @@
 import * as Y from 'yjs';
 import type { Node as PmNode } from '@tiptap/pm/model';
 import { sql } from 'drizzle-orm';
-import type { LiveBlockDTO, LiveDocDTO, LiveReadFormat, Refusal, Target, ViewerContext } from '@polygonlabs/primer-api-types';
+import type { LiveBlockDTO, LiveDocDTO, LivePageDTO, LiveReadFormat, Refusal, Target, ViewerContext } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
-import { blockVersion } from './blocks.ts';
+import { blockVersion, findBlock } from './blocks.ts';
 import { serverEditor, type PrimerBlock } from './editor.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
 import type { AppliedBlock } from './pipeline.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
-import { MAIN_TAB, tabFragmentName, tabsOf } from './reach.ts';
+import { MAIN_TAB, fragmentFor, pageBlocks, tabFragmentName, tabsOf } from './reach.ts';
+import { fenceUntrusted } from '../lib/untrusted.ts';
+import { loadStamped } from '../page/publish.ts';
+import { readPidText } from '../page/text.ts';
+import type { Storage } from '../storage/types.ts';
 
 export type LiveReadOptions = {
   format: LiveReadFormat;
@@ -23,6 +27,8 @@ export type LiveReadOptions = {
   tabId?: string;
   /** Fills `viewer` from the run's request (what the asker was looking at). */
   viewer?: ViewerContext;
+  /** Where page sources are stored; with it, page blocks are listed in `pages`. */
+  storage?: Storage;
 };
 
 export type LiveReadResult = { ok: true; value: LiveDocDTO } | { ok: false; status: 400 | 404; refusal: Refusal };
@@ -92,6 +98,10 @@ export async function getLiveDoc(documentId: string, actor: AuthUser, opts: Live
   const blocks: LiveBlockDTO[] = [];
   for (const entry of flat) blocks.push(await toDTO(entry, opts.format));
   const value: LiveDocDTO = { documentId, docVersion, at: 'live', format: opts.format, tabId, blocks };
+  if (opts.storage && !opts.since && !opts.range) {
+    const pages = await readPages(opts.storage, documentId, tabId);
+    if (pages.length > 0) value.pages = pages;
+  }
   if (deletedIds) value.deletedIds = deletedIds;
   if (opts.viewer) value.viewer = opts.viewer;
   return { ok: true, value };
@@ -174,4 +184,37 @@ export async function appliedBlockDTO(applied: AppliedBlock, tabId: string): Pro
     depth: applied.depth,
     parentId: applied.parentId,
   };
+}
+
+/** Pages and pids an agent read lists at most. */
+const MAX_PAGES = 20;
+const MAX_PIDS = 5000;
+
+/** The tab's page blocks for an agent: the stamped source, and each pid's
+ *  current text (fenced: people write it) with its version. Page refs come
+ *  from the editor-writable document, so a page whose source can't be read
+ *  is listed as unavailable and never fails the read. */
+async function readPages(storage: Storage, documentId: string, tabId: string): Promise<LivePageDTO[]> {
+  const refs = await withDoc(documentId, (ydoc) =>
+    pageBlocks(ydoc)
+      .filter((p) => p.tabId === tabId)
+      .slice(0, MAX_PAGES)
+      .map((p) => ({
+        ref: p,
+        texts: p.pids.slice(0, MAX_PIDS).map((pid) => {
+          const target: Target = { tabId, blockId: p.blockId, pid };
+          const at = findBlock(fragmentDoc(fragmentFor(ydoc, target)), p.blockId);
+          return { target, text: fenceUntrusted(readPidText(ydoc, target), 'pagetext'), version: at ? blockVersion(at.node) : '' };
+        }),
+      })),
+  );
+  const sources = new Map<string, Promise<string | null>>();
+  const out: LivePageDTO[] = [];
+  for (const { ref, texts } of refs) {
+    if (!sources.has(ref.sourceKey)) sources.set(ref.sourceKey, loadStamped(storage, documentId, ref));
+    const source = await sources.get(ref.sourceKey)!;
+    const target = { tabId, blockId: ref.blockId };
+    out.push(source === null ? { target, source: null, texts: [] } : { target, source, texts });
+  }
+  return out;
 }

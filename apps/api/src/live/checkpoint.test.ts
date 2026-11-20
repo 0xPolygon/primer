@@ -20,6 +20,7 @@ import { exportMarkdown } from './export.ts';
 import { makeAgent, withLiveDoc } from './live.testlib.ts';
 import { originFor } from './origin.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
+import { createLegacyDocument } from '../testing/legacy.ts';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -138,7 +139,7 @@ describe('checkpoints', () => {
   it('checkpoint view keeps its discussion context', async () => {
     await withStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
-      const legacy = await publish(storage, { content: '<!doctype html><html><body><p>Ship the editor first.</p></body></html>', format: 'html' });
+      const legacy = await createLegacyDocument(storage, '<!doctype html><html><body><p>Ship the editor first.</p></body></html>');
       const created = await app.request(`/api/versions/${legacy.versionId}/threads`, {
         method: 'POST',
         headers: { ...CSRF_HEADERS, 'content-type': 'application/json' },
@@ -167,7 +168,7 @@ describe('checkpoints', () => {
   it('versions from before the document went live are listed as not bundled', async () => {
     await withStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
-      const legacy = await publish(storage, { content: '<!doctype html><html><body><p>Before live.</p></body></html>', format: 'html' });
+      const legacy = await createLegacyDocument(storage, '<!doctype html><html><body><p>Before live.</p></body></html>');
       const live = await publish(storage, { content: SOURCE, format: 'markdown', documentId: legacy.documentId });
       const list = (await (await app.request(`/api/documents/${legacy.documentId}/versions`)).json()) as {
         versions: { id: string; versionNumber: number; bundled?: boolean }[];

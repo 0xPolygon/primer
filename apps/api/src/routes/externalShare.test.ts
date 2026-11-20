@@ -179,7 +179,7 @@ describe('external share public routes', () => {
       expect(content.headers.get('referrer-policy')).toBe('no-referrer');
       expect(content.headers.get('x-robots-tag')).toBe('noindex');
       expect(content.headers.get('cache-control')).toBe('private, no-store');
-      expect(await content.text()).toContain('<h1>External Deck</h1>');
+      expect(await content.text()).toContain('<h1 data-pid="p1">External Deck</h1>');
 
       const views = await db.select().from(externalViews).where(eq(externalViews.recipientId, f.recipientId));
       expect(views.length).toBe(1);

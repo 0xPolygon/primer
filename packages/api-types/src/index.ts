@@ -577,6 +577,19 @@ export interface LiveDocDTO {
   blocks: LiveBlockDTO[];
   deletedIds?: string[];
   viewer?: ViewerContext;
+  /** The tab's HTML pages: each page block's source (as published, with its
+   *  `data-pid`s: edit it and republish with the pids intact) and the current
+   *  text of each pid, people's text fenced as untrusted data, with the
+   *  version an `update` of that pid expects. At most 20 pages and 5,000
+   *  pids per page are listed. */
+  pages?: LivePageDTO[];
+}
+
+export interface LivePageDTO {
+  target: Target;
+  /** null when the page's source can't be read (the page is unavailable). */
+  source: string | null;
+  texts: { target: Target; text: string; version: string }[];
 }
 
 /** A block an agent writes: Markdown (several top-level nodes make several
@@ -1457,6 +1470,16 @@ export interface PageInfoResponse {
   documentId: string;
   versionId: string;
   policy: PagePolicy;
+}
+
+/** A live page block's frame binding (`GET /api/documents/:docId/pages/:blockId`):
+ *  `versionId` is the checkpoint that published the served source; `texts`
+ *  each pid's source text (the host marks pids a script redrew read-only);
+ *  `embeds` the page's Primer blocks. */
+export interface LivePageInfo extends PageInfoResponse {
+  blockId: string;
+  texts: Record<string, string>;
+  embeds: { embedId: string; kind: 'table' | 'code' | 'mermaid' | 'math' }[];
 }
 
 // ───────────────────── Choices, decisions and tasks ─────────────────────
