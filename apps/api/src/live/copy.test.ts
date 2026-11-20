@@ -408,6 +408,24 @@ describe('proposing a branch of a page or widget', () => {
     });
   });
 
+  it('a widget republished on the branch is refused and the parent widget stays as it was', async () => {
+    await withStorage(async (storage) => {
+      const src = await withWidget();
+      const out = await copyDocument(storage, owner, src.doc, 'branch');
+      if (!out.ok) throw new Error(out.refusal.message);
+      const [row] = await widgetRows(out.documentId);
+      const draft = await draftWidget(owner, out.documentId, { widgetId: row!.id, source: CHART, rows: [{ id: 'w1', signups: 300 }] });
+      if (!draft.ok) throw new Error(draft.refusal.message);
+      const published = await publishWidget(owner, draft.value.widgetId, draft.value.previewHash);
+      if (!published.ok) throw new Error(published.refusal.message);
+
+      const proposal = await propose(storage, out.documentId);
+      expect(proposal.outcomes.map((o) => [o.status, o.target.blockId])).toEqual([['conflict', src.blockId]]);
+      expect(await openSuggestions(src.doc)).toEqual([]);
+      expect(await widgetProps(src.doc)).toMatchObject({ widgetId: src.widgetId, hash: src.hash });
+    });
+  });
+
   it('a widget added on the branch is refused, even after a new paragraph', async () => {
     await withStorage(async (storage) => {
       const { parent, branch } = await branched(storage);

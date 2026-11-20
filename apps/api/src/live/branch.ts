@@ -6,7 +6,7 @@ import { v7 as uuidv7 } from 'uuid';
 import type { BlockPlace, ProposeBranchResponse, Refusal, Target } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
-import { documents } from '../db/schema.ts';
+import { documents, widgets as widgetsTable } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canEdit, canManage } from '../lib/permissions.ts';
@@ -24,6 +24,7 @@ import { fragmentName, pageBlocks, tabFragmentName, tabsOf, targetOfFragment, wi
 import { insertAt } from './undo.ts';
 import { isOwnSourceKey } from '../page/publish.ts';
 import { widgetBlocks } from '../widgets/bundle.ts';
+import { renderBoth, widgetIdPrefix } from '../widgets/render.ts';
 
 export type ProposeResult = { ok: true; value: ProposeBranchResponse } | { ok: false; status: 400 | 403 | 404; refusal: Refusal };
 
@@ -171,9 +172,10 @@ type Owned = { pageSources: Map<string, string>; widgetHashes: Map<string, strin
  * The branch's own page sources and widget rows → the parent's, by block id
  * against the base (the copy made them for the same blocks): a page whose
  * stamped source is still the copy of the base's maps to the base's key, a
- * widget to the base's row and hash. A page republished on the branch, and a
- * page or widget added there, names something only the branch has: those
- * blocks are refused rather than proposed.
+ * widget whose published row still renders, under the base's id, to the
+ * base's hash maps to the base's row and hash. A page or widget republished
+ * or added on the branch names something only the branch has: those blocks
+ * are refused rather than proposed.
  */
 async function ownedToParent(storage: Storage, branchId: string, parentId: string, baseDoc: Y.Doc, ids: Map<string, string>): Promise<Owned> {
   const owned: Owned = { pageSources: new Map(), widgetHashes: new Map(), refused: new Map() };
@@ -190,7 +192,7 @@ async function ownedToParent(storage: Storage, branchId: string, parentId: strin
   const baseWidgets = new Map(widgetBlocks(baseDoc).map((w) => [w.blockId, w]));
   for (const widget of widgets) {
     const base = baseWidgets.get(widget.blockId);
-    if (!base) {
+    if (!base || (await widgetHash(branchId, widget.widgetId, base.widgetId)) !== base.hash) {
       owned.refused.set(widget.blockId, branchOnlyEdit(widget, 'The widget'));
       continue;
     }
@@ -198,6 +200,18 @@ async function ownedToParent(storage: Storage, branchId: string, parentId: strin
     owned.widgetHashes.set(base.widgetId, base.hash);
   }
   return owned;
+}
+
+/** The hash the branch's widget row would publish under the parent's id
+ * (the copy re-rendered it under the branch's own). */
+async function widgetHash(branchId: string, widgetId: string, parentWidgetId: string): Promise<string> {
+  const [row] = await db
+    .select({ source: widgetsTable.publishedSource, rows: widgetsTable.rows })
+    .from(widgetsTable)
+    .where(sql`${widgetsTable.id} = ${widgetId} AND ${widgetsTable.documentId} = ${branchId}`);
+  if (!row?.source) return '';
+  const rendered = await renderBoth(row.source, (row.rows ?? []) as never, widgetIdPrefix(parentWidgetId));
+  return 'errors' in rendered ? '' : rendered.hash;
 }
 
 function branchOnlyEdit(block: { tabId?: string; blockId: string }, what: string): PlannedEdit {
