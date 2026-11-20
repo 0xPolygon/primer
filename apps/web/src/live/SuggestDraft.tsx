@@ -54,7 +54,7 @@ function staying(siblings: DraftBlock[], parentId: string | null, before: Map<st
  * blocks that exist there: a changed block is an update, a block under a new
  * parent or out of order among its siblings a move, a removed one a delete,
  * and new blocks (with their children) are added after their previous sibling,
- * else as their parent's first child, else before their next sibling.
+ * else as their parent's first child, else before the next sibling that stays.
  * `versions` are the blocks' versions at the start, so a block someone changed
  * since is a conflict to decide.
  */
@@ -69,7 +69,8 @@ export function draftOps(base: DraftBlock[], draft: DraftBlock[], versions: Map<
     const stays = staying(siblings, parentId, before);
     let previous: string | null = null;
     siblings.forEach((block, i) => {
-      const next = siblings.slice(i + 1).find((s) => before.has(s.id))?.id;
+      const later = siblings.slice(i + 1);
+      const next = (later.find((s) => stays.has(s.id)) ?? later.find((s) => before.has(s.id)))?.id;
       const place = (): [string, 'after' | 'firstChild' | 'before'] | null =>
         previous ? [previous, 'after'] : parentId ? [parentId, 'firstChild'] : next ? [next, 'before'] : null;
       const old = before.get(block.id);

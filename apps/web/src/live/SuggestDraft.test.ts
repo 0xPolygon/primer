@@ -32,6 +32,15 @@ describe('draftOps keeps structure', () => {
     expect(draftOps([a, b], [b, a], versions, 'main')).toEqual([{ op: 'move', target: at('a'), at: at('b'), position: 'after', expectVersion: 'va' }]);
   });
 
+  it('blocks dragged to the top are placed before a block that stays', () => {
+    const d = p('d', 'Delta');
+    const v = new Map([...versions, ['d', 'vd']]);
+    expect(draftOps([a, b, c, d], [d, c, a, b], v, 'main')).toEqual([
+      { op: 'move', target: at('d'), at: at('a'), position: 'before', expectVersion: 'vd' },
+      { op: 'move', target: at('c'), at: at('d'), position: 'after', expectVersion: 'vc' },
+    ]);
+  });
+
   it('an indent moves the block to be the first child of its new parent', () => {
     expect(draftOps([a, b, c], [nest(a, b), c], versions, 'main')).toEqual([
       { op: 'move', target: at('b'), at: at('a'), position: 'firstChild', expectVersion: 'vb' },

@@ -333,6 +333,17 @@ describe('suggested structure changes', () => {
     expect(await outline(id)).toEqual(['Beta', 'Alpha']);
   });
 
+  it('blocks dragged to the top, accepted in order', async () => {
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('a', 'Alpha'), paragraph('b', 'Beta'), paragraph('c', 'Gamma'), paragraph('d', 'Delta')]);
+    const v = await versions(id, owner);
+    await suggestAndAccept(id, [
+      { op: 'move', target: main('d'), at: main('a'), position: 'before', expectVersion: v.d },
+      { op: 'move', target: main('c'), at: main('d'), position: 'after', expectVersion: v.c },
+    ]);
+    expect(await outline(id)).toEqual(['Delta', 'Gamma', 'Alpha', 'Beta']);
+  });
+
   it('an indent', async () => {
     const id = await createLiveDoc();
     await seedBlocks(id, [paragraph('a', 'Alpha'), paragraph('b', 'Beta'), paragraph('c', 'Gamma')]);
