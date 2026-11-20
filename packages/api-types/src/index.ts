@@ -272,6 +272,8 @@ export interface DocumentDetailResponse {
   document: DocumentDetail;
   latestVersion: VersionSummary;
   myRole: ViewerRole;
+  /** Whether the viewer may start threads, reply and react (the server's `canComment`). */
+  canComment: boolean;
 }
 
 export interface CommentDTO {
