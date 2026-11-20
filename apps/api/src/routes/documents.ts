@@ -12,7 +12,7 @@ import type {
 import { docFiles, documents, versions, users } from '../db/schema.ts';
 import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/bundle.ts';
 import { currentPageHtml } from '../page/publish.ts';
-import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
+import { createCheckpoint, restoreCheckpoint, unchangedCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
 import { exportDecisions } from '../live/choices.ts';
 import { withLiveDocument } from '../live/instance.ts';
@@ -402,6 +402,7 @@ export function registerDocumentRoutes(
         createdAt: versions.createdAt,
         bundleKey: versions.bundleKey,
         docVersion: versions.docVersion,
+        automatic: versions.automatic,
       })
       .from(versions)
       .where(eq(versions.documentId, docId))
@@ -417,6 +418,7 @@ export function registerDocumentRoutes(
           createdAt: r.createdAt.toISOString(),
           bundled: r.bundleKey !== null,
           ...(r.docVersion !== null ? { docVersion: r.docVersion } : {}),
+          ...(r.automatic ? { automatic: true } : {}),
         })),
       },
       200
@@ -504,6 +506,11 @@ export function registerDocumentRoutes(
       note = typeof body.note === 'string' && body.note.trim().length > 0 ? body.note.trim().slice(0, 500) : null;
     }
     await ensureSigningKey(deps.storage);
+    // Unnamed and nothing changed since the latest checkpoint: that one stands.
+    if (note === null) {
+      const latest = await unchangedCheckpoint(docId);
+      if (latest) return c.json(latest, 200);
+    }
     const checkpoint: CheckpointResponse = await createCheckpoint(deps.storage, docId, c.get('user'), note);
     return c.json(checkpoint, 201);
   });

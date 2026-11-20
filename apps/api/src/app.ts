@@ -29,6 +29,7 @@ import { registerCatchUpRoutes } from './routes/catchup.ts';
 import { registerCitationRoutes } from './routes/citations.ts';
 import { registerPromoteRoutes } from './routes/promote.ts';
 import { registerMentionNotifications } from './live/mentions.ts';
+import { registerAutoCheckpoints } from './live/autoCheckpoint.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
 import { registerWidgetRoutes } from './routes/widgets.ts';
@@ -140,6 +141,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerCitationRoutes(app);
   registerPromoteRoutes(app, deps);
   registerMentionNotifications(deps.notifier);
+  registerAutoCheckpoints(deps.storage);
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
   registerLibraryRoute(app);
