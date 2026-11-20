@@ -27,6 +27,9 @@ import {
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
 import { publishDocument } from '../lib/publish.ts';
+import { proposeBranch } from '../live/branch.ts';
+import { copyDocument } from '../live/copy.ts';
+import { decideChangeSet } from '../live/suggest.ts';
 import { recheckAccess } from '../auth/revocation.ts';
 import { refusalResponse } from './upload.ts';
 
@@ -48,6 +51,9 @@ export function registerDocumentRoutes(
         deletedAt: documents.deletedAt,
         format: documents.format,
         agentMode: documents.agentMode,
+        branchOf: documents.branchOf,
+        forkedFrom: documents.forkedFrom,
+        isTemplate: documents.isTemplate,
         uploaderDisplayName: actorName,
       })
       .from(documents)
@@ -102,6 +108,9 @@ export function registerDocumentRoutes(
         externallyShared: Boolean(ext?.externallyShared),
         format: doc.format,
         agentMode: doc.agentMode,
+        branchOf: doc.branchOf,
+        forkedFrom: doc.forkedFrom,
+        isTemplate: doc.isTemplate,
       } satisfies DocumentDetail,
       latestVersion: {
         id: v.id,
@@ -130,9 +139,9 @@ export function registerDocumentRoutes(
     const docId = c.req.param('docId');
     const user = c.get('user');
 
-    let payload: { title?: unknown; description?: unknown; visibility?: unknown; agentMode?: unknown };
+    let payload: { title?: unknown; description?: unknown; visibility?: unknown; agentMode?: unknown; isTemplate?: unknown };
     try {
-      payload = (await c.req.json()) as { title?: unknown; description?: unknown; visibility?: unknown; agentMode?: unknown };
+      payload = (await c.req.json()) as typeof payload;
     } catch {
       return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
     }
@@ -140,7 +149,7 @@ export function registerDocumentRoutes(
     const hasTitle = Object.prototype.hasOwnProperty.call(payload, 'title');
     const hasDescription = Object.prototype.hasOwnProperty.call(payload, 'description');
 
-    const updates: { title?: string; description?: string | null; visibility?: 'org' | 'private'; agentMode?: AgentMode } = {};
+    const updates: { title?: string; description?: string | null; visibility?: 'org' | 'private'; agentMode?: AgentMode; isTemplate?: boolean } = {};
 
     if (hasTitle) {
       if (typeof payload.title !== 'string') {
@@ -200,8 +209,15 @@ export function registerDocumentRoutes(
       updates.agentMode = payload.agentMode;
     }
 
-    if (!hasTitle && !hasDescription && !hasVisibility && !hasAgentMode) {
-      return c.json({ error: 'invalid_body', message: 'Provide title, description, visibility or agentMode.' }, 400);
+    // Listed under Templates: the owner's call.
+    const hasTemplate = Object.prototype.hasOwnProperty.call(payload, 'isTemplate');
+    if (hasTemplate) {
+      if (typeof payload.isTemplate !== 'boolean') return c.json({ error: 'invalid_body', message: 'isTemplate must be a boolean' }, 400);
+      updates.isTemplate = payload.isTemplate;
+    }
+
+    if (!hasTitle && !hasDescription && !hasVisibility && !hasAgentMode && !hasTemplate) {
+      return c.json({ error: 'invalid_body', message: 'Provide title, description, visibility, agentMode or isTemplate.' }, 400);
     }
 
     const [existing] = await db
@@ -217,7 +233,7 @@ export function registerDocumentRoutes(
     }
     // Sub 1 wired this to canEdit. Sub 2: if the body includes any manage-only
     // field, require canManage instead.
-    const requiresManage = hasVisibility || hasAgentMode;
+    const requiresManage = hasVisibility || hasAgentMode || hasTemplate;
     if (requiresManage) {
       if (!canManage(eff)) return c.json({ error: 'forbidden' }, 403);
     } else {
@@ -236,6 +252,7 @@ export function registerDocumentRoutes(
         visibility: documents.visibility,
         createdAt: documents.createdAt,
         agentMode: documents.agentMode,
+        isTemplate: documents.isTemplate,
       })
       .from(documents)
       .where(eq(documents.id, docId));
@@ -255,6 +272,7 @@ export function registerDocumentRoutes(
         visibility: updated.visibility as 'org' | 'private',
         createdAt: updated.createdAt.toISOString(),
         agentMode: updated.agentMode,
+        isTemplate: updated.isTemplate,
       },
       200
     );
@@ -587,6 +605,31 @@ export function registerDocumentRoutes(
       },
     });
   });
+
+  // A private branch of a live document, and a fork (a remix, or a new
+  // document from a template): copies per C12 (live/copy.ts), owned by the
+  // caller. Reading the source is enough.
+  for (const kind of ['branch', 'fork'] as const) {
+    app.post(`/api/documents/:docId/${kind}`, async (c) => {
+      const body = (await c.req.json().catch(() => ({}))) as { title?: unknown };
+      const out = await copyDocument(deps.storage, c.get('user'), c.req.param('docId'), kind, body?.title);
+      return out.ok ? c.json({ documentId: out.documentId }, 201) : c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+    });
+  }
+
+  // A branch proposed back to its parent as one change set of suggestions.
+  app.post('/api/documents/:docId/propose', async (c) => {
+    const out = await proposeBranch(deps.storage, c.get('user'), c.req.param('docId'));
+    return out.ok ? c.json(out.value, 200) : c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+  });
+
+  // Every non-conflict suggestion of a change set, decided at once by a person.
+  for (const decision of ['accept', 'reject'] as const) {
+    app.post(`/api/change-sets/:id/${decision}`, async (c) => {
+      const out = await decideChangeSet(c.req.param('id'), c.get('user'), decision);
+      return out.ok ? c.json(out.value, 200) : c.json({ error: out.refusal.code, refusal: out.refusal }, out.status);
+    });
+  }
 
   // A file placed in a live document (image, video, audio, file blocks). The
   // document stores the opaque `primer-blob://<id>`, never a link.

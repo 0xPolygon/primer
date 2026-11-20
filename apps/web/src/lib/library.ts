@@ -2,7 +2,7 @@ import type { LibraryDocument } from '@polygonlabs/primer-api-types';
 
 export const FOLDER_UNCATEGORIZED = '' as const;
 
-export type Chip = 'all' | 'mine' | 'shared' | 'deleted';
+export type Chip = 'all' | 'mine' | 'shared' | 'templates' | 'deleted';
 export type SortKey = 'activity' | 'uploaded' | 'title-asc' | 'title-desc';
 
 export interface FilterOpts {
@@ -42,6 +42,9 @@ function matchesChip(d: LibraryDocument, chip: Chip): boolean {
     case 'shared':
       // Org docs shared with the caller via link (opened, not owned/collab).
       return d.ownership === 'org';
+    case 'templates':
+      // Documents marked as templates ("New from template" forks one).
+      return d.isTemplate;
     case 'deleted':
       // 'deleted' chip is handled by swapping data source in the page,
       // not by filtering LibraryDocument[]. This branch should never run

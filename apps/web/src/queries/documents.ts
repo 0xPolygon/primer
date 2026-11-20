@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { DocumentDetailResponse, DocumentPatchRequest } from '@polygonlabs/primer-api-types';
+import type { CopyDocumentResponse, DocumentDetailResponse, DocumentPatchRequest, ProposeBranchResponse } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 
 export function useDocument(docId: string) {
@@ -71,4 +71,38 @@ export function useRestoreDocument(docId: string) {
       qc.invalidateQueries({ queryKey: ['library'] });
     },
   });
+}
+
+/** Copies a live document into a new one of the caller's: a private branch,
+ *  or a fork (also "New from template"). Resolves to the new document's id. */
+export function useCopyDocument() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ docId, kind }: { docId: string; kind: 'branch' | 'fork' }): Promise<string> => {
+      const res = await api(`/api/documents/${encodeURIComponent(docId)}/${kind}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      if (!res.ok) throw new Error(await refusalMessage(res));
+      return ((await res.json()) as CopyDocumentResponse).documentId;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['library'] }),
+  });
+}
+
+/** Proposes a branch back to its parent as one change set of suggestions. */
+export function useProposeBranch(docId: string) {
+  return useMutation({
+    mutationFn: async (): Promise<ProposeBranchResponse> => {
+      const res = await api(`/api/documents/${encodeURIComponent(docId)}/propose`, { method: 'POST' });
+      if (!res.ok) throw new Error(await refusalMessage(res));
+      return res.json();
+    },
+  });
+}
+
+async function refusalMessage(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { refusal?: { message: string; fix: string } } | null;
+  return body?.refusal ? `${body.refusal.message} ${body.refusal.fix}` : String(res.status);
 }

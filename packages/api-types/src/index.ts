@@ -257,6 +257,12 @@ export interface DocumentDetail extends DocumentSummary {
   format: DocumentFormat | null;
   /** Who may write on a live document as an agent (owner setting). */
   agentMode?: AgentMode;
+  /** A private branch: the document it proposes back to. */
+  branchOf?: string | null;
+  /** A fork, or a document made from a template: its source. */
+  forkedFrom?: string | null;
+  /** Listed under Templates; "New from template" forks it. */
+  isTemplate?: boolean;
 }
 
 /** The requesting viewer's effective role on a document. Mirrors
@@ -411,6 +417,8 @@ export interface DocumentPatchRequest {
   description?: string | null;
   /** Owner only (a person, in a session). */
   agentMode?: AgentMode;
+  /** Owner only: list the document under Templates. */
+  isTemplate?: boolean;
 }
 
 export interface VersionPatchRequest {
@@ -717,6 +725,31 @@ export interface SuggestionsResponse {
   suggestions: SuggestionDTO[];
 }
 
+/** POST /api/documents/:docId/branch and /fork. `title` defaults to the
+ *  source's ("… (branch)", "… (copy)"). */
+export interface CopyDocumentRequest {
+  title?: string;
+}
+
+/** The new private branch, fork or document made from a template. */
+export interface CopyDocumentResponse {
+  documentId: string;
+}
+
+/**
+ * POST /api/documents/:docId/propose: a branch compared three ways (the
+ * parent as branched, the parent now, the branch) and sent to the parent as
+ * one change set of suggestions. Blocks only the branch changed are plain
+ * suggestions; blocks both sides changed are `conflict: true`, decided one
+ * by one. The change set's id is the branch's document id: proposing again
+ * withdraws the set's open suggestions first.
+ */
+export interface ProposeBranchResponse extends Reconciliation {
+  /** The parent document the suggestions are on. */
+  documentId: string;
+  changeSetId: string;
+}
+
 /** POST /api/runs/:runId/approve */
 export interface ApproveRunRequest {
   planHash: string;
@@ -995,6 +1028,7 @@ export interface LibraryDocument {
   lastActivityAt: string;
   createdAt: string;
   folderId: string | null;
+  isTemplate: boolean;
 }
 
 export interface LibraryResponse {
