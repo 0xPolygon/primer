@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { v7 as uuidv7 } from 'uuid';
 import { sql, db } from './client.ts';
-import { users, documents, versions } from './schema.ts';
+import { users, documents, versions, threads } from './schema.ts';
 import { insertThread } from '../testing/threads.ts';
 
 const backfill = readFileSync(
@@ -27,6 +27,14 @@ describe('threads-across-versions backfill (re-upgrade after a rollback)', () =>
       anchor: { type: 'text-range', selectorText: 'x', prefix: '', suffix: '', containerPath: 'body' },
     });
 
+    // A live thread has no version and so no placement; the backfill skips it.
+    await db.insert(threads).values({
+      id: uuidv7(),
+      documentId,
+      versionId: null,
+      anchor: { type: 'text-range', selectorText: 'y', prefix: '', suffix: '', containerPath: 'body' },
+    });
+
     // The state the old binary leaves: nullable column, no document_id, no placement.
     await sql`ALTER TABLE threads ALTER COLUMN document_id DROP NOT NULL`;
     try {
@@ -40,7 +48,7 @@ describe('threads-across-versions backfill (re-upgrade after a rollback)', () =>
 
       await sql.unsafe(backfill);
       const once = await state();
-      expect(once.threads).toEqual([{ id: threadId, document_id: documentId }]);
+      expect(once.threads).toContainEqual({ id: threadId, document_id: documentId });
       expect(once.placements).toHaveLength(1);
       expect(once.placements[0]).toMatchObject({ thread_id: threadId, version_id: versionId });
 
