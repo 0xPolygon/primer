@@ -19,6 +19,7 @@ import { registerMockAuthRoutes } from './routes/mockAuth.ts';
 import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
 import { registerEventRoutes } from './routes/events.ts';
+import { registerRecordRoutes } from './routes/records.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
@@ -113,6 +114,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerThreadRoutes(app, deps);
   registerCommentRoutes(app, deps);
   registerEventRoutes(app, { resolver });
+  registerRecordRoutes(app);
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
   registerLibraryRoute(app);

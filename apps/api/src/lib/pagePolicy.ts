@@ -11,7 +11,9 @@
 //   all, so record data has no request to ride out on; the host also turns
 //   off the bridge's outbound features for such pages (pageBridgeFeatures).
 
-export type PagePolicy = 'standard' | 'records';
+import type { PagePolicy } from '@polygonlabs/primer-api-types';
+
+export type { PagePolicy };
 
 const STANDARD_CSP = [
   "default-src 'none'",

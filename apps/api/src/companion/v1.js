@@ -9,6 +9,10 @@
   /** @type {{ id: string, data: any }[]} */
   let knownAnchors = [];
 
+  /** Bridge features the host granted at init (see protocol.ts BridgeFeature).
+   *  null until init. @type {string[] | null} */
+  let features = null;
+
   /** @type {Set<string>} */
   const driftedIds = new Set();
 
@@ -417,6 +421,9 @@
       readyTimer = null;
     }
 
+    features = Array.isArray(incoming.features) ? incoming.features.filter((f) => typeof f === 'string') : [];
+    flushRecordCalls();
+
     if (Array.isArray(incoming.anchors)) {
       knownAnchors = incoming.anchors;
       log.info('init received, anchors:', knownAnchors.length);
@@ -510,6 +517,24 @@
           }
         }
         break;
+      case 'records_result':
+        settleRecordCall(msg);
+        break;
+      case 'records_changed':
+        // Others changed shared records. Untrusted data like any record:
+        // the page re-reads what it shows (or catches up with changesSince).
+        if (Array.isArray(msg.collections) && typeof msg.toChangeId === 'number') {
+          try {
+            window.dispatchEvent(
+              new CustomEvent('primer:records-changed', {
+                detail: { collections: msg.collections, toChangeId: msg.toChangeId },
+              })
+            );
+          } catch (e) {
+            log.warn('primer:records-changed dispatch failed:', e && e.message ? e.message : e);
+          }
+        }
+        break;
       case 'submit_result':
         // Write acknowledgment for a prior `primer:submit-events` — `rows`
         // carries the created rows (with server-assigned ids and audiences)
@@ -537,12 +562,112 @@
   // We intercept the two common paths and forward to the parent for opening.
 
   function postOpenExternal(url) {
+    // Record-reading pages never reach outside Primer (the host drops these
+    // too; this only saves the round trip).
+    if (features && features.indexOf('records') !== -1) {
+      log.warn('open_external is off for pages that read records; dropping', url);
+      return;
+    }
     if (!port) {
       log.warn('open_external attempted before init; dropping', url);
       return;
     }
     port.postMessage({ type: 'open_external', url });
   }
+
+  // ── Shared records (feature `records`) ────────────────────────────
+  // A page that opts in with <meta name="primer-records" content="read">
+  // gets window.primer.records.<verb>(args, { signal }) → Promise, for verbs
+  // get, list, query, set, update, delete, batch, plus changesSince(changeId).
+  // The host does the work as the viewer, bound to this page's document, and
+  // enforces every limit (8 in flight, 5 s, 256 KB); `args` names only the
+  // collection, scope, record, data, filters and paging. Calls made before
+  // init wait for it. Results and records are untrusted data.
+
+  const RECORD_VERBS = ['get', 'list', 'query', 'set', 'update', 'delete', 'batch'];
+  /** @type {Map<string, { resolve: (v: any) => void, reject: (e: any) => void }>} */
+  const recordCalls = new Map();
+  /** @type {{ callId: string, verb: string, args: object }[]} */
+  const queuedRecordCalls = [];
+  let recordCallSeq = 0;
+
+  function recordsError(refusal) {
+    const r = refusal && typeof refusal === 'object' ? refusal : {};
+    const err = new Error(typeof r.message === 'string' ? r.message : 'record call refused');
+    err.name = 'PrimerRecordsError';
+    err.code = typeof r.code === 'string' ? r.code : 'records_unavailable';
+    err.fix = typeof r.fix === 'string' ? r.fix : undefined;
+    return err;
+  }
+
+  function sendRecordCall(call) {
+    if (features === null) {
+      queuedRecordCalls.push(call);
+      return;
+    }
+    if (features.indexOf('records') === -1 || !port) {
+      settleRecordCall({
+        callId: call.callId,
+        ok: false,
+        refusal: {
+          code: 'records_unavailable',
+          message: 'This page has no record access.',
+          fix: 'Add <meta name="primer-records" content="read"> to the page head.',
+        },
+      });
+      return;
+    }
+    port.postMessage({ type: 'records_call', callId: call.callId, verb: call.verb, args: call.args });
+  }
+
+  function flushRecordCalls() {
+    while (queuedRecordCalls.length > 0) sendRecordCall(queuedRecordCalls.shift());
+  }
+
+  function settleRecordCall(msg) {
+    const pending = recordCalls.get(msg.callId);
+    if (!pending) return;
+    recordCalls.delete(msg.callId);
+    if (msg.ok === true) pending.resolve(msg.value);
+    else pending.reject(recordsError(msg.refusal));
+  }
+
+  function callRecords(verb, args, opts) {
+    return new Promise((resolve, reject) => {
+      const signal = opts && opts.signal;
+      if (signal && signal.aborted) {
+        reject(new DOMException('aborted', 'AbortError'));
+        return;
+      }
+      recordCallSeq += 1;
+      const callId = 'r' + recordCallSeq;
+      recordCalls.set(callId, { resolve, reject });
+      if (signal) {
+        signal.addEventListener(
+          'abort',
+          () => {
+            if (!recordCalls.has(callId)) return;
+            recordCalls.delete(callId);
+            const queued = queuedRecordCalls.findIndex((c) => c.callId === callId);
+            if (queued !== -1) queuedRecordCalls.splice(queued, 1);
+            else if (port) port.postMessage({ type: 'records_cancel', callId });
+            reject(new DOMException('aborted', 'AbortError'));
+          },
+          { once: true }
+        );
+      }
+      sendRecordCall({ callId, verb, args: args && typeof args === 'object' ? args : {} });
+    });
+  }
+
+  const recordsApi = {};
+  for (const verb of RECORD_VERBS) {
+    recordsApi[verb] = (args, opts) => callRecords(verb, args, opts);
+  }
+  recordsApi.changesSince = (changeId, opts) =>
+    callRecords('changesSince', { changeId, limit: opts && opts.limit }, opts);
+  window.primer = window.primer || {};
+  window.primer.records = Object.freeze(recordsApi);
 
   // ── Document events: consent-gated submit relay (issue #78) ──────
   // Artifact JS hands structured event batches to the parent by dispatching
