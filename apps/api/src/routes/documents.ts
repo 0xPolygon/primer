@@ -13,7 +13,6 @@ import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/b
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
 import { withLiveDocument } from '../live/instance.ts';
-import { ensureSigningKey } from '../live/signing.ts';
 import { MAX_BYTES } from '../upload/validate.ts';
 import { db } from '../db/client.ts';
 import { actorName } from '../lib/actors.ts';
@@ -462,7 +461,6 @@ export function registerDocumentRoutes(
       }
       note = typeof body.note === 'string' && body.note.trim().length > 0 ? body.note.trim().slice(0, 500) : null;
     }
-    await ensureSigningKey(deps.storage);
     const checkpoint: CheckpointResponse = await createCheckpoint(deps.storage, docId, c.get('user'), note);
     return c.json(checkpoint, 201);
   });
@@ -518,7 +516,6 @@ export function registerDocumentRoutes(
       }
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
-      await ensureSigningKey(deps.storage);
       body = await withLiveDocument(docId, (doc) =>
         format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
       );
@@ -558,7 +555,6 @@ export function registerDocumentRoutes(
       if (!version?.bundleKey) return c.json({ error: 'not_found' }, 404);
       html = new TextDecoder().decode(await readBundleFile(deps.storage, version.bundleKey, 'static.html'));
     } else {
-      await ensureSigningKey(deps.storage);
       html = (await withLiveDocument(docId, (doc) => renderStatic(doc, access.title))).served;
     }
     return new Response(printable(html), {
