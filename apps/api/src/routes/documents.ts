@@ -22,7 +22,7 @@ import { artifactCsp } from '../lib/pagePolicy.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import {
-  canRead, canEdit, canManage, loadEffectiveRole,
+  canRead, canComment, canEdit, canManage, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
@@ -122,6 +122,7 @@ export function registerDocumentRoutes(
       },
       myRole: eff,
       lastView: null,
+      canComment: canComment(doc.visibility as Visibility, eff),
     };
     // Records this visit, returning the previous one for catch-up (read in
     // the same statement, so a second open can't lose it in between).
