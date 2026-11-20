@@ -30,6 +30,10 @@ interface Props {
   onCopyComments: () => Promise<ActionFeedback>;
   onExportComments: () => void;
   onDelete: () => Promise<void>;
+  /** Live documents: saves a checkpoint of the current state. */
+  onSaveCheckpoint?: () => Promise<ActionFeedback>;
+  /** Live documents: downloads the content in a format. */
+  onExport?: (format: 'markdown' | 'html') => void;
 }
 
 type MenuState = 'closed' | 'menu' | 'confirm';
@@ -49,6 +53,8 @@ export function HeaderActions({
   onCopyComments,
   onExportComments,
   onDelete,
+  onSaveCheckpoint,
+  onExport,
 }: Props) {
   const [menuState, setMenuState] = useState<MenuState>('closed');
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
@@ -127,6 +133,14 @@ export function HeaderActions({
       setMenuState('closed');
       onExportComments();
     },
+    'export-markdown': () => {
+      setMenuState('closed');
+      onExport?.('markdown');
+    },
+    'export-html': () => {
+      setMenuState('closed');
+      onExport?.('html');
+    },
     delete: () => setMenuState('confirm'),
   };
 
@@ -140,6 +154,15 @@ export function HeaderActions({
           isViewingLatest={isViewingLatest}
           onAddVersion={onAddVersion}
         />
+      )}
+      {variant === 'desktop' && onSaveCheckpoint && (
+        <button
+          type="button"
+          onClick={() => void onSaveCheckpoint().then(showFeedback, () => showFeedback({ kind: 'error', message: 'Saving the checkpoint failed.' }))}
+          className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          Save checkpoint
+        </button>
       )}
       {variant === 'desktop' && isUploader && (
         <button
@@ -170,7 +193,7 @@ export function HeaderActions({
             role="menu"
             className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
           >
-            {buildMenuItems({ isUploader, includeShare: variant === 'mobile' }).map(
+            {buildMenuItems({ isUploader, includeShare: variant === 'mobile', live: onExport !== undefined }).map(
               (item, index) => {
                 if (item.id === 'separator') {
                   return (

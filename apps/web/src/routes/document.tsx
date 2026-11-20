@@ -1,10 +1,13 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { Navigate, Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -77,6 +80,31 @@ import {
 import { EventsGrantPrompt } from '../components/EventsGrantPrompt.tsx';
 import { api } from '../lib/fetch.ts';
 import { ApiError } from '../lib/apiError.ts';
+import type { CheckpointResponse } from '@polygonlabs/primer-api-types';
+
+// BlockNote and its blocks load only when a live document opens.
+const LiveEditor = lazy(() => import('../live/LiveEditor.tsx'));
+
+/**
+ * What the document area shows: a live document's editor, or (legacy
+ * documents, and checkpoints of live ones) the rendered version in its
+ * sandboxed frame.
+ */
+export function DocumentSurface(props: {
+  live: boolean;
+  documentId: string;
+  readOnly: boolean;
+  theme: 'light' | 'dark';
+  userName: string;
+  frame: () => ReactNode;
+}) {
+  if (!props.live) return <>{props.frame()}</>;
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-neutral-500">Loading editor…</div>}>
+      <LiveEditor documentId={props.documentId} readOnly={props.readOnly} theme={props.theme} userName={props.userName} />
+    </Suspense>
+  );
+}
 
 // First-submission grants (issue #78, security requirement 6): per
 // (viewer, document, artifact content version), fronted by an in-memory map
@@ -161,7 +189,11 @@ function DocumentPageInner() {
     currentVersion === undefined ||
     latestNumber === undefined ||
     currentVersion.versionNumber === latestNumber;
-  const readMostly = !isViewingLatest;
+  // A live document is edited at /d/:docId; its checkpoints (/v/:n) are
+  // read-only renders, like the versions of a legacy document.
+  const isLive = (docQuery.data?.document.format ?? null) !== null;
+  const liveView = isLive && requestedNumber === undefined;
+  const readMostly = isLive ? requestedNumber !== undefined : !isViewingLatest;
   // True when this navigation started on the latest version and a newer one
   // was published since (vs. deliberately opening an older /v/:n).
   const newerPublishedWhileOpen = requestedNumber === undefined && readMostly;
@@ -794,12 +826,39 @@ function DocumentPageInner() {
 
   const { document } = docQuery.data;
 
+  async function saveCheckpoint(): Promise<ActionFeedback> {
+    const res = await api(`/api/documents/${docId}/checkpoints`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return { kind: 'error', message: 'Saving the checkpoint failed.' };
+    const checkpoint = (await res.json()) as CheckpointResponse;
+    await queryClient.invalidateQueries({ queryKey: ['versions', docId] });
+    return { kind: 'success', message: `Checkpoint v${checkpoint.versionNumber} saved` };
+  }
+
+  function exportAs(format: 'markdown' | 'html') {
+    const params = new URLSearchParams({ format: format === 'html' ? 'html' : document.format === 'text' ? 'text' : 'markdown' });
+    if (requestedNumber !== undefined) params.set('version', String(requestedNumber));
+    const a = window.document.createElement('a');
+    a.href = `/api/documents/${docId}/export?${params}`;
+    a.download = '';
+    a.style.display = 'none';
+    window.document.body.appendChild(a);
+    a.click();
+    window.document.body.removeChild(a);
+  }
+
   const headerActionsProps = {
     docId: docId!,
     versions,
-    currentVersionNumber,
-    isViewingLatest,
-    onAddVersion: canEdit && !readMostly ? () => setShowAddVersion(true) : undefined,
+    currentVersionNumber: liveView ? (latestNumber ?? 1) : currentVersionNumber,
+    isViewingLatest: liveView || (!isLive && isViewingLatest),
+    // Live documents are edited in place, not republished.
+    onAddVersion: canEdit && !readMostly && !isLive ? () => setShowAddVersion(true) : undefined,
+    onSaveCheckpoint: liveView && canEdit ? saveCheckpoint : undefined,
+    onExport: isLive ? exportAs : undefined,
     isUploader,
     onShare: () => setShowShare(true),
     onOpenFullScreen: openFullScreen,
@@ -893,7 +952,7 @@ function DocumentPageInner() {
             )}
             <HeaderActions variant="desktop" {...headerActionsProps} />
           </div>
-          {!readMostly && (
+          {!readMostly && !isLive && (
             <button
               type="button"
               onClick={togglePickMode}
@@ -926,7 +985,12 @@ function DocumentPageInner() {
       {readMostly && (
         <div className="flex items-center justify-between border-b border-yellow-200 bg-yellow-50 px-4 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
           <span>
-            {newerPublishedWhileOpen ? (
+            {isLive ? (
+              <>
+                You're viewing checkpoint v{currentVersionNumber} of "{document.title}". Checkpoints are
+                read-only; switch to the live document to edit and comment.
+              </>
+            ) : newerPublishedWhileOpen ? (
               <>
                 A newer version (v{latestNumber}) of "{document.title}" was published. You're
                 still viewing v{currentVersionNumber}; switch to the latest to add new comments.
@@ -943,7 +1007,7 @@ function DocumentPageInner() {
             onClick={() => void switchToLatest()}
             className="rounded border border-amber-700 px-2 py-0.5 text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/30"
           >
-            Switch to latest
+            {isLive ? 'Open live document' : 'Switch to latest'}
           </button>
         </div>
       )}
@@ -963,18 +1027,28 @@ function DocumentPageInner() {
           {/* Mount only once the version id has resolved: an empty id would
               build src="/api/versions//content" and 404 on first render
               while the versions query is still in flight. */}
-          {currentVersionId && (
-            <ArtifactIframe
-              src={`/api/versions/${currentVersionId}/content`}
-              anchors={anchorsForCompanion}
-              theme={theme}
-              fitToWidth={isMobile}
-              onMessage={onMessage}
-              registerSender={registerSender}
-            />
-          )}
+          <DocumentSurface
+            live={liveView}
+            documentId={docId!}
+            readOnly={!canEdit}
+            theme={theme}
+            userName={me.data?.displayName ?? 'Someone'}
+            frame={() =>
+              currentVersionId && (
+                <ArtifactIframe
+                  src={`/api/versions/${currentVersionId}/content`}
+                  anchors={anchorsForCompanion}
+                  theme={theme}
+                  fitToWidth={isMobile}
+                  onMessage={onMessage}
+                  registerSender={registerSender}
+                />
+              )
+            }
+          />
         </div>
-        {!isMobile && (
+        {/* Comments on live documents arrive with BlockNote's comments UI. */}
+        {!isMobile && !liveView && (
           <CommentSidebar
             versionId={currentVersionId}
             currentUserId={me.data?.id ?? ''}
@@ -995,7 +1069,7 @@ function DocumentPageInner() {
         )}
       </div>
 
-      {isMobile && (
+      {isMobile && !liveView && (
         <BottomSheet
           snap={sheetSnap}
           onSnapChange={(next) => {

@@ -111,7 +111,7 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
             <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
               {isDragging ? 'Drop to attach' : 'Drop an HTML or Markdown file here, or click to browse'}
             </p>
-            <p className="mt-1 text-xs text-neutral-500">.html / .md files up to {formatSize(maxBytes)}</p>
+            <p className="mt-1 text-xs text-neutral-500">.html / .md / .txt files up to {formatSize(maxBytes)}</p>
           </>
         ) : (
           <div className="flex w-full items-center gap-3 px-4">

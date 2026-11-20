@@ -3,6 +3,7 @@ import { Hocuspocus } from '@hocuspocus/server';
 import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
+import { SYSTEM_ORIGIN } from './origin.ts';
 
 const NAME = /^doc:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
@@ -69,4 +70,17 @@ export function liveInstance(): Hocuspocus {
     },
   });
   return instance;
+}
+
+/**
+ * Runs `fn` against a live document's in-memory Y.Doc (loading it if no one
+ * has it open), for reads such as exports. Writes go through `applyPlan`.
+ */
+export async function withLiveDocument<T>(documentId: string, fn: (doc: Y.Doc) => T | Promise<T>): Promise<T> {
+  const connection = await liveInstance().openDirectConnection(liveDocName(documentId), SYSTEM_ORIGIN);
+  try {
+    return await fn(connection.document!);
+  } finally {
+    await connection.disconnect({ unloadImmediately: false });
+  }
 }

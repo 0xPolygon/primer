@@ -2,6 +2,8 @@ export type MenuItemId =
   | 'share'
   | 'open-fullscreen'
   | 'download-html'
+  | 'export-markdown'
+  | 'export-html'
   | 'notebooklm'
   | 'copy'
   | 'download'
@@ -18,15 +20,24 @@ export interface MenuInput {
   isUploader: boolean;
   /** Mobile collapses the Share button into the menu. */
   includeShare?: boolean;
+  /** Live documents export their content (Markdown or text, and HTML). */
+  live?: boolean;
 }
 
 /** Pure function: given who's viewing, return the ordered menu items. The
  *  caller maps each item to a click handler. */
-export function buildMenuItems({ isUploader, includeShare = false }: MenuInput): MenuItem[] {
+export function buildMenuItems({ isUploader, includeShare = false, live = false }: MenuInput): MenuItem[] {
   const items: MenuItem[] = [];
   if (includeShare && isUploader) {
     items.push({ id: 'share', label: 'Share…' });
     items.push({ id: 'separator' });
+  }
+  if (live) {
+    items.push(
+      { id: 'export-markdown', label: 'Export Markdown' },
+      { id: 'export-html', label: 'Export HTML' },
+      { id: 'separator' },
+    );
   }
   items.push(
     { id: 'open-fullscreen', label: 'Open full screen' },
