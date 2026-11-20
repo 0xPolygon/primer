@@ -1,7 +1,7 @@
 import { sql, eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { docFiles, documents, versions } from '../db/schema.ts';
-import { bundleFileKeys } from '../live/bundle.ts';
+import { bundleStorageKeys } from '../live/bundle.ts';
 import { sourceKeyOf } from '../page/publish.ts';
 import { logger } from '../logger.ts';
 import type { Storage } from '../storage/types.ts';
@@ -37,12 +37,15 @@ export async function purgeExpiredDocuments(deps: { storage: Storage }): Promise
       .from(versions)
       .where(eq(versions.documentId, docId));
     // A checkpoint's bundle holds its storage key (static.html) among its files.
-    const versionKeys = versionRows.flatMap((v) => [
-      ...(v.bundleKey ? bundleFileKeys(v.bundleKey) : [v.storageKey]),
-      ...(v.originalKey ? [v.originalKey] : []),
-      // A live page's stamped source, published with its checkpoint.
-      ...(v.bundleKey && v.sourceFormat === 'html' ? [sourceKeyOf(docId, v.id)] : []),
-    ]);
+    const versionKeys: string[] = [];
+    for (const v of versionRows) {
+      versionKeys.push(
+        ...(v.bundleKey ? await bundleStorageKeys(deps.storage, v.bundleKey) : [v.storageKey]),
+        ...(v.originalKey ? [v.originalKey] : []),
+        // A live page's stamped source, published with its checkpoint.
+        ...(v.bundleKey && v.sourceFormat === 'html' ? [sourceKeyOf(docId, v.id)] : []),
+      );
+    }
     const fileRows = await db.select({ storageKey: docFiles.storageKey }).from(docFiles).where(eq(docFiles.documentId, docId));
     const keys = [...versionKeys, ...fileRows.map((f) => f.storageKey)];
 

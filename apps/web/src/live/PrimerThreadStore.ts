@@ -32,9 +32,9 @@ export class PrimerThreadStore extends ThreadStore {
     private readonly tabId: string,
     viewer: StoreViewer,
     private readonly fetcher: Fetch = api,
-    /** A sub-fragment's store (the page-text overlay): its threads, anchored
-     *  in that fragment, rather than the tab's. */
-    private readonly scope: { blockId: string; pid: string } | null = null,
+    /** A sub-fragment's store (the overlay on page text or a widget label):
+     *  its threads, anchored in that fragment, rather than the tab's. */
+    private readonly scope: { blockId: string; pid?: string; textId?: string } | null = null,
   ) {
     super(new PrimerThreadStoreAuth(viewer));
   }
@@ -49,7 +49,8 @@ export class PrimerThreadStore extends ThreadStore {
     for (const dto of body.threads) {
       if (!('target' in dto.anchor) || dto.anchor.target.tabId !== this.tabId) continue;
       const t = dto.anchor.target;
-      if (this.scope ? t.pid !== this.scope.pid || t.blockId !== this.scope.blockId : t.pid || t.embedId || t.textId) continue;
+      const s = this.scope;
+      if (s ? t.blockId !== s.blockId || t.pid !== s.pid || t.textId !== s.textId || t.embedId : t.pid || t.embedId || t.textId) continue;
       next.set(dto.id, this.toThreadData(dto));
     }
     this.threads = next;

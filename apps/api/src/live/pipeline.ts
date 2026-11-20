@@ -384,9 +384,9 @@ function forwardDiff(before: PmNode, after: PmNode, moved: Set<string>, at: Targ
   const b = indexBlocks(before);
   const a = indexBlocks(after);
   const out: SuggestedEdit[] = [];
-  // Page text keeps its fragment: its one paragraph has the page block's id
-  // (page/text.ts), so the target names both the fragment and the block.
-  const sub = at.pid ? { pid: at.pid } : {};
+  // Page text and widget labels keep their fragment: its one paragraph has
+  // the owning block's id (page/text.ts), so the target names both.
+  const sub = at.pid ? { pid: at.pid } : at.textId ? { textId: at.textId } : {};
   const target = (blockId: string): Target => ({ tabId: at.tabId, blockId, ...sub });
   for (const [id, old] of b) {
     const now = a.get(id);

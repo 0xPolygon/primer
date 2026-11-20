@@ -669,5 +669,15 @@
   "liveEditor.changes": "チェックポイント以降の変更",
   "addVersionModal.suggestedTitle": "新しいバージョンはありません: 変更は提案になりました",
   "addVersionModal.suggestedBody": "提案: {suggested}。競合: {conflicts}。変更なし: {unchanged}。編集権限のある人がドキュメントで各提案を承認または却下します。",
-  "addVersionModal.openSuggestions": "ドキュメントを開く"
+  "addVersionModal.openSuggestions": "ドキュメントを開く",
+  "overlay.editLabel": "ラベルを編集",
+  "widget.drawing": "エージェントがこのウィジェットを描画しています。",
+  "widget.unavailable": "このウィジェットは現在表示できません。",
+  "widget.comments": "このウィジェットへのコメント",
+  "widget.replies": "ほか {count} 件",
+  "widget.commentOn": "{name} にコメント",
+  "widget.commentPlaceholder": "コメントを追加",
+  "widget.comment": "コメント",
+  "widget.cancel": "キャンセル",
+  "widget.commentFailed": "コメントを保存できませんでした。もう一度お試しください。"
 }

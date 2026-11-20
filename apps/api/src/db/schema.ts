@@ -847,3 +847,36 @@ export const docMentions = pgTable(
     pk: primaryKey({ columns: [t.documentId, t.blockId, t.userId] }),
   }),
 );
+
+// Agent-drawn SVG widgets (diagrams and charts) placed in live documents as
+// `widget` blocks. A draft is rendered and previewed before it replaces the
+// live publish; a draft with errors never does. `rows` are the published
+// rows and `draft_rows` the draft's, so a pending draft never changes what the
+// live widget draws from. Label words live in the Y.Doc, not here.
+export const widgets = pgTable(
+  'widgets',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    blockId: text('block_id').notNull(),
+    draftSource: text('draft_source'),
+    draftRows: jsonb('draft_rows'),
+    draftErrors: jsonb('draft_errors'),
+    publishedSource: text('published_source'),
+    publishedSvgLight: text('published_svg_light'),
+    publishedSvgDark: text('published_svg_dark'),
+    publishedHash: text('published_hash'),
+    rows: jsonb('rows'),
+    // The records collection the widget draws from (widgets/records.ts); the
+    // draft's, until it is published.
+    collection: text('collection'),
+    draftCollection: text('draft_collection'),
+    updatedBy: text('updated_by').notNull().references(() => users.id),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDoc: index('widgets_document_id_idx').on(t.documentId),
+  }),
+);

@@ -166,7 +166,7 @@ describe('page documents', () => {
 
   it('a checkpoint keeps the placement of threads on unchanged page text and blocks', async () => {
     await withStorage(async (storage) => {
-      const r = await publishPage(storage, PAGE);
+      const r = await publishPage(storage, PAGE.replace('<canvas', '<primer-code data-embed-id="snippet" lang="ts">const answer = 42;</primer-code>\n<canvas'));
       const page = await pageOf(r.documentId);
       const start = async (anchor: unknown) => {
         const out = await createLiveThread(new NoopNotifier(), owner, r.documentId, { anchor, body: 'Note' });
@@ -174,6 +174,7 @@ describe('page documents', () => {
         return out.value.id;
       };
       const onText = await start({ type: 'prose', target: { tabId: 'main', blockId: page.blockId, pid: 'p2' }, quote: 'editor' });
+      const onEmbed = await start({ type: 'prose', target: { tabId: 'main', blockId: page.blockId, embedId: 'snippet' }, quote: 'answer' });
       const onBlock = await start({ type: 'block', target: { tabId: 'main', blockId: page.blockId } });
       const onGone = await start({ type: 'block', target: { tabId: 'main', blockId: 'gone' } });
 
@@ -184,6 +185,7 @@ describe('page documents', () => {
         .where(eq(threadPlacements.versionId, checkpoint.versionId));
       const anchorOf = (id: string) => placed.find((p) => p.threadId === id)?.anchor;
       expect(anchorOf(onText)).toMatchObject({ type: 'prose', target: { pid: 'p2' } });
+      expect(anchorOf(onEmbed)).toMatchObject({ type: 'prose', target: { embedId: 'snippet' } });
       expect(anchorOf(onBlock)).toMatchObject({ type: 'block' });
       expect(anchorOf(onGone)).toBeNull();
     });
