@@ -8,6 +8,7 @@ import {
 import type { Target } from '@polygonlabs/primer-api-types';
 import { serverEditor } from './editor.ts';
 import { findBlock } from './blocks.ts';
+import { normalizeText, similarity, similarityCost } from '../lib/similarity.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import type { PlannedEdit } from './pipeline.ts';
 import { fragmentName, reachableFragments } from './reach.ts';
@@ -106,15 +107,22 @@ export function commentMarkEdit(
 }
 
 /** Adds the comment mark for `threadId` over the first exact occurrence of
- *  `quote` in the target (its block, or the whole fragment). */
-export function quoteMarkEdit(threadId: string, target: Target, quote: string): PlannedEdit {
+ *  `quote` in the target (its block, or the whole fragment). With `fuzzy`
+ *  (re-anchoring only), a reworded quote matches too (`findQuote`), and
+ *  `onPlaced` gets the text actually marked and the block it is in. */
+export function quoteMarkEdit(
+  threadId: string,
+  target: Target,
+  quote: string,
+  opts: { fuzzy?: boolean; onPlaced?: (quote: string, blockId: string | null) => void } = {},
+): PlannedEdit {
   return {
     target,
     inverse: false,
     build: (tr) => {
-      const range = findQuote(tr.doc, blockScope(target), quote);
+      const range = findQuote(tr.doc, blockScope(target), quote, { fuzzy: opts.fuzzy });
       if (!range) throw new AnchorMissingError(`"${quote}" was not found in the target.`);
-      addComment(tr.doc, range, threadId, () => undefined, (from, to, mark) => tr.addMark(from, to, mark));
+      addComment(tr.doc, range, threadId, (q) => opts.onPlaced?.(q, range.blockId), (from, to, mark) => tr.addMark(from, to, mark));
     },
   };
 }
@@ -132,25 +140,98 @@ function addComment(
   onQuote(quote);
 }
 
+type QuoteRange = { from: number; to: number; blockId: string | null };
+
 /**
  * The range of the first exact occurrence of `quote` inside one textblock of
  * the block `blockId` (or anywhere in the fragment when `blockId` is empty).
- * M10b adds a fuzzy stage.
+ *
+ * With `fuzzy` (re-anchoring, M10b.3), when there is no exact occurrence the
+ * best window of whole words with `similarity ≥ 0.8` is taken instead, and a
+ * block that is gone widens the search to the whole fragment. A second,
+ * separate window scoring within 0.05 of the best makes the match ambiguous:
+ * none is returned, never a guess. The work is bounded like the republish
+ * merge's: quotes over `MAX_FUZZY_QUOTE` characters match exactly only, and
+ * once `FUZZY_BUDGET` character pairs are spent the search gives up.
  */
-export function findQuote(doc: PmNode, blockId: string, quote: string): { from: number; to: number } | null {
+export function findQuote(doc: PmNode, blockId: string, quote: string, opts: { fuzzy?: boolean } = {}): QuoteRange | null {
   if (quote === '') return null;
-  const scope = blockId ? findBlock(doc, blockId) : { pos: -1, node: doc };
+  let scope = blockId ? findBlock(doc, blockId) : { pos: -1, node: doc };
+  if (!scope && opts.fuzzy) scope = { pos: -1, node: doc };
   if (!scope) return null;
-  let found: { from: number; to: number } | null = null;
+  const textblocks: { node: PmNode; start: number; blockId: string | null }[] = [];
   scope.node.descendants((node, offset) => {
-    if (found) return false;
     if (!node.isTextblock) return true;
     const start = scope.pos + 1 + offset + 1;
-    const index = node.textContent.indexOf(quote);
-    if (index >= 0) found = textRange(node, start, index, quote.length);
+    textblocks.push({ node, start, blockId: blockIdAt(doc, start) });
     return false;
   });
-  return found;
+  for (const tb of textblocks) {
+    const index = tb.node.textContent.indexOf(quote);
+    if (index >= 0) return { ...textRange(tb.node, tb.start, index, quote.length), blockId: tb.blockId };
+  }
+  return opts.fuzzy ? fuzzyQuote(textblocks, quote) : null;
+}
+
+/** Re-anchoring: the minimum similarity, the tie margin, and the bounds. */
+const FUZZY_MIN = 0.8;
+const FUZZY_TIE = 0.05;
+const MAX_FUZZY_QUOTE = 2000;
+const FUZZY_BUDGET = 20_000_000;
+
+function fuzzyQuote(textblocks: { node: PmNode; start: number; blockId: string | null }[], quote: string): QuoteRange | null {
+  const wanted = normalizeText(quote);
+  if (wanted.length === 0 || quote.length > MAX_FUZZY_QUOTE) return null;
+  // A window within reach of 0.8 has a length within 20% of the quote's.
+  const minLen = Math.floor(wanted.length * FUZZY_MIN);
+  const maxLen = Math.ceil(wanted.length / FUZZY_MIN);
+  let spent = 0;
+  type Hit = { score: number; tb: number; from: number; to: number };
+  const hits: Hit[] = [];
+  for (let k = 0; k < textblocks.length; k++) {
+    const text = textblocks[k]!.node.textContent;
+    const starts: number[] = [];
+    const ends: number[] = [];
+    for (let i = 0; i <= text.length; i++) {
+      const before = i > 0 && !/\s/.test(text[i - 1]!);
+      const after = i < text.length && !/\s/.test(text[i]!);
+      if (after && !before) starts.push(i);
+      if (before && !after) ends.push(i);
+    }
+    let first = 0;
+    for (const from of starts) {
+      while (first < ends.length && ends[first]! <= from) first++;
+      for (let e = first; e < ends.length; e++) {
+        const to = ends[e]!;
+        const window = text.slice(from, to);
+        const len = normalizeText(window).length;
+        if (len < minLen) continue;
+        if (len > maxLen) break;
+        const cost = similarityCost(window, quote, FUZZY_MIN);
+        if (spent + cost > FUZZY_BUDGET) return null;
+        spent += cost;
+        const score = similarity(window, quote, FUZZY_MIN);
+        if (score > 0) hits.push({ score, tb: k, from, to });
+      }
+    }
+  }
+  if (hits.length === 0) return null;
+  hits.sort((a, b) => b.score - a.score || b.to - b.from - (a.to - a.from));
+  const best = hits[0]!;
+  const rival = hits.find((h) => h.tb !== best.tb || h.to <= best.from || h.from >= best.to);
+  if (rival && rival.score >= best.score - FUZZY_TIE) return null;
+  const tb = textblocks[best.tb]!;
+  return { ...textRange(tb.node, tb.start, best.from, best.to - best.from), blockId: tb.blockId };
+}
+
+/** The id of the innermost block containing `pos`. */
+function blockIdAt(doc: PmNode, pos: number): string | null {
+  const $pos = doc.resolve(pos);
+  for (let d = $pos.depth; d > 0; d--) {
+    const node = $pos.node(d);
+    if (node.type.isInGroup('bnBlock') && typeof node.attrs.id === 'string') return node.attrs.id;
+  }
+  return null;
 }
 
 /** Positions of `[index, index + length)` of a textblock's text content. */
@@ -174,8 +255,8 @@ function blockScope(target: Target): string {
 }
 
 /** `findQuote` against the live content of the target's fragment. */
-export function findMarkedQuote(doc: Y.Doc, target: Target, quote: string): { from: number; to: number } | null {
-  return findQuote(fragmentDoc(doc.getXmlFragment(fragmentName(target))), blockScope(target), quote);
+export function findMarkedQuote(doc: Y.Doc, target: Target, quote: string, opts: { fuzzy?: boolean } = {}): QuoteRange | null {
+  return findQuote(fragmentDoc(doc.getXmlFragment(fragmentName(target))), blockScope(target), quote, opts);
 }
 
 /** Thread ids of every comment mark in `node`. */

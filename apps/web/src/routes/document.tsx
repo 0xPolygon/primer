@@ -81,7 +81,7 @@ import {
 import { EventsGrantPrompt } from '../components/EventsGrantPrompt.tsx';
 import { api } from '../lib/fetch.ts';
 import { ApiError } from '../lib/apiError.ts';
-import type { CheckpointResponse } from '@polygonlabs/primer-api-types';
+import type { CatchUpSince, CheckpointResponse } from '@polygonlabs/primer-api-types';
 
 // BlockNote and its blocks load only when a live document opens.
 const LiveEditor = lazy(() => import('../live/LiveEditor.tsx'));
@@ -102,6 +102,7 @@ export function DocumentSurface(props: {
   role: ViewerRole;
   canComment: boolean;
   onOpenLegacyVersion?: (versionNumber: number) => void;
+  lastView?: CatchUpSince | null;
   frame: () => ReactNode;
 }) {
   if (!props.live) return <>{props.frame()}</>;
@@ -117,6 +118,7 @@ export function DocumentSurface(props: {
         role={props.role}
         canComment={props.canComment}
         onOpenLegacyVersion={props.onOpenLegacyVersion}
+        lastView={props.lastView}
       />
     </Suspense>
   );
@@ -1040,6 +1042,7 @@ function DocumentPageInner() {
             role={docQuery.data?.myRole ?? 'stranger'}
             canComment={docQuery.data?.canComment ?? false}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
+            lastView={docQuery.data?.lastView ?? null}
             frame={() =>
               currentVersionId && (
                 <ArtifactIframe

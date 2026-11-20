@@ -34,6 +34,9 @@ import type {
   UserDTO,
   UserLookupResponse,
   VersionsListResponse,
+  DigestResponse,
+  PromoteConversationRequest,
+  PromoteConversationResponse,
 } from '@polygonlabs/primer-api-types';
 
 /**
@@ -297,8 +300,9 @@ export class PrimerClient {
     });
   }
 
-  /** Moves a live thread's comment onto quoted text. */
-  reanchorThread(threadId: string, input: { target: Target; quote: string }): Promise<ThreadDTO> {
+  /** Moves a live thread's comment back onto text (its own quote and
+   *  target when omitted; reworded text matches too). */
+  reanchorThread(threadId: string, input: { target?: Target; quote?: string }): Promise<ThreadDTO> {
     return this.request<ThreadDTO>({
       method: 'POST',
       path: `/api/threads/${encodeURIComponent(threadId)}/reanchor`,
@@ -474,6 +478,19 @@ export class PrimerClient {
     return this.request<TasksResponse>({
       method: 'GET',
       path: documentId ? `/api/documents/${encodeURIComponent(documentId)}/tasks` : '/api/tasks?assignee=me',
+    });
+  }
+
+  /** A conversation as a document (or added to one), one quote per message. */
+  promoteConversation(input: PromoteConversationRequest): Promise<PromoteConversationResponse> {
+    return this.request<PromoteConversationResponse>({ method: 'POST', path: '/api/documents/from-conversation', json: input });
+  }
+
+  /** What changed across the caller's library since `since` (default: the last day). */
+  getDigest(since?: string): Promise<DigestResponse> {
+    return this.request<DigestResponse>({
+      method: 'GET',
+      path: since ? `/api/me/digest?since=${encodeURIComponent(since)}` : '/api/me/digest',
     });
   }
 

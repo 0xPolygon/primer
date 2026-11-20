@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { LibraryDocument } from '@polygonlabs/primer-api-types';
+import type { LibraryDocument, Reconciliation } from '@polygonlabs/primer-api-types';
 import { useLibraryQuery } from '../queries/library.ts';
 import { useAddVersion } from '../queries/versions.ts';
 import { FileDropZone } from './FileDropZone.tsx';
@@ -37,6 +37,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
   const [versionNote, setVersionNote] = useState('');
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [suggested, setSuggested] = useState<Reconciliation | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerSelector = useRef<HTMLElement | null>(null);
 
@@ -82,6 +83,11 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
 
   if (!open) return null;
 
+  const openDocument = () => {
+    onClose();
+    navigate(`/d/${selectedDocId}`);
+  };
+
   const canSubmit = !!selectedDocId && !!file && !addVersion.isPending;
 
   async function submit() {
@@ -89,7 +95,13 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
     setError(null);
     try {
       const trimmed = versionNote.trim();
-      await addVersion.mutateAsync({ file, versionNote: trimmed.length === 0 ? null : trimmed });
+      const out = await addVersion.mutateAsync({ file, versionNote: trimmed.length === 0 ? null : trimmed });
+      // A republish that only suggests (an agent in suggest mode) makes no
+      // version: say what it did instead of opening a version that isn't there.
+      if (out.versionId === undefined) {
+        setSuggested(out.reconciliation);
+        return;
+      }
       onClose();
       navigate(`/d/${selectedDocId}`);
     } catch (err) {
@@ -197,6 +209,18 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
           </label>
 
           {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+          {suggested && (
+            <div role="status" data-republish-suggested="" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              <p className="font-medium">{t('addVersionModal.suggestedTitle')}</p>
+              <p className="mt-1">
+                {t('addVersionModal.suggestedBody', {
+                  suggested: suggested.outcomes.filter((o) => o.status === 'suggested').length,
+                  conflicts: suggested.outcomes.filter((o) => o.status === 'conflict').length,
+                  unchanged: suggested.outcomes.filter((o) => o.status === 'unchanged').length,
+                })}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-neutral-200 dark:border-neutral-800 px-4 py-3">
@@ -207,6 +231,15 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
           >
             {t('addVersionModal.cancel')}
           </button>
+          {suggested ? (
+            <button
+              type="button"
+              onClick={openDocument}
+              className="rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+            >
+              {t('addVersionModal.openSuggestions')}
+            </button>
+          ) : (
           <button
             type="button"
             onClick={submit}
@@ -215,6 +248,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
           >
             {addVersion.isPending ? t('addVersionModal.adding') : t('addVersionModal.submit')}
           </button>
+          )}
         </div>
       </div>
     </div>

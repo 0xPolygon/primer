@@ -229,6 +229,9 @@ export const documentViews = pgTable(
     viewedAt: timestamp('viewed_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // A live document's docVersion at that visit: catch-up (live/catchup.ts)
+    // shows what changed after it. Null for legacy documents.
+    lastDocVersion: bigint('last_doc_version', { mode: 'number' }),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.userId, t.documentId] }),

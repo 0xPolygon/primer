@@ -25,6 +25,15 @@ html.dark { color-scheme: dark; }
   padding: 0;
 }
 
+/* Citations number themselves in reading order. */
+.bn-container { counter-reset: primer-citation; }
+.primer-citation::before {
+  counter-increment: primer-citation;
+  content: '[' counter(primer-citation) '] ';
+}
+.primer-citation { line-height: 1.2; font-size: 0.75em; vertical-align: super; }
+.primer-citation a { color: inherit; }
+
 /* BlockNote's theme follows Primer's tokens (neutral greys, violet accent);
    BlockNoteView sets data-color-scheme from Primer's light/dark choice. */
 html .bn-container[data-color-scheme='light'] {
