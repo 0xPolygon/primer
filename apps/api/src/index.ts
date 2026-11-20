@@ -13,9 +13,11 @@ import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from '
 import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
 import { makeOAuthBearerResolver } from './auth/oauth/bearer.ts';
 import { createHub } from './live/hub.ts';
+import { loadSigningKey } from './live/signing.ts';
 
 const port = Number(process.env.PORT ?? 3000);
 const { storage, description: storageDescription } = storageFromEnv();
+await loadSigningKey(storage);
 function deriveDomain(fromAddress: string): string | undefined {
   // Accepts "primer@domain" or "Primer <primer@domain>" — returns the host part.
   const match = fromAddress.match(/<?[^<\s@]+@([^>\s]+)>?\s*$/);

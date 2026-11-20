@@ -336,6 +336,8 @@ export interface DocumentDetailResponse {
   /** The viewer's previous visit, before this one (null on the first):
    *  pass it to `GET /api/documents/:docId/catchup` for "since you last looked". */
   lastView: CatchUpSince | null;
+  /** Whether the viewer may start threads, reply and react (the server's `canComment`). */
+  canComment: boolean;
 }
 
 export interface CommentDTO {
