@@ -100,6 +100,7 @@ export function DocumentSurface(props: {
   userName: string;
   userId: string;
   role: ViewerRole;
+  canComment: boolean;
   onOpenLegacyVersion?: (versionNumber: number) => void;
   lastView?: CatchUpSince | null;
   frame: () => ReactNode;
@@ -115,6 +116,7 @@ export function DocumentSurface(props: {
         userName={props.userName}
         userId={props.userId}
         role={props.role}
+        canComment={props.canComment}
         onOpenLegacyVersion={props.onOpenLegacyVersion}
         lastView={props.lastView}
       />
@@ -1038,6 +1040,7 @@ function DocumentPageInner() {
             userName={me.data?.displayName ?? t('document.someone')}
             userId={me.data?.id ?? ''}
             role={docQuery.data?.myRole ?? 'stranger'}
+            canComment={docQuery.data?.canComment ?? false}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
             lastView={docQuery.data?.lastView ?? null}
             frame={() =>
