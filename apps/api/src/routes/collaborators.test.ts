@@ -13,6 +13,7 @@ import type { Notifier, NotifyCommentArgs, NotifyCollaboratorAddedArgs } from '.
 import type { Collaborator, CollaboratorsListResponse } from '@polygonlabs/primer-api-types';
 import { asUser, asUserJson } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
+import { onAccessRecheck, type AccessMatch } from '../auth/revocation.ts';
 
 class SpyNotifier implements Notifier {
   readonly emailEnabled = false;
@@ -537,6 +538,31 @@ describe('agents and collaborators', () => {
         expect(rows).toHaveLength(0);
       } finally {
         await rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
+describe('collaborator changes recheck live access', () => {
+  it('a role change and a removal each recheck the document\'s open connections', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(), documentId: upload.documentId, userId: 'mock-user-2',
+        role: 'editor', grantedBy: 'mock-user-1',
+      });
+      const rechecked: AccessMatch[] = [];
+      const off = onAccessRecheck(async (match) => void rechecked.push(match));
+      try {
+        const url = `/api/documents/${upload.documentId}/collaborators/mock-user-2`;
+        const patch = await app.request(url, { method: 'PATCH', headers: asUserJson('mock-user-1'), body: JSON.stringify({ role: 'commenter' }) });
+        expect(patch.status).toBe(200);
+        expect(rechecked).toEqual([{ documentId: upload.documentId }]);
+        expect((await app.request(url, { method: 'DELETE', headers: asUser('mock-user-1') })).status).toBe(204);
+        expect(rechecked).toEqual([{ documentId: upload.documentId }, { documentId: upload.documentId }]);
+      } finally {
+        off();
       }
     });
   });

@@ -14,7 +14,7 @@ Choice blocks with a decision register, task blocks that become tracked tasks, a
   decides with a rationale, evidence and open questions
   (`POST /api/documents/:docId/choices/:blockId/vote|pick`,
   `DELETE …/decision` to clear). Agents lay out choices
-  (`primer_add_choice`) and propose picks (`primer_propose_pick`), never make
+  (`primer_apply_ops`) and propose picks (`primer_propose_pick`), never make
   or clear one. A pick emits `primer.decision.made`; clearing emits
   `primer.decision.cleared`.
 - **Decision register.** `GET /api/documents/:docId/decisions` and
@@ -27,8 +27,8 @@ Choice blocks with a decision register, task blocks that become tracked tasks, a
   date and status. `doc_tasks` is a rebuildable index kept from the document;
   changes emit `primer.task.created`, `primer.task.updated` and
   `primer.task.deleted`, attributed per block. Ticking the box closes the
-  task; the assignee reports progress inline (`primer_update_task`).
+  task; the assignee reports progress inline (`primer_apply_ops`).
   `GET /api/tasks?assignee=me`, `GET /api/documents/:docId/tasks`,
-  `primer_add_task`, `primer_list_tasks`.
+  `primer_list_tasks`; agents add and update tasks with `primer_apply_ops`.
 - **Mentions.** A mention chip notifies the person it names, once.
 - Agent reads of decisions and tasks are marked `untrusted`.

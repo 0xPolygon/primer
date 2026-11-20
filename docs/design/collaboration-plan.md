@@ -270,7 +270,7 @@ M10 is split into five PRs because the repo's `CLAUDE.md` sizes work as one sess
 14. **Republish onto a live document** is refused with `republish_unsupported` until M5. M5 replaces the refusal with the three-way merge, because "both changed" needs suggestions. This keeps the plan free of a temporary conflict-as-comment path.
 15. **Residual risk.** A sandboxed frame can still navigate *itself* to a remote URL, and no CSP directive blocks that today.
     - On a record-reading page, the host treats any frame navigation (a second `load` event without a bridge handshake) as a breach. It revokes that frame's record capability and reloads the page from Primer.
-    - Data from calls already made can leak once. This is documented in `docs/prd-primer.md`.
+    - **Accepted, not blocked:** a record-reading page can still leak data it has already read by navigating, and the leak can repeat. A navigation that gets a 204 response, or that turns into a download, never fires a second `load` event, so the breach check and the reload do not run; the page's script keeps its capability and can do it again. The owner accepted this on 2026-11-19. It is documented in `docs/prd-primer.md` and is not prevented.
 
 ---
 ## M1: Foundations

@@ -110,6 +110,17 @@ describe('LiveEditor', () => {
     expect(legacy.querySelector('.bn-editor')).toBeNull();
   });
 
+  it('one editor surface: one toolbar, each panel toggle once, in order', async () => {
+    const { DocumentSurface } = await import('../routes/document.tsx');
+    const props = { documentId: 'doc-1', readOnly: false, canVote: true, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, canComment: true, frame: () => null, live: true, theme: 'light' as const };
+    const live = await render(createElement(DocumentSurface, props));
+    await until(() => live.querySelector('.bn-editor') !== null);
+    const toggles = [...live.querySelectorAll('button[aria-pressed]')].map((b) => b.textContent);
+    expect(toggles).toEqual(['Comments', 'Suggestions', 'Decisions', 'Changes since checkpoint', 'History']);
+    expect(live.querySelectorAll('[data-live-editor]')).toHaveLength(1);
+    expect(live.querySelectorAll('.bn-editor')).toHaveLength(1);
+  });
+
   it('an organization reader without a collaborator row can comment', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
     stores.length = 0;

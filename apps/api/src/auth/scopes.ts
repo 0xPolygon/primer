@@ -19,14 +19,14 @@ export interface ScopedRoute {
   method: Method;
   path: string;
   scope: ApiTokenScope | null;
-  /** Decided ahead of the route itself (live documents land their scope rows
-   *  before their routes). Exempt from the stale-row check until registered. */
-  upcoming?: true;
 }
 
 export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/me', scope: null },
   { method: 'POST', path: '/mcp', scope: null },
+  // 405 for every token (mcp/routes.ts), so an MCP client opens no event stream.
+  { method: 'GET', path: '/mcp', scope: null },
+  { method: 'DELETE', path: '/mcp', scope: null },
 
   { method: 'GET', path: '/api/library', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId', scope: 'documents:read' },

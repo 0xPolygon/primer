@@ -23,7 +23,7 @@ import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
 import { MAIN_TAB } from '../live/reach.ts';
 import { carryLabels, labelEdit, readLabel, tabOfBlock } from './labels.ts';
 import { withLiveDocument } from '../live/instance.ts';
-import { fenceData, fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceStrings, fenceUntrusted } from '../lib/untrusted.ts';
 import { blockVersion, findBlock } from '../live/blocks.ts';
 import { fragmentFor } from '../live/reach.ts';
 import { pmDocOf } from '../live/sources.ts';
@@ -122,10 +122,11 @@ async function labelList(row: WidgetRowRecord, actor: AuthUser): Promise<WidgetL
 }
 
 /** Rows drawn from a records collection are what viewers and other agents
- *  wrote: an agent reads every value fenced (the row ids stay plain). */
+ *  wrote: an agent reads every key and value fenced (each row's top-level id,
+ *  a record id Primer validated, stays plain). */
 function fencedRows(actor: AuthUser, rows: unknown, collection: string | null): WidgetRowInput[] | null {
   if (rows === null || collection === null || actor.kind !== 'agent') return rows as WidgetRowInput[] | null;
-  return (rows as WidgetRowInput[]).map((r) => fenceData(r, 'record', ['id']));
+  return (rows as WidgetRowInput[]).map(({ id, ...rest }) => ({ id, ...fenceStrings(rest, 'record') }));
 }
 
 /** Words people wrote reach an agent fenced as untrusted data. */

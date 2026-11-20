@@ -135,8 +135,7 @@ describe('route scope table', () => {
 
       // And no table entry is stale (typo or removed route).
       const registeredSet = new Set(registered);
-      const upcoming = new Set(ROUTE_SCOPES.filter((r) => r.upcoming).map((r) => `${r.method} ${r.path}`));
-      const stale = [...classified].filter((r) => !registeredSet.has(r) && !upcoming.has(r));
+      const stale = [...classified].filter((r) => !registeredSet.has(r));
       expect(stale).toEqual([]);
     });
   });
@@ -161,10 +160,7 @@ describe('route scope table', () => {
       'primer_update_run',
       'primer_withdraw_suggestion',
       'primer_fork_document',
-      'primer_add_choice',
       'primer_propose_pick',
-      'primer_add_task',
-      'primer_update_task',
       'primer_promote_conversation',
       'primer_widget_draft',
       'primer_widget_publish',

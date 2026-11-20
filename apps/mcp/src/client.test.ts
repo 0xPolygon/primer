@@ -443,10 +443,10 @@ describe('PrimerClient.getEvents / sendEvents (issue #78)', () => {
   });
 
   it('lookupUser GETs /api/users/lookup?email=…', async () => {
-    const mockFetch = vi.fn(async () => jsonResponse({ id: 'okta-sub-1' }, 200));
+    const mockFetch = vi.fn(async () => jsonResponse({ id: 'okta-sub-1', email: 'reviewer@polygon.technology', displayName: 'Reviewer' }, 200));
     const client = makeClient(mockFetch as unknown as typeof fetch);
     const result = await client.lookupUser('reviewer@polygon.technology');
-    expect(result).toEqual({ id: 'okta-sub-1' });
+    expect(result).toEqual({ id: 'okta-sub-1', email: 'reviewer@polygon.technology', displayName: 'Reviewer' });
     const [url] = firstCall(mockFetch);
     expect(url).toBe(
       'http://localhost:3000/api/users/lookup?email=reviewer%40polygon.technology',

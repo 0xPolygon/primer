@@ -12,7 +12,7 @@ import { MAX_ROWS, renderBoth, widgetIdPrefix, type WidgetRow } from './render.t
 import { labelsOf, withLabels } from './serialize.ts';
 
 /** A widget block in a document state. */
-type PlacedWidget = { blockId: string; widgetId: string; hash: string; textIds: string[] };
+export type PlacedWidget = { blockId: string; widgetId: string; hash: string; textIds: string[] };
 
 /** What a checkpoint keeps of a widget (`widgets/<id>.json`): enough to republish it. */
 type BundledWidget = { widgetId: string; blockId: string; hash: string; source: string; rows: WidgetRow[] | null };
@@ -26,6 +26,12 @@ const BLOCK_ID = /^[A-Za-z0-9_-]{1,64}$/;
  *  ids still say nothing about which document owns the widget: every lookup
  *  by them is also scoped by the document id. */
 function placedWidgets(doc: Y.Doc): PlacedWidget[] {
+  return widgetBlocks(doc).filter((w) => w.hash);
+}
+
+/** Every widget block with well-formed ids, published or not (a copy takes
+ *  them all; a checkpoint only the published ones). */
+export function widgetBlocks(doc: Y.Doc): PlacedWidget[] {
   const out: PlacedWidget[] = [];
   const walk = (node: Y.XmlFragment | Y.XmlElement) => {
     for (const child of node.toArray()) {
@@ -35,7 +41,7 @@ function placedWidgets(doc: Y.Doc): PlacedWidget[] {
         const widgetId = String(child.getAttribute('widgetId') ?? '');
         const hash = String(child.getAttribute('hash') ?? '');
         const textIds = String(child.getAttribute('textIds') ?? '').split(' ').filter(Boolean);
-        if (blockId && BLOCK_ID.test(blockId) && UUID.test(widgetId) && hash) out.push({ blockId, widgetId, hash, textIds });
+        if (blockId && BLOCK_ID.test(blockId) && UUID.test(widgetId)) out.push({ blockId, widgetId, hash, textIds });
       } else walk(child);
     }
   };

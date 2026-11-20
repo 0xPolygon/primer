@@ -15,28 +15,29 @@ export function fenceUntrusted(text: string, label?: string): string {
   return `<${tag}>\n${escaped}\n</${tag}>`;
 }
 
-/** A plain data key (RECORD_KEY_RE's shape): passes unfenced. */
-const PLAIN_KEY = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
+/** Which names of a DTO are Primer's own: `keys` are its field names (any
+ *  other key is data and gets fenced), `plain` the fields whose string value
+ *  Primer built or validated itself (ids, timestamps, enums). Literal sets
+ *  written beside the DTO, never derived from what a name looks like. */
+export type FenceAllow = { keys?: ReadonlySet<string>; plain?: ReadonlySet<string> };
 
 /**
- * JSON data people wrote (record data, widget rows), for an agent: every
- * string value fenced with `fenceUntrusted`, and every key that isn't a plain
- * data key too, so the shape stays usable and no text in it reads as an
- * instruction. `keep` names top-level keys left as they are (identifiers
- * Primer validated, such as a row's record id). Fencing happens where an
- * agent reads, never in storage.
+ * `value` with every string in it fenced, keys included: JSON that people
+ * wrote, for an agent. Numbers, booleans and the shape stay. Fenced by
+ * default: only the names in `allow` are left alone, so a field nobody
+ * listed can't carry text through bare. An element of an array takes the
+ * plainness of the array's key.
  */
-export function fenceData<T>(value: T, label: string, keep: readonly string[] = []): T {
-  const walk = (v: unknown, top: boolean): unknown => {
-    if (typeof v === 'string') return fenceUntrusted(v, label);
-    if (Array.isArray(v)) return v.map((x) => walk(x, false));
-    if (typeof v !== 'object' || v === null) return v;
-    const out: Record<string, unknown> = {};
-    for (const [k, x] of Object.entries(v)) {
-      if (top && keep.includes(k)) out[k] = x;
-      else out[PLAIN_KEY.test(k) ? k : fenceUntrusted(k, label)] = walk(x, false);
-    }
-    return out;
-  };
-  return walk(value, true) as T;
+export function fenceStrings<T>(value: T, label: string, allow: FenceAllow = {}, plain = false): T {
+  if (typeof value === 'string') return (plain ? value : fenceUntrusted(value, label)) as T;
+  if (Array.isArray(value)) return value.map((v) => fenceStrings(v, label, allow, plain)) as T;
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [
+        allow.keys?.has(k) ? k : fenceUntrusted(k, label),
+        fenceStrings(v, label, allow, allow.plain?.has(k) ?? false),
+      ]),
+    ) as T;
+  }
+  return value;
 }

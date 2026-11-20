@@ -18,9 +18,9 @@
 //   user's personal records.
 // - Provenance: each record keeps `contributors`, everyone whose writes shaped
 //   its current data. An agent reading a record (or a change) that anyone but
-//   itself contributed to gets it marked `untrusted`, with every string in its
-//   data fenced (`fenceData`): record data is data, never instructions. A
-//   merge or a revert can't launder it. Storage keeps the plain values.
+//   itself contributed to gets it marked `untrusted`: record data is data,
+//   never instructions. A merge or a revert can't launder it.
+import { fenceStrings, fenceUntrusted } from '../lib/untrusted.ts';
 import { sql } from 'drizzle-orm';
 import {
   DEFAULT_RECORDS_PAGE_SIZE,
@@ -48,7 +48,6 @@ import {
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
-import { fenceData } from '../lib/untrusted.ts';
 import { canWriteEvents, loadEventDocContext } from '../lib/events.ts';
 import { canEdit, canManage, canRead, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
 import { scheduleDataChanged } from './changed.ts';
@@ -110,6 +109,18 @@ function checkData(raw: unknown): string | null {
     return 'data is not JSON-serializable';
   }
   if (json === undefined) return 'data is not JSON-serializable';
+  return badKey(raw);
+}
+
+/** A data key at any depth is a plain name, so a key can't carry markup. */
+function badKey(value: unknown): string | null {
+  if (Array.isArray(value)) return value.map(badKey).find((m) => m !== null) ?? null;
+  if (value === null || typeof value !== 'object') return null;
+  for (const [key, inner] of Object.entries(value)) {
+    if (!RECORD_KEY_RE.test(key)) return `data keys must be 1–64 characters of letters, digits and . _ - (got "${key.slice(0, 30)}")`;
+    const bad = badKey(inner);
+    if (bad) return bad;
+  }
   return null;
 }
 
@@ -179,9 +190,11 @@ function toDTO(row: RecordRow, actor: AuthUser): RecordDTO {
     updatedBy: row.updatedBy,
     writtenBy: row.writtenBy,
   };
+  // A display name is text a person chose: fenced for any agent reader.
+  if (actor.kind === 'agent') dto.writtenBy = fenceUntrusted(dto.writtenBy, 'record');
   if (untrustedFor(actor, [row.contributors])) {
     dto.untrusted = true;
-    dto.data = fenceData(dto.data, 'record');
+    dto.data = fenceStrings(dto.data, 'record');
   }
   return dto;
 }
@@ -555,10 +568,11 @@ function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
     actorName: row.actorName,
     createdAt: iso(row.createdAt),
   };
+  if (actor.kind === 'agent') dto.actorName = fenceUntrusted(dto.actorName, 'record');
   if (untrustedFor(actor, [row.beforeContributors, row.afterContributors, [row.actorId]])) {
     dto.untrusted = true;
-    dto.before = fenceData(dto.before, 'record');
-    dto.after = fenceData(dto.after, 'record');
+    dto.before = fenceStrings(dto.before, 'record');
+    dto.after = fenceStrings(dto.after, 'record');
   }
   return dto;
 }
