@@ -669,11 +669,14 @@ export type BlockInput = string | { html: string } | { json: Record<string, unkn
 
 /** One semantic edit of a live document (POST /api/documents/:docId/ops). */
 export type LiveOp =
-  | { op: 'add'; at: Target; position: 'before' | 'after'; blocks: BlockInput[] }
+  | { op: 'add'; at: Target; position: OpPosition; blocks: BlockInput[] }
   | { op: 'update'; target: Target; block: BlockInput; expectVersion: string }
   | { op: 'replaceRange'; from: Target; to: Target; blocks: BlockInput[]; expectVersions: Record<string, string> }
   | { op: 'delete'; target: Target; expectVersion: string }
-  | { op: 'move'; target: Target; at: Target; position: 'before' | 'after'; expectVersion: string };
+  | { op: 'move'; target: Target; at: Target; position: OpPosition; expectVersion: string };
+
+/** Where an `add` or `move` puts blocks: next to `at`, or as its first child. */
+export type OpPosition = 'before' | 'after' | 'firstChild';
 
 export interface ApplyOpsRequest {
   /** The docVersion the agent read (informational: preconditions are per block). */
