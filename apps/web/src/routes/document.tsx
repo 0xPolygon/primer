@@ -1017,6 +1017,7 @@ function DocumentPageInner() {
             userName={me.data?.displayName ?? t('document.someone')}
             userId={me.data?.id ?? ''}
             role={docQuery.data?.myRole ?? 'stranger'}
+            canComment={docQuery.data?.canComment ?? false}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
             lastView={docQuery.data?.lastView ?? null}
             frame={() =>

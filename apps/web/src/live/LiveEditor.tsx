@@ -45,6 +45,7 @@ export type LiveEditorProps = {
   userName: string;
   userId: string;
   role: ViewerRole;
+  canComment: boolean;
   /** Opens a version from before the document went live in the version viewer. */
   onOpenLegacyVersion?: (versionNumber: number) => void;
   /** The viewer's previous visit (document detail `lastView`): catch-up shows what changed since. */
@@ -83,7 +84,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   const [since] = useState(() => props.lastView ?? null);
   const [catchUp, setCatchUp] = useState<Target[]>([]);
   // Page, widget and data-table blocks render their views and overlay through the block services.
-  const { live, documentId, readOnly, theme, userId, role, userName, canVote } = props;
+  const { live, documentId, readOnly, theme, userId, role, userName, canVote, canComment } = props;
   const withPages = useMemo(() => {
     const context = {
       doc: live.doc,
@@ -91,7 +92,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
       tabId: active,
       canEdit: !readOnly,
       theme,
-      viewer: { id: userId, isOwner: role === 'owner', canComment: role !== 'stranger', name: userName },
+      viewer: { id: userId, isOwner: role === 'owner', canComment, name: userName },
     };
     const BoundPageView = (p: { blockId: string; title: string }) => <PageView {...context} {...p} />;
     const BoundWidgetView = (p: { blockId: string; props: WidgetBlockProps }) => <WidgetView {...context} {...p} />;
@@ -100,7 +101,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
       <DataTableView {...context} {...p} canWrite={canVote} />
     );
     return { ...services, PageView: BoundPageView, WidgetView: BoundWidgetView, DataTableView: BoundDataTableView };
-  }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName, canVote]);
+  }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName, canVote, canComment]);
   return (
     <PrimerBlocksContext.Provider value={withPages}>
       <div className="flex h-full flex-col" data-live-editor={props.documentId}>
@@ -124,6 +125,7 @@ function TabEditor({
   userName,
   userId,
   role,
+  canComment,
   onOpenLegacyVersion,
   store,
   catchUp,
@@ -142,9 +144,9 @@ function TabEditor({
       new PrimerThreadStore(documentId, tabId, {
         id: userId,
         isOwner: role === 'owner',
-        canComment: role !== 'stranger',
+        canComment,
       }),
-    [documentId, tabId, userId, role],
+    [documentId, tabId, userId, role, canComment],
   );
   useThreadEvents(documentId, () => void threadStore.refresh());
 
