@@ -4,6 +4,7 @@ import type { AppVariables, AppDeps } from '../app.ts';
 import type { Context } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
 import type {
+  AgentMode,
   DocumentDetailResponse, DocumentDetail, AddVersionResponse, DocumentSummary,
   CheckpointResponse, DocFileUploadResponse, ExportFormat, Refusal, RestoreCheckpointResponse,
 } from '@polygonlabs/primer-api-types';
@@ -12,7 +13,6 @@ import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/b
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
 import { withLiveDocument } from '../live/instance.ts';
-import { ensureSigningKey } from '../live/signing.ts';
 import { MAX_BYTES } from '../upload/validate.ts';
 import { db } from '../db/client.ts';
 import { actorName } from '../lib/actors.ts';
@@ -45,6 +45,7 @@ export function registerDocumentRoutes(
         createdAt: documents.createdAt,
         deletedAt: documents.deletedAt,
         format: documents.format,
+        agentMode: documents.agentMode,
         uploaderDisplayName: actorName,
       })
       .from(documents)
@@ -98,6 +99,7 @@ export function registerDocumentRoutes(
         createdAt: doc.createdAt.toISOString(),
         externallyShared: Boolean(ext?.externallyShared),
         format: doc.format,
+        agentMode: doc.agentMode,
       } satisfies DocumentDetail,
       latestVersion: {
         id: v.id,
@@ -126,9 +128,9 @@ export function registerDocumentRoutes(
     const docId = c.req.param('docId');
     const user = c.get('user');
 
-    let payload: { title?: unknown; description?: unknown; visibility?: unknown };
+    let payload: { title?: unknown; description?: unknown; visibility?: unknown; agentMode?: unknown };
     try {
-      payload = (await c.req.json()) as { title?: unknown; description?: unknown; visibility?: unknown };
+      payload = (await c.req.json()) as { title?: unknown; description?: unknown; visibility?: unknown; agentMode?: unknown };
     } catch {
       return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
     }
@@ -136,7 +138,7 @@ export function registerDocumentRoutes(
     const hasTitle = Object.prototype.hasOwnProperty.call(payload, 'title');
     const hasDescription = Object.prototype.hasOwnProperty.call(payload, 'description');
 
-    const updates: { title?: string; description?: string | null; visibility?: 'org' | 'private' } = {};
+    const updates: { title?: string; description?: string | null; visibility?: 'org' | 'private'; agentMode?: AgentMode } = {};
 
     if (hasTitle) {
       if (typeof payload.title !== 'string') {
@@ -183,8 +185,21 @@ export function registerDocumentRoutes(
       }
     }
 
-    if (!hasTitle && !hasDescription && !hasVisibility) {
-      return c.json({ error: 'invalid_body', message: 'Provide title, description, or visibility.' }, 400);
+    // Whether agents edit or suggest here: the owner's call, made by a
+    // person in a session (never by an agent, nor through a scoped token).
+    const hasAgentMode = Object.prototype.hasOwnProperty.call(payload, 'agentMode');
+    if (hasAgentMode) {
+      if (payload.agentMode !== 'auto' && payload.agentMode !== 'edit' && payload.agentMode !== 'suggest') {
+        return c.json({ error: 'invalid_body', message: "agentMode must be 'auto', 'edit' or 'suggest'" }, 400);
+      }
+      if (user.kind !== 'person' || tokenScopes(c) !== null) {
+        return c.json({ error: 'forbidden', message: 'Only the owner, as a person, can change the agent mode.' }, 403);
+      }
+      updates.agentMode = payload.agentMode;
+    }
+
+    if (!hasTitle && !hasDescription && !hasVisibility && !hasAgentMode) {
+      return c.json({ error: 'invalid_body', message: 'Provide title, description, visibility or agentMode.' }, 400);
     }
 
     const [existing] = await db
@@ -200,7 +215,7 @@ export function registerDocumentRoutes(
     }
     // Sub 1 wired this to canEdit. Sub 2: if the body includes any manage-only
     // field, require canManage instead.
-    const requiresManage = hasVisibility;
+    const requiresManage = hasVisibility || hasAgentMode;
     if (requiresManage) {
       if (!canManage(eff)) return c.json({ error: 'forbidden' }, 403);
     } else {
@@ -218,6 +233,7 @@ export function registerDocumentRoutes(
         uploaderId: documents.uploaderId,
         visibility: documents.visibility,
         createdAt: documents.createdAt,
+        agentMode: documents.agentMode,
       })
       .from(documents)
       .where(eq(documents.id, docId));
@@ -236,6 +252,7 @@ export function registerDocumentRoutes(
         uploaderDisplayName: uploader?.displayName ?? '',
         visibility: updated.visibility as 'org' | 'private',
         createdAt: updated.createdAt.toISOString(),
+        agentMode: updated.agentMode,
       },
       200
     );
@@ -410,10 +427,15 @@ export function registerDocumentRoutes(
     });
     if (!result.ok) return refusalResponse(c, result);
 
+    if (result.versionId === undefined) {
+      const suggested: AddVersionResponse = { url: `/d/${docId}`, reconciliation: result.reconciliation };
+      return c.json(suggested, 200);
+    }
     const response: AddVersionResponse = {
       versionId: result.versionId,
       versionNumber: result.versionNumber,
       url: `/d/${docId}`,
+      ...(result.reconciliation ? { reconciliation: result.reconciliation } : {}),
     };
     return c.json(response, 201);
   });
@@ -440,7 +462,6 @@ export function registerDocumentRoutes(
       }
       note = typeof body.note === 'string' && body.note.trim().length > 0 ? body.note.trim().slice(0, 500) : null;
     }
-    await ensureSigningKey(deps.storage);
     const checkpoint: CheckpointResponse = await createCheckpoint(deps.storage, docId, c.get('user'), note);
     return c.json(checkpoint, 201);
   });
@@ -496,7 +517,6 @@ export function registerDocumentRoutes(
       }
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
-      await ensureSigningKey(deps.storage);
       body = await withLiveDocument(docId, (doc) =>
         format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
       );
@@ -536,7 +556,6 @@ export function registerDocumentRoutes(
       if (!version?.bundleKey) return c.json({ error: 'not_found' }, 404);
       html = new TextDecoder().decode(await readBundleFile(deps.storage, version.bundleKey, 'static.html'));
     } else {
-      await ensureSigningKey(deps.storage);
       html = (await withLiveDocument(docId, (doc) => renderStatic(doc, access.title))).served;
     }
     return new Response(printable(html), {

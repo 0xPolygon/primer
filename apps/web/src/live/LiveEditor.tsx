@@ -24,6 +24,7 @@ import { PrimerThreadStore } from './PrimerThreadStore.ts';
 import { commentDeleteGuard, type HeldDelete } from './commentDeleteGuard.ts';
 import { DeleteCommentedDialog } from './DeleteCommentedDialog.tsx';
 import { useThreadEvents } from './threadEvents.ts';
+import { SuggestionsPanel } from './SuggestionsPanel.tsx';
 
 export type LiveEditorProps = {
   documentId: string;
@@ -77,6 +78,8 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
 function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId, role, canComment, onOpenLegacyVersion }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestionCount, setSuggestionCount] = useState(0);
   const [filter, setFilter] = useState<'open' | 'resolved' | 'all'>('open');
   const [held, setHeld] = useState<HeldDelete | null>(null);
   const threadStore = useMemo(
@@ -156,6 +159,14 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
         </button>
         <button
           type="button"
+          onClick={() => setSuggestionsOpen((open) => !open)}
+          aria-pressed={suggestionsOpen}
+          className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          {suggestionCount > 0 ? t('liveEditor.suggestionsCount', { count: suggestionCount }) : t('liveEditor.suggestions')}
+        </button>
+        <button
+          type="button"
           onClick={() => setHistoryOpen((open) => !open)}
           aria-pressed={historyOpen}
           className="h-7 rounded border border-neutral-300 px-3 text-xs text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
@@ -183,6 +194,18 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
             <ThreadsSidebar filter={filter} />
           </div>
         )}
+        <div
+          hidden={!suggestionsOpen}
+          className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 p-2 dark:border-neutral-800"
+        >
+          <SuggestionsPanel
+            documentId={documentId}
+            tabId={tabId}
+            canDecide={role === 'owner' || role === 'editor'}
+            onCount={setSuggestionCount}
+            onShow={(blockId) => editor.setTextCursorPosition(blockId, 'start')}
+          />
+        </div>
         {historyOpen && (
           <div className="w-80 shrink-0 overflow-y-auto border-l border-neutral-200 dark:border-neutral-800">
             <VersioningSidebar onClose={() => setHistoryOpen(false)} />

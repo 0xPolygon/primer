@@ -57,8 +57,10 @@ type Prepared =
  * the agent has a run a person asked for on this document, a batch without
  * its `runId` is refused `run_required`.
  *
- * `onConflict: 'suggest'` is passed to the pipeline unchanged: that is where
- * suggestions (M5) turn conflicts into proposals.
+ * `onConflict: 'suggest'` turns a stale op into a stored suggestion instead
+ * of a conflict. An agent in suggest mode (`effectiveAgentMode`, decided in
+ * the pipeline), or a run whose requester can't edit, gets every op stored as
+ * a suggestion: status `suggested` with its `suggestionId`.
  */
 export async function applyOps(documentId: string, actor: AuthUser, raw: unknown): Promise<ApplyOpsResult> {
   const doc = await readableLiveDoc(documentId, actor);
@@ -132,7 +134,7 @@ async function applyScoped(
   if (runId !== null) {
     const out = await runHooks(documentId, actor, runId);
     if ('code' in out) {
-      return { ok: false, status: out.code === 'not_found' ? 404 : out.code === 'requester_cannot_edit' ? 403 : 409, refusal: out };
+      return { ok: false, status: out.code === 'not_found' ? 404 : 409, refusal: out };
     }
     hooks = out;
   }
@@ -157,13 +159,19 @@ async function applyScoped(
   const result = await applyPlan(documentId, originFor(actor, runId), {
     edits,
     onConflict,
-    guard: async (doc) => {
+    // A run whose requester can't edit only suggests; the pipeline itself
+    // makes an agent in suggest mode suggest.
+    mode: hooks?.suggestOnly ? 'suggest' : undefined,
+    guard: async (doc, { suggesting }) => {
       // Threads first: the dry run must refuse what the real apply refuses.
       for (const id of await openThreadIds(documentId)) open.add(id);
       if (hooks) {
         // The run's budget is charged with what the batch does to the live
-        // document, counted by a dry run of these very edits.
-        const refused = await hooks.guard(dryRun(doc, inert));
+        // document, counted by a dry run of these very edits. Suggestions
+        // write nothing, so a batch that only suggests is charged nothing
+        // (the guard still refuses a cancelled run).
+        const work = suggesting ? { edits: 0, removals: 0, unresolved: false } : dryRun(doc, inert);
+        const refused = await hooks.guard(work);
         if (refused) return refused;
       }
       return null;
@@ -360,7 +368,7 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
         ...base,
         target: p.from,
         expectVersion: p.expectVersions[p.from.blockId],
-        build: guarded(p.from, (tr, at) => {
+        build: guarded(p.from, (tr, at, bctx) => {
           const range = rangeOf(tr.doc, at!, p.to.blockId);
           if (!range) return invalid('`to` is not a later sibling of `from`.', 'Pick `to` among the siblings after `from` (same parent).');
           const { end } = range;
@@ -376,7 +384,7 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
           }
           const extra = Object.keys(p.expectVersions).filter((id) => !ids.includes(id));
           if (extra.length > 0) return invalid(`expectVersions names blocks outside the range: ${extra.join(', ')}.`, 'Send versions for the range\'s blocks only.');
-          if (stale.length > 0) {
+          if (stale.length > 0 && !bctx.suggesting) {
             return {
               code: 'target_changed',
               message: `${stale.length} block(s) in the range changed since you read them.`,

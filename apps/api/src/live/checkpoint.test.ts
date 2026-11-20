@@ -7,17 +7,17 @@ import type { CheckpointResponse, Reconciliation } from '@polygonlabs/primer-api
 import { createApp } from '../app.ts';
 import { MOCK_USER } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
-import { docUpdates, versions } from '../db/schema.ts';
+import { docUpdates, documents, versions } from '../db/schema.ts';
 import { publishDocument, type PublishInput } from '../lib/publish.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import type { Storage } from '../storage/types.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
 import { readBundleFile, type BundleThread } from './bundle.ts';
-import { captureState, writeCheckpoint } from './checkpoint.ts';
+import { captureState, restoreCheckpoint, writeCheckpoint } from './checkpoint.ts';
 import { readBlocks, serverEditor } from './editor.ts';
 import { exportMarkdown } from './export.ts';
-import { withLiveDoc } from './live.testlib.ts';
+import { makeAgent, withLiveDoc } from './live.testlib.ts';
 import { originFor } from './origin.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 
@@ -110,6 +110,31 @@ describe('checkpoints', () => {
     });
   });
 
+  it('restore brings back the front matter and source formatting with the content', async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const first = '---\nstatus: draft\n---\n\n_First_ paragraph.\n';
+      const v1 = await publish(storage, { content: first, format: 'markdown' });
+      const v2 = await publish(storage, { documentId: v1.documentId, content: '---\nstatus: approved\n---\n\n_Second_ paragraph.\n', format: 'markdown' });
+      expect(v2.versionNumber).toBe(2);
+      const second = await liveExport(v1.documentId);
+
+      // An agent that only suggests leaves the front matter and sources as they are.
+      await db.update(documents).set({ agentMode: 'suggest' }).where(eq(documents.id, v1.documentId));
+      const suggested = await restoreCheckpoint(storage, { documentId: v1.documentId, bundleKey: await bundleOf(v1.versionId!) }, await makeAgent());
+      expect(suggested.outcomes.map((o) => o.status)).toEqual(['suggested']);
+      expect(await liveExport(v1.documentId)).toBe(second);
+      const [unchanged] = await db.select({ metadata: documents.metadata }).from(documents).where(eq(documents.id, v1.documentId));
+      expect(unchanged!.metadata).toEqual({ status: 'approved' });
+
+      const restored = await app.request(`/api/versions/${v1.versionId}/restore`, { method: 'POST', headers: CSRF_HEADERS });
+      expect(restored.status).toBe(200);
+      expect(await liveExport(v1.documentId)).toBe(first);
+      const [doc] = await db.select({ metadata: documents.metadata }).from(documents).where(eq(documents.id, v1.documentId));
+      expect(doc!.metadata).toEqual({ status: 'draft' });
+    });
+  });
+
   it('checkpoint view keeps its discussion context', async () => {
     await withStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });
@@ -148,8 +173,8 @@ describe('checkpoints', () => {
         versions: { id: string; versionNumber: number; bundled?: boolean }[];
       };
       const byNumber = new Map(list.versions.map((v) => [v.versionNumber, v]));
-      expect(byNumber.get(legacy.versionNumber)!.bundled).toBe(false);
-      expect(byNumber.get(live.versionNumber)!.bundled).toBe(true);
+      expect(byNumber.get(legacy.versionNumber!)!.bundled).toBe(false);
+      expect(byNumber.get(live.versionNumber!)!.bundled).toBe(true);
       // The old version has no Y.Doc to preview, but its HTML still renders.
       expect((await app.request(`/api/versions/${legacy.versionId}/ydoc`)).status).toBe(404);
       const html = await app.request(`/api/versions/${legacy.versionId}/content`);

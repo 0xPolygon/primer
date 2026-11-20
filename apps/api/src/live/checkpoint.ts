@@ -6,6 +6,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
+import { effectiveAgentMode } from '../lib/permissions.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -14,7 +15,8 @@ import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 import { tabFragmentName, tabsOf, type Tab } from './reach.ts';
-import { pmDocOf } from './sources.ts';
+import { pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
+import { splitFrontMatter } from '../upload/markdown.ts';
 
 /** A live document's state frozen at one docVersion. */
 export type CapturedState = { state: Uint8Array; docVersion: number };
@@ -59,9 +61,11 @@ export async function writeCheckpoint(
   actor: AuthUser,
   note: string | null,
   captured: CapturedState,
+  /** A republish: the uploaded file, kept with the version. */
+  original?: { versionId: string; originalKey: string; sourceFormat: 'markdown' | 'text' },
 ): Promise<CheckpointResponse> {
   const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
-  const versionId = uuidv7();
+  const versionId = original?.versionId ?? uuidv7();
   const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
   const marked = markedThreads(captured.state);
   try {
@@ -80,6 +84,7 @@ export async function writeCheckpoint(
         versionNote: note,
         bundleKey: bundle.bundleKey,
         docVersion: captured.docVersion,
+        ...(original ? { originalKey: original.originalKey, sourceFormat: original.sourceFormat } : {}),
       });
       // Open threads stay listed on the checkpoint: anchored where their
       // comment mark is in the captured content, orphaned elsewhere.
@@ -121,7 +126,17 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
-    await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    // The tab list is no block edit, so it can't be suggested: an agent that
+    // only suggests (the pipeline turns its edits below into suggestions)
+    // leaves it as it is.
+    if ((await effectiveAgentMode(checkpoint.documentId, actor.id)) === 'edit') {
+      await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    }
+    // The import provenance (front matter, verbatim source slices) comes back
+    // with the content, in the same write; a plan that only suggests leaves it.
+    const sources = trustedSources(frozen, checkpoint.documentId);
+    const meta = trustedMeta(frozen, checkpoint.documentId);
+    let restoredMeta = false;
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {
@@ -132,7 +147,20 @@ export async function restoreCheckpoint(
         },
       };
     });
-    return await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    return await applyPlan(checkpoint.documentId, originFor(actor), {
+      onConflict: 'refuse',
+      edits,
+      alsoWrite: (doc, outcomes, suggesting) => {
+        if (suggesting || outcomes.some((o) => o.status === 'conflict')) return;
+        rewriteSources(doc, checkpoint.documentId, sources, { ...meta, format: trustedMeta(doc, checkpoint.documentId).format });
+        restoredMeta = true;
+      },
+      afterWrite: async () => {
+        if (!restoredMeta) return;
+        const metadata = meta.frontMatter ? splitFrontMatter(meta.frontMatter).data : {};
+        await db.update(documents).set({ metadata }).where(eq(documents.id, checkpoint.documentId));
+      },
+    });
   } finally {
     frozen.destroy();
   }

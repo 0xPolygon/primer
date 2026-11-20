@@ -539,6 +539,8 @@
   "records.tooMany": "同時に実行できるレコード呼び出しは最大 {max} 件です。",
   "records.timeout": "呼び出しが {seconds} 秒を超えました。",
   "liveEditor.comments": "コメント",
+  "liveEditor.suggestions": "提案",
+  "liveEditor.suggestionsCount": "提案 ({count})",
   "liveEditor.showComments": "表示するコメント",
   "liveEditor.filterOpen": "未解決",
   "liveEditor.filterResolved": "解決済み",
@@ -548,5 +550,15 @@
   "deleteCommented.keep": "テキストを残す",
   "deleteCommented.confirm": "削除する",
   "threads.notDeleted": "スレッドは削除ではなく解決します。",
-  "request.failed": "リクエストに失敗しました（{status}）。"
+  "request.failed": "リクエストに失敗しました（{status}）。",
+  "suggestions.acceptFailed": "承認できませんでした（{status}）。",
+  "suggestions.rejectFailed": "却下できませんでした（{status}）。",
+  "suggestions.none": "未処理の提案はありません。",
+  "suggestions.changedSince": "その後変更あり",
+  "suggestions.reject": "却下",
+  "suggestions.accept": "承認",
+  "suggestions.kindReplace": "変更",
+  "suggestions.kindInsert": "追加",
+  "suggestions.kindDelete": "削除",
+  "suggestions.kindMove": "移動"
 }

@@ -474,7 +474,7 @@ describe('POST /api/documents/:docId/versions', () => {
       const versionRows = await db
         .select()
         .from(versions)
-        .where(eq(versions.id, out.versionId));
+        .where(eq(versions.id, out.versionId!));
       expect(versionRows).toHaveLength(1);
 
       const stream = await storage.get(versionRows[0].storageKey);
