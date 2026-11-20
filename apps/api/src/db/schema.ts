@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   primaryKey,
   index,
+  customType,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import type { AnchorData } from '@polygonlabs/primer-api-types';
@@ -37,6 +38,13 @@ export const documents = pgTable('documents', {
   visibility: text('visibility', { enum: ['org', 'private'] }).notNull().default('org'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  // Live documents (a Y.Doc in doc_updates/doc_snapshots) have a format; null
+  // marks a legacy, version-only HTML document.
+  format: text('format', { enum: ['markdown', 'text', 'html'] }),
+  // Front matter and other import metadata.
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  // How agents write here: `auto` edits documents an agent owns and suggests elsewhere.
+  agentMode: text('agent_mode', { enum: ['auto', 'edit', 'suggest'] }).notNull().default('auto'),
 });
 
 export const versions = pgTable(
@@ -54,6 +62,10 @@ export const versions = pgTable(
     // versions published before originals were kept.
     originalKey: text('original_key'),
     sourceFormat: text('source_format', { enum: ['html', 'markdown', 'text'] }),
+    // Checkpoints of live documents: the render bundle (`bundles/<versionId>/`)
+    // and the doc_updates id the bundle was captured at.
+    bundleKey: text('bundle_key'),
+    docVersion: bigint('doc_version', { mode: 'number' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -492,5 +504,63 @@ export const externalViews = pgTable(
   },
   (t) => ({
     byRecipient: index('external_views_recipient_idx').on(t.recipientId),
+  }),
+);
+
+const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
+  dataType: () => 'bytea',
+  toDriver: (value) => Buffer.from(value.buffer, value.byteOffset, value.byteLength),
+  fromDriver: (value) => new Uint8Array(value.buffer, value.byteOffset, value.byteLength),
+});
+
+// A live document's Y.Doc is its update log: one row per Yjs update, in
+// order. `id` is the document's `docVersion`. Compaction folds old updates into
+// doc_snapshots and sets `update` to null, keeping the row for its id,
+// attribution and `touched` (the block ids and auxiliary fragments it changed).
+export const docUpdates = pgTable(
+  'doc_updates',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    update: bytea('update'),
+    actorId: text('actor_id').references(() => users.id),
+    runId: uuid('run_id'),
+    touched: text('touched').array().notNull().default(sql`'{}'::text[]`),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDoc: index('doc_updates_document_id_idx').on(t.documentId, t.id),
+  }),
+);
+
+// The compacted state of a document: every update up to `upto_update_id`.
+export const docSnapshots = pgTable('doc_snapshots', {
+  documentId: uuid('document_id')
+    .primaryKey()
+    .references(() => documents.id, { onDelete: 'cascade' }),
+  state: bytea('state').notNull(),
+  uptoUpdateId: bigint('upto_update_id', { mode: 'number' }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Files placed in live documents (image, video, audio and file blocks). The
+// document stores `primer-blob://<id>`, resolved and authorised at read time.
+export const docFiles = pgTable(
+  'doc_files',
+  {
+    id: uuid('id').primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    uploadedBy: text('uploaded_by').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    byDoc: index('doc_files_document_id_idx').on(t.documentId),
   }),
 );

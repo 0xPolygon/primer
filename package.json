@@ -21,7 +21,7 @@
     "db:generate": "pnpm --filter @primer/api run db:generate",
     "db:purge": "pnpm --filter @primer/api run db:purge",
     "sync:plugin-versions": "pnpm -r exec node \"$PNPM_SCRIPT_SRC_DIR/scripts/mirror-plugin-version.mjs\"",
-    "codegen-drift-check": "pnpm run sync:plugin-versions && git diff --exit-code -- 'plugins/*/.claude-plugin/plugin.json'",
+    "codegen-drift-check": "pnpm run sync:plugin-versions && git diff --exit-code -- 'plugins/*/.claude-plugin/plugin.json' && node scripts/check-no-xl.mjs",
     "ci:version": "changeset version && pnpm run sync:plugin-versions",
     "ci:publish": "pnpm exec changeset publish"
   },

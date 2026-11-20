@@ -112,7 +112,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   registerMermaidAssetRoute(app);
   registerThreadRoutes(app, deps);
   registerCommentRoutes(app, deps);
-  registerEventRoutes(app);
+  registerEventRoutes(app, { resolver });
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
   registerLibraryRoute(app);
