@@ -22,7 +22,7 @@ import { artifactCsp } from '../lib/pagePolicy.ts';
 import { logger } from '../logger.ts';
 import { validateUpload } from '../upload/validate.ts';
 import {
-  canRead, canEdit, canManage, loadEffectiveRole,
+  canRead, canComment, canEdit, canManage, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
 import { tokenScopes } from '../auth/scopes.ts';
@@ -120,6 +120,7 @@ export function registerDocumentRoutes(
         createdAt: v.createdAt.toISOString(),
       },
       myRole: eff,
+      canComment: canComment(doc.visibility as Visibility, eff),
     };
     try {
       await db.execute(sql`
