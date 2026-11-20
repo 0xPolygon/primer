@@ -3,9 +3,20 @@ import {
   PRIMER_EVENT_NAMESPACE,
   type AssigneesResponse,
   type ChoiceTallyResponse,
+  type EmbedResponse,
   type EventRowDTO,
 } from '@polygonlabs/primer-api-types';
-import { BLOCK_TEXT_EN, type Assignee, type BlockText, type ChoiceTally, type PickInput, type PrimerBlockServices } from '@primer/blocks';
+import {
+  BLOCK_TEXT_EN,
+  embedDocumentId,
+  embedUrl,
+  type Assignee,
+  type BlockText,
+  type ChoiceTally,
+  type EmbedState,
+  type PickInput,
+  type PrimerBlockServices,
+} from '@primer/blocks';
 import { t, type MessageKey } from '../i18n/index.ts';
 import { api } from '../lib/fetch.ts';
 import { browserEventSourceFactory, type EventSourceLike } from '../lib/eventsFeed.ts';
@@ -129,6 +140,50 @@ const blockText = Object.fromEntries(
   Object.keys(BLOCK_TEXT_EN).map((key) => [key, t(`blocks.${key}` as MessageKey)]),
 ) as BlockText;
 
+/**
+ * What an embed block shows this viewer (the server resolves it: link cards
+ * are fetched there, documents are read with this viewer's permissions). The
+ * server reads the block from its own copy of the document, which can lag an
+ * edit made a moment ago, so an answer for other props than the block's
+ * current ones is asked for again.
+ */
+export function useEmbedState(documentId: string, blockId: string, url: string, targetId: string, fetchImpl: typeof api = api): EmbedState {
+  const [state, setState] = useState<EmbedState>({ status: 'loading' });
+  useEffect(() => {
+    if (!url && !targetId) {
+      setState({ status: 'none' });
+      return;
+    }
+    setState({ status: 'loading' });
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ask = async (attempt: number) => {
+      let answer: EmbedState = { status: 'none' };
+      let current = false;
+      try {
+        const res = await fetchImpl(`/api/documents/${encodeURIComponent(documentId)}/embeds/${encodeURIComponent(blockId)}`);
+        if (res.ok) {
+          const body = (await res.json()) as EmbedResponse;
+          current = embedUrl(body.echo.url) === url && embedDocumentId(body.echo.documentId) === targetId;
+          if (body.kind === 'link') answer = { status: 'link', url: body.url, title: body.title, description: body.description, siteName: body.siteName, image: body.image };
+          else if (body.kind === 'document') answer = { status: 'document', documentId: body.documentId, title: body.title, excerpt: body.excerpt };
+        }
+      } catch {
+        // Offline: nothing to show.
+      }
+      if (!live) return;
+      if (!current && attempt < 4) timer = setTimeout(() => void ask(attempt + 1), 600 * (attempt + 1));
+      else setState(answer);
+    };
+    timer = setTimeout(() => void ask(0), 250);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [documentId, blockId, url, targetId, fetchImpl]);
+  return state;
+}
+
 /** The services the web editor gives Primer's blocks, and the choice store
  *  behind them (the decision register reads it too). */
 export function useBlockServices(
@@ -160,6 +215,7 @@ export function useBlockServices(
       canVote: access.canVote,
       assignees,
       text: blockText,
+      useEmbed: (blockId, url, targetId) => useEmbedState(documentId, blockId, url, targetId),
       useTally(choiceId: string) {
         return useSyncExternalStore(
           (listener) => store.subscribe(choiceId, listener),

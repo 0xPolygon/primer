@@ -264,6 +264,15 @@ pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 table{border-collapse:collapse}td,th{border:1px solid #d4d4d4;padding:4px 8px}
 img,video{max-width:100%}
 .primer-chip{border-radius:4px;background:#ede9fe;color:#4c1d95;padding:0 4px}
+.primer-callout{--callout:#6366f1;display:flex;gap:8px;margin:2px 0;padding:8px 12px;border-left:3px solid var(--callout);border-radius:6px;background:color-mix(in srgb,var(--callout) 12%,transparent)}
+.primer-callout[data-primer-callout="warning"]{--callout:#d97706}
+.primer-callout[data-primer-callout="success"]{--callout:#16a34a}
+.primer-callout[data-primer-callout="note"]{--callout:#71717a}
+.primer-callout-label{font-size:12px;font-weight:600;color:var(--callout);white-space:nowrap}
+.primer-callout-body{flex:1;min-width:0}
+.primer-columns-row{display:flex;gap:16px;align-items:flex-start}
+.primer-column{flex:1 1 0;min-width:0}
+@media (max-width:640px){.primer-columns-row{flex-direction:column}}
 html[data-theme="dark"] body{background:#0a0a0a;color:#e5e5e5}
 html[data-theme="dark"] a{color:#c4b5fd}
 html[data-theme="dark"] td,html[data-theme="dark"] th{border-color:#404040}

@@ -28,6 +28,19 @@ export const BLOCK_TEXT_EN = {
   agentName: "{name} (agent)",
   due: "Due",
   dueOn: "due {date}",
+  calloutKind: "Callout type",
+  calloutInfo: "Info",
+  calloutWarning: "Warning",
+  calloutSuccess: "Success",
+  calloutNote: "Note",
+  addColumn: "+ Column",
+  embedPlaceholder: "Paste a link or a Primer document link",
+  embedAdd: "Embed",
+  embedChange: "Change link",
+  embedLoading: "Loading…",
+  embedUnavailable: "This embed isn't available to you.",
+  embedDocument: "Embedded document",
+  embedOpen: "Open",
 };
 export type BlockText = Record<keyof typeof BLOCK_TEXT_EN, string>;
 
