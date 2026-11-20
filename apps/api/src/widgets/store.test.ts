@@ -16,7 +16,7 @@ import { flushDataChanged } from '../records/changed.ts';
 import { readBundleFile } from '../live/bundle.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
-import { createLiveDoc, paragraph, seedBlocks, withLiveDoc } from '../live/live.testlib.ts';
+import { createLiveDoc, makeAgent, paragraph, seedBlocks, withLiveDoc } from '../live/live.testlib.ts';
 import { applyPlan } from '../live/pipeline.ts';
 import { readBlocks } from '../live/editor.ts';
 import { reachableFragments } from '../live/reach.ts';
@@ -153,6 +153,29 @@ describe('widgets in checkpoints', () => {
       await restoreCheckpoint(storage, { documentId, bundleKey: version!.bundleKey! }, owner);
       const dto = await getWidget(owner, draft.widgetId);
       expect(dto.ok && labelMap(dto.value)).toEqual({ review: 'Peer review', merge: 'Merge' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('an agent that may only suggest cannot restore a published widget', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-widget-bundle-'));
+    const storage = new FilesystemStorage(root);
+    try {
+      const documentId = await createLiveDoc();
+      await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+      const { draft } = await draftAndPublish(documentId, flow('Before'));
+      const checkpoint = await createCheckpoint(storage, documentId, owner, null);
+      const [version] = await db.select().from(versions).where(eq(versions.id, checkpoint.versionId));
+      const after = await draftAndPublish(documentId, flow('After'), draft.widgetId);
+
+      await db.update(documents).set({ agentMode: 'suggest' }).where(eq(documents.id, documentId));
+      const restored = await restoreCheckpoint(storage, { documentId, bundleKey: version!.bundleKey! }, await makeAgent(owner.id));
+      expect(restored.outcomes.every((o) => o.status !== 'applied')).toBe(true);
+      const [row] = await db.select().from(widgets).where(eq(widgets.id, draft.widgetId));
+      expect(row!.publishedSource).toContain('After');
+      expect(row!.publishedHash).toBe(after.published.publishedHash);
+      expect(row!.publishedSvgLight).toContain('>After</text>');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

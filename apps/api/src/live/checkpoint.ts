@@ -127,14 +127,14 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
-    // The tab list is no block edit, so it can't be suggested: an agent that
-    // only suggests (the pipeline turns its edits below into suggestions)
-    // leaves it as it is.
-    if ((await effectiveAgentMode(checkpoint.documentId, actor.id)) === 'edit') {
-      await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
-    }
+    // One decision for the whole restore. The tab list, published widgets and
+    // import provenance are no block edits, so they can't be suggested: an
+    // agent that only suggests gets the content as suggestions and leaves
+    // them as they are.
+    const suggesting = (await effectiveAgentMode(checkpoint.documentId, actor.id)) === 'suggest';
+    if (!suggesting) await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
     // The import provenance (front matter, verbatim source slices) comes back
-    // with the content, in the same write; a plan that only suggests leaves it.
+    // with the content, in the same write.
     const sources = trustedSources(frozen, checkpoint.documentId);
     const meta = trustedMeta(frozen, checkpoint.documentId);
     let restoredMeta = false;
@@ -155,11 +155,12 @@ export async function restoreCheckpoint(
       edits.push({ target, inverse: false, build: (tr) => void tr.replaceWith(0, tr.doc.content.size, content) });
     }
     // Widget rows first, as a publish does: viewers refetch when the block's hash changes.
-    await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
+    if (!suggesting) await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
     return await applyPlan(checkpoint.documentId, originFor(actor), {
       onConflict: 'refuse',
+      ...(suggesting ? { mode: 'suggest' as const } : {}),
       edits,
-      alsoWrite: (doc, outcomes, suggesting) => {
+      alsoWrite: (doc, outcomes) => {
         if (suggesting || outcomes.some((o) => o.status === 'conflict')) return;
         rewriteSources(doc, checkpoint.documentId, sources, { ...meta, format: trustedMeta(doc, checkpoint.documentId).format });
         restoredMeta = true;
