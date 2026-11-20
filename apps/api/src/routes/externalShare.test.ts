@@ -14,7 +14,7 @@ import {
 } from '../db/schema.ts';
 import { generateShareToken } from '../external/tokens.ts';
 import { _resetRateLimiterForTests } from '../lib/rateLimiter.ts';
-import { ARTIFACT_CSP } from './versionContent.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
 
 class CaptureNotifier extends NoopNotifier {
@@ -167,7 +167,7 @@ describe('external share public routes', () => {
 
       const content = await f.app.request(`/api/share/${f.shareToken}/content`, { headers: { cookie } });
       expect(content.status).toBe(200);
-      expect(content.headers.get('content-security-policy')).toBe(ARTIFACT_CSP);
+      expect(content.headers.get('content-security-policy')).toBe(artifactCsp('standard'));
       expect(content.headers.get('x-frame-options')).toBe('SAMEORIGIN');
       expect(content.headers.get('x-content-type-options')).toBe('nosniff');
       expect(content.headers.get('referrer-policy')).toBe('no-referrer');

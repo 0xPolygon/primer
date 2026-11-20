@@ -11,7 +11,7 @@ import {
   createViewerSession, lookupViewerSession,
   VIEWER_COOKIE_NAME, VIEWER_SESSION_TTL_MS,
 } from '../external/session.ts';
-import { ARTIFACT_CSP } from './versionContent.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import { logger } from '../logger.ts';
 
 const GENERIC_OK = { ok: true } as const;
@@ -147,7 +147,7 @@ export function registerExternalShareRoutes(
   // Serves the published version as a TOP-LEVEL document — same delivery as
   // the internal full-screen mode (document.tsx openFullScreen). Top-level
   // navigation sends the SameSite=Lax viewer cookie; a sandboxed iframe
-  // would not (see middleware/auth.ts:22-29). Identical ARTIFACT_CSP applies.
+  // would not (see middleware/auth.ts:22-29). Identical artifact CSP applies.
   app.get('/api/share/:shareToken/content', async (c) => {
     const shareToken = c.req.param('shareToken');
     const sid = viewerSessionId(c);
@@ -201,7 +201,7 @@ export function registerExternalShareRoutes(
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': ARTIFACT_CSP,
+        'content-security-policy': artifactCsp('standard'),
         'x-frame-options': 'SAMEORIGIN',
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer',

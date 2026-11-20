@@ -1,21 +1,21 @@
 import type { Hono } from 'hono';
 import { v7 as uuidv7 } from 'uuid';
 import { eq, sql } from 'drizzle-orm';
-import type { AppVariables, AppDeps } from '../app.ts';
+import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
 import type { Notifier } from '../notifications/notifier.ts';
 import { logger } from '../logger.ts';
 import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
 import { COMMENT_UNDO_WINDOW_MS } from '@polygonlabs/primer-api-types';
 import { threads, versions, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
+import { actorName, authorColumns } from '../lib/actors.ts';
 import { transactionWithEvents, type LifecycleEvent } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import {
   type Visibility,
-  effectiveRole,
-  canRead,
+  loadEffectiveRole, canRead,
   canComment,
-  loadCollaboratorRole,
+  ownerPersonOf,
 } from '../lib/permissions.ts';
 
 /** `primer.thread.updated`: a comment in the thread was edited, deleted or
@@ -97,6 +97,8 @@ interface CommentRow {
   threadId: string;
   authorId: string;
   authorDisplayName: string;
+  authorKind: 'person' | 'agent';
+  authorVia: string | null;
   body: string;
   mentions: string[];
   createdAt: Date;
@@ -111,6 +113,8 @@ function commentToDTO(row: CommentRow): CommentDTO {
     threadId: row.threadId,
     authorId: row.authorId,
     authorDisplayName: row.authorDisplayName,
+    authorKind: row.authorKind,
+    authorVia: row.authorVia,
     body: isTombstoned ? '' : row.body,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt?.toISOString() ?? null,
@@ -127,7 +131,7 @@ async function loadCommentDTO(commentId: string): Promise<CommentDTO | null> {
       id: comments.id,
       threadId: comments.threadId,
       authorId: comments.authorId,
-      authorDisplayName: users.displayName,
+      ...authorColumns,
       body: comments.body,
       mentions: comments.mentions,
       createdAt: comments.createdAt,
@@ -149,7 +153,7 @@ async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
       anchor: threads.anchor,
       resolvedAt: threads.resolvedAt,
       resolvedBy: threads.resolvedBy,
-      resolvedByDisplayName: users.displayName,
+      resolvedByDisplayName: actorName,
       createdAt: threads.createdAt,
     })
     .from(threads)
@@ -163,7 +167,7 @@ async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
       id: comments.id,
       threadId: comments.threadId,
       authorId: comments.authorId,
-      authorDisplayName: users.displayName,
+      ...authorColumns,
       body: comments.body,
       mentions: comments.mentions,
       createdAt: comments.createdAt,
@@ -197,14 +201,13 @@ export type ReplyResult =
  *  participants. Shared by the REST route and the MCP reply tool. */
 export async function replyToThread(
   notifier: Notifier,
-  user: { id: string },
+  user: AuthUser,
   threadId: string,
   payload: { body?: unknown; mentions?: unknown },
 ): Promise<ReplyResult> {
   const ctx = await loadDocContextForThread(threadId);
   if (!ctx.ok) return { ok: false, status: 404, error: 'not_found' };
-  const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-  const eff = effectiveRole(ctx, user.id, collabRole);
+  const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
   if (!canComment(ctx.visibility, eff)) return { ok: false, status: 404, error: 'not_found' };
 
   const validation = validateBody(payload.body);
@@ -215,7 +218,7 @@ export async function replyToThread(
   // Load thread context (existence check + doc/version info for notifier).
   const [threadCtx] = (await db.execute(sql`
     SELECT d.id AS doc_id, d.title AS doc_title,
-           d.uploader_id AS uploader_id,
+           ${ownerPersonOf(sql`d.uploader_id`)} AS uploader_id,
            v.id AS version_id, v.version_number::int AS version_number
     FROM threads t
     INNER JOIN versions v ON v.id = t.version_id
@@ -333,8 +336,7 @@ export function registerCommentRoutes(
     const ctx = await loadDocContextForComment(commentId);
     if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-    const eff = effectiveRole(ctx, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
     if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     let payload: Partial<CommentBodyRequest>;
@@ -424,8 +426,7 @@ export function registerCommentRoutes(
     const ctx = await loadDocContextForComment(commentId);
     if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-    const eff = effectiveRole(ctx, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
     if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
     const [existing] = await db.select().from(comments).where(eq(comments.id, commentId));
     if (!existing) return c.json({ error: 'not_found' }, 404);
@@ -456,8 +457,7 @@ export function registerCommentRoutes(
     const ctx = await loadDocContextForComment(commentId);
     if (!ctx.ok) return c.json({ error: 'not_found' }, 404);
     const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(ctx.docId, user.id);
-    const eff = effectiveRole(ctx, user.id, collabRole);
+    const eff = await loadEffectiveRole({ id: ctx.docId, uploaderId: ctx.uploaderId, visibility: ctx.visibility as Visibility }, user);
     if (!canRead(ctx.visibility, eff)) return c.json({ error: 'not_found' }, 404);
 
     const [existing] = await db.select().from(comments).where(eq(comments.id, commentId));

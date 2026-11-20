@@ -99,7 +99,7 @@ if (authMode === 'okta') {
 userResolver = composeResolvers(makeOAuthBearerResolver(), makeBearerResolver(), userResolver);
 
 // Count only — never log the emails themselves. Zero admins means the
-// service-token endpoints are unreachable (fail closed).
+// admin endpoints are unreachable (fail closed).
 const adminEmails = parseAdminEmails(process.env.ADMIN_EMAILS);
 logger.info({ adminCount: adminEmails.length }, 'admin allowlist loaded');
 

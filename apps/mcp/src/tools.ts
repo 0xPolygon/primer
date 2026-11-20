@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { PrimerApiError, type PrimerClient, type PrimerErrorCode } from './client.ts';
+import { PrimerApiError, type DocumentFormat, type PrimerClient, type PrimerErrorCode } from './client.ts';
 import { pollUntil, startDeviceLogin } from './deviceLogin.ts';
 import { commentRecords, formatComments } from './format.ts';
 
@@ -247,7 +247,7 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
       if (!content.ok) return content.result;
       try {
         const title = String(args.title);
-        const format = args.format as 'html' | 'markdown';
+        const format = args.format as DocumentFormat;
         const description = typeof args.description === 'string' ? args.description : undefined;
         const result = await auth.client.createDocument({ title, content: content.value, format, description });
         return ok(result);
@@ -263,9 +263,16 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
       if (!content.ok) return content.result;
       try {
         const documentId = String(args.documentId);
-        const format = args.format as 'html' | 'markdown';
+        const format = args.format as DocumentFormat;
         const versionNote = typeof args.versionNote === 'string' ? args.versionNote : undefined;
-        const result = await auth.client.addVersion({ documentId, content: content.value, format, versionNote });
+        const baseVersionNumber = typeof args.baseVersionNumber === 'number' ? args.baseVersionNumber : undefined;
+        const result = await auth.client.addVersion({
+          documentId,
+          content: content.value,
+          format,
+          versionNote,
+          baseVersionNumber,
+        });
         return ok(result);
       } catch (e) {
         return errFromException(e);
@@ -519,18 +526,19 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
       description: z.string().optional(),
       content: z.string().optional(),
       contentPath: z.string().optional(),
-      format: z.enum(['html', 'markdown']),
+      format: z.enum(['html', 'markdown', 'text']),
     },
   },
   primer_add_version: {
     description:
-      'Upload a new version of an existing Primer document. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access.',
+      'Upload a new version of an existing Primer document. Pass baseVersionNumber (the version you read) so a newer version published meanwhile is never overwritten: the call is then refused with a fix. Provide the body as `content` (inline) or `contentPath` (absolute path to a local file the server reads — preferred for generated artifacts: the content never transits agent context). The read is not sandboxed to any directory: the server reads whatever absolute path the process can access.',
     inputSchema: {
       documentId: z.string(),
       content: z.string().optional(),
       contentPath: z.string().optional(),
-      format: z.enum(['html', 'markdown']),
+      format: z.enum(['html', 'markdown', 'text']),
       versionNote: z.string().optional(),
+      baseVersionNumber: z.number().int().positive().optional(),
     },
   },
   primer_get_document: {
@@ -572,7 +580,7 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
   },
   primer_resolve_thread: {
     description:
-      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it. Returns { thread_id, resolved }.',
+      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it, and an agent never resolves a thread a person wrote in (reply instead and ask a person to resolve it). Returns { thread_id, resolved }.',
     inputSchema: {
       thread_id: z.string(),
     },

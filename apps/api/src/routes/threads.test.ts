@@ -9,6 +9,7 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
+import { buildMcpToolHandlers } from '../mcp/tools.ts';
 import { db } from '../db/client.ts';
 import { documents, versions, threads, comments, users, documentCollaborators } from '../db/schema.ts';
 import type { ThreadsListResponse } from '@polygonlabs/primer-api-types';
@@ -559,6 +560,71 @@ describe('threads under visibility + collab', () => {
         }),
       });
       expect(res.status).toBe(404);
+    });
+  });
+});
+
+describe('agents never resolve a thread a person wrote in', () => {
+  const AGENT = {
+    id: 'agent_threads-test',
+    email: 'agent@agents.primer.invalid',
+    displayName: 'Claude',
+    kind: 'agent' as const,
+    viaUserId: 'mock-user-1',
+  };
+
+  async function withAgentApp<T>(fn: (app: ReturnType<typeof createApp>, storage: FilesystemStorage) => Promise<T>): Promise<T> {
+    const root = await mkdtemp(join(tmpdir(), 'primer-threads-agent-'));
+    try {
+      const storage = new FilesystemStorage(root);
+      const app = createApp({ storage, notifier: new NoopNotifier(), userResolver: async () => AGENT });
+      return await fn(app, storage);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  /** A thread on a document the agent owns, with one comment per author. */
+  async function seedThread(authors: string[]): Promise<string> {
+    await db.insert(users).values({ ...AGENT }).onConflictDoNothing();
+    const { versionId } = await seedDocument({ uploaderId: AGENT.id });
+    const threadId = uuidv7();
+    await insertThread({ id: threadId, versionId, anchor: { type: 'text-range', selectorText: 'x' } });
+    for (const authorId of authors) {
+      await db.insert(comments).values({ id: uuidv7(), threadId, authorId, body: 'note', mentions: [] });
+    }
+    return threadId;
+  }
+
+  it('agent cannot resolve a thread a person wrote in', async () => {
+    const threadId = await seedThread([AGENT.id, 'mock-user-1']);
+    await withAgentApp(async (app) => {
+      const res = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST', headers: CSRF_HEADERS });
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { refusal: { code: string; fix: string } };
+      expect(body.refusal).toMatchObject({ code: 'forbidden', fix: 'Reply in the thread and ask a person to resolve it.' });
+    });
+  });
+
+  it('agent can resolve a thread only agents wrote in', async () => {
+    const threadId = await seedThread([AGENT.id]);
+    await withAgentApp(async (app) => {
+      const res = await app.request(`/api/threads/${threadId}/resolve`, { method: 'POST', headers: CSRF_HEADERS });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as ThreadDTO).resolvedBy).toBe(AGENT.id);
+    });
+  });
+
+  it('MCP primer_resolve_thread returns the refusal fix', async () => {
+    const threadId = await seedThread(['mock-user-1']);
+    await withAgentApp(async (_app, storage) => {
+      const handlers = buildMcpToolHandlers({ storage, notifier: new NoopNotifier(), apiBaseUrl: 'https://primer.example.com' });
+      const out = await handlers.primer_resolve_thread({ thread_id: threadId }, AGENT);
+      expect(out.isError).toBe(true);
+      expect(JSON.parse(out.content[0].text)).toMatchObject({
+        code: 'forbidden',
+        fix: 'Reply in the thread and ask a person to resolve it.',
+      });
     });
   });
 });

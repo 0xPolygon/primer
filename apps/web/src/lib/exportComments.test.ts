@@ -15,6 +15,8 @@ function comment(over: Partial<CommentDTO> = {}): CommentDTO {
     threadId: 't-1',
     authorId: 'u1',
     authorDisplayName: 'Taylan Pince',
+    authorKind: 'person',
+    authorVia: null,
     body: 'looks good',
     createdAt: '2026-05-20T10:00:00.000Z',
     updatedAt: null,

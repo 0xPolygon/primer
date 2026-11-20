@@ -16,6 +16,8 @@ function comment(over: Partial<CommentDTO> = {}): CommentDTO {
     threadId: 't-1',
     authorId: 'u1',
     authorDisplayName: 'Mock Reviewer',
+    authorKind: 'person',
+    authorVia: null,
     body: 'Why not sponsor gas per app?',
     createdAt: '2026-11-17T10:00:00.000Z',
     updatedAt: null,

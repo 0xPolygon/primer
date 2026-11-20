@@ -653,6 +653,8 @@ describe('primer_get_comments', () => {
               threadId: 't1',
               authorId: 'u1',
               authorDisplayName: 'Alice',
+              authorKind: 'person',
+              authorVia: null,
               body: 'Note',
               createdAt: '2026-06-05T10:00:00.000Z',
               updatedAt: null,

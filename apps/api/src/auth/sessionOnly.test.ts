@@ -9,18 +9,19 @@ import { composeResolvers, makeBearerResolver } from './bearer.ts';
 import { mockMultiResolver } from './resolver.ts';
 import { db } from '../db/client.ts';
 import { apiTokens, users } from '../db/schema.ts';
-import { SERVICE_USER_ID } from './admin.ts';
 import { asUserJson } from '../test/harness.ts';
 import type { CreateTokenResponse } from '@polygonlabs/primer-api-types';
 
 /**
  * Credential-management routes refuse bearer auth: a token — even an admin's
- * own personal token, or the Claude service token — can't mint a sibling
- * credential, approve a device login, or manage service tokens.
+ * own personal token, or an agent's token — can't mint a sibling credential,
+ * approve a device login, or manage agents.
  */
 
 const ADMIN_ID = 'admin-user';
 const ADMIN_EMAIL = `${ADMIN_ID}@polygon.technology`;
+const AGENT_ID = 'agent_session-only-test';
+const AGENT_TOKENS = `/api/agents/${AGENT_ID}/tokens`;
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), 'primer-session-only-'));
@@ -39,14 +40,14 @@ async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>)
 
 async function mint(
   app: ReturnType<typeof createApp>,
-  path: '/api/tokens' | '/api/service-tokens',
+  path: '/api/tokens' | typeof AGENT_TOKENS,
 ): Promise<CreateTokenResponse> {
   const res = await app.request(path, {
     method: 'POST',
     headers: asUserJson(ADMIN_ID),
-    // Service tokens must be scoped; the personal token stays unrestricted.
+    // Agent tokens must be scoped; the personal token stays unrestricted.
     body: JSON.stringify(
-      path === '/api/service-tokens'
+      path === AGENT_TOKENS
         ? { name: 'session-only-test', scopes: ['documents:read'] }
         : { name: 'session-only-test' },
     ),
@@ -64,16 +65,19 @@ beforeEach(async () => {
   await db
     .insert(users)
     .values([
-      { id: SERVICE_USER_ID, email: 'claude-service@polygon.technology', displayName: 'Claude' },
       { id: ADMIN_ID, email: ADMIN_EMAIL, displayName: ADMIN_ID },
     ])
+    .onConflictDoNothing();
+  await db
+    .insert(users)
+    .values({ id: AGENT_ID, email: 'agent@agents.primer.invalid', displayName: 'Claude', kind: 'agent', viaUserId: ADMIN_ID })
     .onConflictDoNothing();
 });
 
 describe('session-only routes', () => {
   it.each([
     ['personal token of an admin', '/api/tokens'],
-    ['service token', '/api/service-tokens'],
+    ['agent token', AGENT_TOKENS],
   ] as const)('%s gets 403 on every credential-management route', async (_label, mintPath) => {
     // An unrestricted token is stopped by sessionOnly; a scoped one already
     // by the scope check, since none of these routes has a scope.
@@ -82,9 +86,10 @@ describe('session-only routes', () => {
       const { token, summary } = await mint(app, mintPath);
       const routes: [string, string, unknown?][] = [
         ['POST', '/api/tokens', { name: 'sibling' }],
-        ['GET', '/api/service-tokens'],
-        ['POST', '/api/service-tokens', { name: 'sibling' }],
-        ['DELETE', `/api/service-tokens/${summary.id}`],
+        ['GET', '/api/agents'],
+        ['POST', '/api/agents', { displayName: 'sibling' }],
+        ['POST', AGENT_TOKENS, { name: 'sibling', scopes: ['documents:read'] }],
+        ['DELETE', `${AGENT_TOKENS}/${summary.id}`],
         ['POST', '/api/device/approve', { userCode: 'ABCD-EFGH' }],
         ['POST', '/api/device/deny', { userCode: 'ABCD-EFGH' }],
         ['GET', '/api/admin/stats'],
@@ -107,7 +112,7 @@ describe('session-only routes', () => {
 
   it('a bearer cannot approve a device login started by someone else', async () => {
     await withApp(async (app) => {
-      const { token } = await mint(app, '/api/service-tokens');
+      const { token } = await mint(app, AGENT_TOKENS);
       const start = await app.request('/api/device/authorize', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

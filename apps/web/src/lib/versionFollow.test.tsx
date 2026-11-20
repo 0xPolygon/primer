@@ -83,6 +83,8 @@ function thread(): ThreadDTO {
         threadId: 't-1',
         authorId: ME,
         authorDisplayName: 'Me',
+        authorKind: 'person',
+        authorVia: null,
         body: 'original',
         createdAt: '2026-11-01T00:00:00.000Z',
         updatedAt: null,

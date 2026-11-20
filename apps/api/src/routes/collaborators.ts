@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import type { AppVariables, AppDeps } from '../app.ts';
+import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
 import {
   isCollaboratorRole,
   type AddCollaboratorRequest,
@@ -11,19 +11,19 @@ import {
 } from '@polygonlabs/primer-api-types';
 import { documents, documentCollaborators, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
+import { actorName } from '../lib/actors.ts';
 import { logger } from '../logger.ts';
 import {
   canManage,
   canRead,
-  effectiveRole,
-  loadCollaboratorRole,
+  loadEffectiveRole,
   type CollaboratorRole,
   type Visibility,
 } from '../lib/permissions.ts';
 
 async function loadDocForManage(
   docId: string,
-  userId: string,
+  actor: AuthUser,
 ): Promise<
   | { status: 'not_found' }
   | { status: 'forbidden' }
@@ -42,11 +42,9 @@ async function loadDocForManage(
   if (!row) return { status: 'not_found' };
   if (row.deletedAt !== null) return { status: 'not_found' };
 
-  const collabRole = await loadCollaboratorRole(docId, userId);
-  const eff = effectiveRole(
-    { uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
-    userId,
-    collabRole,
+  const eff = await loadEffectiveRole(
+    { id: docId, uploaderId: row.uploaderId, visibility: row.visibility as Visibility },
+    actor,
   );
   if (!canRead(row.visibility as Visibility, eff)) return { status: 'not_found' };
   if (!canManage(eff)) return { status: 'forbidden' };
@@ -63,7 +61,7 @@ export function registerCollaboratorRoutes(
   app.get('/api/documents/:docId/collaborators', async (c) => {
     const docId = c.req.param('docId');
     const user = c.get('user');
-    const gate = await loadDocForManage(docId, user.id);
+    const gate = await loadDocForManage(docId, user);
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
 
@@ -73,7 +71,7 @@ export function registerCollaboratorRoutes(
         role: documentCollaborators.role,
         grantedBy: documentCollaborators.grantedBy,
         createdAt: documentCollaborators.createdAt,
-        displayName: users.displayName,
+        displayName: actorName,
       })
       .from(documentCollaborators)
       .innerJoin(users, eq(users.id, documentCollaborators.userId))
@@ -95,7 +93,7 @@ export function registerCollaboratorRoutes(
   app.post('/api/documents/:docId/collaborators', async (c) => {
     const docId = c.req.param('docId');
     const user = c.get('user');
-    const gate = await loadDocForManage(docId, user.id);
+    const gate = await loadDocForManage(docId, user);
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
 
@@ -121,7 +119,7 @@ export function registerCollaboratorRoutes(
       );
     }
     const [target] = await db
-      .select({ id: users.id, displayName: users.displayName })
+      .select({ id: users.id, displayName: actorName })
       .from(users)
       .where(eq(users.id, targetUserId));
     if (!target) return c.json({ error: 'user_not_found', message: 'target user does not exist' }, 400);
@@ -170,7 +168,7 @@ export function registerCollaboratorRoutes(
     const docId = c.req.param('docId');
     const targetUserId = c.req.param('userId');
     const user = c.get('user');
-    const gate = await loadDocForManage(docId, user.id);
+    const gate = await loadDocForManage(docId, user);
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
 
@@ -208,7 +206,7 @@ export function registerCollaboratorRoutes(
         role: documentCollaborators.role,
         grantedBy: documentCollaborators.grantedBy,
         createdAt: documentCollaborators.createdAt,
-        displayName: users.displayName,
+        displayName: actorName,
       })
       .from(documentCollaborators)
       .innerJoin(users, eq(users.id, documentCollaborators.userId))
@@ -228,7 +226,7 @@ export function registerCollaboratorRoutes(
     const docId = c.req.param('docId');
     const targetUserId = c.req.param('userId');
     const user = c.get('user');
-    const gate = await loadDocForManage(docId, user.id);
+    const gate = await loadDocForManage(docId, user);
     if (gate.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     if (gate.status === 'forbidden') return c.json({ error: 'forbidden' }, 403);
 

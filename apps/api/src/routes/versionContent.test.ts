@@ -8,7 +8,7 @@ import { createApp } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
-import { ARTIFACT_CSP } from './versionContent.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import { db } from '../db/client.ts';
 import { documents, versions as versionsTable, users, documentCollaborators } from '../db/schema.ts';
 import { CSRF_HEADERS, asUser } from '../test/harness.ts';
@@ -36,7 +36,7 @@ describe('GET /api/versions/:versionId/content', () => {
       const res = await app.request(`/api/versions/${versionId}/content`);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
-      expect(res.headers.get('content-security-policy')).toBe(ARTIFACT_CSP);
+      expect(res.headers.get('content-security-policy')).toBe(artifactCsp('standard'));
       expect(res.headers.get('x-frame-options')).toBe('SAMEORIGIN');
       expect(res.headers.get('x-content-type-options')).toBe('nosniff');
       expect(res.headers.get('referrer-policy')).toBe('no-referrer');

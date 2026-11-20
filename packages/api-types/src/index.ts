@@ -130,8 +130,34 @@ export interface UserDTO {
   displayName: string;
 }
 
+/** A person signs in; an agent acts through tokens, via a person. */
+export type ActorKind = 'person' | 'agent';
+
 export interface MeResponse extends UserDTO {
   isAdmin: boolean;
+  kind: ActorKind;
+  /** The person an agent acts via; null for people. */
+  viaUserId: string | null;
+}
+
+/** One of the caller's agents (GET /api/agents). */
+export interface AgentDTO {
+  id: string;
+  displayName: string;
+  createdAt: string;
+  tokens: ApiTokenSummary[];
+}
+
+export interface AgentsListResponse {
+  agents: AgentDTO[];
+}
+
+export interface CreateAgentRequest {
+  displayName: string;
+}
+
+export interface CreateAgentResponse {
+  id: string;
 }
 
 export interface VersionSummary {
@@ -167,7 +193,12 @@ export interface CommentDTO {
   id: string;
   threadId: string;
   authorId: string;
+  /** For an agent, already labelled "<name> (via <person>)" by the server,
+   *  as every display name of an actor is. */
   authorDisplayName: string;
+  authorKind: ActorKind;
+  /** Display name of the person an agent author acts via; null for people. */
+  authorVia: string | null;
   /** Empty string for a tombstoned comment — the server never discloses the
    *  text of a deleted comment, even to its author. The row keeps it, so an
    *  in-window restore brings the original text back. */
@@ -264,6 +295,22 @@ export interface AddVersionResponse {
   versionNumber: number;
   url: string;
 }
+
+/** Why the server refused a write, with a ready fix the caller (often an
+ *  agent) can follow. Codes grow per feature; branch on `code`, never on
+ *  message text. */
+export type RefusalCode = 'stale_base' | 'forbidden' | 'not_found' | 'bad_request';
+
+export interface Refusal {
+  code: RefusalCode;
+  message: string;
+  /** What to do instead, in one sentence. */
+  fix: string;
+  details?: Record<string, unknown>;
+}
+
+/** The formats a document version can be published from. */
+export type PublishFormat = 'html' | 'markdown' | 'text';
 
 export interface AdminStatsBucket {
   total: number;

@@ -49,7 +49,23 @@ export function markdownToHtml(input: string): MarkdownConversionResult {
       ? parsed.data.title.trim()
       : null;
 
-  const html =
+  return { html: wrapArticle(rendered), frontmatterTitle: fmTitle, bodyIsEmpty };
+}
+
+/** Plain text (`.txt`) as escaped paragraphs in the Markdown page shell:
+ *  blank lines split paragraphs, single newlines become line breaks. */
+export function textToHtml(input: string): { html: string; bodyIsEmpty: boolean } {
+  const paragraphs = input
+    .replace(/\r\n?/g, '\n')
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+    .map((p) => `<p>${md.utils.escapeHtml(p).replace(/\n/g, '<br>')}</p>`);
+  return { html: wrapArticle(paragraphs.join('')), bodyIsEmpty: paragraphs.length === 0 };
+}
+
+function wrapArticle(body: string): string {
+  return (
     '<!doctype html>' +
     '<html data-theme="light">' +
     '<head>' +
@@ -57,9 +73,8 @@ export function markdownToHtml(input: string): MarkdownConversionResult {
     `<style>${MARKDOWN_STYLESHEET}</style>` +
     '</head>' +
     '<body>' +
-    `<article class="primer-md">${rendered}</article>` +
+    `<article class="primer-md">${body}</article>` +
     '</body>' +
-    '</html>';
-
-  return { html, frontmatterTitle: fmTitle, bodyIsEmpty };
+    '</html>'
+  );
 }

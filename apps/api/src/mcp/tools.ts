@@ -2,21 +2,20 @@ import { z, type ZodTypeAny } from 'zod';
 import { v7 as uuidv7 } from 'uuid';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { Storage } from '../storage/types.ts';
+import type { AuthUser } from '../app.ts';
 import type { Notifier } from '../notifications/notifier.ts';
 import { db } from '../db/client.ts';
+import { actorName, actorNameOf, authorColumns } from '../lib/actors.ts';
 import { documents, versions, threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { replyToThread } from '../routes/comments.ts';
 import { resolveThread } from '../routes/threads.ts';
-import { markdownToHtml } from '../upload/markdown.ts';
-import { transformHtml } from '../upload/htmlPipeline.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
-import { loadCarryOrigins } from '../lib/threadCarry.ts';
-import { insertPublishedVersion } from '../lib/publishVersion.ts';
+import { publishDocument } from '../lib/publish.ts';
 import { logger } from '../logger.ts';
-import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope } from '@polygonlabs/primer-api-types';
+import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope, PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 import {
-  canRead, canEdit, effectiveRole, loadCollaboratorRole, type Visibility,
+  canRead, isSelfOrAgentOf, libraryOwnerId, loadEffectiveRole, type Visibility,
 } from '../lib/permissions.ts';
 import {
   DEFAULT_EVENTS_PAGE_SIZE,
@@ -45,7 +44,6 @@ export type PrimerErrorCode =
 
 export interface TextContent { type: 'text'; text: string; }
 export interface ToolResult { isError?: boolean; content: TextContent[]; }
-export type AuthUser = { id: string; email: string; displayName: string };
 export type ToolHandler = (args: Record<string, unknown>, user: AuthUser) => Promise<ToolResult>;
 
 export interface ToolDeps {
@@ -59,6 +57,16 @@ function ok(payload: unknown): ToolResult {
 }
 function err(code: PrimerErrorCode, message: string): ToolResult {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message }) }] };
+}
+/** A refusal as a tool error: its code, message and the fix to follow. */
+function refusalErr(refusal: Refusal): ToolResult {
+  const { code, message, fix } = refusal;
+  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message, fix }) }] };
+}
+
+const FORMAT_EXTENSION: Record<PublishFormat, string> = { html: 'html', markdown: 'md', text: 'txt' };
+function parseFormat(raw: unknown): PublishFormat {
+  return raw === 'markdown' || raw === 'text' ? raw : 'html';
 }
 
 // Inline port of apps/mcp/src/format.ts — avoids cross-package import.
@@ -219,7 +227,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           visibility: documents.visibility,
           createdAt: documents.createdAt,
           deletedAt: documents.deletedAt,
-          uploaderDisplayName: users.displayName,
+          uploaderDisplayName: actorName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
@@ -229,8 +237,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (docRows.length === 0) return err('not_found', 'document not found');
       if (docRows[0].deletedAt !== null) return err('not_found', 'document not found');
 
-      const collabRole = await loadCollaboratorRole(documentId!, user.id);
-      const eff = effectiveRole(docRows[0], user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: documentId, uploaderId: docRows[0].uploaderId, visibility: docRows[0].visibility as Visibility }, user);
       if (!canRead(docRows[0].visibility as Visibility, eff)) {
         return err('not_found', 'document not found');
       }
@@ -352,8 +359,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         .from(documents)
         .where(eq(documents.id, row.documentId));
       if (!docRow) return err('not_found', 'document not found');
-      const collabRole = await loadCollaboratorRole(row.documentId, user.id);
-      const eff = effectiveRole(docRow, user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: row.documentId, uploaderId: docRow.uploaderId, visibility: docRow.visibility as Visibility }, user);
       if (!canRead(docRow.visibility as Visibility, eff)) {
         return err('not_found', 'version not found');
       }
@@ -386,8 +392,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!existingDoc) return err('not_found', 'document not found');
       if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
 
-      const collabRole = await loadCollaboratorRole(documentId, user.id);
-      const eff = effectiveRole(existingDoc, user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: documentId, uploaderId: existingDoc.uploaderId, visibility: existingDoc.visibility as Visibility }, user);
       if (!canRead(existingDoc.visibility as Visibility, eff)) {
         return err('not_found', 'document not found');
       }
@@ -461,8 +466,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       }[];
       if (!docRow) return err('not_found', 'version not found');
 
-      const collabRole = await loadCollaboratorRole(docRow.documentId, user.id);
-      const eff = effectiveRole(docRow, user.id, collabRole);
+      const eff = await loadEffectiveRole({ id: docRow.documentId, uploaderId: docRow.uploaderId, visibility: docRow.visibility as Visibility }, user);
       if (!canRead(docRow.visibility, eff)) {
         return err('not_found', 'version not found');
       }
@@ -480,179 +484,49 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
     },
 
     primer_create_document: async (args, user) => {
-      // Mirror POST /api/upload from routes/upload.ts, but with inline content.
-      const title = typeof args.title === 'string' ? args.title.trim() : '';
-      const description = typeof args.description === 'string' ? args.description.trim() || undefined : undefined;
+      const format = parseFormat(args.format);
       const content = typeof args.content === 'string' ? args.content : '';
-      const format = args.format === 'markdown' ? 'markdown' : 'html';
-
-      if (!title) return err('bad_request', 'title is required');
       if (!content) return err('bad_request', 'content is required');
-
-      let preparedHtml: string;
-      if (format === 'markdown') {
-        let mdResult;
-        try {
-          mdResult = markdownToHtml(content);
-        } catch (e) {
-          return err('bad_request', `Markdown conversion failed: ${(e as Error).message}`);
-        }
-        if (mdResult.bodyIsEmpty) {
-          return err('bad_request', 'Document body is empty.');
-        }
-        preparedHtml = mdResult.html;
-      } else {
-        preparedHtml = content;
-      }
-
-      const transformed = transformHtml(preparedHtml);
-      if (!transformed.ok) {
-        return err('bad_request', transformed.message);
-      }
-
-      const documentId = uuidv7();
-      const versionId = uuidv7();
-      // Storage key format must match upload.ts exactly: v1/<versionId>.html
-      const storageKey = `v1/${versionId}.html`;
-      const transformedBytes = new TextEncoder().encode(transformed.html);
-
-      await deps.storage.put(storageKey, transformedBytes);
-
-      try {
-        await transactionWithEvents(async (tx, emit) => {
-          await tx.insert(documents).values({
-            id: documentId,
-            title,
-            description: description ?? null,
-            uploaderId: user.id,
-          });
-          await tx.insert(versions).values({
-            id: versionId,
-            documentId,
-            versionNumber: 1,
-            storageKey,
-            sizeBytes: transformedBytes.byteLength,
-            versionNote: null,
-          });
-          emit({
-            documentId: documentId,
-            versionId: versionId,
-            actorId: user.id,
-            type: 'version.published',
-            payload: { document_id: documentId, version_id: versionId, number: 1, author_id: user.id },
-          });
-        });
-      } catch (e) {
-        try { await deps.storage.delete(storageKey); } catch {}
-        return err('bad_request', 'Failed to persist document.');
-      }
-
+      const result = await publishDocument(deps.storage, {
+        actor: user,
+        title: typeof args.title === 'string' ? args.title : '',
+        description: typeof args.description === 'string' ? args.description : null,
+        content: new TextEncoder().encode(content),
+        filename: `content.${FORMAT_EXTENSION[format]}`,
+        format,
+      });
+      if (!result.ok) return refusalErr(result.refusal);
       return ok({
-        documentId,
-        versionId,
-        versionNumber: 1,
-        url: `${deps.apiBaseUrl}/d/${documentId}`,
+        documentId: result.documentId,
+        versionId: result.versionId,
+        versionNumber: result.versionNumber,
+        url: `${deps.apiBaseUrl}/d/${result.documentId}`,
       });
     },
 
     primer_add_version: async (args, user) => {
-      // Mirror POST /api/documents/:docId/versions from routes/documents.ts.
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
+      const format = parseFormat(args.format);
       const content = typeof args.content === 'string' ? args.content : '';
-      const format = args.format === 'markdown' ? 'markdown' : 'html';
-      const versionNoteRaw = typeof args.versionNote === 'string' ? args.versionNote.trim() : null;
-
       if (!documentId) return err('bad_request', 'documentId is required');
       if (!content) return err('bad_request', 'content is required');
-
-      const [existingDoc] = await db
-        .select({
-          uploaderId: documents.uploaderId,
-          visibility: documents.visibility,
-          deletedAt: documents.deletedAt,
-        })
-        .from(documents)
-        .where(eq(documents.id, documentId));
-      if (!existingDoc) return err('not_found', 'document not found');
-      if (existingDoc.deletedAt !== null) return err('not_found', 'document not found');
-
-      const collabRole = await loadCollaboratorRole(documentId, user.id);
-      const eff = effectiveRole(existingDoc, user.id, collabRole);
-      if (!canRead(existingDoc.visibility as Visibility, eff)) {
-        return err('not_found', 'document not found');
+      const base = args.baseVersionNumber;
+      if (base !== undefined && (typeof base !== 'number' || !Number.isInteger(base) || base < 1)) {
+        return err('bad_request', 'baseVersionNumber must be a positive integer');
       }
-      if (!canEdit(eff)) {
-        return err('forbidden', 'only the document owner or editor collaborators can add versions');
-      }
-
-      let preparedHtml: string;
-      if (format === 'markdown') {
-        let mdResult;
-        try {
-          mdResult = markdownToHtml(content);
-        } catch (e) {
-          return err('bad_request', `Markdown conversion failed: ${(e as Error).message}`);
-        }
-        if (mdResult.bodyIsEmpty) {
-          return err('bad_request', 'Document body is empty.');
-        }
-        preparedHtml = mdResult.html;
-      } else {
-        preparedHtml = content;
-      }
-
-      const transformed = transformHtml(preparedHtml);
-      if (!transformed.ok) {
-        return err('bad_request', transformed.message);
-      }
-
-      let versionNote: string | null = null;
-      if (versionNoteRaw && versionNoteRaw.length > 0) {
-        if (versionNoteRaw.length > 500) {
-          return err('bad_request', 'versionNote must be ≤500 chars');
-        }
-        versionNote = versionNoteRaw;
-      }
-
-      const versionId = uuidv7();
-      const storageKey = `v1/${versionId}.html`;
-      const transformedBytes = new TextEncoder().encode(transformed.html);
-
-      const [maxRow] = (await db.execute(sql`
-        SELECT COALESCE(MAX(version_number), 0)::int AS max_n
-        FROM versions
-        WHERE document_id = ${documentId}
-      `)) as unknown as { max_n: number }[];
-      const nextNumber = (maxRow?.max_n ?? 0) + 1;
-
-      const origins = await loadCarryOrigins(deps.storage, documentId);
-
-      await deps.storage.put(storageKey, transformedBytes);
-
-      try {
-        await insertPublishedVersion(deps.storage, {
-          documentId,
-          versionId,
-          versionNumber: nextNumber,
-          storageKey,
-          sizeBytes: transformedBytes.byteLength,
-          versionNote,
-          html: transformed.html,
-          origins,
-          actorId: user.id,
-        });
-      } catch (e) {
-        try { await deps.storage.delete(storageKey); } catch {}
-        const pgErr = e as { code?: string };
-        if (pgErr.code === '23505') {
-          return err('bad_request', 'Concurrent version write; retry.');
-        }
-        return err('bad_request', 'Failed to persist version.');
-      }
-
+      const result = await publishDocument(deps.storage, {
+        actor: user,
+        documentId,
+        content: new TextEncoder().encode(content),
+        filename: `content.${FORMAT_EXTENSION[format]}`,
+        format,
+        versionNote: typeof args.versionNote === 'string' ? args.versionNote : null,
+        baseVersionNumber: base as number | undefined,
+      });
+      if (!result.ok) return refusalErr(result.refusal);
       return ok({
-        versionId,
-        versionNumber: nextNumber,
+        versionId: result.versionId,
+        versionNumber: result.versionNumber,
         url: `${deps.apiBaseUrl}/d/${documentId}`,
       });
     },
@@ -681,15 +555,16 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         cursorCreatedAt = cursorRow.createdAt;
       }
 
+      const me = libraryOwnerId(user);
       const scopePredicate =
-        scope === 'mine' ? sql`${documents.uploaderId} = ${user.id}` : undefined;
+        scope === 'mine' ? isSelfOrAgentOf(documents.uploaderId, me) : undefined;
       const keysetPredicate = cursorCreatedAt
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
       // Library scope: docs the caller has accessed — created, collaborates on,
       // or an org doc they've opened (has a document_views row). Org docs the
       // caller never opened are excluded, mirroring the dashboard library.
-      const accessedPredicate = sql`(${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}) OR (${documents.visibility} = 'org' AND EXISTS (SELECT 1 FROM document_views dv WHERE dv.document_id = ${documents.id} AND dv.user_id = ${user.id})))`;
+      const accessedPredicate = sql`(${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${me}) OR (${documents.visibility} = 'org' AND EXISTS (SELECT 1 FROM document_views dv WHERE dv.document_id = ${documents.id} AND dv.user_id = ${me})))`;
 
       const rows = await db
         .select({
@@ -699,7 +574,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           uploaderId: documents.uploaderId,
           visibility: documents.visibility,
           createdAt: documents.createdAt,
-          uploaderDisplayName: users.displayName,
+          uploaderDisplayName: actorName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
@@ -754,13 +629,14 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
       const pattern = `%${escaped}%`;
       const matchPredicate = sql`(${documents.title} ILIKE ${pattern} ESCAPE '\\' OR ${documents.description} ILIKE ${pattern} ESCAPE '\\')`;
+      const me = libraryOwnerId(user);
       const scopePredicate =
-        scope === 'mine' ? sql`${documents.uploaderId} = ${user.id}` : undefined;
+        scope === 'mine' ? isSelfOrAgentOf(documents.uploaderId, me) : undefined;
       const keysetPredicate = cursorCreatedAt
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
       // canRead filter: exclude private docs the caller cannot read.
-      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${documents.uploaderId} = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${user.id}))`;
+      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${me}))`;
 
       const rows = await db
         .select({
@@ -770,7 +646,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
           uploaderId: documents.uploaderId,
           visibility: documents.visibility,
           createdAt: documents.createdAt,
-          uploaderDisplayName: users.displayName,
+          uploaderDisplayName: actorName,
         })
         .from(documents)
         .innerJoin(users, eq(users.id, documents.uploaderId))
@@ -819,11 +695,9 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!doc) return err('not_found', 'document not found');
       if (doc.deletedAt !== null) return err('not_found', 'document not found');
 
-      const collabRole = await loadCollaboratorRole(documentId, user.id);
-      const eff = effectiveRole(
-        { uploaderId: doc.uploaderId, visibility: doc.visibility as Visibility },
-        user.id,
-        collabRole,
+      const eff = await loadEffectiveRole(
+        { id: documentId, uploaderId: doc.uploaderId, visibility: doc.visibility as Visibility },
+        user,
       );
       if (!canRead(doc.visibility as Visibility, eff)) {
         return err('not_found', 'document not found');
@@ -919,7 +793,8 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         : sql``;
       const scopeFilter = scope === 'mine' ? sql`AND c.author_id = ${user.id}` : sql``;
       // canRead filter: exclude comments on private docs the caller can't read.
-      const canReadFilter = sql`AND (d.visibility = 'org' OR d.uploader_id = ${user.id} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = d.id AND dc.user_id = ${user.id}))`;
+      const me = libraryOwnerId(user);
+      const canReadFilter = sql`AND (d.visibility = 'org' OR ${isSelfOrAgentOf(sql`d.uploader_id`, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = d.id AND dc.user_id = ${me}))`;
 
       const rows = (await db.execute(sql`
         SELECT c.id AS "id",
@@ -929,7 +804,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
                v.document_id AS "documentId",
                d.title AS "documentTitle",
                c.author_id AS "authorId",
-               u.display_name AS "authorDisplayName",
+               ${actorNameOf('u')} AS "authorDisplayName",
                c.body AS "body",
                c.mentions AS "mentions",
                c.created_at AS "createdAt",
@@ -987,7 +862,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
     primer_get_events: async (args, user) => {
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       if (!documentId) return err('bad_request', '`documentId` is required.');
-      const g = await gateEventAccess(documentId, user.id);
+      const g = await gateEventAccess(documentId, user);
       if (g.status === 'not_found') return err('not_found', 'document not found');
 
       const sinceParsed = parseSince(
@@ -1027,7 +902,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
     primer_send_events: async (args, user) => {
       const documentId = typeof args.documentId === 'string' ? args.documentId : '';
       if (!documentId) return err('bad_request', '`documentId` is required.');
-      const g = await gateEventAccess(documentId, user.id);
+      const g = await gateEventAccess(documentId, user);
       if (g.status === 'not_found') return err('not_found', 'document not found');
       if (!g.mayWrite) {
         return err('forbidden', 'only the document owner, editors and responders may write events');
@@ -1052,7 +927,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (args.state !== 'working' && args.state !== 'idle') {
         return err('bad_request', '`state` must be "working" or "idle".');
       }
-      const g = await gateEventAccess(documentId, user.id);
+      const g = await gateEventAccess(documentId, user);
       if (g.status === 'not_found') return err('not_found', 'document not found');
       if (!g.mayWrite) {
         return err('forbidden', 'only the document owner, editors and responders may set a status');
@@ -1077,10 +952,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const threadId = typeof args.thread_id === 'string' ? args.thread_id : '';
       if (!threadId) return err('bad_request', 'thread_id is required');
       const out = await resolveThread(user, threadId);
-      if (!out.ok) {
-        return err(out.status === 404 ? 'not_found' : 'forbidden',
-          out.status === 404 ? 'thread not found' : 'only the document owner or the thread starter can resolve it');
-      }
+      if (!out.ok) return refusalErr(out.refusal);
       return ok({ thread_id: threadId, resolved: true });
     },
   };
@@ -1110,6 +982,8 @@ async function loadThreads(
     threadId: string;
     authorId: string;
     authorDisplayName: string;
+    authorKind: 'person' | 'agent';
+    authorVia: string | null;
     body: string;
     mentions: string[];
     createdAt: Date;
@@ -1124,7 +998,7 @@ async function loadThreads(
     anchor: threads.anchor,
     resolvedAt: threads.resolvedAt,
     resolvedBy: threads.resolvedBy,
-    resolvedByDisplayName: users.displayName,
+    resolvedByDisplayName: actorName,
     createdAt: threads.createdAt,
   };
   const threadRows = (
@@ -1154,7 +1028,7 @@ async function loadThreads(
             id: comments.id,
             threadId: comments.threadId,
             authorId: comments.authorId,
-            authorDisplayName: users.displayName,
+            ...authorColumns,
             body: comments.body,
             mentions: comments.mentions,
             createdAt: comments.createdAt,
@@ -1193,6 +1067,8 @@ async function loadThreads(
       threadId: c.threadId,
       authorId: c.authorId,
       authorDisplayName: c.authorDisplayName,
+      authorKind: c.authorKind,
+      authorVia: c.authorVia,
       body: c.deletedAt !== null ? '' : c.body,
       createdAt: c.createdAt.toISOString(),
       updatedAt: c.updatedAt?.toISOString() ?? null,
@@ -1267,16 +1143,18 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
       title: z.string(),
       description: z.string().optional(),
       content: z.string(),
-      format: z.enum(['html', 'markdown']),
+      format: z.enum(['html', 'markdown', 'text']),
     },
   },
   primer_add_version: {
-    description: 'Upload a new version of an existing Primer document.',
+    description:
+      'Upload a new version of an existing Primer document. Pass baseVersionNumber (the version you read) so a newer version published meanwhile is never overwritten: the call is then refused with code "stale_base" and a fix.',
     inputSchema: {
       documentId: z.string(),
       content: z.string(),
-      format: z.enum(['html', 'markdown']),
+      format: z.enum(['html', 'markdown', 'text']),
       versionNote: z.string().optional(),
+      baseVersionNumber: z.number().int().positive().optional(),
     },
   },
   primer_list_documents: {
@@ -1332,7 +1210,7 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
   },
   primer_resolve_thread: {
     description:
-      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it. Returns { thread_id, resolved }.',
+      'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it, and an agent never resolves a thread a person wrote in (reply instead and ask a person to resolve it). Returns { thread_id, resolved }.',
     inputSchema: { thread_id: z.string() },
   },
   primer_send_events: {
