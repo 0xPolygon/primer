@@ -158,7 +158,7 @@ describe('widgets in checkpoints', () => {
     }
   });
 
-  it('an agent that may only suggest cannot restore a published widget', async () => {
+  it('an agent that may only suggest cannot restore a published widget, directly or by suggestion', async () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-widget-bundle-'));
     const storage = new FilesystemStorage(root);
     try {
@@ -171,7 +171,8 @@ describe('widgets in checkpoints', () => {
 
       await db.update(documents).set({ agentMode: 'suggest' }).where(eq(documents.id, documentId));
       const restored = await restoreCheckpoint(storage, { documentId, bundleKey: version!.bundleKey! }, await makeAgent(owner.id));
-      expect(restored.outcomes.every((o) => o.status !== 'applied')).toBe(true);
+      expect(restored.outcomes.map((o) => o.status === 'conflict' && o.refusal?.code)).toEqual(restored.outcomes.map(() => 'forbidden'));
+      expect(await db.select().from(suggestions).where(eq(suggestions.documentId, documentId))).toEqual([]);
       const [row] = await db.select().from(widgets).where(eq(widgets.id, draft.widgetId));
       expect(row!.publishedSource).toContain('After');
       expect(row!.publishedHash).toBe(after.published.publishedHash);

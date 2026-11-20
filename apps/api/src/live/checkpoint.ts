@@ -15,7 +15,7 @@ import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 import { fragmentName, isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
-import { restoreWidgets } from '../widgets/bundle.ts';
+import { restoreWidgets, widgetsChangedSince } from '../widgets/bundle.ts';
 import { widgetAnchorPublished } from '../widgets/anchors.ts';
 import { pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
 import { splitFrontMatter } from '../upload/markdown.ts';
@@ -131,10 +131,11 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
-    // One decision for the whole restore. The tab list, published widgets and
-    // import provenance are no block edits, so they can't be suggested: an
-    // agent that only suggests gets the content as suggestions and leaves
-    // them as they are.
+    // One decision for the whole restore. The tab list and import provenance
+    // are no block edits, so they can't be suggested: an agent that only
+    // suggests gets the content as suggestions and leaves them as they are.
+    // Nor can a published widget, and accepting its block alone would point
+    // the block at a publish that isn't there, so such a restore is refused.
     const suggesting = (await effectiveAgentMode(checkpoint.documentId, actor.id)) === 'suggest';
     if (!suggesting) await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
     // The import provenance (front matter, verbatim source slices) comes back
@@ -162,7 +163,19 @@ export async function restoreCheckpoint(
     if (!suggesting) await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
     return await applyPlan(checkpoint.documentId, originFor(actor), {
       onConflict: 'refuse',
-      ...(suggesting ? { mode: 'suggest' as const } : {}),
+      ...(suggesting
+        ? {
+            mode: 'suggest' as const,
+            guard: async () =>
+              (await widgetsChangedSince(frozen, checkpoint.documentId))
+                ? {
+                    code: 'forbidden' as const,
+                    message: 'This version has widgets that were published differently since; an agent that may only suggest cannot restore them.',
+                    fix: 'Ask a person who edits the document to restore this version.',
+                  }
+                : null,
+          }
+        : {}),
       edits,
       alsoWrite: (doc, outcomes) => {
         if (suggesting || outcomes.some((o) => o.status === 'conflict')) return;
