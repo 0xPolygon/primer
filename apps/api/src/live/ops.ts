@@ -8,6 +8,7 @@ import {
   type BlockInput,
   type EditOutcome,
   type LiveBlockDTO,
+  type OpPosition,
   type Reconciliation,
   type Refusal,
   type Target,
@@ -40,12 +41,12 @@ export type ApplyOpsResult =
 
 /** One op, validated and converted, ready to become a PlannedEdit. */
 type Prepared =
-  | { op: 'add'; at: Target; position: 'before' | 'after'; nodes: PmNode[]; input: BlockInput[] }
+  | { op: 'add'; at: Target; position: OpPosition; nodes: PmNode[]; input: BlockInput[] }
   | { op: 'update'; target: Target; expectVersion: string; input: UpdateInput; raw: BlockInput }
   | { op: 'replaceRange'; from: Target; to: Target; expectVersions: Record<string, string>; nodes: PmNode[]; input: BlockInput[] }
   | { op: 'delete'; target: Target; expectVersion: string }
   | { op: 'pageText'; target: Target; expectVersion: string; text: string }
-  | { op: 'move'; target: Target; at: Target; position: 'before' | 'after'; expectVersion: string };
+  | { op: 'move'; target: Target; at: Target; position: OpPosition; expectVersion: string };
 
 /**
  * Agents edit a live document by block (plan M4.2). Every op is validated and
@@ -64,21 +65,25 @@ type Prepared =
  * `onConflict: 'suggest'` turns a stale op into a stored suggestion instead
  * of a conflict. An agent in suggest mode (`effectiveAgentMode`, decided in
  * the pipeline), or a run whose requester can't edit, gets every op stored as
- * a suggestion: status `suggested` with its `suggestionId`.
+ * a suggestion: status `suggested` with its `suggestionId`, as does a batch
+ * sent with `mode: 'suggest'` (people suggesting, including commenters).
  */
 export async function applyOps(documentId: string, actor: AuthUser, raw: unknown): Promise<ApplyOpsResult> {
   const doc = await readableLiveDoc(documentId, actor);
   if (!doc) {
     return { ok: false, status: 404, refusal: refusal('not_found', 'Live document not found.', 'Check the document id.') };
   }
-  if (!canEdit(doc.role)) {
+  const req = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  // `mode: 'suggest'` stores every op as a suggestion: a person suggesting
+  // instead of editing, which anyone who may comment can do.
+  const suggestOnly = req.mode === 'suggest';
+  if (!canEdit(doc.role) && !(suggestOnly && actor.kind === 'person')) {
     return {
       ok: false,
       status: 403,
       refusal: refusal('forbidden', 'Only the owner and editors can edit this document.', 'Comment instead (primer_create_thread).'),
     };
   }
-  const req = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   if (!Array.isArray(req.ops) || req.ops.length === 0 || req.ops.length > MAX_OPS) {
     return reject([], `ops must be a list of 1–${MAX_OPS} ops.`);
   }
@@ -131,7 +136,7 @@ export async function applyOps(documentId: string, actor: AuthUser, raw: unknown
   }
   let error: string | null = null;
   try {
-    return await applyScoped(documentId, actor, runId, direct, { prepared, onConflict, allowCommentedDelete });
+    return await applyScoped(documentId, actor, runId, direct, { prepared, onConflict, allowCommentedDelete, suggestOnly });
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
     throw err;
@@ -145,7 +150,12 @@ async function applyScoped(
   actor: AuthUser,
   runId: string | null,
   direct: boolean,
-  { prepared, onConflict, allowCommentedDelete }: { prepared: Prepared[]; onConflict: 'refuse' | 'suggest'; allowCommentedDelete: boolean },
+  {
+    prepared,
+    onConflict,
+    allowCommentedDelete,
+    suggestOnly,
+  }: { prepared: Prepared[]; onConflict: 'refuse' | 'suggest'; allowCommentedDelete: boolean; suggestOnly: boolean },
 ): Promise<ApplyOpsResult> {
   let hooks: RunHooks | null = null;
   if (runId !== null) {
@@ -178,7 +188,7 @@ async function applyScoped(
     onConflict,
     // A run whose requester can't edit only suggests; the pipeline itself
     // makes an agent in suggest mode suggest.
-    mode: hooks?.suggestOnly ? 'suggest' : undefined,
+    mode: suggestOnly || hooks?.suggestOnly ? 'suggest' : undefined,
     guard: async (doc, { suggesting }) => {
       // Threads first: the dry run must refuse what the real apply refuses.
       for (const id of await openThreadIds(documentId)) open.add(id);
@@ -232,7 +242,7 @@ async function prepareOp(raw: unknown): Promise<Prepared | { error: string; fix:
     return { tabId: t.tabId, blockId: t.blockId };
   };
   const version = (v: unknown) => typeof v === 'string' && VERSION.test(v);
-  const position = op.position === 'before' || op.position === 'after' ? op.position : null;
+  const position = op.position === 'before' || op.position === 'after' || op.position === 'firstChild' ? op.position : null;
   const blocks = async (list: unknown): Promise<{ nodes: PmNode[]; input: BlockInput[] } | { error: string; fix: string }> => {
     if (!Array.isArray(list) || list.length === 0 || list.length > MAX_BLOCKS_PER_OP) {
       return { error: `\`blocks\` must list 1–${MAX_BLOCKS_PER_OP} blocks.`, fix: 'Send at least one block.' };
@@ -251,7 +261,7 @@ async function prepareOp(raw: unknown): Promise<Prepared | { error: string; fix:
     case 'add': {
       const at = target('at');
       if ('error' in at) return at;
-      if (!position) return { error: '`position` must be "before" or "after".', fix: 'Say where the blocks go relative to `at`.' };
+      if (!position) return { error: '`position` must be "before", "after" or "firstChild".', fix: 'Say where the blocks go relative to `at`.' };
       const b = await blocks(op.blocks);
       if ('error' in b) return b;
       return { op: 'add', at, position, ...b };
@@ -313,7 +323,7 @@ async function prepareOp(raw: unknown): Promise<Prepared | { error: string; fix:
       if ('error' in t) return t;
       const at = target('at');
       if ('error' in at) return at;
-      if (!position) return { error: '`position` must be "before" or "after".', fix: 'Say where the block goes relative to `at`.' };
+      if (!position) return { error: '`position` must be "before", "after" or "firstChild".', fix: 'Say where the block goes relative to `at`.' };
       if (!version(op.expectVersion)) return missingVersion('expectVersion');
       if (t.tabId !== at.tabId) return { error: 'A block moves within its tab.', fix: 'Pick an `at` block in the same tab.' };
       if (t.blockId === at.blockId) return { error: 'A block can\'t move relative to itself.', fix: 'Pick another `at` block.' };
@@ -360,7 +370,7 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
         target: p.at,
         build: guarded(p.at, (tr, at) => {
           if (!at) return gone(p.at);
-          tr.insert(p.position === 'before' ? at.pos : at.pos + at.node.nodeSize, Fragment.fromArray(p.nodes));
+          insertAt(tr, at, p.position, Fragment.fromArray(p.nodes));
         }),
       };
     case 'update':
@@ -398,8 +408,7 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
           }
           const removed = removeBlock(tr, at!);
           if (removed) return removed;
-          const there = findBlock(tr.doc, p.at.blockId)!;
-          tr.insert(p.position === 'before' ? there.pos : there.pos + there.node.nodeSize, node);
+          insertAt(tr, findBlock(tr.doc, p.at.blockId)!, p.position, node);
           bctx.moved(node.attrs.id as string);
         }),
       };
@@ -452,6 +461,19 @@ function rangeOf(doc: PmNode, at: NonNullable<Located>, toBlockId: string): { bl
     if (child.attrs.id === toBlockId) return { blocks, end: pos };
   }
   return null;
+}
+
+function insertAt(tr: Transform, at: NonNullable<Located>, position: OpPosition, content: Fragment | PmNode) {
+  if (position === 'firstChild') insertFirstChild(tr, at, content);
+  else tr.insert(position === 'before' ? at.pos : at.pos + at.node.nodeSize, content);
+}
+
+/** Inserts as the first child of `parent`, making its child group if it has none. */
+export function insertFirstChild(tr: Transform, parent: NonNullable<Located>, content: Fragment | PmNode) {
+  const group = parent.node.childCount > 1 ? parent.node.child(1) : null;
+  const end = parent.pos + parent.node.nodeSize - 1;
+  if (group) tr.insert(end - group.nodeSize + 1, content);
+  else tr.insert(end, tr.doc.type.schema.nodes.blockGroup!.create(null, content));
 }
 
 /** Removes a block; a last child takes its (then empty) group with it. The
