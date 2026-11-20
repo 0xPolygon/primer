@@ -19,6 +19,8 @@ vi.mock('./provider.ts', async (importOriginal) => ({
     const doc = new Y.Doc();
     const seed = BlockNoteEditor.create({ schema: primerSchema });
     blocksToYXmlFragment(seed, [{ type: 'heading', content: 'Seeded from the Y.Doc' }] as never, doc.getXmlFragment('document-store'));
+    blocksToYXmlFragment(seed, [{ type: 'paragraph', content: 'Notes tab text' }] as never, doc.getXmlFragment('tab/notes'));
+    doc.getArray('tabs').push([{ id: 'main', title: '' }, { id: 'notes', title: 'Notes' }]);
     const provider = new HocuspocusProvider({
       websocketProvider: new HocuspocusProviderWebsocket({ url: 'ws://127.0.0.1:9/collab', autoConnect: false }),
       name: `doc:${documentId}`,
@@ -76,6 +78,12 @@ describe('LiveEditor', () => {
     await until(() => live.querySelector('[contenteditable="true"].bn-editor')?.textContent?.includes('Seeded from the Y.Doc') === true);
     expect(live.querySelector('iframe[title="legacy-frame"]')).toBeNull();
     expect(live.textContent).toContain('History');
+    // Each tab opens its own fragment.
+    const notes = live.querySelector<HTMLButtonElement>('[role="tab"][data-tab-id="notes"]')!;
+    expect(notes.textContent).toBe('Notes');
+    await act(async () => notes.click());
+    await until(() => live.querySelector('.bn-editor')?.textContent?.includes('Notes tab text') === true);
+    expect(live.querySelector('.bn-editor')!.textContent).not.toContain('Seeded from the Y.Doc');
     await act(async () => root!.unmount());
 
     const legacy = await render(createElement(DocumentSurface, { ...props, live: false }));

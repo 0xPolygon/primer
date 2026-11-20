@@ -25,11 +25,31 @@ export function isTabFragment(name: string): boolean {
   return name === MAIN_FRAGMENT || name.startsWith('tab/');
 }
 
-/** The document's tabs, `main` first. A document without a `tabs` entry has
- *  only `main`. */
-export function tabsOf(doc: Y.Doc): { id: string; title: string }[] {
-  const tabs = doc.getArray<{ id: string; title: string }>('tabs').toArray();
-  return tabs.length > 0 ? tabs : [{ id: MAIN_TAB, title: '' }];
+export type Tab = { id: string; title: string };
+
+/**
+ * The document's tabs in order, `main` first. Editors write the `tabs` array
+ * directly, so entries are checked: malformed or repeated ones are skipped,
+ * and `main` is always there (a document without `tabs` has only `main`).
+ * Removing a tab from the array deletes it; its fragment stays in the Y.Doc,
+ * unreachable, so its comment marks no longer count.
+ */
+export function tabsOf(doc: Y.Doc): Tab[] {
+  const tabs: Tab[] = [{ id: MAIN_TAB, title: '' }];
+  const seen = new Set([MAIN_TAB]);
+  for (const entry of doc.getArray<unknown>('tabs').toArray()) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const { id, title } = entry as Record<string, unknown>;
+    if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id) || typeof title !== 'string') continue;
+    if (id === MAIN_TAB) {
+      tabs[0] = { id, title: title.slice(0, 200) };
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    tabs.push({ id, title: title.slice(0, 200) });
+  }
+  return tabs;
 }
 
 /**
