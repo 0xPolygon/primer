@@ -1,7 +1,7 @@
 import * as Y from 'yjs';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import type { CheckpointResponse, Reconciliation } from '@polygonlabs/primer-api-types';
+import { isLiveAnchor, type CheckpointResponse, type Reconciliation } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
@@ -14,7 +14,7 @@ import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
-import { tabFragmentName, tabsOf, type Tab } from './reach.ts';
+import { fragmentName, isTabFragment, reachableFragments, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
 import { splitFrontMatter } from '../upload/markdown.ts';
 
@@ -67,7 +67,7 @@ export async function writeCheckpoint(
   const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
   const versionId = original?.versionId ?? uuidv7();
   const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
-  const marked = markedThreads(captured.state);
+  const anchored = anchoredIn(captured.state);
   try {
     const versionNumber = await transactionWithEvents(async (tx, emit) => {
       await tx.execute(sql`SELECT id FROM documents WHERE id = ${documentId} FOR UPDATE`);
@@ -86,14 +86,14 @@ export async function writeCheckpoint(
         docVersion: captured.docVersion,
         ...(original ? { originalKey: original.originalKey, sourceFormat: original.sourceFormat } : {}),
       });
-      // Open threads stay listed on the checkpoint: anchored where their
-      // comment mark is in the captured content, orphaned elsewhere.
+      // Open threads stay listed on the checkpoint: anchored where the
+      // captured content has their anchor, orphaned elsewhere.
       const open = await tx
         .select({ id: threads.id, anchor: threads.anchor })
         .from(threads)
         .where(and(eq(threads.documentId, documentId), isNull(threads.resolvedAt)));
       for (const thread of open) {
-        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: marked.has(thread.id) ? thread.anchor : null });
+        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: anchored(thread) ? thread.anchor : null });
       }
       emit({
         documentId,
@@ -166,18 +166,33 @@ export async function restoreCheckpoint(
   }
 }
 
-/** Thread ids whose comment mark is in a state's tabs. */
-export function markedThreads(state: Uint8Array): Set<string> {
+/**
+ * Which open threads a captured state anchors, by the rules live anchoring
+ * uses: a marked thread (prose, or carried over from before the document
+ * went live) while its comment mark is in reachable content (tab, page text,
+ * embed and widget label fragments), a structured one (block, widget part,
+ * data point) while its target is.
+ */
+export function anchoredIn(state: Uint8Array): (thread: { id: string; anchor: unknown }) => boolean {
   const doc = new Y.Doc();
   Y.applyUpdate(doc, state);
-  const ids = new Set<string>();
-  for (const tab of tabsOf(doc)) {
-    pmDocOf(doc.getXmlFragment(tabFragmentName(tab.id))).descendants((node) => {
-      for (const mark of node.marks) if (mark.type.name === 'comment' && !mark.attrs.orphan) ids.add(mark.attrs.threadId as string);
+  const marked = new Set<string>();
+  // Reachable fragment names, and `<fragment> <blockId>` for their blocks.
+  const present = new Set<string>();
+  for (const name of reachableFragments(doc)) {
+    present.add(name);
+    pmDocOf(doc.getXmlFragment(name)).descendants((node) => {
+      if (node.type.isInGroup('bnBlock')) present.add(`${name} ${node.attrs.id as string}`);
+      for (const mark of node.marks) if (mark.type.name === 'comment' && !mark.attrs.orphan) marked.add(mark.attrs.threadId as string);
     });
   }
   doc.destroy();
-  return ids;
+  return ({ id, anchor }) => {
+    if (marked.has(id)) return true;
+    if (!isLiveAnchor(anchor) || anchor.type === 'prose') return false;
+    const name = fragmentName(anchor.target);
+    return present.has(isTabFragment(name) ? `${name} ${anchor.target.blockId}` : name);
+  };
 }
 
 /** Sets the live tab list to `tabs` when it differs. The pipeline writes
