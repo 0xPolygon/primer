@@ -31,7 +31,6 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { docUpdates, documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { deleteBundle, quoteOf, renderBundle } from '../live/bundle.ts';
-import { ensureSigningKey } from '../live/signing.ts';
 import { captureState, writeCheckpoint } from '../live/checkpoint.ts';
 import { anchorThreads, buildLiveDoc, importMarkdown, importText, type ImportResult } from '../live/import.ts';
 import { mergeRepublish } from '../live/merge.ts';
@@ -317,7 +316,6 @@ async function publishLive(
 
   const existingId = input.documentId;
   const documentId = existingId ?? uuidv7();
-  await ensureSigningKey(storage);
   const ydoc = buildLiveDoc(imported, format, documentId);
   const open = existingId === undefined ? [] : await openThreadQuotes(existingId);
   const anchored = anchorThreads(ydoc, open);
