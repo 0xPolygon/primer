@@ -9,9 +9,13 @@
 // exact words it was about or it says that it isn't.
 //
 // The match runs on the version's <body> text as the companion's text walk sees
-// it (every text node in document order, script and style text included), with
-// whitespace ignored in the comparison, so neither reformatting the HTML nor the
-// line breaks of a selection across blocks move a thread.
+// it (every text node in document order, script and style text included) with
+// whitespace runs collapsed to one space, so reformatting the HTML doesn't move
+// a thread. A browser selection across blocks carries line breaks the DOM text
+// doesn't have (`<p>a</p><p>b</p>` is "ab" there, "a\n\nb" in the selection),
+// so the text gets a synthetic space at each block boundary that matching may
+// use or skip. Anywhere else a space is part of the words: "now here" is not
+// "nowhere".
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { AnchorData, TextRangeAnchor } from '@polygonlabs/primer-api-types';
@@ -28,11 +32,21 @@ export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export const CONTEXT_CHARS = 32;
 
 export interface BodyText {
-  /** Body text with every whitespace run collapsed to one space. */
+  /** Body text with every whitespace run collapsed to one space, plus a space
+   *  at each block boundary that has none. */
   text: string;
   /** For each character of `text`, its offset in the raw (uncollapsed) text. */
   rawOffset: number[];
+  /** For each character of `text`, whether it is a block-boundary space that
+   *  the DOM text doesn't have. */
+  synthetic: boolean[];
 }
+
+const BLOCKS = new Set(
+  'address article aside blockquote body br caption dd details div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section summary table tbody td tfoot th thead tr ul'.split(
+    ' ',
+  ),
+);
 
 /** The collapsed text of an HTML document's <body>. */
 export function bodyText(html: string): BodyText {
@@ -40,68 +54,74 @@ export function bodyText(html: string): BodyText {
   const htmlEl = doc.childNodes.find((n) => (n as Element).tagName === 'html') as Element | undefined;
   const body = htmlEl?.childNodes.find((n) => (n as Element).tagName === 'body') as Element | undefined;
   let raw = '';
+  const breaks = new Set<number>();
   const walk = (node: Node): void => {
     if (node.nodeName === '#text') {
       raw += (node as DefaultTreeAdapterMap['textNode']).value;
       return;
     }
     // <template> content lives in `content`, which a DOM text walk skips too.
+    const block = BLOCKS.has(node.nodeName);
+    if (block) breaks.add(raw.length);
     for (const child of (node as Element).childNodes ?? []) walk(child);
+    if (block) breaks.add(raw.length);
   };
   if (body) walk(body);
 
   let text = '';
   const rawOffset: number[] = [];
+  const synthetic: boolean[] = [];
+  const push = (ch: string, at: number, fake: boolean): void => {
+    text += ch;
+    rawOffset.push(at);
+    synthetic.push(fake);
+  };
   for (let i = 0; i < raw.length; i++) {
+    if (breaks.has(i) && text.length > 0 && !text.endsWith(' ')) push(' ', i, true);
     if (/\s/.test(raw[i])) {
-      if (text.endsWith(' ')) continue;
-      text += ' ';
+      if (!text.endsWith(' ')) push(' ', i, false);
     } else {
-      text += raw[i];
+      push(raw[i], i, false);
     }
-    rawOffset.push(i);
   }
-  return { text, rawOffset };
+  return { text, rawOffset, synthetic };
 }
 
 function collapse(s: string): string {
   return s.replace(/\s+/g, ' ');
 }
 
-function squeeze(s: string): string {
-  return s.replace(/\s+/g, '');
-}
-
-/** The body text with all whitespace removed, and for each of its characters
- *  the index in `BodyText.text`. Matching runs on this form because a browser
- *  selection spanning blocks carries line breaks the DOM text walk never has
- *  (`<p>a</p><p>b</p>` is "ab" there, "a\n\nb" in the selection), so the two
- *  can only be compared modulo whitespace. */
-interface Squeezed {
-  text: string;
-  at: number[];
-}
-
-const squeezed = new WeakMap<BodyText, Squeezed>();
-
-function squeezedOf(body: BodyText): Squeezed {
-  let sq = squeezed.get(body);
-  if (!sq) {
-    sq = { text: '', at: [] };
-    for (let i = 0; i < body.text.length; i++) {
-      if (body.text[i] === ' ') continue;
-      sq.text += body.text[i];
-      sq.at.push(i);
-    }
-    squeezed.set(body, sq);
+/** Where `needle` matches `body.text` at `at`, as the end index, or -1.
+ *  Synthetic spaces the needle doesn't have are skipped. */
+function matchAt(body: BodyText, needle: string, at: number, from = 0): number {
+  let i = at;
+  for (let j = from; j < needle.length; ) {
+    if (i >= body.text.length) return -1;
+    if (body.text[i] === needle[j]) {
+      i++;
+      j++;
+    } else if (body.synthetic[i]) i++;
+    else return -1;
   }
-  return sq;
+  return i;
 }
 
-function occurrences(haystack: string, needle: string): number[] {
-  const out: number[] = [];
+/** The [start, end) of every place `needle` matches. */
+function occurrences(body: BodyText, needle: string): [number, number][] {
+  const out: [number, number][] = [];
   if (needle.length === 0) return out;
-  for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + 1)) out.push(i);
+  for (let i = 0; i < body.text.length; i++) {
+    if (body.synthetic[i] && needle[0] !== ' ') continue;
+    const end = matchAt(body, needle, i);
+    if (end !== -1) out.push([i, end]);
+  }
+  return out;
+}
+
+/** The text between two indexes as the DOM has it: without synthetic spaces. */
+function domText(body: BodyText, from: number, to: number): string {
+  let out = '';
+  for (let i = Math.max(0, from); i < to && i < body.text.length; i++) if (!body.synthetic[i]) out += body.text[i];
   return out;
 }
 
@@ -117,46 +137,44 @@ function lowerBound(list: number[], value: number): number {
   return lo;
 }
 
-/** The quote with its context on the originating version, all whitespace-free,
- *  or null when the anchor can't be pinned to one place there. */
+/** The quote with its context on the originating version, or null when the
+ *  anchor can't be pinned to one place there. */
 function quoteInOrigin(
   anchor: TextRangeAnchor,
   origin: BodyText,
 ): { prefix: string; quote: string; suffix: string } | null {
-  const quote = squeeze(anchor.selectorText);
+  const quote = collapse(anchor.selectorText).trim();
   if (quote.length === 0) return null;
 
   // Legacy anchors carry their own context.
   if (typeof anchor.prefix === 'string' && typeof anchor.suffix === 'string') {
     return {
-      prefix: squeeze(collapse(anchor.prefix).slice(-CONTEXT_CHARS)),
+      prefix: collapse(anchor.prefix).slice(-CONTEXT_CHARS),
       quote,
-      suffix: squeeze(collapse(anchor.suffix).slice(0, CONTEXT_CHARS)),
+      suffix: collapse(anchor.suffix).slice(0, CONTEXT_CHARS),
     };
   }
 
   // Position anchors: the offsets index the live DOM text, which matches the
   // stored HTML unless the document's scripts changed it. Use the offsets when
-  // they point at the quote; else the quote's only occurrence; else give up.
-  const sq = squeezedOf(origin);
-  let at = -1;
+  // their text is the quote; else the quote's only occurrence; else give up.
+  let at: [number, number] | undefined;
   if (typeof anchor.start === 'number' && typeof anchor.end === 'number') {
-    const from = lowerBound(sq.at, lowerBound(origin.rawOffset, anchor.start));
-    const to = lowerBound(sq.at, lowerBound(origin.rawOffset, anchor.end));
-    if (sq.text.slice(from, to) === quote) at = from;
+    let from = lowerBound(origin.rawOffset, anchor.start);
+    let to = lowerBound(origin.rawOffset, anchor.end);
+    while (from < to && origin.text[from] === ' ') from++;
+    while (to > from && origin.text[to - 1] === ' ') to--;
+    if (matchAt(origin, quote, from) === to) at = [from, to];
   }
-  if (at === -1) {
-    const hits = occurrences(sq.text, quote);
+  if (!at) {
+    const hits = occurrences(origin, quote);
     if (hits.length !== 1) return null;
     at = hits[0];
   }
-  // Context is CONTEXT_CHARS of the collapsed text, then compared without whitespace.
-  const from = sq.at[at];
-  const to = sq.at[at + quote.length - 1] + 1;
   return {
-    prefix: squeeze(origin.text.slice(Math.max(0, from - CONTEXT_CHARS), from)),
+    prefix: origin.text.slice(Math.max(0, at[0] - CONTEXT_CHARS), at[0]),
     quote,
-    suffix: squeeze(origin.text.slice(to, to + CONTEXT_CHARS)),
+    suffix: origin.text.slice(at[1], at[1] + CONTEXT_CHARS),
   };
 }
 
@@ -164,11 +182,11 @@ function quoteInOrigin(
  * Places a text-range anchor from its originating version onto a target
  * version. Returns the anchor to store for the target, or null when there
  * isn't exactly one occurrence of the quote with its preceding or following
- * context unchanged ("context changed"). Whitespace, including the line breaks
- * a selection across blocks carries, is ignored in the comparison.
+ * context unchanged ("context changed"). Whitespace runs are equal and block
+ * boundaries may or may not show as a space; no other word boundary moves.
  *
  * The returned anchor uses the context shape (`prefix`/`selectorText`/`suffix`
- * with `containerPath: 'body'`) built from the target's own text, which the
+ * with `containerPath: 'body'`) built from the target's own DOM text, which the
  * companion resolves by searching the live text, so it can never highlight
  * different words than the ones matched.
  */
@@ -179,20 +197,23 @@ export function placeTextRange(
 ): TextRangeAnchor | null {
   const q = quoteInOrigin(anchor, origin);
   if (!q) return null;
-  const sq = squeezedOf(target);
-  const candidates = new Set([
-    ...occurrences(sq.text, q.prefix + q.quote).map((i) => i + q.prefix.length),
-    ...occurrences(sq.text, q.quote + q.suffix),
-  ]);
-  if (candidates.size !== 1) return null;
-  const [k] = candidates;
-  const from = sq.at[k];
-  const to = sq.at[k + q.quote.length - 1] + 1;
+  const found = new Map<number, number>();
+  for (const [from] of occurrences(target, q.prefix + q.quote)) {
+    const start = matchAt(target, q.prefix, from);
+    if (start === -1) continue;
+    // The synthetic space between the context and the quote belongs to neither.
+    let qs = start;
+    while (target.synthetic[qs] && q.quote[0] !== ' ') qs++;
+    found.set(qs, matchAt(target, q.quote, qs));
+  }
+  for (const [from] of occurrences(target, q.quote + q.suffix)) found.set(from, matchAt(target, q.quote, from));
+  if (found.size !== 1) return null;
+  const [[from, to]] = found;
   return {
     type: 'text-range',
-    selectorText: target.text.slice(from, to),
-    prefix: target.text.slice(Math.max(0, from - CONTEXT_CHARS), from),
-    suffix: target.text.slice(to, to + CONTEXT_CHARS),
+    selectorText: domText(target, from, to),
+    prefix: domText(target, from - CONTEXT_CHARS, from),
+    suffix: domText(target, to, to + CONTEXT_CHARS),
     containerPath: 'body',
   };
 }
