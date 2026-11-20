@@ -22,6 +22,7 @@ class SpyNotifier implements Notifier {
   async notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void> { this.collabCalls.push(args); }
   async notifyExternalOtp() {}
   async notifyExternalFirstView() {}
+  async notifyDocumentMention() {}
 }
 
 async function withMultiUserApp<T>(

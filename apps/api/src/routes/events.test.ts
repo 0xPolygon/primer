@@ -30,6 +30,7 @@ class NullNotifier implements Notifier {
   async notifyCollaboratorAdded(): Promise<void> {}
   async notifyExternalOtp(): Promise<void> {}
   async notifyExternalFirstView(): Promise<void> {}
+  async notifyDocumentMention() {}
 }
 
 const OWNER = 'mock-user-1'; // uploadFixture uploads as the default mock user

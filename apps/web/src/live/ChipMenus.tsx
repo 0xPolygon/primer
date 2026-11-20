@@ -13,13 +13,15 @@ const MAX_MENTIONS = 8;
  * menu gains Date and Dropdown next to BlockNote's own items. A chip is
  * inline content, so all three work in table cells too.
  */
-export function ChipMenus({ editor }: { editor: PrimerEditor }) {
+/** `slashItems`: more `/` entries (Primer's own blocks) next to the chips. */
+export function ChipMenus({ editor, slashItems: extra = [] }: { editor: PrimerEditor; slashItems?: DefaultReactSuggestionItem[] }) {
   const people = useMentionableUsers().data ?? [];
 
   const slashItems = async (query: string): Promise<DefaultReactSuggestionItem[]> =>
     filterSuggestionItems(
       [
         ...getDefaultReactSlashMenuItems(editor),
+        ...extra,
         {
           title: t('chips.date'),
           subtext: t('chips.dateHint'),

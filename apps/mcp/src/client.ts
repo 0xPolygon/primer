@@ -5,8 +5,16 @@ import type {
   Reconciliation,
   LiveDocDTO,
   LiveReadFormat,
+  AddChoiceRequest,
+  AddChoiceResponse,
+  AddTaskRequest,
+  AddTaskResponse,
   AddVersionResponse,
   Collaborator,
+  DecisionsResponse,
+  ProposePickRequest,
+  TasksResponse,
+  UpdateTaskRequest,
   CollaboratorRole,
   CollaboratorsListResponse,
   CommentDTO,
@@ -45,7 +53,8 @@ export type PrimerErrorCode =
   /** Server refusals passed through by code (see api-types RefusalCode). */
   | 'stale_base'
   | 'record_conflict'
-  | 'records_cap';
+  | 'records_cap'
+  | 'choice_decided';
 
 export class PrimerApiError extends Error {
   readonly code: PrimerErrorCode;
@@ -91,7 +100,7 @@ export interface AddVersionInput {
 }
 
 interface RequestOptions {
-  method: 'GET' | 'POST' | 'DELETE';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   path: string;
   body?: FormData;
   /** JSON request body — serialized with the content-type header set.
@@ -108,7 +117,7 @@ interface ApiErrorBody {
 }
 
 /** Refusal codes the tool layer branches on, kept as the server sent them. */
-const PASSED_THROUGH = new Set<string>(['stale_base', 'record_conflict', 'records_cap']);
+const PASSED_THROUGH = new Set<string>(['stale_base', 'record_conflict', 'records_cap', 'choice_decided']);
 
 function statusToCode(status: number): PrimerErrorCode {
   if (status === 401) return 'not_authenticated';
@@ -403,6 +412,58 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/documents/${encodeURIComponent(documentId)}/records/purge-personal`,
       json: { userId },
+    });
+  }
+
+  /** Adds a choice block (question and options) to a live document. */
+  addChoice(documentId: string, input: AddChoiceRequest): Promise<AddChoiceResponse> {
+    return this.request<AddChoiceResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/choices`,
+      json: input,
+    });
+  }
+
+  /** Recommends an option of an undecided choice; a person decides. */
+  proposePick(documentId: string, blockId: string, input: ProposePickRequest): Promise<{ docVersion: number }> {
+    return this.request<{ docVersion: number }>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/choices/${encodeURIComponent(blockId)}/propose`,
+      json: input,
+    });
+  }
+
+  /** The document's decision register. */
+  listDecisions(documentId: string): Promise<DecisionsResponse> {
+    return this.request<DecisionsResponse>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/decisions`,
+    });
+  }
+
+  /** Adds a task block to a live document. */
+  addTask(documentId: string, input: AddTaskRequest): Promise<AddTaskResponse> {
+    return this.request<AddTaskResponse>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/tasks`,
+      json: input,
+    });
+  }
+
+  /** Sets a task's status and/or progress line. */
+  updateTask(documentId: string, blockId: string, input: UpdateTaskRequest): Promise<{ docVersion: number }> {
+    return this.request<{ docVersion: number }>({
+      method: 'PATCH',
+      path: `/api/documents/${encodeURIComponent(documentId)}/tasks/${encodeURIComponent(blockId)}`,
+      json: input,
+    });
+  }
+
+  /** One document's tasks, or (without a document) the caller's own. */
+  listTasks(documentId?: string): Promise<TasksResponse> {
+    return this.request<TasksResponse>({
+      method: 'GET',
+      path: documentId ? `/api/documents/${encodeURIComponent(documentId)}/tasks` : '/api/tasks?assignee=me',
     });
   }
 

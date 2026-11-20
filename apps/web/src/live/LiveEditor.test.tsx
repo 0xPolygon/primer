@@ -13,6 +13,9 @@ import type { PrimerThreadStore } from './PrimerThreadStore.ts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// The editor's block services follow the document's event stream; jsdom has no EventSource.
+vi.stubGlobal('EventSource', class { close() {} });
+
 // A provider that never connects, over a document that already holds a
 // heading: the editor must show what the Y.Doc holds.
 vi.mock('./provider.ts', async (importOriginal) => ({
@@ -88,7 +91,7 @@ describe('LiveEditor', () => {
   it('live document renders the editor and legacy renders the iframe', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
     const frame = () => createElement('iframe', { title: 'legacy-frame' });
-    const props = { documentId: 'doc-1', readOnly: false, theme: 'light' as const, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, canComment: true, frame };
+    const props = { documentId: 'doc-1', readOnly: false, canVote: true, theme: 'light' as const, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, canComment: true, frame };
 
     const live = await render(createElement(DocumentSurface, { ...props, live: true }));
     await until(() => live.querySelector('[contenteditable="true"].bn-editor')?.textContent?.includes('Seeded from the Y.Doc') === true);
@@ -111,7 +114,7 @@ describe('LiveEditor', () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
     stores.length = 0;
     const reader = await render(
-      createElement(DocumentSurface, { documentId: 'doc-1', readOnly: true, theme: 'light', userName: 'Bo', userId: 'u-bo', role: 'stranger', canComment: true, frame: () => null, live: true }),
+      createElement(DocumentSurface, { documentId: 'doc-1', readOnly: true, canVote: false, theme: 'light', userName: 'Bo', userId: 'u-bo', role: 'stranger', canComment: true, frame: () => null, live: true }),
     );
     await until(() => reader.querySelector('.bn-editor') !== null && stores.length > 0);
     const store = stores[stores.length - 1]!;
@@ -122,7 +125,7 @@ describe('LiveEditor', () => {
 
   it('editor uses the dark theme when Primer is dark', async () => {
     const { DocumentSurface } = await import('../routes/document.tsx');
-    const props = { documentId: 'doc-1', readOnly: false, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, canComment: true, frame: () => null, live: true };
+    const props = { documentId: 'doc-1', readOnly: false, canVote: true, userName: 'Ana', userId: 'u-ana', role: 'owner' as const, canComment: true, frame: () => null, live: true };
     const dark = await render(createElement(DocumentSurface, { ...props, theme: 'dark' as const }));
     await until(() => dark.querySelector('.bn-editor') !== null);
     expect(dark.querySelector('.bn-container')!.getAttribute('data-color-scheme')).toBe('dark');
