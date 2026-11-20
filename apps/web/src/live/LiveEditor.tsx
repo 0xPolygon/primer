@@ -32,6 +32,7 @@ export type LiveEditorProps = {
   userName: string;
   userId: string;
   role: ViewerRole;
+  canComment: boolean;
   /** Opens a version from before the document went live in the version viewer. */
   onOpenLegacyVersion?: (versionNumber: number) => void;
 };
@@ -71,7 +72,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   );
 }
 
-function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId, role, onOpenLegacyVersion }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
+function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId, role, canComment, onOpenLegacyVersion }: LiveEditorProps & { live: LiveProvider; tabId: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [filter, setFilter] = useState<'open' | 'resolved' | 'all'>('open');
@@ -81,9 +82,9 @@ function TabEditor({ live, tabId, documentId, readOnly, theme, userName, userId,
       new PrimerThreadStore(documentId, tabId, {
         id: userId,
         isOwner: role === 'owner',
-        canComment: role !== 'stranger',
+        canComment,
       }),
-    [documentId, tabId, userId, role],
+    [documentId, tabId, userId, role, canComment],
   );
   useThreadEvents(documentId, () => void threadStore.refresh());
 
