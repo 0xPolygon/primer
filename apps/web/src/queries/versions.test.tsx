@@ -106,7 +106,7 @@ describe('publishing a new version from the document page', () => {
     // AddVersionModal.submit: await the mutation, then navigate to /d/:docId.
     const current = hooks.current;
     if (!current) throw new Error('hooks not mounted');
-    let published = 0;
+    let published: number | undefined;
     await act(async () => {
       const res = await current.addVersion.mutateAsync({
         file: new File(['<p>v2</p>'], 'v2.html', { type: 'text/html' }),

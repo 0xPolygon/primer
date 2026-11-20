@@ -11,6 +11,7 @@ import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from '
 import { makeProxyResolver } from './auth/proxy.ts';
 import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
 import { makeOAuthBearerResolver } from './auth/oauth/bearer.ts';
+import { createHub } from './live/hub.ts';
 
 const port = Number(process.env.PORT ?? 3000);
 const { storage, description: storageDescription } = storageFromEnv();
@@ -92,9 +93,14 @@ if (authMode === 'okta') {
 userResolver = composeResolvers(makeOAuthBearerResolver(), makeBearerResolver(), userResolver);
 
 // Count only — never log the emails themselves. Zero admins means the
-// service-token endpoints are unreachable (fail closed).
+// admin endpoints are unreachable (fail closed).
 const adminEmails = parseAdminEmails(process.env.ADMIN_EMAILS);
 logger.info({ adminCount: adminEmails.length }, 'admin allowlist loaded');
+
+// Live documents sync over WebSocket at /collab on this same server. Browser
+// credentials are accepted only from the app's own origin.
+const appOrigin = new URL(process.env.AUTH_BASE_URL ?? 'http://localhost:5173').origin;
+const hub = createHub({ resolver: userResolver, appOrigin });
 
 const app = createApp({
   storage,
@@ -115,9 +121,11 @@ const stopPurge = startPurgeInterval({ storage, intervalMs: purgeIntervalMs });
 const server = serve({ fetch: app.fetch, port }, () => {
   logger.info({ port, storage: storageDescription, authMode }, 'primer api listening');
 });
+server.on('upgrade', hub.handleUpgrade);
 
 const shutdown = async () => {
   await stopPurge();
+  hub.close();
   if ('close' in server) {
     (server as { close: (cb?: () => void) => void }).close(() => process.exit(0));
   } else {

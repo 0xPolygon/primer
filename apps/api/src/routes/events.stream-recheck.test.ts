@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import { createApp } from '../app.ts';
+import { createApp, type AuthUser } from '../app.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { mockMultiResolver } from '../auth/resolver.ts';
@@ -35,11 +35,12 @@ vi.mock('../lib/events.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/events.ts')>();
   return {
     ...actual,
-    gateEventAccess: async (documentId: string, userId: string) => {
+    gateEventAccess: async (documentId: string, actor: AuthUser) => {
+      const userId = actor.id;
       const n = (gateControl.calls.get(userId) ?? 0) + 1;
       gateControl.calls.set(userId, n);
       if (gateControl.failFor.has(userId)) throw new Error('simulated database failure');
-      const result = await actual.gateEventAccess(documentId, userId);
+      const result = await actual.gateEventAccess(documentId, actor);
       const hold = gateControl.holds.get(userId)?.get(n) ?? 0;
       if (hold > 0) await new Promise((resolve) => setTimeout(resolve, hold));
       return result;
@@ -298,6 +299,26 @@ describe('event stream re-check: a slow check never re-grants access mid-batch',
       else process.env.EVENTS_SSE_KEEPALIVE_MS = prev;
     }
   }, 15000);
+
+  it('a commit on another document never wakes the stream', async () => {
+    await withApp(async (app) => {
+      const docA = await privateDocWithReader(app);
+      const docB = await privateDocWithReader(app);
+      const res = await app.request(`/api/documents/${docB}/events/stream`, { headers: asUser(READER) });
+      const stream = readStream(res);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const afterConnect = gateControl.calls.get(READER) ?? 0;
+
+      await ownerPosts(app, docA, 5);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect((gateControl.calls.get(READER) ?? 0) - afterConnect).toBe(0);
+
+      const ids = await ownerPosts(app, docB, 1);
+      expect(await stream.waitForIds(ids)).toBe('done');
+      await stream.close();
+      expect((gateControl.calls.get(READER) ?? 0) - afterConnect).toBe(1);
+    });
+  });
 
   it('one multi-row POST costs one access check per open stream', async () => {
     await withApp(async (app) => {

@@ -1,6 +1,7 @@
 import { inArray } from 'drizzle-orm';
 import type { CollaboratorRole } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
+import { actorName as actorNameColumn } from '../lib/actors.ts';
 import { users } from '../db/schema.ts';
 import { logger } from '../logger.ts';
 import type {
@@ -8,6 +9,8 @@ import type {
   NotifyCommentArgs,
   NotifyCollaboratorAddedArgs,
   NotifyExternalOtpArgs,
+  NotifyDocumentMentionArgs,
+  NotifyDigestArgs,
   NotifyExternalFirstViewArgs,
 } from './notifier.ts';
 
@@ -23,6 +26,7 @@ interface UserRow {
   id: string;
   displayName: string;
   email: string;
+  kind?: 'person' | 'agent';
 }
 
 const SUBJECT_TITLE_LIMIT = 50;
@@ -198,13 +202,14 @@ export class MailgunNotifier implements Notifier {
     if (recipientIds.size === 0) return;
 
     const rows = (await db
-      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email, kind: users.kind })
       .from(users)
       .where(inArray(users.id, [...recipientIds, args.actorUserId]))) as UserRow[];
     const actor = rows.find((u) => u.id === args.actorUserId);
     const actorName = actor?.displayName ?? 'Someone';
 
-    const url = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}/v/${args.version.versionNumber}#thread-${args.thread.id}`;
+    const base = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}`;
+    const url = `${args.version ? `${base}/v/${args.version.versionNumber}` : base}#thread-${args.thread.id}`;
     const excerpt = truncate(args.comment.body, BODY_EXCERPT_LIMIT);
     const subject = renderSubject(actorName, args.doc.title);
 
@@ -214,6 +219,8 @@ export class MailgunNotifier implements Notifier {
         logger.warn({ recipientId }, 'recipient not found in users table, skipping');
         continue;
       }
+      // Agents have no mailbox (auth/agents.ts).
+      if (recipient.kind === 'agent') continue;
       const mention = mentionSet.has(recipientId);
       const reply = participantSet.has(recipientId);
       const uploaded = args.uploaderUserId !== null && recipientId === args.uploaderUserId;
@@ -227,7 +234,7 @@ export class MailgunNotifier implements Notifier {
     if (args.addedUserId === args.addedByUserId) return;
 
     const rows = (await db
-      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email })
       .from(users)
       .where(inArray(users.id, [args.addedUserId, args.addedByUserId]))) as UserRow[];
     const recipient = rows.find((u) => u.id === args.addedUserId);
@@ -271,9 +278,39 @@ export class MailgunNotifier implements Notifier {
     await this.send(args.toEmail, subject, text, html);
   }
 
+  async notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void> {
+    if (args.mentionedUserId === args.actorUserId) return;
+    const rows = (await db
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email, kind: users.kind })
+      .from(users)
+      .where(inArray(users.id, [args.mentionedUserId, args.actorUserId]))) as UserRow[];
+    const recipient = rows.find((u) => u.id === args.mentionedUserId);
+    // Agents have no mailbox (auth/agents.ts).
+    if (!recipient || recipient.kind === 'agent') return;
+    const actorName = rows.find((u) => u.id === args.actorUserId)?.displayName ?? 'Someone';
+    const url = `${this.cfg.appBaseUrl.replace(/\/$/, '')}/d/${args.doc.id}`;
+    const subject = `${actorName} mentioned you in '${truncate(args.doc.title, SUBJECT_TITLE_LIMIT)}'`;
+    const text = [`${actorName} mentioned you in '${args.doc.title}'.`, '', `Open the doc: ${url}`].join('\n');
+    const html = `<!doctype html><html><body style="font-family:-apple-system,system-ui,sans-serif;color:#171717;">
+<p>${escapeHtml(actorName)} mentioned you in '<strong>${escapeHtml(args.doc.title)}</strong>'.</p>
+<p><a href="${url}">Open the doc</a></p></body></html>`;
+    await this.send(recipient.email, subject, text, html);
+  }
+
+  async notifyDigest(args: NotifyDigestArgs): Promise<void> {
+    const [recipient] = (await db
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email, kind: users.kind })
+      .from(users)
+      .where(inArray(users.id, [args.userId]))) as UserRow[];
+    // Agents have no mailbox (auth/agents.ts).
+    if (!recipient || recipient.kind === 'agent') return;
+    const { subject, text, html } = await args.render(this.cfg.appBaseUrl);
+    await this.send(recipient.email, subject, text, html);
+  }
+
   async notifyExternalFirstView(args: NotifyExternalFirstViewArgs): Promise<void> {
     const rows = (await db
-      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .select({ id: users.id, displayName: actorNameColumn, email: users.email })
       .from(users)
       .where(inArray(users.id, [args.sharerUserId]))) as UserRow[];
     const sharer = rows[0];

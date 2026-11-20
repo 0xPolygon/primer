@@ -16,10 +16,15 @@ interface FakeClient {
   getDocument: ReturnType<typeof vi.fn>;
   listVersions: ReturnType<typeof vi.fn>;
   getVersionThreads: ReturnType<typeof vi.fn>;
+  replyToThread: ReturnType<typeof vi.fn>;
+  resolveThread: ReturnType<typeof vi.fn>;
   getVersionContent: ReturnType<typeof vi.fn>;
   createDocument: ReturnType<typeof vi.fn>;
   addVersion: ReturnType<typeof vi.fn>;
   revokeToken: ReturnType<typeof vi.fn>;
+  lookupUser: ReturnType<typeof vi.fn>;
+  addCollaborator: ReturnType<typeof vi.fn>;
+  listCollaborators: ReturnType<typeof vi.fn>;
 }
 
 function makeFakeClient(): FakeClient {
@@ -30,10 +35,15 @@ function makeFakeClient(): FakeClient {
     getDocument: vi.fn(),
     listVersions: vi.fn(),
     getVersionThreads: vi.fn(),
+    replyToThread: vi.fn(),
+    resolveThread: vi.fn(),
     getVersionContent: vi.fn(),
     createDocument: vi.fn(),
     addVersion: vi.fn(),
     revokeToken: vi.fn(),
+    lookupUser: vi.fn(),
+    addCollaborator: vi.fn(),
+    listCollaborators: vi.fn(),
   };
 }
 
@@ -636,6 +646,8 @@ describe('primer_get_comments', () => {
         {
           id: 't1',
           versionId: 'v1',
+          versionNumber: 1,
+          contextChanged: false,
           anchor: { type: 'text-range', selectorText: 'snippet', prefix: '', suffix: '', containerPath: 'body' },
           resolvedAt: null,
           resolvedBy: null,
@@ -647,6 +659,8 @@ describe('primer_get_comments', () => {
               threadId: 't1',
               authorId: 'u1',
               authorDisplayName: 'Alice',
+              authorKind: 'person',
+              authorVia: null,
               body: 'Note',
               createdAt: '2026-06-05T10:00:00.000Z',
               updatedAt: null,
@@ -669,9 +683,32 @@ describe('primer_get_comments', () => {
 
     expect(client.getVersionThreads).toHaveBeenCalledWith('v1');
     expect(result.isError).toBeFalsy();
-    const text = (result.content[0] as { type: 'text'; text: string }).text;
-    expect(text).toContain('> snippet');
-    expect(text).toContain('**Alice** — Note');
+    const out = JSON.parse((result.content[0] as { type: 'text'; text: string }).text);
+    expect(out.markdown).toContain('> snippet');
+    expect(out.markdown).toContain('**Alice** — Note');
+    expect(out.comments).toEqual([
+      {
+        thread_id: 't1',
+        comment_id: 'c1',
+        author_id: 'u1',
+        author_name: 'Alice',
+        body: 'Note',
+        created_at: '2026-06-05T10:00:00.000Z',
+        anchor_text: 'snippet',
+        version_number: 1,
+        resolved: false,
+        context_changed: false,
+      },
+    ]);
+  });
+
+  it('primer_reply_to_thread posts the reply and returns the created ids', async () => {
+    const client = makeFakeClient();
+    client.replyToThread.mockResolvedValue({ comment: { id: 'c2' }, thread: { id: 't1' } });
+    const { deps } = buildDeps({ client });
+    const result = await buildToolHandlers(deps).primer_reply_to_thread({ thread_id: 't1', body: 'Addressed in v2.' });
+    expect(client.replyToThread).toHaveBeenCalledWith('t1', 'Addressed in v2.');
+    expect(JSON.parse((result.content[0] as { type: 'text'; text: string }).text)).toEqual({ thread_id: 't1', comment_id: 'c2' });
   });
 
   it('with documentId: resolves latest via getDocument, then getVersionThreads, includes title + version in header', async () => {
@@ -796,5 +833,54 @@ describe('primer_send_events', () => {
     client!.sendEvents.mockRejectedValue(new PrimerApiError('forbidden', 'not a collaborator', 403));
     const forbidden = await handlers.primer_send_events({ documentId: 'doc-1', events: batch });
     expect(JSON.parse(forbidden.content[0].text).code).toBe('forbidden');
+  });
+});
+
+// ─────────────────── collaborator tools ───────────────────
+
+describe('collaborator tools', () => {
+  it('primer_add_collaborator resolves an email, then adds the user at the role', async () => {
+    const { deps, client } = buildDeps();
+    const row = { userId: 'u-2', displayName: 'Two', role: 'editor', grantedBy: 'agent', createdAt: 't' };
+    client!.lookupUser.mockResolvedValue({ id: 'u-2', email: 'two@example.com', displayName: 'Two' });
+    client!.addCollaborator.mockResolvedValue(row);
+    const result = await buildToolHandlers(deps).primer_add_collaborator({
+      documentId: 'doc-1',
+      email: ' Two@Example.com ',
+      role: 'editor',
+    });
+    expect(parseSuccessPayload(result)).toEqual(row);
+    expect(client!.lookupUser).toHaveBeenCalledWith('Two@Example.com');
+    expect(client!.addCollaborator).toHaveBeenCalledWith('doc-1', 'u-2', 'editor');
+  });
+
+  it('primer_add_collaborator needs exactly one of email or userId, and a valid role', async () => {
+    const { deps, client } = buildDeps();
+    const h = buildToolHandlers(deps);
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', role: 'editor' })).code).toBe('bad_request');
+    expect(
+      parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', email: 'a@b.c', userId: 'u', role: 'editor' })).code,
+    ).toBe('bad_request');
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', userId: 'u', role: 'owner' })).code).toBe('bad_request');
+    expect(client!.addCollaborator).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the server refusal and an unknown email as errors', async () => {
+    const { deps, client } = buildDeps();
+    const h = buildToolHandlers(deps);
+    client!.lookupUser.mockRejectedValue(new PrimerApiError('not_found', 'not_found', 404));
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', email: 'x@y.z', role: 'editor' })).code).toBe('not_found');
+    client!.addCollaborator.mockRejectedValue(new PrimerApiError('forbidden', 'forbidden', 403));
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', userId: 'u', role: 'editor' })).code).toBe('forbidden');
+  });
+
+  it('primer_list_collaborators and primer_lookup_user pass through', async () => {
+    const { deps, client } = buildDeps();
+    const h = buildToolHandlers(deps);
+    client!.listCollaborators.mockResolvedValue({ collaborators: [] });
+    expect(parseSuccessPayload(await h.primer_list_collaborators({ documentId: 'd' }))).toEqual({ collaborators: [] });
+    const found = { id: 'u-9', email: 'a@b.c', displayName: 'Nine' };
+    client!.lookupUser.mockResolvedValue(found);
+    expect(parseSuccessPayload(await h.primer_lookup_user({ email: 'a@b.c' }))).toEqual(found);
   });
 });

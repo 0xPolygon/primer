@@ -57,7 +57,7 @@ export function formatThreadsAsMarkdown(
       if (context.length > 0 && context !== t.anchor.selectorText) {
         lines.push(`**Context:** "…${context}…"`);
       }
-    } else {
+    } else if (t.anchor.type === 'element-path') {
       const inner = t.anchor.innerText;
       if (inner && inner.length > 0) {
         lines.push(`**Anchored on element:** "${inner}"`);

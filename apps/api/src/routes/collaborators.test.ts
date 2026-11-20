@@ -13,6 +13,7 @@ import type { Notifier, NotifyCommentArgs, NotifyCollaboratorAddedArgs } from '.
 import type { Collaborator, CollaboratorsListResponse } from '@polygonlabs/primer-api-types';
 import { asUser, asUserJson } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
+import { onAccessRecheck, type AccessMatch } from '../auth/revocation.ts';
 
 class SpyNotifier implements Notifier {
   readonly emailEnabled = false;
@@ -22,6 +23,8 @@ class SpyNotifier implements Notifier {
   async notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void> { this.collabCalls.push(args); }
   async notifyExternalOtp() {}
   async notifyExternalFirstView() {}
+  async notifyDocumentMention() {}
+  async notifyDigest() {}
 }
 
 async function withMultiUserApp<T>(
@@ -496,6 +499,71 @@ describe('DELETE /api/documents/:docId/collaborators/:userId', () => {
         { method: 'DELETE', headers: asUser('mock-user-1') },
       );
       expect(res.status).toBe(204);
+    });
+  });
+});
+
+describe('agents and collaborators', () => {
+  const AGENT = {
+    id: 'agent_collab-test',
+    email: 'agent@agents.primer.invalid',
+    displayName: 'Claude (via User One)',
+    kind: 'agent' as const,
+    viaUserId: 'mock-user-1',
+  };
+
+  it("an agent's person is an owner of the agent's document and can revoke what the agent added", async () => {
+    await withMultiUserApp(async (_app, notifier) => {
+      await db.insert(users).values({ ...AGENT }).onConflictDoNothing();
+      const docId = uuidv7();
+      await db.insert(documents).values({ id: docId, title: 'T', uploaderId: AGENT.id });
+      const root = await mkdtemp(join(tmpdir(), 'primer-collab-agent-'));
+      try {
+        const agentApp = createApp({ storage: new FilesystemStorage(root), notifier, userResolver: async () => AGENT });
+        const add = await agentApp.request(`/api/documents/${docId}/collaborators`, {
+          method: 'POST',
+          headers: asUserJson('ignored'),
+          body: JSON.stringify({ userId: 'mock-user-2', role: 'editor' }),
+        });
+        expect(add.status).toBe(201);
+        expect(((await add.json()) as Collaborator).grantedBy).toBe(AGENT.id);
+
+        const personApp = createApp({ storage: new FilesystemStorage(root), notifier, userResolver: mockMultiResolver });
+        const del = await personApp.request(`/api/documents/${docId}/collaborators/mock-user-2`, {
+          method: 'DELETE',
+          headers: asUser('mock-user-1'),
+        });
+        expect(del.status).toBe(204);
+        const rows = await db.select().from(documentCollaborators).where(eq(documentCollaborators.documentId, docId));
+        expect(rows).toHaveLength(0);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+});
+
+describe('collaborator changes recheck live access', () => {
+  it('a role change and a removal each recheck the document\'s open connections', async () => {
+    await withMultiUserApp(async (app) => {
+      const upload = await uploadFixture(app);
+      await db.update(documents).set({ visibility: 'private' }).where(eq(documents.id, upload.documentId));
+      await db.insert(documentCollaborators).values({
+        id: uuidv7(), documentId: upload.documentId, userId: 'mock-user-2',
+        role: 'editor', grantedBy: 'mock-user-1',
+      });
+      const rechecked: AccessMatch[] = [];
+      const off = onAccessRecheck(async (match) => void rechecked.push(match));
+      try {
+        const url = `/api/documents/${upload.documentId}/collaborators/mock-user-2`;
+        const patch = await app.request(url, { method: 'PATCH', headers: asUserJson('mock-user-1'), body: JSON.stringify({ role: 'commenter' }) });
+        expect(patch.status).toBe(200);
+        expect(rechecked).toEqual([{ documentId: upload.documentId }]);
+        expect((await app.request(url, { method: 'DELETE', headers: asUser('mock-user-1') })).status).toBe(204);
+        expect(rechecked).toEqual([{ documentId: upload.documentId }, { documentId: upload.documentId }]);
+      } finally {
+        off();
+      }
     });
   });
 });

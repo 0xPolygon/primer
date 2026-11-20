@@ -1,0 +1,50 @@
+/** Primer's block strings in English: the defaults for exports and static renders. The web editor passes its locale's (apps/web/src/i18n, keys `blocks.<name>`). */
+export const BLOCK_TEXT_EN = {
+  openChoice: "Open choice",
+  decided: "Decided",
+  question: "Question",
+  questionPlaceholder: "What are we deciding?",
+  untitledChoice: "Untitled choice",
+  untitledOption: "Untitled option",
+  addOption: "+ Add option",
+  decision: "Decision: {label}",
+  by: "by {name}",
+  changed: "(changed since decided)",
+  openQuestions: "Open questions",
+  proposes: "{by} proposes {label}",
+  anAgent: "An agent",
+  decide: "Decide…",
+  option: "Option",
+  rationale: "Rationale",
+  evidence: "Evidence (one per line: label, then a link)",
+  openQuestionsField: "Open questions (one per line)",
+  recordDecision: "Record decision",
+  cancel: "Cancel",
+  vote: "Vote ({count})",
+  completeTask: "Complete task",
+  reopenTask: "Reopen task",
+  assignee: "Assignee",
+  unassigned: "Unassigned",
+  agentName: "{name} (agent)",
+  due: "Due",
+  dueOn: "due {date}",
+  calloutKind: "Callout type",
+  calloutInfo: "Info",
+  calloutWarning: "Warning",
+  calloutSuccess: "Success",
+  calloutNote: "Note",
+  addColumn: "+ Column",
+  embedPlaceholder: "Paste a link or a Primer document link",
+  embedAdd: "Embed",
+  embedChange: "Change link",
+  embedLoading: "Loading…",
+  embedUnavailable: "This embed isn't available to you.",
+  embedDocument: "Embedded document",
+  embedOpen: "Open",
+};
+export type BlockText = Record<keyof typeof BLOCK_TEXT_EN, string>;
+
+/** Fills `{name}` placeholders. */
+export function fill(text: string, vars: Record<string, string | number>): string {
+  return text.replace(/\{(\w+)\}/g, (whole, name: string) => (name in vars ? String(vars[name]) : whole));
+}

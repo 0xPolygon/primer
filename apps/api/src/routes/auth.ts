@@ -7,6 +7,7 @@ import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { proxyUnauthorizedPage } from '../auth/proxy.ts';
 import { createSession, deleteSession } from '../auth/session.ts';
+import { recheckAccess } from '../auth/revocation.ts';
 
 const STATE_COOKIE_MAX_AGE_SEC = 10 * 60;            // 10 minutes
 const DEFAULT_SESSION_COOKIE = 'primer_sid';
@@ -156,6 +157,9 @@ export function registerAuthRoutes(
     const sid = parseCookie(cookieHeader, sessionCookieName);
     if (sid) {
       await deleteSession(sid);
+      // The user's open connections re-resolve; this session's close.
+      const user = c.get('user');
+      if (user) await recheckAccess({ userId: user.id });
     }
     const clearCookie = serializeCookie(sessionCookieName, '', cookieOpts(0, secure));
     c.header('set-cookie', clearCookie);

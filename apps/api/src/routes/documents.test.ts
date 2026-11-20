@@ -337,6 +337,7 @@ describe('DELETE /api/documents/:docId', () => {
 });
 
 import type { AddVersionResponse, VersionsListResponse } from '@polygonlabs/primer-api-types';
+import { createLegacyDocument } from '../testing/legacy.ts';
 
 function buildVersionFormData(html: string, versionNote?: string): FormData {
   const fd = new FormData();
@@ -451,12 +452,12 @@ describe('POST /api/documents/:docId/versions', () => {
     }
   });
 
-  it('converts a .md file to HTML when adding a new version', async () => {
+  it('a .md version makes a legacy document live, rendered as an artifact', async () => {
     const root = await mkdtemp(join(tmpdir(), 'primer-addver-md-'));
     try {
       const storage = new FilesystemStorage(root);
       const app = createApp({ storage, notifier: new NoopNotifier() });
-      const upload = await uploadFixture(app);
+      const upload = await createLegacyDocument(storage, '<html><body><p>x</p></body></html>');
 
       const md = '---\ntitle: ignored\n---\n\n# v2\n\nNew content.';
       const fd = new FormData();
@@ -474,7 +475,7 @@ describe('POST /api/documents/:docId/versions', () => {
       const versionRows = await db
         .select()
         .from(versions)
-        .where(eq(versions.id, out.versionId));
+        .where(eq(versions.id, out.versionId!));
       expect(versionRows).toHaveLength(1);
 
       const stream = await storage.get(versionRows[0].storageKey);
@@ -485,9 +486,9 @@ describe('POST /api/documents/:docId/versions', () => {
         if (done) break;
         combined += new TextDecoder().decode(value);
       }
-      expect(combined).toContain('<h1>v2</h1>');
-      expect(combined).toContain('<p>New content.</p>');
-      expect(combined).toContain('data-theme="light"');
+      expect(combined).toMatch(/<h1[^>]*>v2<\/h1>/);
+      expect(combined).toMatch(/<p[^>]*>New content\.<\/p>/);
+      expect(versionRows[0].bundleKey).toBe(`bundles/${out.versionId}/`);
       // Primer-authored Markdown carries the theme-ownership marker.
       expect(combined).toContain('data-primer-theme="managed"');
       expect(combined).toContain('<script src="/companion/v1.js"');

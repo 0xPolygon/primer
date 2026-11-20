@@ -9,6 +9,7 @@ import {
   toolsForScopes,
   type ToolDeps,
 } from './tools.ts';
+import { MCP_INSTRUCTIONS, registerAuthoringResource } from './authoring.ts';
 
 export interface McpTransportDeps extends ToolDeps {
   serverName?: string;
@@ -32,10 +33,11 @@ export async function handleMcpRequest(
   }
 
   const handlers = buildMcpToolHandlers(deps);
-  const server = new McpServer({
-    name: deps.serverName ?? 'primer',
-    version: deps.serverVersion ?? '0.0.0',
-  });
+  const server = new McpServer(
+    { name: deps.serverName ?? 'primer', version: deps.serverVersion ?? '0.0.0' },
+    { instructions: MCP_INSTRUCTIONS },
+  );
+  registerAuthoringResource(server);
 
   // Scoped API tokens only see the tools their scopes grant.
   for (const name of toolsForScopes(tokenScopes(c))) {
@@ -44,8 +46,11 @@ export async function handleMcpRequest(
     server.registerTool(
       name,
       { description: config.description, inputSchema: config.inputSchema },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      async (args: Record<string, unknown>) => handler(args ?? {}, user) as any,
+      async (args: Record<string, unknown>) => {
+        const { images, ...result } = await handler(args ?? {}, user);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (images ? { ...result, content: [...result.content, ...images] } : result) as any;
+      },
     );
   }
 

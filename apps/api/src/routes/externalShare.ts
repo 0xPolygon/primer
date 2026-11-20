@@ -11,7 +11,9 @@ import {
   createViewerSession, lookupViewerSession,
   VIEWER_COOKIE_NAME, VIEWER_SESSION_TTL_MS,
 } from '../external/session.ts';
-import { ARTIFACT_CSP } from './versionContent.ts';
+import { frozenForShare, pagePolicyOf, withFrozenRecords } from '../records/page.ts';
+import { readFrozenRecords } from '../records/snapshot.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import { logger } from '../logger.ts';
 
 const GENERIC_OK = { ok: true } as const;
@@ -147,7 +149,7 @@ export function registerExternalShareRoutes(
   // Serves the published version as a TOP-LEVEL document — same delivery as
   // the internal full-screen mode (document.tsx openFullScreen). Top-level
   // navigation sends the SameSite=Lax viewer cookie; a sandboxed iframe
-  // would not (see middleware/auth.ts:22-29). Identical ARTIFACT_CSP applies.
+  // would not (see middleware/auth.ts:22-29). Identical artifact CSP applies.
   app.get('/api/share/:shareToken/content', async (c) => {
     const shareToken = c.req.param('shareToken');
     const sid = viewerSessionId(c);
@@ -161,11 +163,11 @@ export function registerExternalShareRoutes(
     // Keyed by the share row's own pointer — this endpoint cannot be steered
     // to any other version or document.
     const [version] = (await db.execute(sql`
-      SELECT id, storage_key AS "storageKey"
+      SELECT id, storage_key AS "storageKey", bundle_key AS "bundleKey"
       FROM versions
       WHERE id = ${ctx.share.publishedVersionId}
       LIMIT 1
-    `)) as unknown as Array<{ id: string; storageKey: string }>;
+    `)) as unknown as Array<{ id: string; storageKey: string; bundleKey: string | null }>;
     if (!version) return c.redirect(`/share/${shareToken}`, 302);
 
     await db.insert(externalViews).values({
@@ -196,12 +198,17 @@ export function registerExternalShareRoutes(
       }
     }
 
-    const stream = await deps.storage.get(version.storageKey);
-    return new Response(stream, {
+    // A checkpoint's record-reading page reads the records frozen at publish
+    // (records.json), never live ones, under the records outbound lockdown.
+    const stored = await new Response(await deps.storage.get(version.storageKey)).text();
+    // Only the collections the page declares, with no identities or metadata.
+    const frozen = version.bundleKey ? await readFrozenRecords(deps.storage, version.bundleKey) : null;
+    const html = withFrozenRecords(stored, frozen && frozenForShare(frozen, stored));
+    return new Response(html, {
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': ARTIFACT_CSP,
+        'content-security-policy': artifactCsp(pagePolicyOf(stored)),
         'x-frame-options': 'SAMEORIGIN',
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer',

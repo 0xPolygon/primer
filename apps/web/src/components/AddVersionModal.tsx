@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { LibraryDocument } from '@polygonlabs/primer-api-types';
+import type { LibraryDocument, Reconciliation } from '@polygonlabs/primer-api-types';
 import { useLibraryQuery } from '../queries/library.ts';
 import { useAddVersion } from '../queries/versions.ts';
 import { FileDropZone } from './FileDropZone.tsx';
+import { t } from '../i18n';
 
 interface Props {
   open: boolean;
@@ -18,12 +19,12 @@ function relativeTime(iso: string): string {
   const d = new Date(iso);
   const diffMs = Date.now() - d.getTime();
   const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return 'just now';
+  if (sec < 60) return t('addVersionModal.justNow');
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
+  if (min < 60) return t('addVersionModal.minutesAgo', { count: min });
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
+  if (hr < 24) return t('addVersionModal.hoursAgo', { count: hr });
+  return t('addVersionModal.daysAgo', { count: Math.floor(hr / 24) });
 }
 
 export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, onClose }: Props) {
@@ -36,6 +37,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
   const [versionNote, setVersionNote] = useState('');
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [suggested, setSuggested] = useState<Reconciliation | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerSelector = useRef<HTMLElement | null>(null);
 
@@ -81,6 +83,11 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
 
   if (!open) return null;
 
+  const openDocument = () => {
+    onClose();
+    navigate(`/d/${selectedDocId}`);
+  };
+
   const canSubmit = !!selectedDocId && !!file && !addVersion.isPending;
 
   async function submit() {
@@ -88,7 +95,13 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
     setError(null);
     try {
       const trimmed = versionNote.trim();
-      await addVersion.mutateAsync({ file, versionNote: trimmed.length === 0 ? null : trimmed });
+      const out = await addVersion.mutateAsync({ file, versionNote: trimmed.length === 0 ? null : trimmed });
+      // A republish that only suggests (an agent in suggest mode) makes no
+      // version: say what it did instead of opening a version that isn't there.
+      if (out.versionId === undefined) {
+        setSuggested(out.reconciliation);
+        return;
+      }
       onClose();
       navigate(`/d/${selectedDocId}`);
     } catch (err) {
@@ -112,12 +125,12 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
       >
         <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-4 py-3">
           <h2 id="add-version-title" className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-            Add a new version
+            {t('addVersionModal.title')}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('addVersionModal.close')}
             className="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
           >
             ×
@@ -126,18 +139,18 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
 
         <div className="space-y-4 px-4 py-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-700 dark:text-neutral-300">Document</label>
+            <label className="mb-1 block text-xs font-medium text-neutral-700 dark:text-neutral-300">{t('addVersionModal.document')}</label>
             {preselectedDocId && selectedDocId === preselectedDocId ? (
               <div className="rounded-md border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 px-3 py-2 text-sm">
                 <div className="font-medium text-neutral-800 dark:text-neutral-200">
-                  {selectedDoc?.title ?? preselectedDocTitle ?? '(loading)'}
+                  {selectedDoc?.title ?? preselectedDocTitle ?? t('addVersionModal.loading')}
                 </div>
                 <button
                   type="button"
                   onClick={() => setSelectedDocId(undefined)}
                   className="mt-1 text-xs text-neutral-500 underline hover:text-neutral-900 dark:hover:text-neutral-100"
                 >
-                  ← change document
+                  {t('addVersionModal.changeDocument')}
                 </button>
               </div>
             ) : (
@@ -146,7 +159,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search your documents…"
+                  placeholder={t('addVersionModal.searchPlaceholder')}
                   className="block w-full rounded-md border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
                 />
                 {filteredDocs.length > 0 && (
@@ -164,7 +177,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
                       >
                         <div className="font-medium text-neutral-800 dark:text-neutral-200">{d.title}</div>
                         <div className="text-xs text-neutral-500">
-                          {d.activeThreadCount}/{d.threadCount} active · {relativeTime(d.lastActivityAt)}
+                          {t('addVersionModal.threadStats', { active: d.activeThreadCount, total: d.threadCount, time: relativeTime(d.lastActivityAt) })}
                         </div>
                       </li>
                     ))}
@@ -174,7 +187,7 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
             )}
             {selectedDoc && (
               <div className="mt-1 text-xs text-neutral-500">
-                Last updated {relativeTime(selectedDoc.lastActivityAt)}
+                {t('addVersionModal.lastUpdated', { time: relativeTime(selectedDoc.lastActivityAt) })}
               </div>
             )}
           </div>
@@ -183,19 +196,31 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
 
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-neutral-700 dark:text-neutral-300">
-              Version note (optional)
+              {t('addVersionModal.versionNote')}
             </span>
             <input
               type="text"
               value={versionNote}
               onChange={(e) => setVersionNote(e.target.value)}
               maxLength={500}
-              placeholder='e.g. "fixed Y-axis scale"'
+              placeholder={t('addVersionModal.versionNotePlaceholder')}
               className="block w-full rounded-md border border-neutral-300 dark:border-neutral-700 px-3 py-2 text-sm"
             />
           </label>
 
           {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+          {suggested && (
+            <div role="status" data-republish-suggested="" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              <p className="font-medium">{t('addVersionModal.suggestedTitle')}</p>
+              <p className="mt-1">
+                {t('addVersionModal.suggestedBody', {
+                  suggested: suggested.outcomes.filter((o) => o.status === 'suggested').length,
+                  conflicts: suggested.outcomes.filter((o) => o.status === 'conflict').length,
+                  unchanged: suggested.outcomes.filter((o) => o.status === 'unchanged').length,
+                })}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-neutral-200 dark:border-neutral-800 px-4 py-3">
@@ -204,16 +229,26 @@ export function AddVersionModal({ open, preselectedDocId, preselectedDocTitle, o
             onClick={onClose}
             className="rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800"
           >
-            Cancel
+            {t('addVersionModal.cancel')}
           </button>
+          {suggested ? (
+            <button
+              type="button"
+              onClick={openDocument}
+              className="rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
+            >
+              {t('addVersionModal.openSuggestions')}
+            </button>
+          ) : (
           <button
             type="button"
             onClick={submit}
             disabled={!canSubmit}
             className="rounded-md bg-neutral-900 px-4 py-1.5 text-sm text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
-            {addVersion.isPending ? 'Adding…' : 'Add version'}
+            {addVersion.isPending ? t('addVersionModal.adding') : t('addVersionModal.submit')}
           </button>
+          )}
         </div>
       </div>
     </div>

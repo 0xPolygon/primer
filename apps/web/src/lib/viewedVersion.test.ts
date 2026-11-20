@@ -79,17 +79,24 @@ describe('viewed version on /d/:docId/v/:n', () => {
 
 describe('composerPendingFrom (a poll lands mid-compose)', () => {
   it('keeps the open composer and its anchor; it takes no "is latest" input that could close it', () => {
-    expect(composerPendingFrom({ pendingSelection: { anchor: 'sel' }, pendingPick: null })).toEqual({
-      anchor: 'sel',
-      origin: 'selection',
-    });
-    expect(composerPendingFrom({ pendingSelection: null, pendingPick: { anchor: 'pick' } })).toEqual({
-      anchor: 'pick',
-      origin: 'pick',
-    });
+    expect(
+      composerPendingFrom({ pendingSelection: { anchor: 'sel', versionId: 'v4' }, pendingPick: null, viewedVersionId: 'v4' }),
+    ).toEqual({ anchor: 'sel', origin: 'selection' });
+    expect(
+      composerPendingFrom({ pendingSelection: null, pendingPick: { anchor: 'pick', versionId: 'v4' }, viewedVersionId: 'v4' }),
+    ).toEqual({ anchor: 'pick', origin: 'pick' });
+  });
+
+  it('never shows an anchor captured on a version other than the one viewed', () => {
+    expect(
+      composerPendingFrom({ pendingSelection: { anchor: 'sel', versionId: 'v4' }, pendingPick: null, viewedVersionId: 'v5' }),
+    ).toBeNull();
+    expect(
+      composerPendingFrom({ pendingSelection: null, pendingPick: { anchor: 'pick', versionId: 'v4' }, viewedVersionId: 'v5' }),
+    ).toBeNull();
   });
 
   it('has nothing to show when no anchor is pending', () => {
-    expect(composerPendingFrom({ pendingSelection: null, pendingPick: null })).toBeNull();
+    expect(composerPendingFrom({ pendingSelection: null, pendingPick: null, viewedVersionId: 'v4' })).toBeNull();
   });
 });

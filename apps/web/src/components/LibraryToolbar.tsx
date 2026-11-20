@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import type { Chip, SortKey } from '../lib/library.ts';
 
 export interface LibraryToolbarProps {
@@ -14,17 +15,18 @@ export interface LibraryToolbarProps {
 }
 
 const CHIPS: ReadonlyArray<{ key: Chip; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'mine', label: 'Mine' },
-  { key: 'shared', label: 'Shared with me' },
-  { key: 'deleted', label: 'Deleted' },
+  { key: 'all', label: t('libraryToolbar.all') },
+  { key: 'mine', label: t('libraryToolbar.mine') },
+  { key: 'shared', label: t('libraryToolbar.shared') },
+  { key: 'templates', label: t('libraryToolbar.templates') },
+  { key: 'deleted', label: t('libraryToolbar.deleted') },
 ];
 
 const SORT_OPTIONS: ReadonlyArray<{ key: SortKey; label: string }> = [
-  { key: 'activity', label: 'Recent activity' },
-  { key: 'uploaded', label: 'Recently uploaded' },
-  { key: 'title-asc', label: 'Title A→Z' },
-  { key: 'title-desc', label: 'Title Z→A' },
+  { key: 'activity', label: t('libraryToolbar.recentActivity') },
+  { key: 'uploaded', label: t('libraryToolbar.recentlyUploaded') },
+  { key: 'title-asc', label: t('libraryToolbar.titleAsc') },
+  { key: 'title-desc', label: t('libraryToolbar.titleDesc') },
 ];
 
 export function LibraryToolbar(props: LibraryToolbarProps) {
@@ -37,19 +39,19 @@ export function LibraryToolbar(props: LibraryToolbarProps) {
             onClick={props.onOpenFolders}
             className="md:hidden rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
           >
-            Folders ▾
+            {t('libraryToolbar.folders')}
           </button>
         )}
         <input
           type="search"
           value={props.q}
           onChange={(e) => props.onQChange(e.target.value)}
-          placeholder="Search…"
+          placeholder={t('libraryToolbar.search')}
           className="flex-1 rounded border border-neutral-300 bg-white px-3 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
         />
       </div>
       <div className="flex items-center gap-2 overflow-x-auto">
-        <div className="flex gap-1 shrink-0" role="tablist" aria-label="Filter">
+        <div className="flex gap-1 shrink-0" role="tablist" aria-label={t('libraryToolbar.filter')}>
           {CHIPS.map((c) => {
             const active = c.key === props.chip;
             return (
@@ -73,7 +75,7 @@ export function LibraryToolbar(props: LibraryToolbarProps) {
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           <label className="text-xs text-neutral-500">
-            Sort{' '}
+            {t('libraryToolbar.sort')}{' '}
             <select
               value={props.sortKey}
               onChange={(e) => props.onSortKeyChange(e.target.value as SortKey)}
@@ -89,7 +91,7 @@ export function LibraryToolbar(props: LibraryToolbarProps) {
           <div className="flex overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
             <button
               type="button"
-              aria-label="List view"
+              aria-label={t('libraryToolbar.listView')}
               aria-pressed={props.layout === 'list'}
               onClick={() => props.onLayoutChange('list')}
               className={
@@ -101,7 +103,7 @@ export function LibraryToolbar(props: LibraryToolbarProps) {
             </button>
             <button
               type="button"
-              aria-label="Cards view"
+              aria-label={t('libraryToolbar.cardsView')}
               aria-pressed={props.layout === 'cards'}
               onClick={() => props.onLayoutChange('cards')}
               className={

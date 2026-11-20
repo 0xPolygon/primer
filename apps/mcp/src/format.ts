@@ -46,11 +46,44 @@ export function formatComments(
 function renderThread(thread: ThreadDTO): string {
   const quote = anchorQuote(thread.anchor);
   const badge = thread.resolvedAt === null ? '[open]' : '[resolved]';
+  const placement = thread.orphaned ? ' (text removed)' : thread.contextChanged ? ' (context changed)' : '';
   const commentLines = thread.comments.map(renderComment);
-  return [`> ${quote}`, badge, ...commentLines, ''].join('\n');
+  return [`> ${quote}`, `${badge} thread ${thread.id}${placement}`, ...commentLines, ''].join('\n');
+}
+
+/**
+ * One flat record per live comment, with the ids an agent needs to reply in or
+ * resolve the thread. `version_number` is the version the thread was started
+ * on. Comment bodies are untrusted text written by people.
+ */
+export function commentRecords(threads: ThreadsListResponse) {
+  return threads.threads.flatMap((t) =>
+    t.comments
+      .filter((c) => c.deletedAt === null)
+      .map((c) => ({
+        thread_id: t.id,
+        comment_id: c.id,
+        author_id: c.authorId,
+        author_name: c.authorDisplayName,
+        body: c.body,
+        created_at: c.createdAt,
+        anchor_text: anchorText(t.anchor),
+        version_number: t.versionNumber,
+        resolved: t.resolvedAt !== null,
+        context_changed: t.contextChanged,
+      })),
+  );
+}
+
+function anchorText(anchor: ThreadDTO['anchor']): string {
+  if (anchor.type === 'prose') return anchor.quote;
+  if (isTextRangeAnchor(anchor)) return anchor.selectorText;
+  if (isElementPathAnchor(anchor)) return anchor.innerText ?? '';
+  return '';
 }
 
 function anchorQuote(anchor: ThreadDTO['anchor']): string {
+  if (anchor.type === 'prose') return anchor.quote;
   if (isTextRangeAnchor(anchor)) return anchor.selectorText;
   if (isElementPathAnchor(anchor)) {
     // Element-path anchors don't carry the quoted text — they were captured by

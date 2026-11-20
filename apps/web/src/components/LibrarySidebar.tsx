@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useState } from 'react';
 import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { FOLDER_UNCATEGORIZED } from '../lib/library.ts';
@@ -25,7 +26,7 @@ export function LibrarySidebar(props: LibrarySidebarProps) {
   const submitCreate = () => {
     const normalized = normalizeFolderNameClient(draftName);
     if (!normalized.ok) {
-      setCreateError(normalized.reason === 'empty' ? 'Name required' : 'Too long (max 60)');
+      setCreateError(normalized.reason === 'empty' ? t('librarySidebar.nameRequired') : t('librarySidebar.tooLong'));
       return;
     }
     create.mutate(
@@ -37,7 +38,7 @@ export function LibrarySidebar(props: LibrarySidebarProps) {
           setCreateError(null);
         },
         onError: (e) => {
-          setCreateError(String(e).includes('409') ? 'Name already used' : 'Could not create');
+          setCreateError(String(e).includes('409') ? t('librarySidebar.nameUsed') : t('librarySidebar.couldNotCreate'));
         },
       },
     );
@@ -45,15 +46,15 @@ export function LibrarySidebar(props: LibrarySidebarProps) {
 
   return (
     <aside className="hidden md:flex md:w-56 shrink-0 flex-col gap-1 border-r border-neutral-200 pr-4 text-sm dark:border-neutral-800">
-      <div className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Folders</div>
+      <div className="text-xs font-semibold uppercase tracking-wider text-neutral-500">{t('librarySidebar.folders')}</div>
       <SidebarLink
-        label="All docs"
+        label={t('librarySidebar.allDocs')}
         count={props.totalCount}
         active={props.selectedFolderId === null}
         onClick={() => props.onSelect(null)}
       />
       <SidebarLink
-        label="Uncategorized"
+        label={t('librarySidebar.uncategorized')}
         count={props.uncategorizedCount}
         active={props.selectedFolderId === FOLDER_UNCATEGORIZED}
         onClick={() => props.onSelect(FOLDER_UNCATEGORIZED)}
@@ -89,7 +90,7 @@ export function LibrarySidebar(props: LibrarySidebarProps) {
                   setCreateError(null);
                 }
               }}
-              placeholder="New folder name"
+              placeholder={t('librarySidebar.newFolderName')}
               className="rounded border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-900"
               disabled={create.isPending}
             />
@@ -101,7 +102,7 @@ export function LibrarySidebar(props: LibrarySidebarProps) {
             onClick={() => setIsAdding(true)}
             className="text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
           >
-            + New folder
+            {t('librarySidebar.newFolder')}
           </button>
         )}
       </div>
@@ -137,7 +138,7 @@ function FolderRow(props: { folder: FolderDTO; active: boolean; onSelect: () => 
   const submit = () => {
     const normalized = normalizeFolderNameClient(draft);
     if (!normalized.ok) {
-      setError(normalized.reason === 'empty' ? 'Name required' : 'Too long (max 60)');
+      setError(normalized.reason === 'empty' ? t('librarySidebar.nameRequired') : t('librarySidebar.tooLong'));
       return;
     }
     if (normalized.name === props.folder.name) {
@@ -151,13 +152,13 @@ function FolderRow(props: { folder: FolderDTO; active: boolean; onSelect: () => 
           setEditing(false);
           setError(null);
         },
-        onError: (e) => setError(String(e).includes('409') ? 'Name already used' : 'Could not rename'),
+        onError: (e) => setError(String(e).includes('409') ? t('librarySidebar.nameUsed') : t('librarySidebar.couldNotRename')),
       },
     );
   };
 
   const askDelete = () => {
-    if (window.confirm(`Delete folder "${props.folder.name}"? Docs in it will become Uncategorized in your view.`)) {
+    if (window.confirm(t('librarySidebar.confirmDelete', { name: props.folder.name }))) {
       del.mutate({ id: props.folder.id });
     }
   };
@@ -204,7 +205,7 @@ function FolderRow(props: { folder: FolderDTO; active: boolean; onSelect: () => 
         <div className="hidden group-hover:flex items-center gap-1">
           <button
             type="button"
-            aria-label="Rename"
+            aria-label={t('librarySidebar.rename')}
             onClick={() => setEditing(true)}
             className="text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
           >
@@ -212,7 +213,7 @@ function FolderRow(props: { folder: FolderDTO; active: boolean; onSelect: () => 
           </button>
           <button
             type="button"
-            aria-label="Delete"
+            aria-label={t('librarySidebar.delete')}
             onClick={askDelete}
             className="text-xs text-neutral-500 hover:text-red-600 dark:hover:text-red-400"
             disabled={del.isPending}

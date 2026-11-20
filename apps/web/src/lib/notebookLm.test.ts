@@ -16,11 +16,14 @@ function comment(over: Partial<CommentDTO> = {}): CommentDTO {
     threadId: 't-1',
     authorId: 'u1',
     authorDisplayName: 'Mock Reviewer',
+    authorKind: 'person',
+    authorVia: null,
     body: 'Why not sponsor gas per app?',
     createdAt: '2026-11-17T10:00:00.000Z',
     updatedAt: null,
     deletedAt: null,
     mentions: [],
+    reactions: [],
     ...over,
   };
 }
@@ -29,7 +32,10 @@ function thread(over: Partial<ThreadDTO> = {}): ThreadDTO {
   return {
     id: 't-1',
     versionId: 'v-1',
+    versionNumber: 1,
     anchor: { type: 'text-range', selectorText: 'paymaster', containerPath: 'body > p' },
+    contextChanged: false,
+    orphaned: false,
     resolvedAt: null,
     resolvedBy: null,
     resolvedByDisplayName: null,

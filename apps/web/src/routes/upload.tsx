@@ -5,6 +5,7 @@ import { FileDropZone } from '../components/FileDropZone.tsx';
 import { DesktopOnly } from '../components/DesktopOnly.tsx';
 import { api } from '../lib/fetch.ts';
 import { extractFrontmatterTitle } from '../lib/frontmatterTitle.ts';
+import { t } from '../i18n/index.ts';
 
 export function UploadPage() {
   const navigate = useNavigate();
@@ -30,9 +31,9 @@ export function UploadPage() {
       .text()
       .then((head) => {
         if (cancelled) return;
-        const t = extractFrontmatterTitle(head);
-        if (t && title.trim().length === 0) {
-          setTitle(t);
+        const heading = extractFrontmatterTitle(head);
+        if (heading && title.trim().length === 0) {
+          setTitle(heading);
         }
       })
       .catch(() => {
@@ -48,7 +49,7 @@ export function UploadPage() {
     e.preventDefault();
     setError(null);
     if (!file) {
-      setError('Please choose a file (.html, .md, or .markdown).');
+      setError(t('upload.chooseFile'));
       return;
     }
     setSubmitting(true);
@@ -61,7 +62,7 @@ export function UploadPage() {
       const res = await api('/api/upload', { method: 'POST', body: fd });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as Partial<UploadErrorResponse>;
-        setError(body.message ?? `Upload failed (${res.status}).`);
+        setError(body.message ?? t('upload.failed', { status: res.status }));
         return;
       }
       const body = (await res.json()) as UploadResponse;
@@ -78,12 +79,12 @@ export function UploadPage() {
   return (
     <DesktopOnly>
       <form onSubmit={onSubmit} className="mx-auto max-w-xl space-y-5">
-        <h1 className="text-2xl font-semibold">Upload a document</h1>
+        <h1 className="text-2xl font-semibold">{t('upload.title')}</h1>
 
         <FileDropZone file={file} onChange={setFile} />
 
         <label className="block">
-          <span className="mb-1 block text-sm font-medium">Title *</span>
+          <span className="mb-1 block text-sm font-medium">{t('upload.titleLabel')}</span>
           <input
             type="text"
             value={title}
@@ -95,7 +96,7 @@ export function UploadPage() {
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-sm font-medium">Description (optional)</span>
+          <span className="mb-1 block text-sm font-medium">{t('upload.descriptionLabel')}</span>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -113,14 +114,14 @@ export function UploadPage() {
             onClick={() => navigate('/')}
             className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
-            Cancel
+            {t('upload.cancel')}
           </button>
           <button
             type="submit"
             disabled={!canSubmit}
             className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
-            {submitting ? 'Uploading…' : 'Upload'}
+            {submitting ? t('upload.uploading') : t('upload.upload')}
           </button>
         </div>
       </form>

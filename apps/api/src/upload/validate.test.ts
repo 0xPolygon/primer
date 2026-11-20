@@ -19,9 +19,9 @@ describe('validateUpload', () => {
     expect(r).toEqual({ ok: false, error: 'too_large', message: expect.any(String) });
   });
 
-  it('rejects non-.html filename', () => {
+  it('rejects an unsupported filename', () => {
     const r = validateUpload({
-      file: { ...okFile, filename: 'report.txt' },
+      file: { ...okFile, filename: 'report.pdf' },
       title: 't',
       description: undefined,
     });
@@ -131,7 +131,7 @@ describe('validateUpload', () => {
 
   it('rejects an unsupported extension with the updated message', () => {
     const r = validateUpload({
-      file: { ...okFile, filename: 'report.txt' },
+      file: { ...okFile, filename: 'report.pdf' },
       title: 't',
       description: undefined,
     });

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { VersionSummaryDTO } from '@polygonlabs/primer-api-types';
 import { VersionSelector } from './VersionSelector.tsx';
 import { buildMenuItems, type MenuItemId } from '../lib/documentActionsMenu.ts';
+import { t } from '../i18n';
+import { useCopyDocument, useDocument, useEditDocument, useProposeBranch } from '../queries/documents.ts';
 
 export interface ActionFeedback {
   kind: 'success' | 'error';
@@ -30,6 +33,10 @@ interface Props {
   onCopyComments: () => Promise<ActionFeedback>;
   onExportComments: () => void;
   onDelete: () => Promise<void>;
+  /** Live documents: saves a checkpoint of the current state. */
+  onSaveCheckpoint?: () => Promise<ActionFeedback>;
+  /** Live documents: downloads the content in a format. */
+  onExport?: (format: 'markdown' | 'html' | 'print') => void;
 }
 
 type MenuState = 'closed' | 'menu' | 'confirm';
@@ -49,12 +56,20 @@ export function HeaderActions({
   onCopyComments,
   onExportComments,
   onDelete,
+  onSaveCheckpoint,
+  onExport,
 }: Props) {
   const [menuState, setMenuState] = useState<MenuState>('closed');
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  const navigate = useNavigate();
+  const docQuery = useDocument(docId);
+  const detail = docQuery.data?.document;
+  const copy = useCopyDocument();
+  const propose = useProposeBranch(docId);
+  const editDoc = useEditDocument(docId);
 
   useEffect(() => {
     if (menuState !== 'menu') return;
@@ -108,7 +123,7 @@ export function HeaderActions({
           if (fb) showFeedback(fb);
         })
         .catch(() =>
-          showFeedback({ kind: 'error', message: 'Download failed. Try again.' }),
+          showFeedback({ kind: 'error', message: t('headerActions.downloadFailed') }),
         );
     },
     notebooklm: () => {
@@ -120,15 +135,51 @@ export function HeaderActions({
       void onCopyComments()
         .then((fb) => showFeedback(fb))
         .catch(() =>
-          showFeedback({ kind: 'error', message: 'Copy failed. Try Download instead.' }),
+          showFeedback({ kind: 'error', message: t('headerActions.copyFailed') }),
         );
     },
     download: () => {
       setMenuState('closed');
       onExportComments();
     },
+    'export-markdown': () => {
+      setMenuState('closed');
+      onExport?.('markdown');
+    },
+    'export-html': () => {
+      setMenuState('closed');
+      onExport?.('html');
+    },
+    'export-print': () => {
+      setMenuState('closed');
+      onExport?.('print');
+    },
+    branch: () => copyAs('branch'),
+    fork: () => copyAs('fork'),
+    propose: () => {
+      setMenuState('closed');
+      propose.mutate(undefined, {
+        onSuccess: (out) => navigate(`/d/${out.documentId}`),
+        onError: (err) => showFeedback({ kind: 'error', message: t('headerActions.proposeFailed', { reason: err.message }) }, 5000),
+      });
+    },
+    template: () => {
+      setMenuState('closed');
+      editDoc.mutate({ isTemplate: !detail?.isTemplate });
+    },
     delete: () => setMenuState('confirm'),
   };
+
+  function copyAs(kind: 'branch' | 'fork') {
+    setMenuState('closed');
+    copy.mutate(
+      { docId, kind },
+      {
+        onSuccess: (id) => navigate(`/d/${id}`),
+        onError: () => showFeedback({ kind: 'error', message: t('headerActions.copyDocumentFailed') }),
+      },
+    );
+  }
 
   return (
     <div className="flex shrink-0 items-center gap-1.5">
@@ -141,20 +192,29 @@ export function HeaderActions({
           onAddVersion={onAddVersion}
         />
       )}
+      {variant === 'desktop' && onSaveCheckpoint && (
+        <button
+          type="button"
+          onClick={() => void onSaveCheckpoint().then(showFeedback, () => showFeedback({ kind: 'error', message: t('headerActions.saveCheckpointFailed') }))}
+          className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >
+          {t('headerActions.saveCheckpoint')}
+        </button>
+      )}
       {variant === 'desktop' && isUploader && (
         <button
           type="button"
           onClick={onShare}
           className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          Share
+          {t('headerActions.share')}
         </button>
       )}
       <div className="relative" ref={menuRef}>
         <button
           type="button"
           onClick={() => setMenuState((s) => (s === 'closed' ? 'menu' : 'closed'))}
-          aria-label="More actions"
+          aria-label={t('headerActions.moreActions')}
           aria-haspopup="menu"
           aria-expanded={menuState === 'menu'}
           className="inline-flex h-7 items-center justify-center rounded border border-neutral-300 bg-white px-2 text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
@@ -170,7 +230,14 @@ export function HeaderActions({
             role="menu"
             className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
           >
-            {buildMenuItems({ isUploader, includeShare: variant === 'mobile' }).map(
+            {buildMenuItems({
+              isUploader,
+              includeShare: variant === 'mobile',
+              live: onExport !== undefined,
+              isBranch: Boolean(detail?.branchOf),
+              isTemplate: Boolean(detail?.isTemplate),
+              isOwner: docQuery.data?.myRole === 'owner',
+            }).map(
               (item, index) => {
                 if (item.id === 'separator') {
                   return (
@@ -203,7 +270,7 @@ export function HeaderActions({
         {menuState === 'confirm' && (
           <div className="absolute right-0 z-10 mt-1 w-64 rounded border border-neutral-200 bg-white p-3 shadow-md dark:border-neutral-800 dark:bg-neutral-900">
             <p className="text-xs text-neutral-700 dark:text-neutral-300">
-              Delete this document? You can restore it within 30 days from the home page.
+              {t('headerActions.deleteConfirm')}
             </p>
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -211,7 +278,7 @@ export function HeaderActions({
                 onClick={() => setMenuState('closed')}
                 className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300"
               >
-                Cancel
+                {t('headerActions.cancel')}
               </button>
               <button
                 type="button"
@@ -221,13 +288,13 @@ export function HeaderActions({
                     if (mountedRef.current) setMenuState('closed');
                   } catch {
                     if (mountedRef.current) {
-                      showFeedback({ kind: 'error', message: 'Delete failed. Try again.' });
+                      showFeedback({ kind: 'error', message: t('headerActions.deleteFailed') });
                     }
                   }
                 }}
                 className="rounded bg-red-600 px-2 py-0.5 text-xs text-white hover:bg-red-700"
               >
-                Delete
+                {t('headerActions.delete')}
               </button>
             </div>
           </div>

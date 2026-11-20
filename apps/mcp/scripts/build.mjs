@@ -14,7 +14,7 @@
 // extra setup step.
 
 import { build } from 'esbuild';
-import { readFile, chmod } from 'node:fs/promises';
+import { readFile, chmod, mkdir, copyFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,4 +53,10 @@ await build({
 // Make the bin entry executable.
 await chmod(outfile, 0o755);
 
-console.log('mcp build complete: dist/index.js');
+// The authoring skill, served as the MCP resource primer://skills/authoring.
+await mkdir(resolve(mcpRoot, 'dist/skills'), { recursive: true });
+for (const name of ['authoring.md', 'widgets.md']) {
+  await copyFile(resolve(mcpRoot, `../../plugins/primer/skills/primer/${name}`), resolve(mcpRoot, `dist/skills/${name}`));
+}
+
+console.log('mcp build complete: dist/index.js, dist/skills/authoring.md, dist/skills/widgets.md');

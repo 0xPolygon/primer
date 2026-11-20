@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useTheme, type Preference } from '../lib/useTheme.ts';
 
 const NEXT: Record<Preference, Preference> = {
@@ -7,9 +8,9 @@ const NEXT: Record<Preference, Preference> = {
 };
 
 const LABEL: Record<Preference, string> = {
-  light: 'Theme: Light — click for Dark',
-  dark: 'Theme: Dark — click for System',
-  system: 'Theme: System — click for Light',
+  light: t('themeToggle.light'),
+  dark: t('themeToggle.dark'),
+  system: t('themeToggle.system'),
 };
 
 function SunIcon() {

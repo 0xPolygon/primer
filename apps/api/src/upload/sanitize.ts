@@ -9,7 +9,7 @@ const PARSER_OPTIONS = {
   lowerCaseAttributeNames: false,
 };
 
-const SVG_TAGS = [
+export const SVG_TAGS = [
   'svg', 'g', 'defs', 'title', 'desc', 'symbol', 'marker', 'use',
   'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
   'text', 'tspan', 'textPath',
@@ -17,7 +17,9 @@ const SVG_TAGS = [
   'clipPath', 'mask', 'pattern', 'filter',
 ];
 
-const SVG_PRESENTATION_ATTRS = [
+const PRIMER_TAGS = ['primer-table', 'primer-code', 'primer-mermaid', 'primer-math'];
+
+export const SVG_PRESENTATION_ATTRS = [
   'fill', 'fill-opacity', 'fill-rule',
   'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray',
   'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit',
@@ -28,6 +30,32 @@ const SVG_PRESENTATION_ATTRS = [
   'clip-path', 'mask', 'filter',
   'marker-start', 'marker-mid', 'marker-end',
 ];
+
+// Per-tag SVG attributes (geometry and references). Widgets reuse these lists
+// (widgets/serialize.ts) without the sanitizer's `'*'` row.
+export const SVG_TAG_ATTRS: Record<string, string[]> = {
+  svg: ['viewBox', 'xmlns', 'preserveAspectRatio', 'width', 'height',
+        'role', 'aria-label', 'aria-labelledby', 'aria-describedby'],
+  use: ['href', 'x', 'y', 'width', 'height'],
+  path: ['d', 'pathLength'],
+  rect: ['x', 'y', 'width', 'height', 'rx', 'ry'],
+  circle: ['cx', 'cy', 'r'],
+  ellipse: ['cx', 'cy', 'rx', 'ry'],
+  line: ['x1', 'y1', 'x2', 'y2'],
+  polyline: ['points'],
+  polygon: ['points'],
+  text: ['x', 'y', 'dx', 'dy', 'rotate', 'textLength', 'lengthAdjust'],
+  tspan: ['x', 'y', 'dx', 'dy', 'rotate', 'textLength', 'lengthAdjust'],
+  marker: ['markerWidth', 'markerHeight', 'markerUnits', 'refX', 'refY',
+           'orient', 'viewBox'],
+  linearGradient: ['x1', 'y1', 'x2', 'y2', 'gradientUnits', 'gradientTransform', 'spreadMethod'],
+  radialGradient: ['cx', 'cy', 'r', 'fx', 'fy', 'gradientUnits', 'gradientTransform', 'spreadMethod'],
+  stop: ['offset', 'stop-color', 'stop-opacity'],
+  clipPath: ['clipPathUnits'],
+  mask: ['maskUnits', 'maskContentUnits', 'x', 'y', 'width', 'height'],
+  pattern: ['patternUnits', 'patternContentUnits', 'patternTransform', 'x', 'y', 'width', 'height', 'viewBox'],
+  filter: ['x', 'y', 'width', 'height', 'filterUnits', 'primitiveUnits'],
+};
 
 // Threat model: uploaded HTML executes inside ArtifactIframe's
 // `sandbox="allow-scripts allow-forms allow-modals allow-downloads"`
@@ -65,6 +93,9 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     'button', 'input', 'select', 'option', 'optgroup', 'textarea',
     'label', 'fieldset', 'legend',
     ...SVG_TAGS,
+    // Primer blocks inside pages (page/embeds.ts): rendered read-only from the
+    // document's block state and edited in Primer's own window.
+    ...PRIMER_TAGS,
   ],
   allowedAttributes: {
     a: ['href', 'name', 'target', 'rel'],
@@ -89,28 +120,9 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
       'required', 'maxlength', 'minlength', 'wrap', 'autofocus',
     ],
     label: ['for'],
+    ...Object.fromEntries(PRIMER_TAGS.map((tag) => [tag, ['lang']])),
     fieldset: ['disabled', 'name'],
-    svg: ['viewBox', 'xmlns', 'preserveAspectRatio', 'width', 'height',
-          'role', 'aria-label', 'aria-labelledby', 'aria-describedby'],
-    use: ['href', 'x', 'y', 'width', 'height'],
-    path: ['d', 'pathLength'],
-    rect: ['x', 'y', 'width', 'height', 'rx', 'ry'],
-    circle: ['cx', 'cy', 'r'],
-    ellipse: ['cx', 'cy', 'rx', 'ry'],
-    line: ['x1', 'y1', 'x2', 'y2'],
-    polyline: ['points'],
-    polygon: ['points'],
-    text: ['x', 'y', 'dx', 'dy', 'rotate', 'textLength', 'lengthAdjust'],
-    tspan: ['x', 'y', 'dx', 'dy', 'rotate', 'textLength', 'lengthAdjust'],
-    marker: ['markerWidth', 'markerHeight', 'markerUnits', 'refX', 'refY',
-             'orient', 'viewBox'],
-    linearGradient: ['x1', 'y1', 'x2', 'y2', 'gradientUnits', 'gradientTransform', 'spreadMethod'],
-    radialGradient: ['cx', 'cy', 'r', 'fx', 'fy', 'gradientUnits', 'gradientTransform', 'spreadMethod'],
-    stop: ['offset', 'stop-color', 'stop-opacity'],
-    clipPath: ['clipPathUnits'],
-    mask: ['maskUnits', 'maskContentUnits', 'x', 'y', 'width', 'height'],
-    pattern: ['patternUnits', 'patternContentUnits', 'patternTransform', 'x', 'y', 'width', 'height', 'viewBox'],
-    filter: ['x', 'y', 'width', 'height', 'filterUnits', 'primitiveUnits'],
+    ...SVG_TAG_ATTRS,
     '*': [
       'class', 'id', 'style', 'role', 'tabindex',
       'data-*', 'aria-*',

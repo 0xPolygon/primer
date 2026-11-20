@@ -1,82 +1,34 @@
 import type { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
-import type { AppVariables, AppDeps } from '../app.ts';
+import type { PageInfoResponse } from '@polygonlabs/primer-api-types';
+import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import {
-  canRead, effectiveRole, loadCollaboratorRole,
+  canRead, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
+import { pagePolicyOf, readsRecords, withFrozenRecords } from '../records/page.ts';
+import { readFrozenRecords } from '../records/snapshot.ts';
+import type { Storage } from '../storage/types.ts';
 
-export const ARTIFACT_CSP = [
-  "default-src 'none'",
-  // blob: required for self-bundled artifacts that decode JS/CSS/fonts from
-  // an embedded base64 manifest into blob: URLs at runtime. Blob URLs are
-  // origin-bound to the creator (the sandboxed opaque-origin iframe) so this
-  // does not expand the exfil surface — connect-src 'none' still blocks all
-  // outbound network from the artifact.
-  // 'unsafe-inline' is required so uploaded artifacts can ship inline
-  // <script> blocks and on* event handlers — that's the only way most
-  // interactive dashboards work. The threat surface this opens is bounded
-  // by ArtifactIframe's sandbox (opaque origin, no `allow-same-origin`) plus
-  // `connect-src 'none'` and `form-action 'none'` below: inline JS runs,
-  // but cannot reach Primer cookies/storage/parent DOM, cannot make network
-  // requests, and cannot submit forms.
-  "script-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net esm.sh cdn.skypack.dev",
-  "style-src 'self' 'unsafe-inline' blob: cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com cdn.jsdelivr.net fonts.googleapis.com",
-  "connect-src 'none'",
-  "img-src data: blob: 'self' https:",
-  "font-src 'self' blob: data: fonts.gstatic.com",
-  "form-action 'none'",
-  "frame-src 'none'",
-  "frame-ancestors 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-].join('; ');
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function registerVersionContentRoute(
   app: Hono<{ Variables: AppVariables }>,
   deps: AppDeps
 ): void {
   app.get('/api/versions/:versionId/content', async (c) => {
-    const versionId = c.req.param('versionId');
-
-    // Enforce soft-delete and permissions: a deleted doc's content must not be
-    // served, and private docs are only accessible to the owner and collabs.
-    const [versionWithDoc] = (await db.execute(sql`
-      SELECT v.storage_key AS "storageKey",
-             d.uploader_id  AS "uploaderId",
-             d.visibility   AS "visibility",
-             d.deleted_at   AS "deletedAt",
-             d.id           AS "documentId"
-      FROM versions v
-      INNER JOIN documents d ON d.id = v.document_id
-      WHERE v.id = ${versionId}
-      LIMIT 1
-    `)) as unknown as {
-      storageKey: string;
-      uploaderId: string;
-      visibility: Visibility;
-      deletedAt: Date | null;
-      documentId: string;
-    }[];
-    if (!versionWithDoc || versionWithDoc.deletedAt !== null) {
-      return c.json({ error: 'not_found' }, 404);
-    }
-
-    const user = c.get('user');
-    const collabRole = await loadCollaboratorRole(versionWithDoc.documentId, user.id);
-    const eff = effectiveRole(versionWithDoc, user.id, collabRole);
-    if (!canRead(versionWithDoc.visibility, eff)) {
-      return c.json({ error: 'not_found' }, 404);
-    }
-
-    const stream = await deps.storage.get(versionWithDoc.storageKey);
-
-    return new Response(stream, {
+    const page = await loadReadablePage(deps.storage, c.req.param('versionId'), c.get('user'));
+    if (!page) return c.json({ error: 'not_found' }, 404);
+    // A checkpoint's page reads the records frozen with it, never live ones.
+    const html = page.bundleKey ? withFrozenRecords(page.html, await readFrozenRecords(deps.storage, page.bundleKey)) : page.html;
+    return new Response(html, {
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        'content-security-policy': ARTIFACT_CSP,
+        // A page that opted in to records gets the complete outbound lockdown.
+        'content-security-policy': artifactCsp(pagePolicyOf(page.html)),
         'x-frame-options': 'SAMEORIGIN',
         'x-content-type-options': 'nosniff',
         'referrer-policy': 'no-referrer',
@@ -84,4 +36,50 @@ export function registerVersionContentRoute(
       },
     });
   });
+
+  // What the host binds a page to, before it binds anything: the document
+  // the page belongs to (the only document a records capability is ever
+  // bound to) and its outbound policy, read from the same stored bytes the
+  // content route serves.
+  app.get('/api/versions/:versionId/page', async (c) => {
+    const page = await loadReadablePage(deps.storage, c.req.param('versionId'), c.get('user'));
+    if (!page) return c.json({ error: 'not_found' }, 404);
+    const body: PageInfoResponse = { documentId: page.documentId, versionId: page.versionId, policy: pagePolicyOf(page.html) };
+    if (page.bundleKey && readsRecords(page.html)) body.frozen = true;
+    return c.json(body, 200);
+  });
+}
+
+/** A version's stored page, when the caller may read its document (a
+ *  deleted document's pages are never served). */
+async function loadReadablePage(
+  storage: Storage,
+  versionId: string,
+  user: AuthUser,
+): Promise<{ documentId: string; versionId: string; html: string; bundleKey: string | null } | null> {
+  if (!UUID_RE.test(versionId)) return null;
+  const [row] = (await db.execute(sql`
+    SELECT v.storage_key AS "storageKey",
+           v.bundle_key  AS "bundleKey",
+           d.uploader_id  AS "uploaderId",
+           d.visibility   AS "visibility",
+           d.deleted_at   AS "deletedAt",
+           d.id           AS "documentId"
+    FROM versions v
+    INNER JOIN documents d ON d.id = v.document_id
+    WHERE v.id = ${versionId}
+    LIMIT 1
+  `)) as unknown as {
+    storageKey: string;
+    bundleKey: string | null;
+    uploaderId: string;
+    visibility: Visibility;
+    deletedAt: Date | null;
+    documentId: string;
+  }[];
+  if (!row || row.deletedAt !== null) return null;
+  const eff = await loadEffectiveRole({ id: row.documentId, uploaderId: row.uploaderId, visibility: row.visibility }, user);
+  if (!canRead(row.visibility, eff)) return null;
+  const html = await new Response(await storage.get(row.storageKey)).text();
+  return { documentId: row.documentId, versionId, html, bundleKey: row.bundleKey };
 }

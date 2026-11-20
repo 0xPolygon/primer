@@ -18,6 +18,7 @@ import type {
   ElementPathAnchor,
   EventInput,
   EventRowDTO,
+  Refusal,
   TextRangeAnchor,
 } from '@polygonlabs/primer-api-types';
 import {
@@ -30,6 +31,7 @@ import {
   isElementPathAnchor,
   isEventAudience,
   isTextRangeAnchor,
+  RECORD_VERBS,
 } from '@polygonlabs/primer-api-types';
 
 export interface SerializableRect {
@@ -47,9 +49,16 @@ export interface Anchor {
 // Parent → Iframe
 export type Theme = 'light' | 'dark';
 
+/** Optional bridge capabilities the host grants a page at init. `records`:
+ *  the page opted in to records, is served with the records outbound
+ *  policy, and gets `window.primer.records`. */
+export type BridgeFeature = 'page-text' | 'embeds' | 'records';
+
 export interface MsgInit {
   type: 'init';
   anchors: Anchor[];
+  /** Granted features; absent means none. */
+  features?: BridgeFeature[];
   /** Parent's effective theme at iframe load. Companion sets
    *  document.documentElement.dataset.theme accordingly. Older companion
    *  snapshots ignore unknown init fields, so this is forward-compatible. */
@@ -102,7 +111,40 @@ export interface MsgSubmitResult {
   error?: string;
 }
 
+/** The answer to one `records_call`. */
+export interface MsgRecordsResult {
+  type: 'records_result';
+  callId: string;
+  ok: boolean;
+  value?: unknown;
+  refusal?: Refusal;
+}
+/** Others changed shared records (a `primer.data.changed` event, or the
+ *  host's catch-up when its feed (re)connects). Empty `collections` means
+ *  anything may have changed: re-read what the page shows. */
+export interface MsgRecordsChanged {
+  type: 'records_changed';
+  collections: string[];
+  toChangeId: number;
+}
+
+/** Feature `page-text`: people's current text for stamped elements. The
+ *  bridge sets only the text (`\n` as <br>) of elements carrying that
+ *  `data-pid`, never markup. */
+export interface MsgSetPageTexts {
+  type: 'set_page_texts';
+  texts: Record<string, string>;
+}
+/** Feature `embeds`: each `<primer-*>` block's static HTML, rendered by the
+ *  host from the document's block state; the page shows it read-only. */
+export interface MsgSetEmbeds {
+  type: 'set_embeds';
+  embeds: Record<string, string>;
+}
+
 export type OutboundProtocolMessage =
+  | MsgSetPageTexts
+  | MsgSetEmbeds
   | MsgInit
   | MsgUpdateAnchors
   | MsgEnterPickMode
@@ -111,7 +153,9 @@ export type OutboundProtocolMessage =
   | MsgRequestAnchorPositions
   | MsgThemeChanged
   | MsgEventsRelay
-  | MsgSubmitResult;
+  | MsgSubmitResult
+  | MsgRecordsResult
+  | MsgRecordsChanged;
 
 // Iframe → Parent
 export interface MsgSelectionCaptured {
@@ -180,7 +224,50 @@ export interface MsgSubmitEvents {
   events: EventInput[];
 }
 
+/** The page's call into records. `args` names only what the page may
+ *  choose (collection, scope, record, data, filters, paging); the host binds
+ *  the document and the viewer, whatever `args` says. */
+export type RecordsCallVerb = (typeof RECORD_VERBS)[number] | 'changesSince';
+export interface MsgRecordsCall {
+  type: 'records_call';
+  callId: string;
+  verb: RecordsCallVerb;
+  args: Record<string, unknown>;
+}
+export interface MsgRecordsCancel {
+  type: 'records_cancel';
+  callId: string;
+}
+
+/** Feature `page-text` (and `embeds`): every stamped element's DOM text and
+ *  rect, sent once after the page loaded and before the host sets any text
+ *  (so a script-drawn pid shows text other than its source), with each
+ *  embed's rect. Rects are in the frame's viewport. */
+export interface MsgPageElements {
+  type: 'page_elements';
+  elements: { pid: string; text: string; rect: SerializableRect }[];
+  embeds: { embedId: string; rect: SerializableRect }[];
+}
+/** The same elements' rects again, after a scroll, resize or text change. */
+export interface MsgPageRects {
+  type: 'page_rects';
+  rects: Record<string, SerializableRect>;
+  embedRects: Record<string, SerializableRect>;
+}
+export interface MsgPidClicked {
+  type: 'pid_clicked';
+  pid: string;
+}
+export interface MsgEmbedClicked {
+  type: 'embed_clicked';
+  embedId: string;
+}
+
 export type InboundProtocolMessage =
+  | MsgPageElements
+  | MsgPageRects
+  | MsgPidClicked
+  | MsgEmbedClicked
   | MsgSelectionCaptured
   | MsgSelectionCleared
   | MsgElementPicked
@@ -191,7 +278,9 @@ export type InboundProtocolMessage =
   | MsgOpenExternal
   | MsgAnchorClicked
   | MsgCompanionLog
-  | MsgSubmitEvents;
+  | MsgSubmitEvents
+  | MsgRecordsCall
+  | MsgRecordsCancel;
 
 /** Window-level handshake messages — go via window.postMessage (not the
  *  port) because they exist for the case where the port isn't established
@@ -299,9 +388,71 @@ export function parseInboundMessage(raw: unknown): InboundProtocolMessage | null
       }
       return { type: 'submit_events', events };
     }
+    case 'records_call': {
+      if (!isCallId(raw.callId)) return null;
+      if (!isString(raw.verb) || !RECORDS_CALL_VERBS.includes(raw.verb as RecordsCallVerb)) return null;
+      if (!isObject(raw.args) || Array.isArray(raw.args)) return null;
+      return { type: 'records_call', callId: raw.callId, verb: raw.verb as RecordsCallVerb, args: raw.args };
+    }
+    case 'records_cancel':
+      if (!isCallId(raw.callId)) return null;
+      return { type: 'records_cancel', callId: raw.callId };
+    case 'page_elements': {
+      if (!Array.isArray(raw.elements) || raw.elements.length > MAX_PAGE_ELEMENTS) return null;
+      if (!Array.isArray(raw.embeds) || raw.embeds.length > MAX_PAGE_ELEMENTS) return null;
+      const elements: MsgPageElements['elements'] = [];
+      for (const e of raw.elements) {
+        if (!isObject(e) || !isPageId(e.pid) || !isString(e.text) || e.text.length > MAX_PAGE_TEXT || !isRect(e.rect)) return null;
+        elements.push({ pid: e.pid, text: e.text, rect: e.rect });
+      }
+      const embeds: MsgPageElements['embeds'] = [];
+      for (const e of raw.embeds) {
+        if (!isObject(e) || !isPageId(e.embedId) || !isRect(e.rect)) return null;
+        embeds.push({ embedId: e.embedId, rect: e.rect });
+      }
+      return { type: 'page_elements', elements, embeds };
+    }
+    case 'page_rects': {
+      const rects = parseRects(raw.rects);
+      const embedRects = parseRects(raw.embedRects);
+      if (!rects || !embedRects) return null;
+      return { type: 'page_rects', rects, embedRects };
+    }
+    case 'pid_clicked':
+      if (!isPageId(raw.pid)) return null;
+      return { type: 'pid_clicked', pid: raw.pid };
+    case 'embed_clicked':
+      if (!isPageId(raw.embedId)) return null;
+      return { type: 'embed_clicked', embedId: raw.embedId };
     default:
       return null;
   }
+}
+
+const MAX_PAGE_ELEMENTS = 20_000;
+const MAX_PAGE_TEXT = 100_000;
+
+/** Pids and embed ids as the server stamps and accepts them. */
+function isPageId(v: unknown): v is string {
+  return isString(v) && /^[A-Za-z0-9_-]{1,64}$/.test(v);
+}
+
+function parseRects(raw: unknown): Record<string, SerializableRect> | null {
+  if (!isObject(raw) || Array.isArray(raw)) return null;
+  const entries = Object.entries(raw);
+  if (entries.length > MAX_PAGE_ELEMENTS) return null;
+  const out: Record<string, SerializableRect> = {};
+  for (const [id, rect] of entries) {
+    if (!isPageId(id) || !isRect(rect)) return null;
+    out[id] = rect;
+  }
+  return out;
+}
+
+const RECORDS_CALL_VERBS: readonly string[] = [...RECORD_VERBS, 'changesSince'];
+
+function isCallId(v: unknown): v is string {
+  return isString(v) && v.length > 0 && v.length <= 64;
 }
 
 /** Validates one untrusted event of a submit batch against the api-types

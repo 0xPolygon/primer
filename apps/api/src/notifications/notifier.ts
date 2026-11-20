@@ -11,7 +11,8 @@ export interface NotifyCollaboratorAddedArgs {
 
 export interface NotifyCommentArgs {
   doc: { id: string; title: string };
-  version: { id: string; versionNumber: number };
+  /** Null for a comment on a live document. */
+  version: { id: string; versionNumber: number } | null;
   thread: { id: string };
   comment: { id: string; body: string; createdAt: Date };
   mentionedUserIds: string[];
@@ -32,6 +33,21 @@ export interface NotifyExternalFirstViewArgs {
   docTitle: string;
 }
 
+/** A person was mentioned (an inline mention chip) in a live document. */
+export interface NotifyDocumentMentionArgs {
+  doc: { id: string; title: string };
+  blockId: string;
+  mentionedUserId: string;
+  actorUserId: string;
+}
+
+/** A person's digest (live/digestEmail.ts). `render` lays it out with the
+ *  app's base URL for links; the notifier only addresses and sends it. */
+export interface NotifyDigestArgs {
+  userId: string;
+  render: (appBaseUrl: string) => Promise<{ subject: string; text: string; html: string }>;
+}
+
 export interface Notifier {
   /**
    * Whether OTP emails can actually reach recipients. The external-share
@@ -42,6 +58,8 @@ export interface Notifier {
   notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void>;
   notifyExternalOtp(args: NotifyExternalOtpArgs): Promise<void>;
   notifyExternalFirstView(args: NotifyExternalFirstViewArgs): Promise<void>;
+  notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void>;
+  notifyDigest(args: NotifyDigestArgs): Promise<void>;
 }
 
 export class NoopNotifier implements Notifier {
@@ -55,6 +73,12 @@ export class NoopNotifier implements Notifier {
   async notifyCollaboratorAdded(args: NotifyCollaboratorAddedArgs): Promise<void> {
     if (args.addedUserId === args.addedByUserId) return;
     logger.debug({ args }, 'notifyCollaboratorAdded (no-op)');
+  }
+  async notifyDocumentMention(args: NotifyDocumentMentionArgs): Promise<void> {
+    logger.debug({ args }, 'notifyDocumentMention (no-op)');
+  }
+  async notifyDigest(args: NotifyDigestArgs): Promise<void> {
+    logger.debug({ userId: args.userId }, 'notifyDigest (no-op)');
   }
   async notifyExternalOtp(args: NotifyExternalOtpArgs): Promise<void> {
     logger.info({ toEmail: args.toEmail, code: args.code }, 'external OTP code (no-op notifier, dev only)');

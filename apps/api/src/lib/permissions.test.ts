@@ -1,37 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  effectiveRole,
   canRead,
   canComment,
   canEdit,
   canManage,
-  type Visibility,
-  type CollaboratorRole,
   type EffectiveRole,
 } from './permissions.ts';
 import { canWriteEvents } from './events.ts';
-
-describe('effectiveRole', () => {
-  const doc = { uploaderId: 'owner-1', visibility: 'org' as Visibility };
-
-  it('returns "owner" when userId matches uploaderId', () => {
-    expect(effectiveRole(doc, 'owner-1', null)).toBe('owner');
-    expect(effectiveRole(doc, 'owner-1', 'editor')).toBe('owner'); // owner beats collab
-  });
-  it('returns "editor" when user is editor collab and not owner', () => {
-    expect(effectiveRole(doc, 'someone-else', 'editor')).toBe('editor');
-  });
-  it('returns "commenter" when user is commenter collab and not owner', () => {
-    expect(effectiveRole(doc, 'someone-else', 'commenter')).toBe('commenter');
-  });
-  it('returns "responder" when user is responder collab and not owner', () => {
-    expect(effectiveRole(doc, 'someone-else', 'responder')).toBe('responder');
-    expect(effectiveRole(doc, 'owner-1', 'responder')).toBe('owner'); // owner beats collab
-  });
-  it('returns "stranger" when no collab row and not owner', () => {
-    expect(effectiveRole(doc, 'someone-else', null)).toBe('stranger');
-  });
-});
 
 describe('canRead', () => {
   it('everyone reads under org visibility', () => {
@@ -98,7 +73,7 @@ describe('canWriteEvents', () => {
 import { v7 as uuidv7 } from 'uuid';
 import { db } from '../db/client.ts';
 import { documents, users, documentCollaborators } from '../db/schema.ts';
-import { loadCollaboratorRole, loadCollaboratorRoles } from './permissions.ts';
+import { loadEffectiveRole } from './permissions.ts';
 
 async function seedUser(id: string): Promise<void> {
   await db
@@ -118,18 +93,13 @@ async function seedDoc(ownerId: string): Promise<string> {
   return docId;
 }
 
-describe('loadCollaboratorRole', () => {
-  it('returns null when no row exists', async () => {
-    await seedUser('perm-owner');
-    await seedUser('perm-other');
-    const docId = await seedDoc('perm-owner');
-    const role = await loadCollaboratorRole(docId, 'perm-other');
-    expect(role).toBeNull();
-  });
+const person = (id: string) => ({ id, email: `${id}@x.test`, displayName: id, kind: 'person' as const, viaUserId: null });
 
-  it('returns the stored role when a row exists', async () => {
+describe('loadEffectiveRole', () => {
+  it('owner, collaborator roles, stranger', async () => {
     await seedUser('perm-owner');
     await seedUser('perm-editor');
+    await seedUser('perm-other');
     const docId = await seedDoc('perm-owner');
     await db.insert(documentCollaborators).values({
       id: uuidv7(),
@@ -138,45 +108,9 @@ describe('loadCollaboratorRole', () => {
       role: 'editor',
       grantedBy: 'perm-owner',
     });
-    const role = await loadCollaboratorRole(docId, 'perm-editor');
-    expect(role).toBe('editor');
-  });
-
-  it('round-trips a stored responder role', async () => {
-    await seedUser('perm-owner');
-    await seedUser('perm-responder');
-    const docId = await seedDoc('perm-owner');
-    await db.insert(documentCollaborators).values({
-      id: uuidv7(),
-      documentId: docId,
-      userId: 'perm-responder',
-      role: 'responder',
-      grantedBy: 'perm-owner',
-    });
-    const role = await loadCollaboratorRole(docId, 'perm-responder');
-    expect(role).toBe('responder');
-  });
-});
-
-describe('loadCollaboratorRoles (bulk)', () => {
-  it('returns a map keyed by documentId for docs the user collaborates on', async () => {
-    await seedUser('perm-owner');
-    await seedUser('perm-both');
-    const docA = await seedDoc('perm-owner');
-    const docB = await seedDoc('perm-owner');
-    const docC = await seedDoc('perm-owner');
-    await db.insert(documentCollaborators).values([
-      { id: uuidv7(), documentId: docA, userId: 'perm-both', role: 'editor', grantedBy: 'perm-owner' },
-      { id: uuidv7(), documentId: docB, userId: 'perm-both', role: 'commenter', grantedBy: 'perm-owner' },
-    ]);
-    const roles = await loadCollaboratorRoles([docA, docB, docC], 'perm-both');
-    expect(roles.get(docA)).toBe('editor');
-    expect(roles.get(docB)).toBe('commenter');
-    expect(roles.has(docC)).toBe(false);
-  });
-
-  it('returns an empty map when the id list is empty', async () => {
-    const roles = await loadCollaboratorRoles([], 'perm-owner');
-    expect(roles.size).toBe(0);
+    const doc = { id: docId, uploaderId: 'perm-owner', visibility: 'org' as const };
+    expect(await loadEffectiveRole(doc, person('perm-owner'))).toBe('owner');
+    expect(await loadEffectiveRole(doc, person('perm-editor'))).toBe('editor');
+    expect(await loadEffectiveRole(doc, person('perm-other'))).toBe('stranger');
   });
 });

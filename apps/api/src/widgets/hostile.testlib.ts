@@ -1,0 +1,22 @@
+/** Attribute values that must never pass, whichever checker sees them. */
+export const HOSTILE_VALUES: [string, string][] = [
+  ["mask", "image-set(\"https://example.com/a.png\" 1x)"],
+  ["mask", "src(\"https://example.com/a\")"],
+  ["mask", "url (https://example.com/a)"],
+  ["mask", "URL(https://example.com/a)"],
+  ["mask", "url(https://example.com/a)"],
+  ["mask", "url(#a) url(https://example.com/b)"],
+  ["filter", "\\75 rl(https://example.com/a)"],
+  ["clip-path", "&#117;rl(https://example.com/a)"],
+  ["marker-end", "url(\"#a\")"],
+  ["fill", "image-set(\"https://example.com/a.png\" 1x)"],
+  ["fill", "url(https://example.com/a)"],
+  ["fill", "var(--x)"],
+  ["stroke", "red"],
+  ["stop-color", "rgb(1,2,3)"],
+  ["transform", "translate(10) url(https://example.com/a)"],
+  ["transform", "rotate(calc(1turn))"],
+  ["font-size", "calc(1em)"],
+  ["data-row", "a\\62 c"],
+  ["opacity", "&#49;"],
+];

@@ -10,6 +10,7 @@ import type {
   DailyStackPoint,
 } from '@polygonlabs/primer-api-types';
 import { db as defaultDb, type Db } from '../db/client.ts';
+import { actorNameOf } from '../lib/actors.ts';
 import {
   users,
   documents,
@@ -249,12 +250,12 @@ export async function buildEngagement(db: Db = defaultDb): Promise<AdminEngageme
      limit 10
   `;
   const topCommentersQ = sql<{ display_name: string; comments: number }[]>`
-    select u.display_name, count(*)::int as comments
+    select ${actorNameOf('u')} as display_name, count(*)::int as comments
       from comments c
       join users u on u.id = c.author_id
      where c.deleted_at is null
        and c.created_at >= ${since30d}
-     group by c.author_id, u.display_name
+     group by c.author_id, u.id
      order by comments desc
      limit 10
   `;
