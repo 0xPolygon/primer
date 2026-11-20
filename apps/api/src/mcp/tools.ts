@@ -8,10 +8,12 @@ import { db } from '../db/client.ts';
 import { actorName, actorNameOf, authorColumns } from '../lib/actors.ts';
 import { documents, versions, threads, threadPlacements, comments, users } from '../db/schema.ts';
 import { replyToThread } from '../routes/comments.ts';
+import { addCollaborator, listCollaborators, lookupUserByEmail, type CollaboratorFailure } from '../routes/collaborators.ts';
 import { resolveThread } from '../routes/threads.ts';
 import { parsePrimerUrl } from './urlResolve.ts';
 import { publishDocument } from '../lib/publish.ts';
 import { logger } from '../logger.ts';
+import { isCollaboratorRole } from '@polygonlabs/primer-api-types';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope, PublishFormat, Refusal } from '@polygonlabs/primer-api-types';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
 import {
@@ -62,6 +64,22 @@ function err(code: PrimerErrorCode, message: string): ToolResult {
 function refusalErr(refusal: Refusal): ToolResult {
   const { code, message, fix } = refusal;
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message, fix }) }] };
+}
+
+/** A collaborator refusal as a tool error: the REST error code, message and fix. */
+function collaboratorErr(f: CollaboratorFailure): ToolResult {
+  const { error: code, message, fix } = f;
+  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code, message: message ?? code, fix }) }] };
+}
+
+/** The target document of a tool call: `documentId`, or a Primer `url`. */
+function documentIdArg(args: Record<string, unknown>): { id: string } | { error: ToolResult } {
+  if (typeof args.documentId === 'string' && args.documentId.length > 0) return { id: args.documentId };
+  if (typeof args.url === 'string') {
+    const parsed = parsePrimerUrl(args.url);
+    return parsed ? { id: parsed.documentId } : { error: err('bad_request', 'not a Primer URL') };
+  }
+  return { error: err('bad_request', 'documentId or url is required') };
 }
 
 const FORMAT_EXTENSION: Record<PublishFormat, string> = { html: 'html', markdown: 'md', text: 'txt' };
@@ -127,6 +145,9 @@ export const TOOL_NAMES = [
   'primer_set_status',
   'primer_reply_to_thread',
   'primer_resolve_thread',
+  'primer_lookup_user',
+  'primer_add_collaborator',
+  'primer_list_collaborators',
 ] as const;
 
 // Default and maximum page sizes for paginated tools.
@@ -182,6 +203,9 @@ export const TOOL_SCOPES: Record<ToolName, ApiTokenScope | null> = {
   primer_set_status: 'events:write',
   primer_reply_to_thread: 'comments:write',
   primer_resolve_thread: 'comments:write',
+  primer_lookup_user: 'users:read',
+  primer_add_collaborator: 'collaborators:manage',
+  primer_list_collaborators: 'collaborators:manage',
 };
 
 /** Tools available to a request with the given token scopes (null = all). */
@@ -955,6 +979,36 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       if (!out.ok) return refusalErr(out.refusal);
       return ok({ thread_id: threadId, resolved: true });
     },
+
+    primer_lookup_user: async (args) => {
+      const email = typeof args.email === 'string' ? args.email.trim() : '';
+      if (!email) return err('bad_request', 'email is required');
+      const found = await lookupUserByEmail(email);
+      if (!found) return err('not_found', 'no Primer user has that email');
+      return ok(found);
+    },
+
+    primer_add_collaborator: async (args, user) => {
+      const doc = documentIdArg(args);
+      if ('error' in doc) return doc.error;
+      const userId = typeof args.userId === 'string' && args.userId.length > 0 ? args.userId : undefined;
+      const email = typeof args.email === 'string' && args.email.trim().length > 0 ? args.email : undefined;
+      if ((userId === undefined) === (email === undefined)) {
+        return err('bad_request', 'provide exactly one of email or userId');
+      }
+      if (!isCollaboratorRole(args.role)) {
+        return err('bad_request', 'role must be commenter, responder or editor');
+      }
+      const out = await addCollaborator(user, doc.id, { userId, email, role: args.role }, deps.notifier);
+      return out.ok ? ok(out.value) : collaboratorErr(out);
+    },
+
+    primer_list_collaborators: async (args, user) => {
+      const doc = documentIdArg(args);
+      if ('error' in doc) return doc.error;
+      const out = await listCollaborators(user, doc.id);
+      return out.ok ? ok({ collaborators: out.value }) : collaboratorErr(out);
+    },
   };
 }
 
@@ -1212,6 +1266,27 @@ export const TOOL_CONFIGS: Record<ToolName, { description: string; inputSchema: 
     description:
       'Resolve a comment thread. Only the document owner or the person who started the thread can resolve it, and an agent never resolves a thread a person wrote in (reply instead and ask a person to resolve it). Returns { thread_id, resolved }.',
     inputSchema: { thread_id: z.string() },
+  },
+  primer_lookup_user: {
+    description:
+      "Find a Primer user by email (case-insensitive) so you can share a document with them. Returns { id, email, displayName }, or a not_found error when nobody has that email. This never creates users.",
+    inputSchema: { email: z.string() },
+  },
+  primer_add_collaborator: {
+    description:
+      "Share a document you created with the person who asked for it (or other named reviewers). Pass documentId or a Primer url, the person's email or userId, and a role: commenter (read and comment; private documents only), responder (also submits events) or editor (also publishes versions). Only the document's owner may add people (for an agent, documents it created), and never at a role above your own. This only adds: you cannot change a role, remove anyone or change visibility. The person is notified. Returns the collaborator row; errors: forbidden, user_not_found, collaborator_exists, owner_not_collaborator, invalid_role_for_visibility.",
+    inputSchema: {
+      documentId: z.string().optional(),
+      url: z.string().optional(),
+      email: z.string().optional(),
+      userId: z.string().optional(),
+      role: z.enum(['commenter', 'responder', 'editor']),
+    },
+  },
+  primer_list_collaborators: {
+    description:
+      "List who a document is shared with: the people you have added, their roles and who granted each. Pass documentId or a Primer url. Only the document's owner may list (for an agent, documents it created). Returns { collaborators }.",
+    inputSchema: { documentId: z.string().optional(), url: z.string().optional() },
   },
   primer_send_events: {
     description:

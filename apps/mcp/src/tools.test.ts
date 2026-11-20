@@ -22,6 +22,9 @@ interface FakeClient {
   createDocument: ReturnType<typeof vi.fn>;
   addVersion: ReturnType<typeof vi.fn>;
   revokeToken: ReturnType<typeof vi.fn>;
+  lookupUser: ReturnType<typeof vi.fn>;
+  addCollaborator: ReturnType<typeof vi.fn>;
+  listCollaborators: ReturnType<typeof vi.fn>;
 }
 
 function makeFakeClient(): FakeClient {
@@ -38,6 +41,9 @@ function makeFakeClient(): FakeClient {
     createDocument: vi.fn(),
     addVersion: vi.fn(),
     revokeToken: vi.fn(),
+    lookupUser: vi.fn(),
+    addCollaborator: vi.fn(),
+    listCollaborators: vi.fn(),
   };
 }
 
@@ -827,5 +833,53 @@ describe('primer_send_events', () => {
     client!.sendEvents.mockRejectedValue(new PrimerApiError('forbidden', 'not a collaborator', 403));
     const forbidden = await handlers.primer_send_events({ documentId: 'doc-1', events: batch });
     expect(JSON.parse(forbidden.content[0].text).code).toBe('forbidden');
+  });
+});
+
+// ─────────────────── collaborator tools ───────────────────
+
+describe('collaborator tools', () => {
+  it('primer_add_collaborator resolves an email, then adds the user at the role', async () => {
+    const { deps, client } = buildDeps();
+    const row = { userId: 'u-2', displayName: 'Two', role: 'editor', grantedBy: 'agent', createdAt: 't' };
+    client!.lookupUser.mockResolvedValue({ id: 'u-2' });
+    client!.addCollaborator.mockResolvedValue(row);
+    const result = await buildToolHandlers(deps).primer_add_collaborator({
+      documentId: 'doc-1',
+      email: ' Two@Example.com ',
+      role: 'editor',
+    });
+    expect(parseSuccessPayload(result)).toEqual(row);
+    expect(client!.lookupUser).toHaveBeenCalledWith('Two@Example.com');
+    expect(client!.addCollaborator).toHaveBeenCalledWith('doc-1', 'u-2', 'editor');
+  });
+
+  it('primer_add_collaborator needs exactly one of email or userId, and a valid role', async () => {
+    const { deps, client } = buildDeps();
+    const h = buildToolHandlers(deps);
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', role: 'editor' })).code).toBe('bad_request');
+    expect(
+      parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', email: 'a@b.c', userId: 'u', role: 'editor' })).code,
+    ).toBe('bad_request');
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', userId: 'u', role: 'owner' })).code).toBe('bad_request');
+    expect(client!.addCollaborator).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the server refusal and an unknown email as errors', async () => {
+    const { deps, client } = buildDeps();
+    const h = buildToolHandlers(deps);
+    client!.lookupUser.mockRejectedValue(new PrimerApiError('not_found', 'not_found', 404));
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', email: 'x@y.z', role: 'editor' })).code).toBe('not_found');
+    client!.addCollaborator.mockRejectedValue(new PrimerApiError('forbidden', 'forbidden', 403));
+    expect(parseErrorPayload(await h.primer_add_collaborator({ documentId: 'd', userId: 'u', role: 'editor' })).code).toBe('forbidden');
+  });
+
+  it('primer_list_collaborators and primer_lookup_user pass through', async () => {
+    const { deps, client } = buildDeps();
+    const h = buildToolHandlers(deps);
+    client!.listCollaborators.mockResolvedValue({ collaborators: [] });
+    expect(parseSuccessPayload(await h.primer_list_collaborators({ documentId: 'd' }))).toEqual({ collaborators: [] });
+    client!.lookupUser.mockResolvedValue({ id: 'u-9' });
+    expect(parseSuccessPayload(await h.primer_lookup_user({ email: 'a@b.c' }))).toEqual({ id: 'u-9' });
   });
 });
