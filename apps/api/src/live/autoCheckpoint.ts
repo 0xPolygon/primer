@@ -3,7 +3,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { logger } from '../logger.ts';
 import type { Storage } from '../storage/types.ts';
-import { createCheckpoint, unchangedCheckpoint } from './checkpoint.ts';
+import { contentUnchangedSince, createCheckpoint } from './checkpoint.ts';
 import { onLiveUpdate } from './instance.ts';
 import type { LiveOrigin } from './origin.ts';
 import { ensureSigningKey } from './signing.ts';
@@ -67,7 +67,7 @@ async function autoCheckpoint(documentId: string, actorId: string): Promise<void
      WHERE u.id = ${actorId} AND d.deleted_at IS NULL
   `)) as unknown as AuthUser[];
   if (!row) return;
-  if (await unchangedCheckpoint(documentId)) return;
+  if ((await contentUnchangedSince(documentId)) !== null) return;
   await ensureSigningKey(current);
   await createCheckpoint(current, documentId, row, null, { automatic: true });
 }

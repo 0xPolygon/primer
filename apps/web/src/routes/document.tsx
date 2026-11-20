@@ -825,8 +825,8 @@ function DocumentPageInner() {
     const checkpoint = (await res.json()) as CheckpointResponse;
     await queryClient.invalidateQueries({ queryKey: ['versions', docId] });
     const link = { label: t('document.viewCheckpoint'), to: `/d/${docId}/v/${checkpoint.versionNumber}` };
-    return checkpoint.unchanged
-      ? { kind: 'success', message: t('document.checkpointUnchanged', { number: checkpoint.versionNumber }), link }
+    return checkpoint.unchangedSince !== undefined
+      ? { kind: 'success', message: t('document.checkpointUnchanged', { number: checkpoint.versionNumber, previous: checkpoint.unchangedSince }), link }
       : { kind: 'success', message: t('document.checkpointSaved', { number: checkpoint.versionNumber }), link };
   }
 

@@ -12,7 +12,7 @@ import type {
 import { docFiles, documents, versions, users } from '../db/schema.ts';
 import { exportFileOf, printable, readBundleFile, renderStatic } from '../live/bundle.ts';
 import { currentPageHtml } from '../page/publish.ts';
-import { createCheckpoint, restoreCheckpoint, unchangedCheckpoint } from '../live/checkpoint.ts';
+import { contentUnchangedSince, createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
 import { exportDecisions } from '../live/choices.ts';
 import { withLiveDocument } from '../live/instance.ts';
@@ -506,13 +506,11 @@ export function registerDocumentRoutes(
       note = typeof body.note === 'string' && body.note.trim().length > 0 ? body.note.trim().slice(0, 500) : null;
     }
     await ensureSigningKey(deps.storage);
-    // Unnamed and nothing changed since the latest checkpoint: that one stands.
-    if (note === null) {
-      const latest = await unchangedCheckpoint(docId);
-      if (latest) return c.json(latest, 200);
-    }
+    // A save is always a checkpoint (it also freezes records and comments);
+    // the answer says when no one edited the content since the previous one.
+    const unchangedSince = await contentUnchangedSince(docId);
     const checkpoint: CheckpointResponse = await createCheckpoint(deps.storage, docId, c.get('user'), note);
-    return c.json(checkpoint, 201);
+    return c.json(unchangedSince === null ? checkpoint : { ...checkpoint, unchangedSince }, 201);
   });
 
   app.post('/api/versions/:versionId/restore', async (c) => {

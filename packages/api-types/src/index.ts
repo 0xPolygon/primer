@@ -837,9 +837,9 @@ export interface CheckpointResponse {
   versionId: string;
   versionNumber: number;
   docVersion: number;
-  /** Nothing changed since this, the latest checkpoint, so no new one was
-   *  made (POST without a note answers 200 with it). */
-  unchanged?: true;
+  /** The previous checkpoint, when no one edited the content between it and
+   *  this one. */
+  unchangedSince?: number;
 }
 
 /** POST /api/versions/:versionId/restore: the restore is a new edit. */

@@ -119,29 +119,29 @@ describe('checkpoints', () => {
       const listed = async () => (await db.select().from(versions).where(eq(versions.documentId, v1.documentId))).sort((a, b) => a.versionNumber - b.versionNumber);
       const save = () => app.request(`/api/documents/${v1.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
 
-      // Nothing changed since the upload: saving answers with that checkpoint.
+      // Nothing changed since the upload: a save still checkpoints, and says so.
       const unchanged = await save();
-      expect(unchanged.status).toBe(200);
-      expect(await unchanged.json()).toMatchObject({ versionNumber: 1, unchanged: true });
+      expect(unchanged.status).toBe(201);
+      expect(await unchanged.json()).toMatchObject({ versionNumber: 2, unchangedSince: 1 });
 
       await setText(v1.documentId, 'Then tabs.', 'Then tabs, and comments.');
       await flushAutoCheckpoints();
-      const [, auto] = await listed();
-      expect(auto).toMatchObject({ versionNumber: 2, automatic: true, versionNote: null });
+      const auto = (await listed()).at(-1);
+      expect(auto).toMatchObject({ versionNumber: 3, automatic: true, versionNote: null });
       expect(dec(await readBundleFile(storage, auto!.bundleKey!, 'export.md'))).toContain('Then tabs, and comments.');
 
-      // No edit since: neither a flush nor a save adds a version.
-      await flushAutoCheckpoints();
-      expect((await save()).status).toBe(200);
-      expect(await listed()).toHaveLength(2);
-
-      // A save after an edit is a new checkpoint, not automatic.
-      await setText(v1.documentId, 'Ship the editor first.', 'Ship the editor now.');
-      expect((await save()).status).toBe(201);
-      expect((await listed()).at(-1)).toMatchObject({ versionNumber: 3, automatic: false });
-      // ...and it leaves the automatic one nothing to save.
+      // No edit since: a flush adds nothing.
       await flushAutoCheckpoints();
       expect(await listed()).toHaveLength(3);
+
+      // A save after an edit is a checkpoint by hand, which leaves the
+      // automatic one nothing to save.
+      await setText(v1.documentId, 'Ship the editor first.', 'Ship the editor now.');
+      const saved = await save();
+      expect(await saved.json()).not.toHaveProperty('unchangedSince');
+      expect((await listed()).at(-1)).toMatchObject({ versionNumber: 4, automatic: false });
+      await flushAutoCheckpoints();
+      expect(await listed()).toHaveLength(4);
     });
   });
 

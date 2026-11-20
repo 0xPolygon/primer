@@ -53,11 +53,12 @@ export async function createCheckpoint(
 }
 
 /**
- * The latest checkpoint, when nothing anyone wrote is stored after it (only
- * comment marks and system writes, which change no content); else null. A
- * document with no live checkpoint yet has changed.
+ * The latest checkpoint's number when no one edited the content after it
+ * (comment marks and system writes change no content); else null. A document
+ * with no live checkpoint yet has changed. Records and comments aren't
+ * content: a checkpoint still freezes them.
  */
-export async function unchangedCheckpoint(documentId: string): Promise<CheckpointResponse | null> {
+export async function contentUnchangedSince(documentId: string): Promise<number | null> {
   // Edits still queued for storage count: wait for them.
   await withLiveDocument(documentId, (doc) => persistedUpTo(doc));
   const [latest] = (await db.execute(sql`
@@ -73,7 +74,7 @@ export async function unchangedCheckpoint(documentId: string): Promise<Checkpoin
        AND actor_id IS NOT NULL AND touched <> '{}'::text[]
      LIMIT 1
   `)) as unknown as unknown[];
-  return edit ? null : { versionId: latest.id, versionNumber: latest.versionNumber, docVersion, unchanged: true };
+  return edit ? null : latest.versionNumber;
 }
 
 /**
