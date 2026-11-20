@@ -14,6 +14,7 @@ import { DocCard } from '../components/DocCard.tsx';
 import { DeletedDocumentRow } from '../components/DocumentListRow.tsx';
 import { AddVersionModal } from '../components/AddVersionModal.tsx';
 import { MobileFoldersSheet } from '../components/MobileFoldersSheet.tsx';
+import { t } from '../i18n/index.ts';
 
 const LAYOUT_KEY = 'primer.library.layout';
 const SORT_KEY = 'primer.library.sort';
@@ -107,28 +108,28 @@ export function HomePage() {
   return (
     <div className="space-y-4">
       <header className="flex items-center justify-between border-b border-neutral-200 pb-3 dark:border-neutral-800">
-        <h1 className="text-2xl font-semibold">Primer</h1>
+        <h1 className="text-2xl font-semibold">{t('home.title')}</h1>
         <div className="hidden md:flex items-center gap-2">
           <button
             type="button"
             onClick={() => setShowAddVersion(true)}
             className="inline-flex h-7 items-center rounded border border-neutral-300 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
-            + Add new version
+            {t('home.addNewVersion')}
           </button>
           <Link
             to="/upload"
             className="inline-flex h-7 items-center rounded bg-neutral-900 px-3 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
           >
-            + Upload document
+            {t('home.uploadDocument')}
           </Link>
         </div>
       </header>
 
-      {q.isLoading && <div className="text-sm text-neutral-500">Loading…</div>}
+      {q.isLoading && <div className="text-sm text-neutral-500">{t('home.loading')}</div>}
       {q.error && (
         <div className="text-sm text-red-600 dark:text-red-400">
-          Could not load library: {(q.error as Error).message}
+          {t('home.loadFailed', { message: (q.error as Error).message })}
         </div>
       )}
 
@@ -157,7 +158,7 @@ export function HomePage() {
 
             {chip === 'deleted' ? (
               deletedFiltered.length === 0 ? (
-                <EmptyState message="No recently deleted documents." />
+                <EmptyState message={t('home.noRecentlyDeleted')} />
               ) : (
                 <div>
                   {deletedFiltered.map((entry) => (
@@ -232,15 +233,13 @@ function LibraryEmpty(props: {
     return (
       <div className="px-2 py-8 text-center">
         <blockquote className="mx-auto max-w-lg text-sm italic leading-relaxed text-neutral-600 dark:text-neutral-400">
-          &ldquo;The Primer was a book in appearance only. Its interior was a tissue of paper, but each page was a
-          separate flat-panel display, which formed itself into pictures, words, and animations responsive to the
-          reader.&rdquo;
+          {t('home.quote')}
         </blockquote>
-        <p className="mt-2 text-xs text-neutral-400 dark:text-neutral-500">— Neal Stephenson, <em>The Diamond Age</em></p>
+        <p className="mt-2 text-xs text-neutral-400 dark:text-neutral-500">{t('home.quoteAuthor')} <em>{t('home.quoteBook')}</em></p>
         <p className="mt-6 text-sm text-neutral-500">
-          No documents yet.{' '}
+          {t('home.noDocumentsYet')}{' '}
           <Link to="/upload" className="font-medium text-neutral-700 underline hover:text-neutral-900 dark:text-neutral-300 dark:hover:text-neutral-100">
-            Upload your first one
+            {t('home.uploadFirst')}
           </Link>
           .
         </p>
@@ -250,9 +249,9 @@ function LibraryEmpty(props: {
   if (props.q.length > 0) {
     return (
       <div className="px-1 py-4 text-sm text-neutral-500">
-        No docs matching &ldquo;{props.q}&rdquo;.{' '}
+        {t('home.noDocsMatching', { query: props.q })}{' '}
         <button type="button" onClick={props.onClearSearch} className="underline">
-          Clear search
+          {t('home.clearSearch')}
         </button>
       </div>
     );
@@ -260,15 +259,15 @@ function LibraryEmpty(props: {
   if (props.folderName) {
     return (
       <div className="px-1 py-4 text-sm text-neutral-500">
-        Nothing in <strong>{props.folderName}</strong> yet. Move docs here from the ⋯ menu.
+        {t('home.nothingIn')} <strong>{props.folderName}</strong> {t('home.nothingInSuffix')}
       </div>
     );
   }
   return (
     <div className="px-1 py-4 text-sm text-neutral-500">
-      No documents match this view.{' '}
+      {t('home.noDocumentsMatch')}{' '}
       <button type="button" onClick={props.onClearFilters} className="underline">
-        Clear filters
+        {t('home.clearFilters')}
       </button>
     </div>
   );

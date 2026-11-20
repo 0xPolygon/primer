@@ -38,6 +38,7 @@
  * layered later without changing this module's contract.
  */
 import type { EventAudience, EventInput } from '@polygonlabs/primer-api-types';
+import { t } from '../i18n';
 
 /** Audience-tier ordering used for "broader": author < collaborators <
  *  artifact (each tier's reader set strictly contains the previous). */
@@ -52,9 +53,9 @@ export const AUDIENCE_RANK: Record<EventAudience, number> = {
  *  structured data the artifact submits on their behalf. */
 export const AUDIENCE_MEANING: Record<EventAudience, string> = {
   artifact:
-    'What you enter here may be shared with everyone who can open this document, and is delivered into the artifact on every viewer’s screen.',
-  collaborators: 'Visible to the document’s collaborators.',
-  author: 'Visible only to you.',
+    t('libEventsGrant.audienceArtifact'),
+  collaborators: t('libEventsGrant.audienceCollaborators'),
+  author: t('libEventsGrant.audienceAuthor'),
 };
 
 /** The broadest audience tier a submission carries — what a grant must

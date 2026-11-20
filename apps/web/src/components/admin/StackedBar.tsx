@@ -1,6 +1,7 @@
 import type { ThreadFlowPoint } from '@polygonlabs/primer-api-types';
 import { linearScale, formatTickDate, niceTicks } from './chartGeom.ts';
 import { EmptyChart } from './AreaChart.tsx';
+import { t } from '../../i18n/index.ts';
 
 interface Props {
   data: ThreadFlowPoint[];
@@ -25,7 +26,7 @@ export function StackedBar({ data, height = 200 }: Props) {
   const xTickIndices = [0, Math.floor(data.length / 2), data.length - 1];
 
   return (
-    <svg viewBox={`0 0 ${WIDTH} ${height}`} className="w-full" role="img" aria-label="Threads opened and resolved per day">
+    <svg viewBox={`0 0 ${WIDTH} ${height}`} className="w-full" role="img" aria-label={t('stackedBar.threadsOpenedAndResolvedPerDay')}>
       {data.map((p, i) => {
         const cx = x(i);
         const openedH = (innerH * p.opened) / max;

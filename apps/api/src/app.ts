@@ -9,6 +9,7 @@ import { csrfMiddleware } from './auth/csrf.ts';
 import { scopeMiddleware } from './auth/scopes.ts';
 import { mockResolver, type UserResolver } from './auth/resolver.ts';
 import { registerUploadRoute } from './routes/upload.ts';
+import { registerConvertRoute } from './routes/convert.ts';
 import { registerDocumentRoutes } from './routes/documents.ts';
 import { registerVersionContentRoute } from './routes/versionContent.ts';
 import { registerExternalShareRoutes } from './routes/externalShare.ts';
@@ -104,6 +105,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   registerHealthRoutes(app, { checkDatabase: deps.checkDatabase });
   registerUploadRoute(app, deps);
+  registerConvertRoute(app);
   registerDocumentRoutes(app, deps);
   registerCollaboratorRoutes(app, deps);
   registerExternalShareAdminRoutes(app, deps);

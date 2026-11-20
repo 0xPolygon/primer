@@ -139,6 +139,47 @@ describe('checkpoints', () => {
     });
   });
 
+  it('versions from before the document went live are listed as not bundled', async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const legacy = await publish(storage, { content: '<!doctype html><html><body><p>Before live.</p></body></html>', format: 'html' });
+      const live = await publish(storage, { content: SOURCE, format: 'markdown', documentId: legacy.documentId });
+      const list = (await (await app.request(`/api/documents/${legacy.documentId}/versions`)).json()) as {
+        versions: { id: string; versionNumber: number; bundled?: boolean }[];
+      };
+      const byNumber = new Map(list.versions.map((v) => [v.versionNumber, v]));
+      expect(byNumber.get(legacy.versionNumber)!.bundled).toBe(false);
+      expect(byNumber.get(live.versionNumber)!.bundled).toBe(true);
+      // The old version has no Y.Doc to preview, but its HTML still renders.
+      expect((await app.request(`/api/versions/${legacy.versionId}/ydoc`)).status).toBe(404);
+      const html = await app.request(`/api/versions/${legacy.versionId}/content`);
+      expect(await html.text()).toContain('Before live.');
+    });
+  });
+
+  it('print renders the checkpoint or the live state, light and sandboxed', async () => {
+    await withStorage(async (storage) => {
+      const app = createApp({ storage, notifier: new NoopNotifier() });
+      const { documentId } = await publish(storage, { content: SOURCE, format: 'markdown' });
+      const checkpoint = (await (await app.request(`/api/documents/${documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS })).json()) as CheckpointResponse;
+      await setText(documentId, 'Then tabs.', 'Then tabs, and comments.');
+
+      const frozen = await app.request(`/api/documents/${documentId}/print?version=${checkpoint.versionNumber}`);
+      expect(frozen.status).toBe(200);
+      const frozenHtml = await frozen.text();
+      expect(frozenHtml).toContain('Then tabs.');
+      expect(frozenHtml).not.toContain('and comments');
+      expect(frozenHtml).toContain('window.print()');
+      expect(frozenHtml).toContain('@page');
+      expect(frozen.headers.get('content-security-policy')).toContain("connect-src 'none'");
+
+      const live = await (await app.request(`/api/documents/${documentId}/print`)).text();
+      expect(live).toContain('Then tabs, and comments.');
+
+      expect((await app.request(`/api/documents/${documentId}/print?version=99`)).status).toBe(404);
+    });
+  });
+
   it('compare diffs the Markdown exports', async () => {
     await withStorage(async (storage) => {
       const app = createApp({ storage, notifier: new NoopNotifier() });

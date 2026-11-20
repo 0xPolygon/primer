@@ -278,6 +278,9 @@ export interface VersionSummaryDTO {
   versionNote: string | null;
   sizeBytes: number;
   createdAt: string;
+  /** True for a checkpoint of a live document (it has a render bundle).
+   *  Versions from before the document went live are plain rendered HTML. */
+  bundled?: boolean;
 }
 
 export interface VersionsListResponse {
@@ -1071,4 +1074,14 @@ export interface PageInfoResponse {
   documentId: string;
   versionId: string;
   policy: PagePolicy;
+}
+
+/** POST /api/convert/markdown: Markdown to BlockNote blocks by the importer's
+ *  parser (what an upload uses), so a paste lands as the same blocks. */
+export interface ConvertMarkdownRequest {
+  markdown: string;
+}
+export interface ConvertMarkdownResponse {
+  /** BlockNote block JSON without ids; the editor assigns them on insert. */
+  blocks: unknown[];
 }

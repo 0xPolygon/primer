@@ -38,10 +38,12 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/status', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read', upcoming: true },
+  { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read', upcoming: true },
   { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read', upcoming: true },
 
   { method: 'POST', path: '/api/upload', scope: 'documents:write' },
+  { method: 'POST', path: '/api/convert/markdown', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/versions', scope: 'documents:write' },
   // Title/description, and visibility only towards private: a scoped token
   // asking for `visibility: 'org'` is refused in the handler

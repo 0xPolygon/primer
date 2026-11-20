@@ -11,9 +11,11 @@ import { NotFoundPage } from './routes/notFound.tsx';
 import CompareSelectPage from './routes/compareSelect.tsx';
 import ComparePage from './routes/compare.tsx';
 import { SharePage } from './routes/share.tsx';
+import { PrintPage } from './routes/print.tsx';
 
 const router = createBrowserRouter([
   { path: '/share/:shareToken', element: <SharePage /> },
+  { path: '/d/:docId/print', element: <PrintPage /> },
   {
     element: <AppShell />,
     children: [

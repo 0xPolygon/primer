@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 /**
  * Structured error for a failed `/api/*` call. The API's error responses are
  * consistently `{ error: <code>, message?: <human text> }` (see
@@ -25,7 +26,7 @@ export class ApiError extends Error {
  *  isn't the API's usual `{ error, message }` shape (e.g. a proxy error
  *  page). Never throws — always resolves to an ApiError. */
 export async function parseApiError(res: Response): Promise<ApiError> {
-  let message = `Request failed (${res.status})`;
+  let message = t('apiError.requestFailed', { status: res.status });
   let code: string | undefined;
   try {
     const body = (await res.json()) as { error?: unknown; message?: unknown };
@@ -46,7 +47,7 @@ export async function parseApiError(res: Response): Promise<ApiError> {
  *  failure never reached the server, so there's no server message to show). */
 export function describeApiError(err: unknown): string {
   if (err instanceof ApiError) return err.message;
-  return 'Something went wrong. Please try again.';
+  return t('apiError.generic');
 }
 
 /** True when the error is the "post to a non-latest version" guard

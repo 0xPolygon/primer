@@ -42,6 +42,35 @@ export function exportFileOf(format: string): 'export.md' | 'export.txt' {
   return format === 'text' ? 'export.txt' : 'export.md';
 }
 
+/** The static rendering of a document state, served like any version's content. */
+export async function renderStatic(doc: Y.Doc, title: string): Promise<{ html: string; served: string }> {
+  const html = await exportHtml(doc, title);
+  const served = transformHtml(html, { themeManaged: true });
+  if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
+  return { html, served: served.html };
+}
+
+const PRINT_CSS =
+  '@page{margin:16mm}html,body{background:#fff!important;color:#000!important}a{color:inherit}' +
+  'h1,h2,h3,h4{break-after:avoid}img,table,pre,blockquote{break-inside:avoid}';
+
+// Runs in the sandboxed frame (the only place a served page can open the print
+// dialog): once loaded, and again whenever the host asks.
+const PRINT_JS =
+  "(function(){var go=function(){setTimeout(function(){window.print()},150)};" +
+  "if(document.readyState==='complete')go();else addEventListener('load',go);" +
+  "addEventListener('message',function(e){if(e.source===parent&&e.data==='primer:print')window.print()})})();";
+
+/** A static rendering made printable: light colours, page margins, and a script that opens the print dialog. */
+export function printable(staticHtml: string): string {
+  const head = staticHtml.lastIndexOf('</head>');
+  const body = staticHtml.lastIndexOf('</body>');
+  if (head < 0 || body < 0) throw new Error('static rendering has no head or body');
+  return (
+    staticHtml.slice(0, head) + `<style>${PRINT_CSS}</style>` + staticHtml.slice(head, body) + `<script>${PRINT_JS}</script>` + staticHtml.slice(body)
+  );
+}
+
 export async function renderBundle(
   storage: Storage,
   opts: { versionId: string; documentId: string; title: string; state: Uint8Array },
@@ -50,15 +79,13 @@ export async function renderBundle(
   Y.applyUpdate(doc, opts.state);
   try {
     const { format } = trustedMeta(doc, opts.documentId);
-    const html = await exportHtml(doc, opts.title);
-    const served = transformHtml(html, { themeManaged: true });
-    if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
+    const { html, served } = await renderStatic(doc, opts.title);
     const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
       [exportFileOf(format)]: exported,
       'export.html': html,
-      'static.html': served.html,
+      'static.html': served,
       'threads.json': JSON.stringify(await openThreads(opts.documentId)),
       'files.json': JSON.stringify(await referencedFiles(doc, opts.documentId)),
     };
@@ -73,7 +100,7 @@ export async function renderBundle(
       if (name === 'static.html') staticBytes = bytes.byteLength;
       await storage.put(key + name, bytes);
     }
-    return { bundleKey: key, staticKey: `${key}static.html`, staticBytes, staticHtml: served.html };
+    return { bundleKey: key, staticKey: `${key}static.html`, staticBytes, staticHtml: served };
   } finally {
     doc.destroy();
   }

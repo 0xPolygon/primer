@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useState, useRef, useEffect } from 'react';
 import type { FolderDTO } from '@polygonlabs/primer-api-types';
 import { FolderPickerMenu } from './FolderPickerMenu.tsx';
@@ -26,7 +27,7 @@ export function DocDetailFolderControl({ docId, currentFolderId, currentFolderNa
     return () => window.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const label = currentFolderName ?? 'Folder';
+  const label = currentFolderName ?? t('docDetailFolderControl.folder');
 
   const handleCreateAndPick = (name: string) => {
     create.mutate(
