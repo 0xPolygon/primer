@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm';
 import type { WidgetDTO } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
-import { documents, suggestions, users, versions, widgets } from '../db/schema.ts';
+import { documents, suggestions, threadPlacements, users, versions, widgets } from '../db/schema.ts';
 import { v7 as uuidv7 } from 'uuid';
 import { createLiveThread } from '../lib/liveThreads.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
@@ -176,6 +176,39 @@ describe('widgets in checkpoints', () => {
       expect(row!.publishedSource).toContain('After');
       expect(row!.publishedHash).toBe(after.published.publishedHash);
       expect(row!.publishedSvgLight).toContain('>After</text>');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a checkpoint keeps the placement of threads on unchanged widget labels and parts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-widget-bundle-'));
+    const storage = new FilesystemStorage(root);
+    try {
+      const documentId = await createLiveDoc();
+      await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+      const { draft } = await draftAndPublish(documentId, flow('Review'));
+      const start = async (anchor: Record<string, unknown>) => {
+        const out = await createLiveThread(new NoopNotifier(), owner, documentId, { anchor, body: 'Note' });
+        if (!out.ok) throw new Error(out.refusal.message);
+        return out.value.id;
+      };
+      const target = { tabId: 'main', blockId: draft.blockId };
+      const onLabel = await start({ type: 'prose', target: { ...target, textId: 'review' }, quote: 'Review' });
+      const onPart = await start({ type: 'widget-part', target, anchor: 'step-merge' });
+
+      const checkpoint = await createCheckpoint(storage, documentId, owner, null);
+      const placed = await db.select().from(threadPlacements).where(eq(threadPlacements.versionId, checkpoint.versionId));
+      const anchorOf = (id: string) => placed.find((p) => p.threadId === id)?.anchor;
+      expect(anchorOf(onLabel)).toMatchObject({ type: 'prose', target: { textId: 'review' } });
+      expect(anchorOf(onPart)).toMatchObject({ type: 'widget-part', anchor: 'step-merge' });
+
+      // The redraw no longer draws the merge step: its thread is unplaced on the next checkpoint.
+      await draftAndPublish(documentId, flow('Review').replace(' data-anchor="step-merge"', ''), draft.widgetId);
+      const next = await createCheckpoint(storage, documentId, owner, null);
+      const later = await db.select().from(threadPlacements).where(eq(threadPlacements.versionId, next.versionId));
+      expect(later.find((p) => p.threadId === onPart)?.anchor).toBeNull();
+      expect(later.find((p) => p.threadId === onLabel)?.anchor).toMatchObject({ type: 'prose' });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

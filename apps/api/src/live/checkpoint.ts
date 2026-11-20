@@ -1,7 +1,7 @@
 import * as Y from 'yjs';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import { isLiveAnchor, type CheckpointResponse, type Reconciliation } from '@polygonlabs/primer-api-types';
+import { isLiveAnchor, type CheckpointResponse, type DataPointAnchor, type Reconciliation, type WidgetPartAnchor } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
@@ -16,6 +16,7 @@ import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 import { fragmentName, isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
 import { restoreWidgets } from '../widgets/bundle.ts';
+import { widgetAnchorPublished } from '../widgets/anchors.ts';
 import { pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
 import { splitFrontMatter } from '../upload/markdown.ts';
 
@@ -94,7 +95,10 @@ export async function writeCheckpoint(
         .from(threads)
         .where(and(eq(threads.documentId, documentId), isNull(threads.resolvedAt)));
       for (const thread of open) {
-        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: anchored(thread) ? thread.anchor : null });
+        const anchor = thread.anchor as WidgetPartAnchor | DataPointAnchor;
+        const drawn = anchor.type !== 'widget-part' && anchor.type !== 'data-point' ? true : await widgetAnchorPublished(documentId, anchor);
+        const placed = anchored(thread) && drawn;
+        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: placed ? thread.anchor : null });
       }
       emit({
         documentId,
@@ -181,7 +185,8 @@ export async function restoreCheckpoint(
  * uses: a marked thread (prose, or carried over from before the document
  * went live) while its comment mark is in reachable content (tab, page text,
  * embed and widget label fragments), a structured one (block, widget part,
- * data point) while its target is.
+ * data point) while its target is; a widget part or data point also needs
+ * the published widget to draw it (writeCheckpoint checks that).
  */
 export function anchoredIn(state: Uint8Array): (thread: { id: string; anchor: unknown }) => boolean {
   const doc = new Y.Doc();
