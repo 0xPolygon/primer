@@ -177,7 +177,10 @@ describe('records store', () => {
     expect(ownSet.untrusted).toBe(true); // its before image came from the viewer
     expect((await revertChange(ownSet.id, OWNER)).ok).toBe(true);
     const restored = await agent.get({ collection: 'notes', scope: 'shared', recordId: 'n' });
-    expect(restored.ok && restored.value.record).toMatchObject({ data: { text: 'from a viewer', checked: true }, untrusted: true });
+    // The agent reads it fenced; storage keeps the viewer's words as written.
+    expect(restored.ok && restored.value.record).toMatchObject({ data: { text: expect.stringMatching(/^<untrusted-record-[0-9a-f]+>\nfrom a viewer\n/), checked: true }, untrusted: true });
+    const asOwner = await recordsApi(OWNER, doc).get({ collection: 'notes', scope: 'shared', recordId: 'n' });
+    expect(asOwner.ok && asOwner.value.record?.data).toEqual({ text: 'from a viewer', checked: true });
     await flushDataChanged();
   });
 });

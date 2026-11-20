@@ -1451,6 +1451,87 @@ export const MAX_RECORDS_PAGE_SIZE = 200;
 export const DEFAULT_RECORDS_PAGE_SIZE = 50;
 export const MAX_RECORDS_BATCH = 100;
 
+// ───────────────────── Data tables ─────────────────────
+// A `dataTable` block is a view over one records collection: its props name
+// the collection, the scope and the columns; the rows are the records. The
+// props live in the client-writable document, so everyone reads them through
+// `parseDataTable`.
+
+export type DataTableColumnType = 'text' | 'number' | 'date' | 'select';
+
+export interface DataTableColumn {
+  /** The record data key the column shows. */
+  key: string;
+  label: string;
+  type: DataTableColumnType;
+  /** A select column's choices. */
+  options?: string[];
+}
+
+export interface DataTableSpec {
+  collection: string;
+  scope: RecordScope;
+  columns: DataTableColumn[];
+  /** A named warehouse query's results (`query:<name>`): written by an agent, read-only here. */
+  readOnly: boolean;
+}
+
+export const MAX_DATA_TABLE_COLUMNS = 30;
+/** Rows a data table shows (the collection may hold more). */
+export const MAX_DATA_TABLE_ROWS = 1_000;
+/** Collections holding a named warehouse query's results. */
+export const QUERY_COLLECTION_PREFIX = 'query:';
+
+const COLUMN_TYPES: readonly string[] = ['text', 'number', 'date', 'select'];
+
+/** A data-table block's props, validated, or null when they name no valid
+ *  collection. Bad columns are dropped, never trusted. */
+export function parseDataTable(props: { collection?: unknown; scope?: unknown; columns?: unknown }): DataTableSpec | null {
+  const { collection } = props;
+  if (typeof collection !== 'string' || !RECORD_COLLECTION_RE.test(collection)) return null;
+  const scope: RecordScope = props.scope === 'personal' ? 'personal' : 'shared';
+  let raw: unknown = [];
+  try {
+    raw = typeof props.columns === 'string' ? JSON.parse(props.columns) : [];
+  } catch {
+    raw = [];
+  }
+  const columns: DataTableColumn[] = [];
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (columns.length >= MAX_DATA_TABLE_COLUMNS) break;
+    if (typeof item !== 'object' || item === null) continue;
+    const { key, label, type, options } = item as Record<string, unknown>;
+    if (typeof key !== 'string' || !RECORD_KEY_RE.test(key) || columns.some((c) => c.key === key)) continue;
+    const column: DataTableColumn = {
+      key,
+      label: typeof label === 'string' && label.trim() !== '' ? label.slice(0, 200) : key,
+      type: typeof type === 'string' && COLUMN_TYPES.includes(type) ? (type as DataTableColumnType) : 'text',
+    };
+    if (column.type === 'select') {
+      column.options = (Array.isArray(options) ? options : []).filter((o): o is string => typeof o === 'string').slice(0, 50).map((o) => o.slice(0, 200));
+    }
+    columns.push(column);
+  }
+  return { collection, scope, columns, readOnly: collection.startsWith(QUERY_COLLECTION_PREFIX) };
+}
+
+/** A data-table cell as text: strings as they are, other JSON values written out. */
+export function recordCellText(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+/** A checkpoint's `records.json` (C11): the document's shared records when
+ *  the checkpoint was taken. Shares and checkpoint views read data from it,
+ *  never from live records. Personal records are never frozen. */
+export interface RecordsSnapshot {
+  capturedAt: string;
+  /** The last change id included: the records as of this point in the change log. */
+  toChangeId: number;
+  /** Records by collection, each in record id order. */
+  collections: Record<string, { recordId: string; data: Record<string, unknown>; version: number; updatedAt: string; writtenBy: string }[]>;
+}
+
 /** The arguments of every verb. `recordId` names one record (get, set,
  *  update, delete); `data` is a JSON object (set replaces, update merges
  *  its top-level keys); `expectVersion` refuses the write with
@@ -1566,6 +1647,9 @@ export interface PageInfoResponse {
   documentId: string;
   versionId: string;
   policy: PagePolicy;
+  /** A checkpoint's record-reading page: it reads the records frozen with the
+   *  checkpoint, served in the page, and the host binds no live record access. */
+  frozen?: true;
 }
 
 /** A live page block's frame binding (`GET /api/documents/:docId/pages/:blockId`):

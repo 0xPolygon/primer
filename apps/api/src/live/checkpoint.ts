@@ -15,7 +15,7 @@ import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 import { fragmentName, isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
-import { restoreWidgets, widgetsChangedSince } from '../widgets/bundle.ts';
+import { redrawBoundWidgets, restoreWidgets, widgetsChangedSince } from '../widgets/bundle.ts';
 import { widgetAnchorPublished } from '../widgets/anchors.ts';
 import { pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
 import { splitFrontMatter } from '../upload/markdown.ts';
@@ -161,7 +161,7 @@ export async function restoreCheckpoint(
     }
     // Widget rows first, as a publish does: viewers refetch when the block's hash changes.
     if (!suggesting) await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
-    return await applyPlan(checkpoint.documentId, originFor(actor), {
+    const out = await applyPlan(checkpoint.documentId, originFor(actor), {
       onConflict: 'refuse',
       ...(suggesting
         ? {
@@ -188,6 +188,8 @@ export async function restoreCheckpoint(
         await db.update(documents).set({ metadata }).where(eq(documents.id, checkpoint.documentId));
       },
     });
+    if (!suggesting) await redrawBoundWidgets(checkpoint.documentId);
+    return out;
   } finally {
     frozen.destroy();
   }

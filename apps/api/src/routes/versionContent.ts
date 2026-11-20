@@ -8,7 +8,8 @@ import {
   canRead, loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
-import { pagePolicyOf } from '../records/page.ts';
+import { pagePolicyOf, readsRecords, withFrozenRecords } from '../records/page.ts';
+import { readFrozenRecords } from '../records/snapshot.ts';
 import type { Storage } from '../storage/types.ts';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -20,7 +21,9 @@ export function registerVersionContentRoute(
   app.get('/api/versions/:versionId/content', async (c) => {
     const page = await loadReadablePage(deps.storage, c.req.param('versionId'), c.get('user'));
     if (!page) return c.json({ error: 'not_found' }, 404);
-    return new Response(page.html, {
+    // A checkpoint's page reads the records frozen with it, never live ones.
+    const html = page.bundleKey ? withFrozenRecords(page.html, await readFrozenRecords(deps.storage, page.bundleKey)) : page.html;
+    return new Response(html, {
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
@@ -42,6 +45,7 @@ export function registerVersionContentRoute(
     const page = await loadReadablePage(deps.storage, c.req.param('versionId'), c.get('user'));
     if (!page) return c.json({ error: 'not_found' }, 404);
     const body: PageInfoResponse = { documentId: page.documentId, versionId: page.versionId, policy: pagePolicyOf(page.html) };
+    if (page.bundleKey && readsRecords(page.html)) body.frozen = true;
     return c.json(body, 200);
   });
 }
@@ -52,10 +56,11 @@ async function loadReadablePage(
   storage: Storage,
   versionId: string,
   user: AuthUser,
-): Promise<{ documentId: string; versionId: string; html: string } | null> {
+): Promise<{ documentId: string; versionId: string; html: string; bundleKey: string | null } | null> {
   if (!UUID_RE.test(versionId)) return null;
   const [row] = (await db.execute(sql`
     SELECT v.storage_key AS "storageKey",
+           v.bundle_key  AS "bundleKey",
            d.uploader_id  AS "uploaderId",
            d.visibility   AS "visibility",
            d.deleted_at   AS "deletedAt",
@@ -66,6 +71,7 @@ async function loadReadablePage(
     LIMIT 1
   `)) as unknown as {
     storageKey: string;
+    bundleKey: string | null;
     uploaderId: string;
     visibility: Visibility;
     deletedAt: Date | null;
@@ -75,5 +81,5 @@ async function loadReadablePage(
   const eff = await loadEffectiveRole({ id: row.documentId, uploaderId: row.uploaderId, visibility: row.visibility }, user);
   if (!canRead(row.visibility, eff)) return null;
   const html = await new Response(await storage.get(row.storageKey)).text();
-  return { documentId: row.documentId, versionId, html };
+  return { documentId: row.documentId, versionId, html, bundleKey: row.bundleKey };
 }

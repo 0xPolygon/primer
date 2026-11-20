@@ -441,6 +441,14 @@ everything the CSP and the host can take away:
   calls fail, later ones are refused), closes its change feed and reloads the
   page from Primer with a fresh capability (at most three times, then it
   stays revoked).
+- **Checkpoints and shares are frozen.** A checkpoint keeps the shared
+  records of its moment (`records.json` in its bundle). Its page, in a
+  checkpoint view or an external share, is served with them in an inert JSON
+  script and the companion answers reads from it; writes are refused and the
+  host binds no live access. An external share carries only the collections
+  the page declares (`<meta name="primer-records-collections" content="…">`),
+  each record only its id and data: no writer identity, versions or times.
+  Personal records are never frozen.
 
 **Residual risk (accepted).** Nothing stops a sandboxed frame from
 navigating itself (`location.href = 'https://attacker/?d=…'`), and no CSP

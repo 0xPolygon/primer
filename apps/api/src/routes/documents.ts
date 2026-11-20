@@ -1,3 +1,4 @@
+import type * as Y from 'yjs';
 import type { Hono } from 'hono';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
@@ -33,6 +34,8 @@ import { decideChangeSet } from '../live/suggest.ts';
 import { recheckAccess } from '../auth/revocation.ts';
 import { refusalResponse } from './upload.ts';
 import { bundleWidgets } from '../widgets/bundle.ts';
+import { snapshotRecords } from '../records/snapshot.ts';
+import { embedTables } from '../records/table.ts';
 
 export function registerDocumentRoutes(
   app: Hono<{ Variables: AppVariables }>,
@@ -586,6 +589,14 @@ export function registerDocumentRoutes(
   // and served like any version's content (sandboxed frame, artifact CSP).
   // Without `?version=<n>` it renders the live state now, by the same code that
   // renders a checkpoint's `static.html`; with it, that checkpoint's bundle.
+  /** The live state's widgets and data tables, drawn from the records now. */
+  const liveEmbeds = async (doc: Y.Doc, docId: string) => {
+    const records = await snapshotRecords(docId);
+    const widgets = await bundleWidgets(doc, docId, records);
+    const tables = embedTables(doc, records);
+    return (html: string) => tables(widgets.embed(html));
+  };
+
   app.get('/api/documents/:docId/print', async (c) => {
     const docId = c.req.param('docId');
     const access = await docAccess(docId, c.get('user'));
@@ -612,7 +623,7 @@ export function registerDocumentRoutes(
             access.title,
             decisions,
             access.format === 'html' ? await currentPageHtml(deps.storage, docId, doc) : null,
-            (await bundleWidgets(doc, docId)).embed,
+            await liveEmbeds(doc, docId),
           ),
         )
       ).served;

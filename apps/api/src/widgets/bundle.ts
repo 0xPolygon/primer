@@ -1,11 +1,14 @@
 import * as Y from 'yjs';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import type { RecordsSnapshot } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
 import { widgets } from '../db/schema.ts';
 import { tabFragmentName, tabsOf } from '../live/reach.ts';
 import type { Storage } from '../storage/types.ts';
 import { readLabel } from './labels.ts';
-import { renderBoth, widgetIdPrefix, type WidgetRow } from './render.ts';
+import { snapshotRows } from '../records/snapshot.ts';
+import { refreshBoundWidgets } from './records.ts';
+import { MAX_ROWS, renderBoth, widgetIdPrefix, type WidgetRow } from './render.ts';
 import { labelsOf, withLabels } from './serialize.ts';
 
 /** A widget block in a document state. */
@@ -45,8 +48,18 @@ function placedWidgets(doc: Y.Doc): PlacedWidget[] {
  * block, `widgets/<id>.light.svg` and `.dark.svg` with the labels as they
  * were, and `widgets/<id>.json` to republish it on restore. `embed` puts both
  * themes' SVG in place of the blocks' placeholders in the static rendering.
+ *
+ * A widget bound to a records collection is drawn again from the checkpoint's
+ * frozen records (`records`), so its SVG shows exactly the rows `records.json`
+ * holds, even when the live redraw after a write hasn't landed yet. A frozen
+ * collection that no longer renders keeps the live publish, as a live redraw
+ * that fails does.
  */
-export async function bundleWidgets(doc: Y.Doc, documentId: string): Promise<{ files: Record<string, string>; embed: (html: string) => string }> {
+export async function bundleWidgets(
+  doc: Y.Doc,
+  documentId: string,
+  records: RecordsSnapshot,
+): Promise<{ files: Record<string, string>; embed: (html: string) => string }> {
   const placed = placedWidgets(doc);
   const rows =
     placed.length === 0
@@ -61,19 +74,25 @@ export async function bundleWidgets(doc: Y.Doc, documentId: string): Promise<{ f
     // A block naming another document's widget, or another block's, draws nothing.
     const row = rows.find((r) => r.id === widget.widgetId && r.blockId === widget.blockId);
     if (!row?.publishedSvgLight || !row.publishedSvgDark || !row.publishedSource) continue;
-    const labels = labelsOf(row.publishedSvgLight);
+    let drawn = { light: row.publishedSvgLight, dark: row.publishedSvgDark, hash: row.publishedHash!, rows: row.rows as WidgetRow[] | null };
+    if (row.collection) {
+      const frozen = snapshotRows(records, row.collection);
+      const rendered = frozen.length <= MAX_ROWS ? await renderBoth(row.publishedSource, frozen, widgetIdPrefix(row.id)) : null;
+      if (rendered && !('errors' in rendered)) drawn = { light: rendered.light.svg, dark: rendered.dark.svg, hash: rendered.hash, rows: frozen };
+    }
+    const labels = labelsOf(drawn.light);
     for (const textId of widget.textIds) labels[textId] = readLabel(doc, widget.blockId, textId) ?? labels[textId] ?? '';
-    const light = withLabels(row.publishedSvgLight, labels);
-    const dark = withLabels(row.publishedSvgDark, labels);
+    const light = withLabels(drawn.light, labels);
+    const dark = withLabels(drawn.dark, labels);
     svgs.set(widget.widgetId, { light, dark });
     files[`widgets/${widget.widgetId}.light.svg`] = light;
     files[`widgets/${widget.widgetId}.dark.svg`] = dark;
     const kept: BundledWidget = {
       widgetId: row.id,
       blockId: widget.blockId,
-      hash: row.publishedHash!,
+      hash: drawn.hash,
       source: row.publishedSource,
-      rows: row.rows as WidgetRow[] | null,
+      rows: drawn.rows,
     };
     files[`widgets/${widget.widgetId}.json`] = JSON.stringify(kept);
   }
@@ -112,6 +131,8 @@ export async function widgetsChangedSince(frozen: Y.Doc, documentId: string): Pr
  * Restoring a checkpoint republishes each of its widgets from the bundle
  * (C12): the kept source and rows are rendered again and become the live
  * publish when they give the kept hash. A pending draft is left alone.
+ * Records are not versioned, so a widget bound to a collection then draws
+ * from the live records again (`refreshBoundWidgets`), as its data tables do.
  */
 export async function restoreWidgets(storage: Storage, bundleKey: string, frozen: Y.Doc, documentId: string): Promise<void> {
   for (const widget of placedWidgets(frozen)) {
@@ -136,4 +157,13 @@ export async function restoreWidgets(storage: Storage, bundleKey: string, frozen
       })
       .where(and(eq(widgets.id, kept.widgetId), eq(widgets.documentId, documentId), eq(widgets.blockId, kept.blockId)));
   }
+}
+
+/** After a restore's edit landed: bound widgets draw from the live records again. */
+export async function redrawBoundWidgets(documentId: string): Promise<void> {
+  const bound = await db
+    .selectDistinct({ collection: widgets.collection })
+    .from(widgets)
+    .where(and(eq(widgets.documentId, documentId), isNotNull(widgets.collection)));
+  await refreshBoundWidgets(documentId, bound.map((b) => b.collection!));
 }

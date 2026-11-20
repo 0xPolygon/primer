@@ -35,7 +35,8 @@ describe('record-reading pages', () => {
       expect(res.headers.get('content-security-policy')).toBe(artifactCsp('records'));
       expect(readsRecords(await res.text())).toBe(true);
       const info = (await (await app.request(`/api/versions/${poll.versionId}/page`)).json()) as PageInfoResponse;
-      expect(info).toEqual({ documentId: poll.documentId, versionId: poll.versionId, policy: 'records' });
+      // An upload is a checkpoint of a live page: it reads the records frozen with it.
+      expect(info).toEqual({ documentId: poll.documentId, versionId: poll.versionId, policy: 'records', frozen: true });
 
       const plain = await publish(app, '<html><body><p>primer-records</p></body></html>');
       const plainRes = await app.request(`/api/versions/${plain.versionId}/content`);

@@ -21,6 +21,7 @@ import { transactionWithEvents } from './events.ts';
 import { canComment, canEdit, canRead, loadEffectiveRole, ownerPersonOf, type EffectiveRole, type Visibility } from './permissions.ts';
 import { loadThread, loadThreads } from './threadList.ts';
 import { widgetAnchorProblem } from '../widgets/anchors.ts';
+import { dataTableAnchorProblem, isDataTableTarget } from '../records/table.ts';
 
 export type LiveThreadResult<T> = { ok: true; value: T } | { ok: false; status: 400 | 403 | 404 | 409; refusal: Refusal };
 
@@ -93,7 +94,10 @@ export async function createLiveThread(
   const mentions = await cleanMentions(req.mentions, user.id);
   if (!mentions.ok) return badRequest(mentions.message, 'Mention user ids from primer_lookup_user.');
 
-  if (anchor.type === 'widget-part' || anchor.type === 'data-point') {
+  if (anchor.type === 'data-point' && (await isDataTableTarget(documentId, anchor.target))) {
+    const problem = await dataTableAnchorProblem(documentId, anchor, user);
+    if (problem) return badRequest(problem, 'Comment on a row of the table: row is its record id, column a column key or "" for the whole row.');
+  } else if (anchor.type === 'widget-part' || anchor.type === 'data-point') {
     const problem = await widgetAnchorProblem(documentId, anchor);
     if (problem) return badRequest(problem, 'Comment on a part the widget names (data-anchor) or a mark drawn from a row (data-row, data-col).');
   }
