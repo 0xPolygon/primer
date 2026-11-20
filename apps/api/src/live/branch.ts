@@ -98,7 +98,7 @@ export async function proposeBranch(storage: Storage, actor: AuthUser, branchId:
     if (!target.blockId && !baseTabs.has(target.tabId)) edits.push(newTabEdit(target.tabId));
     else if (target.embedId) {
       if (!branch.eq(base)) edits.push(embedEdit(target));
-    } else edits.push(...tabEdits(target, base, branch));
+    } else edits.push(...tabEdits(target, base, branch, owned.refused));
   }
   baseDoc.destroy();
   const plan = [...edits.filter((e) => !owned.refused.has(e.target.blockId)), ...owned.refused.values()];
@@ -294,7 +294,7 @@ function longestIncreasing(xs: number[]): number[] {
 }
 
 /** The edits of one fragment (`at`: its target, without a block id). */
-function tabEdits(at: Target, baseRoot: PmNode, branchRoot: PmNode): PlannedEdit[] {
+function tabEdits(at: Target, baseRoot: PmNode, branchRoot: PmNode, refused: Map<string, PlannedEdit>): PlannedEdit[] {
   const base = tree(baseRoot);
   const branch = tree(branchRoot);
   const movedOnBranch = movedBlocks(base, branch);
@@ -307,6 +307,11 @@ function tabEdits(at: Target, baseRoot: PmNode, branchRoot: PmNode): PlannedEdit
     if (!b) {
       const parentNew = r.place.parentId !== null && !base.index.has(r.place.parentId);
       if (parentNew) continue;
+      // A new block holding a refused one isn't proposed: it would carry it in.
+      if (holdsAny(r.node, refused)) {
+        run = null;
+        continue;
+      }
       // Consecutive new siblings go in one edit: a suggestion builds against
       // the parent as it is, so separate ones would all anchor the same way.
       if (run && run.nodes.at(-1)!.attrs.id === r.place.prevId) run.nodes.push(r.node);
@@ -327,6 +332,15 @@ function tabEdits(at: Target, baseRoot: PmNode, branchRoot: PmNode): PlannedEdit
     edits.push(removeEdit({ ...at, blockId: id }, b.node));
   }
   return edits;
+}
+
+function holdsAny(node: PmNode, ids: Map<string, PlannedEdit>): boolean {
+  let found = ids.has(node.attrs.id as string);
+  node.descendants((child) => {
+    if (child.type.name === 'blockContainer' && ids.has(child.attrs.id as string)) found = true;
+    return !found;
+  });
+  return found;
 }
 
 function bothChanged(target: Target, why: string): Refusal {

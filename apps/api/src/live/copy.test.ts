@@ -354,7 +354,9 @@ describe('page text in copies (C12)', () => {
 });
 
 describe('proposing a branch of a page or widget', () => {
-  const PAGE = '<!doctype html><html><head><title>Plan</title></head><body><h1>Roadmap</h1><p>Ship the editor in May.</p></body></html>';
+  const PAGE =
+    '<!doctype html><html><head><title>Plan</title></head><body><h1>Roadmap</h1><p>Ship the editor in May.</p>' +
+    '<primer-code data-embed-id="snippet" lang="ts">const a = 1;</primer-code></body></html>';
 
   it('accepting an edited page branch keeps the parent page its own and carries the edited text', async () => {
     await withStorage(async (storage) => {
@@ -366,6 +368,8 @@ describe('proposing a branch of a page or widget', () => {
       if (!out.ok) throw new Error(out.refusal.message);
       const branch = out.documentId;
       const page = await withLiveDoc(branch, (d) => pageBlocks(d)[0]!);
+      // The untouched embed is compared too, and proposes nothing.
+      expect(page.embeds).toEqual(['snippet']);
       await applyPlan(branch, originFor(owner), {
         onConflict: 'refuse',
         edits: [setPidText({ tabId: page.tabId, blockId: page.blockId, pid: page.pids[1]! }, 'Ship the editor in June.')],
@@ -401,6 +405,33 @@ describe('proposing a branch of a page or widget', () => {
       expect(accepted.ok && accepted.value.outcomes.map((o) => o.status)).toEqual(['applied']);
       expect(await widgetProps(src.doc)).toMatchObject({ widgetId: src.widgetId, hash: src.hash });
       expect(await withLiveDoc(src.doc, (d) => readPidText(d, label))).toBe('Weekly signups');
+    });
+  });
+
+  it('a widget added on the branch is refused, even after a new paragraph', async () => {
+    await withStorage(async (storage) => {
+      const { parent, branch } = await branched(storage);
+      const agent = await makeAgent();
+      await ops(branch, agent, { ops: [{ op: 'add', at: main('c'), position: 'after', blocks: ['Delta'] }] });
+      // Top-level blocks: Alpha, Beta, Gamma, Delta, then the image.
+      const blocks = await withLiveDoc(branch, (d) => {
+        const ids: string[] = [];
+        fragmentDoc(d.getXmlFragment('document-store')).descendants((n) => {
+          if (n.type.name === 'blockContainer') ids.push(n.attrs.id as string);
+          return true;
+        });
+        return ids;
+      });
+      const draft = await draftWidget(owner, branch, { source: CHART, rows: [{ id: 'w1', signups: 240 }], afterBlockId: blocks[3]! });
+      if (!draft.ok) throw new Error(draft.refusal.message);
+      const published = await publishWidget(owner, draft.value.widgetId, draft.value.previewHash);
+      if (!published.ok) throw new Error(published.refusal.message);
+
+      const proposal = await propose(storage, branch);
+      const widget = proposal.outcomes.find((o) => o.target.blockId === draft.value.blockId);
+      expect(widget?.status).toBe('conflict');
+      const open = await openSuggestions(parent);
+      expect(JSON.stringify(open)).not.toContain(draft.value.widgetId);
     });
   });
 });
