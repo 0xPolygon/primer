@@ -22,10 +22,14 @@ function row(id: number, over: Partial<EventRowDTO> = {}): EventRowDTO {
 
 /** In-memory paginated server + controllable fake EventSource. */
 function makeHarness(initialRows: EventRowDTO[], pageSize = 2) {
-  const state = { rows: [...initialRows], listCalls: [] as string[] };
+  const state = { rows: [...initialRows], listCalls: [] as string[], failNextFetch: false };
 
   const fetchImpl = async (url: string): Promise<Response> => {
     state.listCalls.push(url);
+    if (state.failNextFetch) {
+      state.failNextFetch = false;
+      return new Response('unavailable', { status: 503 });
+    }
     const u = new URL(url, 'http://test.local');
     const since = u.searchParams.has('since') ? Number(u.searchParams.get('since')) : null;
     const pageToken = u.searchParams.get('pageToken');
@@ -56,15 +60,32 @@ function makeHarness(initialRows: EventRowDTO[], pageSize = 2) {
     emit(r: EventRowDTO): void {
       this.onmessage?.({ data: JSON.stringify(r), lastEventId: String(r.id) });
     }
+    /** The server establishing the connection, as routes/events.ts does:
+     *  start after `since` when given, else at the latest id at this moment
+     *  (so a row committed before now and after the client's hydrate is
+     *  skipped); replay what follows the start point; then `onopen`. */
+    establish(): void {
+      const u = new URL(this.url, 'http://test.local');
+      const since = u.searchParams.get('since');
+      const start = since !== null ? Number(since) : Math.max(0, ...state.rows.map((r) => r.id));
+      for (const r of [...state.rows].sort((a, b) => a.id - b.id)) if (r.id > start) this.emit(r);
+      this.onopen?.({});
+    }
   }
 
   const batches: EventRowDTO[][] = [];
+  const docChanges: EventRowDTO[] = [];
+  let resyncs = 0;
   // Immediate-flush timers keep the tests deterministic; coalescing is
   // exercised by pushing several rows before the queued flush runs.
   const timers: (() => void)[] = [];
   const feed = createEventsFeed({
     documentId: 'doc-1',
     onBatch: (rows) => batches.push(rows),
+    onDocChange: (r) => docChanges.push(r),
+    onResync: () => {
+      resyncs += 1;
+    },
     fetchImpl,
     eventSourceFactory: (url) => new FakeEventSource(url),
     setTimeoutImpl: (fn) => {
@@ -78,6 +99,8 @@ function makeHarness(initialRows: EventRowDTO[], pageSize = 2) {
     state,
     feed,
     batches,
+    docChanges,
+    resyncs: () => resyncs,
     sources,
     flushTimers(): void {
       const pending = timers.splice(0);
@@ -85,6 +108,9 @@ function makeHarness(initialRows: EventRowDTO[], pageSize = 2) {
     },
   };
 }
+
+/** Lets the fetches refresh() starts settle. */
+const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe('createEventsFeed', () => {
   it('hydrates the full list (following pagination to exhaustion) as ONE batch of artifact rows', async () => {
@@ -130,46 +156,75 @@ describe('createEventsFeed', () => {
     expect(h.sources[0].url).toContain('/events/stream?since=9');
   });
 
-  it('re-hydrates in FULL on reconnect: a late-committing lower id is delivered', async () => {
+  it('on reconnect re-reads everything after the highest id seen and relays what was missed', async () => {
     const h = makeHarness([row(20), row(21)]);
     await h.feed.start();
     const src = h.sources[0];
-
-    // Connection drops; while offline, a LOWER id (assigned earlier,
-    // committed later) becomes visible — exactly the Pin 6 case.
     src.onerror?.({});
-    h.state.rows.push(row(15));
+    h.state.rows.push(row(22)); // committed while disconnected
     src.onopen?.({});
     await new Promise((r) => setTimeout(r, 0)); // let refresh()'s fetches settle
-
-    const delivered = h.batches.flat().map((r) => r.id);
-    expect(delivered).toContain(15);
-    // The reconnect re-fetch was FULL — no since param (any bounded window
-    // could silently skip a row that committed far below the frontier).
+    expect(h.batches.flat().map((r) => r.id)).toEqual([20, 21, 22]);
     const reconnectCalls = h.state.listCalls.slice(1); // [0] is the initial hydrate
-    expect(reconnectCalls.length).toBeGreaterThan(0);
-    for (const u of reconnectCalls) expect(u).not.toContain('since=');
+    expect(reconnectCalls[0]).toContain('since=21');
   });
 
-  it('delivers a row committed ARBITRARILY far below the frontier during a disconnect (no bounded window)', async () => {
-    const h = makeHarness([row(500), row(501)]);
-    await h.feed.start();
-    const src = h.sources[0];
-    src.onerror?.({});
-    // While disconnected, a transaction that drew id 3 long ago finally
-    // commits — 497 ids below the frontier, beyond any plausible window.
-    h.state.rows.push(row(3));
-    src.onopen?.({});
-    await new Promise((r) => setTimeout(r, 0));
-    expect(h.batches.flat().map((r) => r.id)).toContain(3);
-  });
-
-  it('refresh() (visibility regain) re-hydrates in full without a connection error', async () => {
+  it('refresh() (visibility regain) re-reads without a connection error', async () => {
     const h = makeHarness([row(30)]);
     await h.feed.start();
-    h.state.rows.push(row(25)); // late-committing lower id
+    h.state.rows.push(row(31));
     await h.feed.refresh();
-    expect(h.batches.flat().map((r) => r.id)).toEqual([30, 25]);
+    expect(h.batches.flat().map((r) => r.id)).toEqual([30, 31]);
+  });
+
+  it("hands Primer's lifecycle rows to onDocChange, never to the artifact, and resyncs on open and after a refresh", async () => {
+    const h = makeHarness([]);
+    await h.feed.start();
+    expect(h.resyncs()).toBe(0); // not before the stream is up
+    h.sources[0].establish();
+    await settle();
+    expect(h.resyncs()).toBe(1); // first open: the page's first fetches may be stale
+    h.sources[0].emit(row(5, { namespace: 'primer', type: 'comment.created', audience: 'readers' }));
+    h.flushTimers();
+    expect(h.docChanges.map((r) => r.id)).toEqual([5]);
+    expect(h.batches.flat()).toEqual([]);
+    await h.feed.refresh();
+    expect(h.resyncs()).toBe(2);
+  });
+
+  it('subscribes with an explicit ?since=0 after an empty hydrate', async () => {
+    const h = makeHarness([]);
+    await h.feed.start();
+    expect(h.sources[0].url).toMatch(/\/events\/stream\?since=0$/);
+  });
+
+  it('a write between an empty hydrate and stream establishment still arrives (no history yet)', async () => {
+    const h = makeHarness([]);
+    await h.feed.start();
+    // Both commit after the hydrate read and before the server fixes the
+    // stream's start point.
+    h.state.rows.push(row(1), row(2, { namespace: 'primer', type: 'comment.created', audience: 'readers' }));
+    h.sources[0].establish();
+    h.flushTimers();
+    await settle();
+    expect(h.batches.flat().map((r) => r.id)).toEqual([1]);
+    expect(h.docChanges.map((r) => r.id)).toEqual([2]);
+    expect(h.resyncs()).toBe(1);
+  });
+
+  it('a failed initial hydrate falls back to since=0 and re-hydrates and resyncs on open', async () => {
+    const h = makeHarness([row(1)]);
+    h.state.failNextFetch = true;
+    await h.feed.start();
+    expect(h.batches).toEqual([]);
+    expect(h.sources[0].url).toMatch(/\?since=0$/);
+    h.state.rows.push(row(2)); // a write before the stream is up
+    h.sources[0].establish();
+    h.flushTimers();
+    await settle();
+    expect(h.batches.flat().map((r) => r.id).sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(h.state.listCalls.at(-1)).not.toContain('since='); // the re-hydrate reads from the start
+    expect(h.resyncs()).toBe(1);
   });
 
   it('stop() closes the stream and drops pending flushes', async () => {
