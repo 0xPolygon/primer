@@ -12,6 +12,7 @@ import '@blocknote/ariakit/style.css';
 import type { DocFileUploadResponse, ViewerRole } from '@polygonlabs/primer-api-types';
 import { api } from '../lib/fetch.ts';
 import { ConnectionStatus } from './ConnectionStatus.tsx';
+import { AgentStatus } from './AgentStatus.tsx';
 import { createLiveProvider, type LiveProvider } from './provider.ts';
 import { editorDictionary, t } from '../i18n/index.ts';
 import { ChipMenus } from './ChipMenus.tsx';
@@ -65,6 +66,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   return (
     <div className="flex h-full flex-col" data-live-editor={props.documentId}>
       <ConnectionStatus provider={props.live.provider} />
+      <AgentStatus provider={props.live.provider} />
       <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
       {/* One editor per tab fragment, mounted when its tab is opened. */}
       <TabEditor key={active} tabId={active} {...props} />

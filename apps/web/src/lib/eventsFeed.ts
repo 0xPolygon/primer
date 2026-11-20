@@ -45,7 +45,7 @@ export interface EventsFeedOptions {
   /** Receives coalesced batches of `artifact`-audience rows, ascending id. */
   onBatch: (rows: EventRowDTO[]) => void;
   /** Receives Primer's own lifecycle rows (namespace `primer`: comments,
-   *  threads, versions, working status) as the stream delivers them. They
+   *  threads, versions, runs) as the stream delivers them. They
    *  are page notifications and are never relayed into the artifact. */
   onDocChange?: (row: EventRowDTO) => void;
   /** Called after every re-hydrate (each stream open, visibility regain):

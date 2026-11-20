@@ -1,5 +1,10 @@
 import type {
   Target,
+  AgentRunDTO,
+  ApplyOpsRequest,
+  Reconciliation,
+  LiveDocDTO,
+  LiveReadFormat,
   AddVersionResponse,
   Collaborator,
   CollaboratorRole,
@@ -7,8 +12,6 @@ import type {
   CommentDTO,
   DocumentDetailResponse,
   EventInput,
-  DocumentStatusResponse,
-  DocumentStatusState,
   EventsListResponse,
   PurgePersonalRecordsResponse,
   RecordChangesResponse,
@@ -46,12 +49,15 @@ export type PrimerErrorCode =
 export class PrimerApiError extends Error {
   readonly code: PrimerErrorCode;
   readonly status?: number;
+  /** The server's JSON error body (refusal, per-op errors), when it sent one. */
+  readonly body?: unknown;
 
-  constructor(code: PrimerErrorCode, message: string, status?: number) {
+  constructor(code: PrimerErrorCode, message: string, status?: number, body?: unknown) {
     super(message);
     this.name = 'PrimerApiError';
     this.code = code;
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -188,6 +194,60 @@ export class PrimerClient {
     });
   }
 
+  /** Reads a live document's blocks (see primer_get_doc). */
+  getLiveDoc(
+    documentId: string,
+    opts: { format?: LiveReadFormat; tabId?: string; since?: number; range?: { from: Target; to: Target }; runId?: string } = {},
+  ): Promise<LiveDocDTO> {
+    const q = new URLSearchParams();
+    if (opts.format) q.set('format', opts.format);
+    if (opts.tabId) q.set('tabId', opts.tabId);
+    if (opts.since !== undefined) q.set('since', String(opts.since));
+    if (opts.runId) q.set('runId', opts.runId);
+    if (opts.range) {
+      q.set('from', opts.range.from.blockId);
+      q.set('to', opts.range.to.blockId);
+    }
+    const qs = q.toString();
+    return this.request<LiveDocDTO>({
+      method: 'GET',
+      path: `/api/documents/${encodeURIComponent(documentId)}/live${qs ? `?${qs}` : ''}`,
+    });
+  }
+
+  /** The caller's (an agent's) runs; active ones by default. */
+  listRuns(opts: { documentId?: string; status?: string } = {}): Promise<{ runs: AgentRunDTO[] }> {
+    const q = new URLSearchParams();
+    if (opts.documentId) q.set('documentId', opts.documentId);
+    if (opts.status) q.set('status', opts.status);
+    const qs = q.toString();
+    return this.request<{ runs: AgentRunDTO[] }>({ method: 'GET', path: `/api/runs${qs ? `?${qs}` : ''}` });
+  }
+
+  /** Claims, updates, finishes or fails one of the caller's runs. */
+  updateRun(
+    runId: string,
+    action: 'claim' | 'status' | 'finish' | 'fail',
+    input: { statusLine?: string; plan?: string; error?: string } = {},
+  ): Promise<AgentRunDTO> {
+    const id = encodeURIComponent(runId);
+    if (action === 'claim') return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/claim`, json: {} });
+    if (action === 'status') {
+      return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/status`, json: { statusLine: input.statusLine, plan: input.plan } });
+    }
+    const json = action === 'fail' ? { error: input.error ?? 'failed' } : {};
+    return this.request<AgentRunDTO>({ method: 'POST', path: `/api/runs/${id}/finish`, json });
+  }
+
+  /** Edits a live document by block (see primer_apply_ops). */
+  applyOps(documentId: string, req: ApplyOpsRequest): Promise<Reconciliation> {
+    return this.request<Reconciliation>({
+      method: 'POST',
+      path: `/api/documents/${encodeURIComponent(documentId)}/ops`,
+      json: req,
+    });
+  }
+
   /** Comments on a live document's text, quoted exactly from one block. */
   createLiveThread(
     documentId: string,
@@ -288,16 +348,6 @@ export class PrimerClient {
       method: 'POST',
       path: `/api/documents/${encodeURIComponent(documentId)}/events`,
       json: { events },
-    });
-  }
-
-  /** Records the caller's working status on a document; returns who is
-   *  working on it now. */
-  setStatus(documentId: string, state: DocumentStatusState): Promise<DocumentStatusResponse> {
-    return this.request<DocumentStatusResponse>({
-      method: 'POST',
-      path: `/api/documents/${encodeURIComponent(documentId)}/status`,
-      json: { state },
     });
   }
 
@@ -424,7 +474,7 @@ export class PrimerClient {
       const code = refused !== undefined && PASSED_THROUGH.has(refused) ? (refused as PrimerErrorCode) : statusToCode(res.status);
       const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
       const message = body?.refusal?.fix ? `${base} ${body.refusal.fix}` : base;
-      throw new PrimerApiError(code, message, res.status);
+      throw new PrimerApiError(code, message, res.status, body ?? undefined);
     }
 
     return res;

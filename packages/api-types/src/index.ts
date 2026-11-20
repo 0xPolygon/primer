@@ -452,7 +452,25 @@ export type RefusalCode =
   /** A comment's selection no longer resolves in the live document. */
   | 'target_missing'
   /** The quoted text was not found in the target. */
-  | 'quote_not_found';
+  | 'quote_not_found'
+  /** An op names an agent run that was cancelled or has finished. */
+  | 'run_cancelled'
+  /** An op would remove text an open comment thread is on; `details.threads`
+   *  lists them. Retry with `allowCommentedDelete` once that is intended. */
+  | 'deletes_commented_text'
+  /** An op is malformed or can't apply to the document's structure. */
+  | 'invalid_op'
+  /** The run's edits would pass the large-edit threshold: post a plan and
+   *  wait for a person to approve it. */
+  | 'approval_required'
+  /** The person who asked for the run can't edit the document, so the run
+   *  can't either (it may comment). */
+  | 'requester_cannot_edit'
+  /** An approval named a plan the agent has since replaced. */
+  | 'plan_changed'
+  /** An agent with an active run on the document wrote without its runId;
+   *  `details.runIds` lists the active runs. */
+  | 'run_required';
 
 export interface Refusal {
   code: RefusalCode;
@@ -523,6 +541,114 @@ export interface EditOutcome {
 export interface Reconciliation {
   docVersion: number;
   outcomes: EditOutcome[];
+}
+
+/** The format of a live read's blocks. */
+export type LiveReadFormat = 'markdown' | 'html' | 'json';
+
+/** What the person who asked an agent was looking at (M4 runs). */
+export interface ViewerContext {
+  tabId: string;
+  selectedBlockIds: string[];
+  cursorBlockId: string | null;
+  unsentText?: string;
+}
+
+/** GET /api/documents/:docId/live: one tab's blocks, flattened depth-first
+ *  (children follow their parent with `depth + 1`). With `since`, only the
+ *  blocks changed after that docVersion, plus the ids of deleted ones. */
+export interface LiveDocDTO {
+  documentId: string;
+  docVersion: number;
+  at: 'live';
+  format: LiveReadFormat;
+  tabId: string;
+  blocks: LiveBlockDTO[];
+  deletedIds?: string[];
+  viewer?: ViewerContext;
+}
+
+/** A block an agent writes: Markdown (several top-level nodes make several
+ *  blocks, one list item per block), one HTML element, or BlockNote partial
+ *  block JSON (for custom blocks and props). */
+export type BlockInput = string | { html: string } | { json: Record<string, unknown> };
+
+/** One semantic edit of a live document (POST /api/documents/:docId/ops). */
+export type LiveOp =
+  | { op: 'add'; at: Target; position: 'before' | 'after'; blocks: BlockInput[] }
+  | { op: 'update'; target: Target; block: BlockInput; expectVersion: string }
+  | { op: 'replaceRange'; from: Target; to: Target; blocks: BlockInput[]; expectVersions: Record<string, string> }
+  | { op: 'delete'; target: Target; expectVersion: string }
+  | { op: 'move'; target: Target; at: Target; position: 'before' | 'after'; expectVersion: string };
+
+export interface ApplyOpsRequest {
+  /** The docVersion the agent read (informational: preconditions are per block). */
+  baseVersion: number;
+  ops: LiveOp[];
+  /** The agent run these edits belong to (undo, status, cancel). */
+  runId?: string;
+  /** `suggest` turns a stale op into a suggestion once suggestions exist (M5);
+   *  until then it is a conflict either way. */
+  onConflict?: 'refuse' | 'suggest';
+  /** Allow removing text that open comment threads are on. */
+  allowCommentedDelete?: boolean;
+}
+
+/** A batch refused before anything applied: one refusal per bad op. */
+export interface ApplyOpsRejection {
+  error: RefusalCode;
+  refusal: Refusal;
+  errors: { index: number; refusal: Refusal }[];
+}
+
+export type AgentRunStatus = 'queued' | 'running' | 'failed' | 'done' | 'cancelled';
+
+/** What someone asked an agent: from a comment @-mention, "Send to agent",
+ *  @agent on an empty line (`inline`, answered at `blockId`), or "Ask agent"
+ *  on a selection. `direct` is the run the server opens for an agent's own
+ *  edit without a runId (empty prompt, asked by the agent). `prompt` and
+ *  `viewer.unsentText` are written by people: untrusted data for the agent. */
+export interface AgentRunRequest {
+  kind: 'mention' | 'send' | 'inline' | 'selection' | 'direct';
+  prompt: string;
+  threadId?: string;
+  blockId?: string;
+  viewer: ViewerContext;
+}
+
+/** One agent run on a live document. */
+export interface AgentRunDTO {
+  id: string;
+  documentId: string;
+  agentId: string;
+  requestedBy: string;
+  status: AgentRunStatus;
+  /** Null for viewers other than the requester, the agent and the owner:
+   *  the prompt and unsent text are the requester's. */
+  request: AgentRunRequest | null;
+  statusLine: string | null;
+  error: string | null;
+  editsApplied: number;
+  blocksRemoved: number;
+  /** A large run's plan; ops past the threshold need `planApprovedBy`. */
+  plan: string | null;
+  /** sha256 of `plan`; approving sends it, so only that plan is approved. */
+  planHash: string | null;
+  planApprovedBy: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** POST /api/runs/:runId/approve */
+export interface ApproveRunRequest {
+  planHash: string;
+}
+
+/** POST /api/documents/:docId/runs */
+export interface CreateRunRequest {
+  agentId: string;
+  request: AgentRunRequest;
 }
 
 /** POST /api/documents/:docId/checkpoints */
@@ -1006,16 +1132,18 @@ export interface PrimerVersionPublishedPayload {
   author_id: string;
 }
 
-export type DocumentStatusState = 'working' | 'idle';
-
-/** How long a `working` status counts before it expires unless refreshed. */
-export const DOCUMENT_STATUS_TTL_MS = 10 * 60 * 1000;
-
-export interface PrimerStatusPayload {
+/** Someone asked an agent to work on a document. */
+export interface PrimerRunRequestedPayload {
   document_id: string;
-  state: DocumentStatusState;
+  run_id: string;
+  agent_id: string;
+}
+
+/** A run's status, status line or plan changed. */
+export interface PrimerRunUpdatedPayload {
+  document_id: string;
+  run_id: string;
   by: string;
-  expires_at: string; // ISO
 }
 
 /** Shared records changed. Coalesced per (document, actor) over a short
@@ -1035,27 +1163,22 @@ export interface PrimerEventPayloads {
   'thread.updated': PrimerThreadUpdatedPayload;
   'thread.orphaned': PrimerThreadOrphanedPayload;
   'version.published': PrimerVersionPublishedPayload;
-  status: PrimerStatusPayload;
+  'run.requested': PrimerRunRequestedPayload;
+  'run.updated': PrimerRunUpdatedPayload;
 }
 
 export type PrimerEventType = keyof PrimerEventPayloads;
 
-/** POST /api/documents/:id/status */
-export interface SetDocumentStatusRequest {
-  state: DocumentStatusState;
-}
-
-/** One person currently working on a document (an unexpired `working`). */
-export interface DocumentStatusDTO {
-  by: string;
-  displayName: string;
-  state: 'working';
-  expiresAt: string; // ISO
-}
-
-/** GET /api/documents/:id/status — who is working on the document now. */
-export interface DocumentStatusResponse {
-  statuses: DocumentStatusDTO[];
+/** The Yjs awareness client id the server uses for an agent's cursor and
+ *  status on live documents (fnv1a32 of the agent's id). Clients trust an
+ *  agent state only under this id. */
+export function agentClientId(agentId: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < agentId.length; i++) {
+    hash ^= agentId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
 }
 
 // ───────────────────── Shared records ─────────────────────

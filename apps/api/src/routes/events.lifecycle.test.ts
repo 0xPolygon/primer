@@ -1,6 +1,5 @@
 // Primer's own lifecycle events (namespace `primer`), the caller-scoped
-// stream, resume that cannot skip a row under concurrent commits, and the
-// working status with its expiry.
+// stream, and resume that cannot skip a row under concurrent commits.
 import { describe, it, expect } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,8 +12,7 @@ import { mockMultiResolver } from '../auth/resolver.ts';
 import { db } from '../db/client.ts';
 import { threadPlacements, users } from '../db/schema.ts';
 import { buildMcpToolHandlers } from '../mcp/tools.ts';
-import { setDocumentStatus } from '../lib/events.ts';
-import type { DocumentStatusResponse, EventRowDTO, EventsListResponse } from '@polygonlabs/primer-api-types';
+import type { EventRowDTO, EventsListResponse } from '@polygonlabs/primer-api-types';
 import { asUser, asUserJson } from '../test/harness.ts';
 import { uploadFixture } from './upload.testlib.ts';
 
@@ -242,7 +240,7 @@ describe('GET /api/events/stream?scope=me', () => {
         const writes = Array.from({ length: 40 }, (_, i) => {
           const doc = docs[i % 2];
           if (i % 4 === 0) return newThread(app, doc.versionId, OWNER);
-          if (i % 4 === 1) return setDocumentStatus(doc.documentId, OWNER, 'working');
+          if (i % 4 === 1) return newThread(app, doc.versionId, OWNER);
           return app.request(`/api/documents/${doc.documentId}/events`, {
             method: 'POST',
             headers: asUserJson(OWNER),
@@ -280,44 +278,4 @@ describe('GET /api/events/stream?scope=me', () => {
       }
     });
   }, 30_000);
-});
-
-describe('working status', () => {
-  it('shows a fresh working status by name, drops it after the TTL, and clears it on idle', async () => {
-    await withApp(async (app) => {
-      const { documentId } = await uploadFixture(app);
-      const status = async () =>
-        ((await (await app.request(`/api/documents/${documentId}/status`, { headers: asUser(READER) })).json()) as DocumentStatusResponse)
-          .statuses;
-
-      // Set eleven minutes ago: past the ten-minute TTL.
-      await setDocumentStatus(documentId, OWNER, 'working', new Date(Date.now() - 11 * 60 * 1000));
-      expect(await status()).toEqual([]);
-
-      const set = await app.request(`/api/documents/${documentId}/status`, {
-        method: 'POST',
-        headers: asUserJson(OWNER),
-        body: JSON.stringify({ state: 'working' }),
-      });
-      expect(set.status).toBe(200);
-      const [fresh] = await status();
-      expect(fresh).toMatchObject({ by: OWNER, displayName: expect.any(String), state: 'working' });
-      expect(Date.parse(fresh.expiresAt) - Date.now()).toBeGreaterThan(9 * 60 * 1000);
-
-      // A reader who can't write events can't set a status.
-      const denied = await app.request(`/api/documents/${documentId}/status`, {
-        method: 'POST',
-        headers: asUserJson(READER),
-        body: JSON.stringify({ state: 'working' }),
-      });
-      expect(denied.status).toBe(403);
-
-      await app.request(`/api/documents/${documentId}/status`, {
-        method: 'POST',
-        headers: asUserJson(OWNER),
-        body: JSON.stringify({ state: 'idle' }),
-      });
-      expect(await status()).toEqual([]);
-    });
-  });
 });

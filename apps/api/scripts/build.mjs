@@ -86,6 +86,13 @@ await copyFile(
   resolve(apiRoot, `dist/companion/mermaid-v${mermaidVersion}.js`),
 );
 
+// The authoring skill, served as the MCP resource primer://skills/authoring.
+await mkdir(resolve(apiRoot, 'dist/skills'), { recursive: true });
+await copyFile(
+  resolve(apiRoot, '../../plugins/primer/skills/primer/authoring.md'),
+  resolve(apiRoot, 'dist/skills/authoring.md'),
+);
+
 console.log(
-  `api build complete: dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
+  `api build complete: dist/skills/authoring.md, dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
 );

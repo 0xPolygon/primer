@@ -37,10 +37,10 @@ const badRequest = (message: string, fix: string): LiveThreadResult<never> => ({
   refusal: { code: 'bad_request', message, fix },
 });
 
-type LiveDoc = { id: string; title: string; uploaderId: string; visibility: Visibility; role: EffectiveRole };
+export type LiveDoc = { id: string; title: string; uploaderId: string; visibility: Visibility; role: EffectiveRole };
 
 /** A live (non-deleted) document the user can read, with their role. */
-async function readableLiveDoc(documentId: string, user: AuthUser): Promise<LiveDoc | null> {
+export async function readableLiveDoc(documentId: string, user: AuthUser): Promise<LiveDoc | null> {
   const [doc] = await db
     .select({
       id: documents.id,
