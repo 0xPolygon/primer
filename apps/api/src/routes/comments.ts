@@ -6,9 +6,9 @@ import type { Notifier } from '../notifications/notifier.ts';
 import { logger } from '../logger.ts';
 import type { CommentBodyRequest, CommentDTO, ThreadDTO } from '@polygonlabs/primer-api-types';
 import { COMMENT_UNDO_WINDOW_MS } from '@polygonlabs/primer-api-types';
-import { threads, versions, comments, users } from '../db/schema.ts';
+import { threads, comments, users } from '../db/schema.ts';
 import { db } from '../db/client.ts';
-import { actorName, authorColumns } from '../lib/actors.ts';
+import { loadThread } from '../lib/threadList.ts';
 import { transactionWithEvents, type LifecycleEvent } from '../lib/events.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import {
@@ -39,8 +39,7 @@ async function loadDocContextForThread(
     SELECT d.id AS "docId", d.uploader_id AS "uploaderId",
            d.visibility AS "visibility", d.deleted_at AS "deletedAt"
     FROM threads t
-    INNER JOIN versions v ON v.id = t.version_id
-    INNER JOIN documents d ON d.id = v.document_id
+    INNER JOIN documents d ON d.id = t.document_id
     WHERE t.id = ${threadId}
     LIMIT 1
   `)) as unknown as {
@@ -61,8 +60,7 @@ async function loadDocContextForComment(
            d.visibility AS "visibility", d.deleted_at AS "deletedAt"
     FROM comments c
     INNER JOIN threads t ON t.id = c.thread_id
-    INNER JOIN versions v ON v.id = t.version_id
-    INNER JOIN documents d ON d.id = v.document_id
+    INNER JOIN documents d ON d.id = t.document_id
     WHERE c.id = ${commentId}
     LIMIT 1
   `)) as unknown as {
@@ -81,116 +79,12 @@ function validateBody(raw: unknown): { ok: true; body: string } | { ok: false } 
   return { ok: true, body: trimmed };
 }
 
-interface ThreadRow {
-  id: string;
-  versionId: string;
-  versionNumber: number;
-  anchor: unknown;
-  resolvedAt: Date | null;
-  resolvedBy: string | null;
-  resolvedByDisplayName: string | null;
-  createdAt: Date;
-}
-
-interface CommentRow {
-  id: string;
-  threadId: string;
-  authorId: string;
-  authorDisplayName: string;
-  authorKind: 'person' | 'agent';
-  authorVia: string | null;
-  body: string;
-  mentions: string[];
-  createdAt: Date;
-  updatedAt: Date | null;
-  deletedAt: Date | null;
-}
-
-function commentToDTO(row: CommentRow): CommentDTO {
-  const isTombstoned = row.deletedAt !== null;
-  return {
-    id: row.id,
-    threadId: row.threadId,
-    authorId: row.authorId,
-    authorDisplayName: row.authorDisplayName,
-    authorKind: row.authorKind,
-    authorVia: row.authorVia,
-    body: isTombstoned ? '' : row.body,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt?.toISOString() ?? null,
-    deletedAt: row.deletedAt?.toISOString() ?? null,
-    mentions: row.mentions,
-  };
-}
-
 /** Re-read one comment as a DTO. Used by the routes that mutate a single
  *  comment (edit / delete / restore) to return the row's settled state. */
 async function loadCommentDTO(commentId: string): Promise<CommentDTO | null> {
-  const [row] = (await db
-    .select({
-      id: comments.id,
-      threadId: comments.threadId,
-      authorId: comments.authorId,
-      ...authorColumns,
-      body: comments.body,
-      mentions: comments.mentions,
-      createdAt: comments.createdAt,
-      updatedAt: comments.updatedAt,
-      deletedAt: comments.deletedAt,
-    })
-    .from(comments)
-    .innerJoin(users, eq(users.id, comments.authorId))
-    .where(eq(comments.id, commentId))) as CommentRow[];
-  return row ? commentToDTO(row) : null;
-}
-
-async function loadThreadDTO(threadId: string): Promise<ThreadDTO | null> {
-  const [row] = (await db
-    .select({
-      id: threads.id,
-      versionId: threads.versionId,
-      versionNumber: versions.versionNumber,
-      anchor: threads.anchor,
-      resolvedAt: threads.resolvedAt,
-      resolvedBy: threads.resolvedBy,
-      resolvedByDisplayName: actorName,
-      createdAt: threads.createdAt,
-    })
-    .from(threads)
-    .innerJoin(versions, eq(versions.id, threads.versionId))
-    .leftJoin(users, eq(users.id, threads.resolvedBy))
-    .where(eq(threads.id, threadId))) as ThreadRow[];
+  const [row] = await db.select({ threadId: comments.threadId }).from(comments).where(eq(comments.id, commentId));
   if (!row) return null;
-
-  const commentRows = (await db
-    .select({
-      id: comments.id,
-      threadId: comments.threadId,
-      authorId: comments.authorId,
-      ...authorColumns,
-      body: comments.body,
-      mentions: comments.mentions,
-      createdAt: comments.createdAt,
-      updatedAt: comments.updatedAt,
-      deletedAt: comments.deletedAt,
-    })
-    .from(comments)
-    .innerJoin(users, eq(users.id, comments.authorId))
-    .where(eq(comments.threadId, threadId))
-    .orderBy(comments.createdAt)) as CommentRow[];
-
-  return {
-    id: row.id,
-    versionId: row.versionId,
-    versionNumber: row.versionNumber,
-    anchor: row.anchor as ThreadDTO['anchor'],
-    contextChanged: false,
-    resolvedAt: row.resolvedAt?.toISOString() ?? null,
-    resolvedBy: row.resolvedBy,
-    resolvedByDisplayName: row.resolvedByDisplayName,
-    createdAt: row.createdAt.toISOString(),
-    comments: commentRows.map(commentToDTO),
-  };
+  return (await loadThread(row.threadId))?.comments.find((c) => c.id === commentId) ?? null;
 }
 
 export type ReplyResult =
@@ -221,16 +115,16 @@ export async function replyToThread(
            ${ownerPersonOf(sql`d.uploader_id`)} AS uploader_id,
            v.id AS version_id, v.version_number::int AS version_number
     FROM threads t
-    INNER JOIN versions v ON v.id = t.version_id
-    INNER JOIN documents d ON d.id = v.document_id
+    INNER JOIN documents d ON d.id = t.document_id
+    LEFT JOIN versions v ON v.id = t.version_id
     WHERE t.id = ${threadId}
     LIMIT 1
   `)) as unknown as Array<{
     doc_id: string;
     doc_title: string;
     uploader_id: string;
-    version_id: string;
-    version_number: number;
+    version_id: string | null;
+    version_number: number | null;
   }>;
   if (!threadCtx) {
     return { ok: false, status: 404, error: 'not_found', message: 'thread not found' };
@@ -282,7 +176,7 @@ export async function replyToThread(
       .where(eq(threads.id, threadId));
     emit({
       documentId: threadCtx.doc_id,
-      versionId: threadCtx.version_id,
+      versionId: threadCtx.version_id ?? undefined,
       actorId: user.id,
       type: 'comment.created',
       payload: {
@@ -298,7 +192,7 @@ export async function replyToThread(
   void notifier
     .notifyComment({
       doc: { id: threadCtx.doc_id, title: threadCtx.doc_title },
-      version: { id: threadCtx.version_id, versionNumber: threadCtx.version_number },
+      version: threadCtx.version_id ? { id: threadCtx.version_id, versionNumber: threadCtx.version_number! } : null,
       thread: { id: threadId },
       comment: { id: commentId, body: validation.body, createdAt: insertedAt },
       mentionedUserIds: cleanedMentions,
@@ -308,7 +202,7 @@ export async function replyToThread(
     })
     .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
 
-  const dto = await loadThreadDTO(threadId);
+  const dto = await loadThread(threadId);
   if (!dto) return { ok: false, status: 404, error: 'not_found' };
   const newComment = dto.comments.find((cm) => cm.id === commentId)!;
   return { ok: true, comment: newComment, thread: dto };
@@ -388,22 +282,22 @@ export function registerCommentRoutes(
         SELECT d.id AS doc_id, d.title AS doc_title,
                v.id AS version_id, v.version_number::int AS version_number
         FROM threads t
-        INNER JOIN versions v ON v.id = t.version_id
-        INNER JOIN documents d ON d.id = v.document_id
+        INNER JOIN documents d ON d.id = t.document_id
+        LEFT JOIN versions v ON v.id = t.version_id
         WHERE t.id = ${existing.threadId}
         LIMIT 1
       `)) as unknown as Array<{
         doc_id: string;
         doc_title: string;
-        version_id: string;
-        version_number: number;
+        version_id: string | null;
+        version_number: number | null;
       }>;
 
       if (editCtx) {
         void deps.notifier
           .notifyComment({
             doc: { id: editCtx.doc_id, title: editCtx.doc_title },
-            version: { id: editCtx.version_id, versionNumber: editCtx.version_number },
+            version: editCtx.version_id ? { id: editCtx.version_id, versionNumber: editCtx.version_number! } : null,
             thread: { id: existing.threadId },
             comment: { id: commentId, body: validation.body, createdAt: existing.createdAt },
             mentionedUserIds: newlyAdded,

@@ -537,5 +537,16 @@
   "relativeTime.daysAgo": "hace {count} d",
   "records.noAccess": "Esta página no tiene acceso a los registros.",
   "records.tooMany": "Como máximo {max} llamadas de registros pueden estar en curso.",
-  "records.timeout": "La llamada tardó más de {seconds} s."
+  "records.timeout": "La llamada tardó más de {seconds} s.",
+  "liveEditor.comments": "Comentarios",
+  "liveEditor.showComments": "Mostrar comentarios",
+  "liveEditor.filterOpen": "Abiertos",
+  "liveEditor.filterResolved": "Resueltos",
+  "liveEditor.filterAll": "Todos",
+  "deleteCommented.title": "¿Eliminar texto comentado?",
+  "deleteCommented.body": "Esto elimina texto al que apuntan comentarios abiertos. Los comentarios siguen abiertos, marcados como «Texto eliminado».",
+  "deleteCommented.keep": "Conservar texto",
+  "deleteCommented.confirm": "Eliminar de todos modos",
+  "threads.notDeleted": "Los hilos se resuelven, no se eliminan.",
+  "request.failed": "La solicitud falló ({status})."
 }

@@ -537,5 +537,16 @@
   "relativeTime.daysAgo": "{count} 天前",
   "records.noAccess": "此页面无权访问记录。",
   "records.tooMany": "最多可同时进行 {max} 个记录调用。",
-  "records.timeout": "调用耗时超过 {seconds} 秒。"
+  "records.timeout": "调用耗时超过 {seconds} 秒。",
+  "liveEditor.comments": "评论",
+  "liveEditor.showComments": "显示评论",
+  "liveEditor.filterOpen": "未解决",
+  "liveEditor.filterResolved": "已解决",
+  "liveEditor.filterAll": "全部",
+  "deleteCommented.title": "删除有评论的文本？",
+  "deleteCommented.body": "这会删除未解决评论所指向的文本。评论仍保持打开，并标记为“文本已删除”。",
+  "deleteCommented.keep": "保留文本",
+  "deleteCommented.confirm": "仍然删除",
+  "threads.notDeleted": "讨论串只能解决，不能删除。",
+  "request.failed": "请求失败（{status}）。"
 }

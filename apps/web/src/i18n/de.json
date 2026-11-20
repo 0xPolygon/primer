@@ -537,5 +537,16 @@
   "relativeTime.daysAgo": "vor {count} T.",
   "records.noAccess": "Diese Seite hat keinen Zugriff auf Datensätze.",
   "records.tooMany": "Höchstens {max} Datensatzaufrufe dürfen gleichzeitig laufen.",
-  "records.timeout": "Der Aufruf dauerte länger als {seconds} s."
+  "records.timeout": "Der Aufruf dauerte länger als {seconds} s.",
+  "liveEditor.comments": "Kommentare",
+  "liveEditor.showComments": "Kommentare anzeigen",
+  "liveEditor.filterOpen": "Offen",
+  "liveEditor.filterResolved": "Erledigt",
+  "liveEditor.filterAll": "Alle",
+  "deleteCommented.title": "Kommentierten Text löschen?",
+  "deleteCommented.body": "Damit wird Text entfernt, auf den offene Kommentare verweisen. Die Kommentare bleiben offen und werden als „Text entfernt“ markiert.",
+  "deleteCommented.keep": "Text behalten",
+  "deleteCommented.confirm": "Trotzdem löschen",
+  "threads.notDeleted": "Threads werden erledigt, nicht gelöscht.",
+  "request.failed": "Anfrage fehlgeschlagen ({status})."
 }

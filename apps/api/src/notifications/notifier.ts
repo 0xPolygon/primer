@@ -11,7 +11,8 @@ export interface NotifyCollaboratorAddedArgs {
 
 export interface NotifyCommentArgs {
   doc: { id: string; title: string };
-  version: { id: string; versionNumber: number };
+  /** Null for a comment on a live document. */
+  version: { id: string; versionNumber: number } | null;
   thread: { id: string };
   comment: { id: string; body: string; createdAt: Date };
   mentionedUserIds: string[];

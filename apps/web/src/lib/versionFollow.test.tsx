@@ -73,6 +73,7 @@ function thread(): ThreadDTO {
     versionNumber: 4,
     anchor: { type: 'text-range', selectorText: 'some text', prefix: '', suffix: '', containerPath: 'body' },
     contextChanged: false,
+    orphaned: false,
     resolvedAt: null,
     resolvedBy: null,
     resolvedByDisplayName: null,
@@ -90,6 +91,7 @@ function thread(): ThreadDTO {
         updatedAt: null,
         deletedAt: null,
         mentions: [],
+        reactions: [],
       },
     ],
   };

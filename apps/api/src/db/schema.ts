@@ -14,7 +14,7 @@ import {
   customType,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
-import type { AnchorData } from '@polygonlabs/primer-api-types';
+import type { ThreadAnchor } from '@polygonlabs/primer-api-types';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),                                       // Okta sub (Phase 2) or "mock-user-1" (Phase 1)
@@ -84,10 +84,13 @@ export const threads = pgTable('threads', {
   documentId: uuid('document_id')
     .notNull()
     .references(() => documents.id, { onDelete: 'cascade' }),
-  versionId: uuid('version_id')
-    .notNull()
-    .references(() => versions.id, { onDelete: 'cascade' }),
-  anchor: jsonb('anchor').$type<AnchorData>().notNull(),
+  // Null for a thread on a live document: it belongs to the live content,
+  // anchored by a comment mark, not to a version.
+  versionId: uuid('version_id').references(() => versions.id, { onDelete: 'cascade' }),
+  anchor: jsonb('anchor').$type<ThreadAnchor>().notNull(),
+  // Set while a live thread's comment mark is gone from reachable content
+  // ("Text removed"); the thread stays open and keeps its quote.
+  orphanedAt: timestamp('orphaned_at', { withTimezone: true }),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
   resolvedBy: text('resolved_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -107,7 +110,7 @@ export const threadPlacements = pgTable(
     versionId: uuid('version_id')
       .notNull()
       .references(() => versions.id, { onDelete: 'cascade' }),
-    anchor: jsonb('anchor').$type<AnchorData>(),
+    anchor: jsonb('anchor').$type<ThreadAnchor>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -134,6 +137,22 @@ export const comments = pgTable(
     byThreadAlive: index('comments_thread_id_alive_idx')
       .on(t.threadId)
       .where(sql`${t.deletedAt} IS NULL`),
+  }),
+);
+
+// One emoji reaction per person per comment.
+export const commentReactions = pgTable(
+  'comment_reactions',
+  {
+    commentId: uuid('comment_id')
+      .notNull()
+      .references(() => comments.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => users.id),
+    emoji: text('emoji').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.commentId, t.userId, t.emoji] }),
   }),
 );
 

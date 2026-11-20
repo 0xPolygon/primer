@@ -238,7 +238,7 @@ export async function loadCarryOrigins(
     .innerJoin(versions, eq(versions.id, threads.versionId))
     .where(OPEN_THREADS_WHERE(documentId));
   const texts = new Map<string, BodyText>();
-  for (const o of origins) texts.set(o.id, bodyText(await new Response(await storage.get(o.storageKey)).text()));
+  for (const o of origins) texts.set(o.id!, bodyText(await new Response(await storage.get(o.storageKey)).text()));
   return texts;
 }
 
@@ -272,10 +272,10 @@ export async function carryOpenThreads(
     if (isElementPathAnchor(t.anchor)) {
       anchor = t.anchor;
     } else if (isTextRangeAnchor(t.anchor)) {
-      let origin = args.origins.get(t.originVersionId);
+      let origin = args.origins.get(t.originVersionId!);
       if (!origin) {
         origin = bodyText(await new Response(await storage.get(t.originStorageKey)).text());
-        args.origins.set(t.originVersionId, origin);
+        args.origins.set(t.originVersionId!, origin);
       }
       anchor = placeTextRange(t.anchor, origin, target);
     }

@@ -22,6 +22,8 @@ import type {
   EventRowDTO,
   TextRangeAnchor,
   ElementPathAnchor,
+  ThreadAnchor,
+  ViewerRole,
   VersionsListResponse,
 } from '@polygonlabs/primer-api-types';
 import { useDocument, useDeleteDocument, useEditDocument } from '../queries/documents.ts';
@@ -96,13 +98,25 @@ export function DocumentSurface(props: {
   readOnly: boolean;
   theme: 'light' | 'dark';
   userName: string;
+  userId: string;
+  role: ViewerRole;
+  canComment: boolean;
   onOpenLegacyVersion?: (versionNumber: number) => void;
   frame: () => ReactNode;
 }) {
   if (!props.live) return <>{props.frame()}</>;
   return (
     <Suspense fallback={<div className="p-4 text-sm text-neutral-500">{t('document.loadingEditor')}</div>}>
-      <LiveEditor documentId={props.documentId} readOnly={props.readOnly} theme={props.theme} userName={props.userName} onOpenLegacyVersion={props.onOpenLegacyVersion} />
+      <LiveEditor
+        documentId={props.documentId}
+        readOnly={props.readOnly}
+        theme={props.theme}
+        userName={props.userName}
+        userId={props.userId}
+        role={props.role}
+        canComment={props.canComment}
+        onOpenLegacyVersion={props.onOpenLegacyVersion}
+      />
     </Suspense>
   );
 }
@@ -259,7 +273,7 @@ function DocumentPageInner() {
     () =>
       threads
         .filter((t) => hasAnyComments(t) && !t.contextChanged)
-        .map((t) => ({ id: t.id, data: t.anchor })),
+        .flatMap((t) => (isVersionAnchor(t.anchor) ? [{ id: t.id, data: t.anchor }] : [])),
     [threads]
   );
 
@@ -1037,6 +1051,9 @@ function DocumentPageInner() {
             readOnly={!canEdit}
             theme={theme}
             userName={me.data?.displayName ?? t('document.someone')}
+            userId={me.data?.id ?? ''}
+            role={docQuery.data?.myRole ?? 'stranger'}
+            canComment={docQuery.data?.canComment ?? false}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
             frame={() =>
               currentVersionId && (
@@ -1180,4 +1197,10 @@ function DocumentPageInner() {
     </div>
     </DraftReporterContext.Provider>
   );
+}
+
+/** Anchors the companion places in a version's HTML (live anchors are marks
+ *  in the live document instead). */
+function isVersionAnchor(anchor: ThreadAnchor): anchor is AnchorData {
+  return anchor.type === 'text-range' || anchor.type === 'element-path';
 }

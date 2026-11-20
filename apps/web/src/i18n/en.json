@@ -537,5 +537,16 @@
   "relativeTime.daysAgo": "{count}d ago",
   "records.noAccess": "This page has no record access.",
   "records.tooMany": "At most {max} record calls may be in flight.",
-  "records.timeout": "The call took longer than {seconds} s."
+  "records.timeout": "The call took longer than {seconds} s.",
+  "liveEditor.comments": "Comments",
+  "liveEditor.showComments": "Show comments",
+  "liveEditor.filterOpen": "Open",
+  "liveEditor.filterResolved": "Resolved",
+  "liveEditor.filterAll": "All",
+  "deleteCommented.title": "Delete commented text?",
+  "deleteCommented.body": "This removes text that open comments point at. The comments stay open, marked \"Text removed\".",
+  "deleteCommented.keep": "Keep text",
+  "deleteCommented.confirm": "Delete anyway",
+  "threads.notDeleted": "Threads are resolved, not deleted.",
+  "request.failed": "Request failed ({status})."
 }
