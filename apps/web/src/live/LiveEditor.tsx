@@ -43,6 +43,7 @@ export type LiveEditorProps = {
   userName: string;
   userId: string;
   role: ViewerRole;
+  canComment: boolean;
   /** Opens a version from before the document went live in the version viewer. */
   onOpenLegacyVersion?: (versionNumber: number) => void;
   /** The viewer's previous visit (document detail `lastView`): catch-up shows what changed since. */
@@ -117,6 +118,7 @@ function TabEditor({
   userName,
   userId,
   role,
+  canComment,
   onOpenLegacyVersion,
   store,
   catchUp,
@@ -135,9 +137,9 @@ function TabEditor({
       new PrimerThreadStore(documentId, tabId, {
         id: userId,
         isOwner: role === 'owner',
-        canComment: role !== 'stranger',
+        canComment,
       }),
-    [documentId, tabId, userId, role],
+    [documentId, tabId, userId, role, canComment],
   );
   useThreadEvents(documentId, () => void threadStore.refresh());
 
