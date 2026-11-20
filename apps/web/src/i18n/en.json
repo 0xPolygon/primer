@@ -734,6 +734,8 @@
   "suggestDraft.failed": "Sending the suggestions failed ({status}).",
   "suggestDraft.sent": "Suggestions sent: {count}",
   "headerActions.savingCheckpoint": "Saving…",
-  "document.checkpointUnchanged": "No changes since checkpoint v{number}",
-  "document.viewCheckpoint": "View"
+  "document.checkpointUnchanged": "Checkpoint v{number} saved, with no edits since v{previous}",
+  "document.viewCheckpoint": "View",
+  "connectionStatus.live": "Live",
+  "connectionStatus.offline": "Offline — changes not saved"
 }

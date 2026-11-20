@@ -734,6 +734,8 @@
   "suggestDraft.failed": "发送建议失败（{status}）。",
   "suggestDraft.sent": "已发送 {count} 条建议",
   "headerActions.savingCheckpoint": "正在保存…",
-  "document.checkpointUnchanged": "自检查点 v{number} 以来没有修改",
-  "document.viewCheckpoint": "查看"
+  "document.checkpointUnchanged": "已保存检查点 v{number}，自 v{previous} 以来没有编辑",
+  "document.viewCheckpoint": "查看",
+  "connectionStatus.live": "实时",
+  "connectionStatus.offline": "离线 — 修改未保存"
 }

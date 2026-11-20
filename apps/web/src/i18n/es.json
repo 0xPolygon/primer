@@ -734,6 +734,8 @@
   "suggestDraft.failed": "No se pudieron enviar las sugerencias ({status}).",
   "suggestDraft.sent": "Sugerencias enviadas: {count}",
   "headerActions.savingCheckpoint": "Guardando…",
-  "document.checkpointUnchanged": "Sin cambios desde el punto de control v{number}",
-  "document.viewCheckpoint": "Ver"
+  "document.checkpointUnchanged": "Punto de control v{number} guardado, sin cambios desde v{previous}",
+  "document.viewCheckpoint": "Ver",
+  "connectionStatus.live": "En vivo",
+  "connectionStatus.offline": "Sin conexión: cambios sin guardar"
 }

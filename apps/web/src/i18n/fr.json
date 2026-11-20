@@ -734,6 +734,8 @@
   "suggestDraft.failed": "L’envoi des suggestions a échoué ({status}).",
   "suggestDraft.sent": "Suggestions envoyées : {count}",
   "headerActions.savingCheckpoint": "Enregistrement…",
-  "document.checkpointUnchanged": "Aucun changement depuis le point de contrôle v{number}",
-  "document.viewCheckpoint": "Voir"
+  "document.checkpointUnchanged": "Point de contrôle v{number} enregistré, sans modification depuis v{previous}",
+  "document.viewCheckpoint": "Voir",
+  "connectionStatus.live": "En direct",
+  "connectionStatus.offline": "Hors ligne — modifications non enregistrées"
 }

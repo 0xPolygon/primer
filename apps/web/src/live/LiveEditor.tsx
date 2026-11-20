@@ -25,7 +25,7 @@ import { MAIN_TAB, tabFragmentName } from './tabs.ts';
 import { PrimerThreadStore } from './PrimerThreadStore.ts';
 import { commentDeleteGuard, type HeldDelete } from './commentDeleteGuard.ts';
 import { DeleteCommentedDialog } from './DeleteCommentedDialog.tsx';
-import { useThreadEvents } from './threadEvents.ts';
+import { relayLiveEvents, useThreadEvents } from './threadEvents.ts';
 import { SuggestionsPanel } from './SuggestionsPanel.tsx';
 import { SuggestDraft, type DraftBlock } from './SuggestDraft.tsx';
 import { ThreadActions } from './ThreadActions.tsx';
@@ -75,6 +75,7 @@ export default function LiveEditor(props: LiveEditorProps) {
 
 function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   const tabs = useTabs(props.live.doc);
+  useEffect(() => relayLiveEvents(props.documentId, props.live.provider), [props.documentId, props.live.provider]);
   const [selected, setSelected] = useState(MAIN_TAB);
   // A tab someone else deleted falls back to the first.
   const active = tabs.some((t) => t.id === selected) ? selected : MAIN_TAB;
@@ -106,7 +107,6 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   return (
     <PrimerBlocksContext.Provider value={withPages}>
       <div className="flex h-full flex-col" data-live-editor={props.documentId}>
-        <ConnectionStatus provider={props.live.provider} />
         <AgentStatus provider={props.live.provider} />
         <TabStrip doc={props.live.doc} tabs={tabs} active={active} onSelect={setSelected} readOnly={props.readOnly} />
         {since && <CatchUpPanel documentId={props.documentId} since={since} onBlocks={setCatchUp} />}
@@ -220,6 +220,7 @@ function TabEditor({
             }}
           />
         )}
+        <ConnectionStatus provider={live.provider} />
         {sentNote && (
           <span role="status" className="hidden truncate text-xs text-emerald-700 sm:inline dark:text-emerald-400">
             {sentNote}

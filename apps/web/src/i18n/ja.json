@@ -734,6 +734,8 @@
   "suggestDraft.failed": "提案の送信に失敗しました（{status}）。",
   "suggestDraft.sent": "{count} 件の提案を送信しました",
   "headerActions.savingCheckpoint": "保存中…",
-  "document.checkpointUnchanged": "チェックポイント v{number} 以降の変更はありません",
-  "document.viewCheckpoint": "表示"
+  "document.checkpointUnchanged": "チェックポイント v{number} を保存しました（v{previous} 以降の編集なし）",
+  "document.viewCheckpoint": "表示",
+  "connectionStatus.live": "ライブ",
+  "connectionStatus.offline": "オフライン — 変更は保存されていません"
 }
