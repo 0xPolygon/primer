@@ -100,7 +100,7 @@ interface ApiErrorBody {
   error?: string;
   message?: string;
   /** Present on refusals: its code and what to do instead. */
-  refusal?: { code?: string; fix?: string };
+  refusal?: { code?: string; message?: string; fix?: string };
 }
 
 /** Refusal codes the tool layer branches on, kept as the server sent them. */
@@ -404,7 +404,7 @@ export class PrimerClient {
       const body = await parseErrorBody(res);
       const refused = body?.refusal?.code;
       const code = refused !== undefined && PASSED_THROUGH.has(refused) ? (refused as PrimerErrorCode) : statusToCode(res.status);
-      const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
+      const base = body?.message ?? body?.refusal?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
       const refusal = body?.refusal?.code
         ? { code: body.refusal.code, fix: body.refusal.fix }
         : undefined;
