@@ -19,6 +19,11 @@ async function taskEvents(doc: string) {
 }
 
 describe('task blocks', () => {
+  it('a due date PostgreSQL cannot store is refused', async () => {
+    const doc = await liveDoc();
+    expect((await addTask(OWNER, doc, { title: 'Year zero', due: '0000-01-01' })).ok).toBe(false);
+  });
+
   it('adding a task block creates a tracked task and emits task.created', async () => {
     const doc = await liveDoc();
     const added = await addTask(OWNER, doc, { title: 'Draft the launch note', assigneeId: AGENT.id, due: '2026-12-01' });

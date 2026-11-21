@@ -38,6 +38,16 @@ export function onLiveUpdate(handler: UpdateHandler): () => void {
   return () => updateHandlers.delete(handler);
 }
 
+const loadHandlers = new Set<(documentId: string) => void>();
+
+/** Runs when a live document has been loaded into memory (indexes kept from
+ *  the document, such as tasks, catch up with what changed while it was
+ *  unloaded). Must not wait on the document itself. */
+export function onLiveLoad(handler: (documentId: string) => void): () => void {
+  loadHandlers.add(handler);
+  return () => loadHandlers.delete(handler);
+}
+
 let instance: Hocuspocus | null = null;
 
 /**
@@ -87,6 +97,7 @@ export function liveInstance(): Hocuspocus {
         for (const handler of updateHandlers) handler(documentId, by, touched);
       };
       document.on('update', onUpdate);
+      for (const handler of loadHandlers) handler(documentId);
       // Detach only once the document is really gone: Hocuspocus keeps it
       // after beforeUnloadDocument when someone connected meanwhile.
       document.on('destroy', () => {
