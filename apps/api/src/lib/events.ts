@@ -711,6 +711,7 @@ export async function activeDocumentStatuses(
       SELECT DISTINCT ON (author_id) author_id, payload
       FROM events
       WHERE document_id = ${documentId} AND namespace = ${PRIMER_EVENT_NAMESPACE} AND type = 'status'
+        AND audience = 'readers'
       ORDER BY author_id, id DESC
     ) latest
     JOIN users u ON u.id = latest.author_id
