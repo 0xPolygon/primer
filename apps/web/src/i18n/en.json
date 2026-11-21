@@ -659,6 +659,7 @@
   "catchUp.tasks": "task changes: {count}",
   "catchUp.decided": "{name} decided “{question}”: {option}",
   "catchUp.cleared": "{name} cleared a decision",
+  "catchUp.picked": "{name} picked an option",
   "catchUp.commented": "{name} commented on “{quote}”",
   "catchUp.replied": "{name} replied on “{quote}”",
   "catchUp.resolved": "{name} resolved “{quote}”",

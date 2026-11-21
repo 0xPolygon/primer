@@ -659,6 +659,7 @@
   "catchUp.tasks": "タスクの変更: {count}",
   "catchUp.decided": "{name} が「{question}」を決定: {option}",
   "catchUp.cleared": "{name} が決定を取り消しました",
+  "catchUp.picked": "{name} が選択肢を選びました",
   "catchUp.commented": "{name} が「{quote}」にコメントしました",
   "catchUp.replied": "{name} が「{quote}」に返信しました",
   "catchUp.resolved": "{name} が「{quote}」を解決しました",

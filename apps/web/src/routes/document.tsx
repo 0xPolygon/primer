@@ -184,6 +184,12 @@ function DocumentPageInner() {
   const { docId, versionNumber: versionNumberParam } = useParams();
   const navigate = useNavigate();
   const docQuery = useDocument(docId ?? '');
+  // This visit's baseline: the previous visit as the server reported it on this
+  // page's own fetch, not the cached copy of an earlier one.
+  const [visit, setVisit] = useState<{ docId: string; lastView: CatchUpSince | null } | null>(null);
+  useEffect(() => {
+    if (docId && docQuery.data && !docQuery.isFetching && visit?.docId !== docId) setVisit({ docId, lastView: docQuery.data.lastView ?? null });
+  }, [docId, docQuery.data, docQuery.isFetching, visit?.docId]);
   const versionsQuery = useVersionsQuery(docId ?? '');
   const queryClient = useQueryClient();
   const versions = versionsQuery.data?.versions ?? [];
@@ -1042,7 +1048,7 @@ function DocumentPageInner() {
             role={docQuery.data?.myRole ?? 'stranger'}
             canComment={docQuery.data?.canComment ?? false}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
-            lastView={docQuery.data?.lastView ?? null}
+            lastView={visit && visit.docId === docId ? visit.lastView : undefined}
             frame={() =>
               currentVersionId && (
                 <ArtifactIframe

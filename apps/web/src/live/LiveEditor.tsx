@@ -79,7 +79,11 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // browser is always a person's session).
   const { services, store } = useBlockServices(props.documentId, { canPick: !props.readOnly, canVote: props.canVote });
   // Taken once: a refetch of the document records a newer visit.
-  const [since] = useState(() => props.lastView ?? null);
+  // `undefined`: the visit's fetch has not answered yet.
+  const [since, setSince] = useState(props.lastView);
+  useEffect(() => {
+    if (since === undefined && props.lastView !== undefined) setSince(props.lastView);
+  }, [since, props.lastView]);
   const [catchUp, setCatchUp] = useState<Target[]>([]);
   // Page blocks render their frame and overlay through the block services.
   const { live, documentId, readOnly, theme, userId, role, userName, canComment } = props;
@@ -260,7 +264,7 @@ function TabEditor({
               <option value="all">{t('liveEditor.filterAll')}</option>
             </select>
             <ThreadsSidebar filter={filter} />
-            <ThreadActions store={threadStore} canPromote />
+            <ThreadActions store={threadStore} canPromote canReanchor={canComment} />
           </div>
         )}
         <div

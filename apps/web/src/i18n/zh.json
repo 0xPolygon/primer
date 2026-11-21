@@ -659,6 +659,7 @@
   "catchUp.tasks": "任务变更：{count}",
   "catchUp.decided": "{name} 决定了“{question}”：{option}",
   "catchUp.cleared": "{name} 撤销了一项决定",
+  "catchUp.picked": "{name} 选择了一个选项",
   "catchUp.commented": "{name} 评论了“{quote}”",
   "catchUp.replied": "{name} 回复了“{quote}”",
   "catchUp.resolved": "{name} 解决了“{quote}”",
