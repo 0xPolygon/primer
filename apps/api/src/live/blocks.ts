@@ -23,7 +23,25 @@ function stripAnnotations(json: NodeJson): NodeJson {
     if (marks.length > 0) out.marks = marks;
     else delete out.marks;
   }
-  if (json.content) out.content = json.content.map(stripAnnotations);
+  if (json.content) out.content = mergeTextRuns(json.content.map(stripAnnotations));
+  return out;
+}
+
+/** A comment on part of a run splits its text node; with the mark gone the
+ *  pieces must read as the one run they were, or the version would change. */
+function mergeTextRuns(nodes: NodeJson[]): NodeJson[] {
+  const out: NodeJson[] = [];
+  for (const node of nodes) {
+    const last = out[out.length - 1];
+    if (
+      last && last.type === 'text' && node.type === 'text' &&
+      JSON.stringify(last.marks ?? null) === JSON.stringify(node.marks ?? null)
+    ) {
+      out[out.length - 1] = { ...last, text: `${last.text as string}${node.text as string}` };
+    } else {
+      out.push(node);
+    }
+  }
   return out;
 }
 
