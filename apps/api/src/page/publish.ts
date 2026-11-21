@@ -188,7 +188,7 @@ export async function republishPage(
   const carried = planCarry({ tabId: page.tabId, blockId: page.blockId, previous, next, uncertain: prepared.uncertain, decisions });
   const edits: PlannedEdit[] = suggesting ? carried : [
     ...carried,
-    ...(await seedPage({ tabId: page.tabId, blockId: page.blockId, stamped: prepared.stamped, pids: [] })),
+    ...(await seedPage({ tabId: page.tabId, blockId: page.blockId, stamped: prepared.stamped, pids: [], previous: previousStamped })),
     {
       target: { tabId: page.tabId, blockId: page.blockId },
       inverse: true,
