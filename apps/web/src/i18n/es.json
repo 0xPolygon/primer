@@ -549,6 +549,7 @@
   "deleteCommented.body": "Esto elimina texto al que apuntan comentarios abiertos. Los comentarios siguen abiertos, marcados como «Texto eliminado».",
   "deleteCommented.keep": "Conservar texto",
   "deleteCommented.confirm": "Eliminar de todos modos",
+  "deleteCommented.stale": "El documento cambió mientras decidías. No se eliminó nada; vuelve a hacer el cambio.",
   "threads.notDeleted": "Los hilos se resuelven, no se eliminan.",
   "request.failed": "La solicitud falló ({status}).",
   "suggestions.acceptFailed": "No se pudo aceptar ({status}).",

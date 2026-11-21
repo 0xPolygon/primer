@@ -291,7 +291,18 @@ async function applyWrite(
   if (Buffer.byteLength(json, 'utf8') > MAX_RECORD_BYTES) {
     throw new Refused(refuse('records_cap', `A record holds at most ${MAX_RECORD_BYTES} bytes of data.`).refusal);
   }
-  const version = (current?.version ?? 0) + 1;
+  // A record recreated after a delete continues from its change count, so
+  // its version never repeats one a reader may have seen.
+  let previous = current?.version ?? 0;
+  if (!current) {
+    const [seen] = (await tx.execute(sql`
+      SELECT count(*)::int AS count FROM doc_record_changes
+       WHERE document_id = ${documentId} AND collection = ${op.collection} AND scope = ${op.scope}
+         AND ${owner === null ? sql`owner_user_id IS NULL` : sql`owner_user_id = ${owner}`} AND record_id = ${op.recordId}
+    `)) as unknown as { count: number }[];
+    previous = seen.count;
+  }
+  const version = previous + 1;
   // A full set is the writer's alone; a merge or a revert adds the writer to
   // whoever shaped the content it keeps.
   const kept = op.verb === 'update' ? current!.contributors : (restoredContributors ?? []);
@@ -399,8 +410,8 @@ async function readPage(
       conditions.push(sql`r.data @> ${JSON.stringify(args.where)}::jsonb`);
     }
     if (args.orderBy !== undefined) {
-      const o = args.orderBy as { key?: unknown; dir?: unknown };
-      if (typeof o.key !== 'string' || !RECORD_KEY_RE.test(o.key) || (o.dir !== 'asc' && o.dir !== 'desc')) {
+      const o = args.orderBy as { key?: unknown; dir?: unknown } | null;
+      if (o === null || typeof o !== 'object' || typeof o.key !== 'string' || !RECORD_KEY_RE.test(o.key) || (o.dir !== 'asc' && o.dir !== 'desc')) {
         return refuse('bad_request', 'orderBy must be { key, dir: "asc" | "desc" }');
       }
       order = o.dir === 'asc'
@@ -432,7 +443,10 @@ export type RecordsApi = {
 
 /** The records verbs for one caller on one document. Every verb checks
  *  access itself, so callers (REST, MCP, the bridge via REST) can't skip it. */
-export function recordsApi(actor: AuthUser, documentId: string): RecordsApi {
+export function recordsApi(actor: AuthUser, rawDocumentId: string): RecordsApi {
+  // Ids match case-insensitively but the lock key and data.changed key hash
+  // the spelling, so one canonical spelling keeps every writer on one lock.
+  const documentId = rawDocumentId.toLowerCase();
   const gate = async (write: boolean): Promise<RecordsResult<Access>> => {
     const a = await access(documentId, actor);
     if (!a) return refuse('not_found', 'Document not found.');
@@ -546,9 +560,10 @@ function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
  *  personal ones (never anyone else's). Readers of the document only. */
 export async function listRecordChanges(
   actor: AuthUser,
-  documentId: string,
+  rawDocumentId: string,
   args: { since?: number; limit?: number },
 ): Promise<RecordsResult<RecordChangesResponse>> {
+  const documentId = rawDocumentId.toLowerCase();
   const since = args.since ?? 0;
   if (!Number.isInteger(since) || since < 0) return refuse('bad_request', 'since must be a non-negative change id');
   const limit = parseLimit(args.limit);
@@ -606,9 +621,10 @@ export async function revertChange(changeId: number, actor: AuthUser): Promise<R
  *  user's personal change log. */
 export async function purgePersonalRecords(
   actor: AuthUser,
-  documentId: string,
+  rawDocumentId: string,
   userId: unknown,
 ): Promise<RecordsResult<{ deleted: number }>> {
+  const documentId = rawDocumentId.toLowerCase();
   if (typeof userId !== 'string' || userId.length === 0) return refuse('bad_request', 'userId is required');
   // Erasing people's data is a person's decision. Agents own what they
   // upload and OAuth tokens carry no scopes, so neither the role nor the

@@ -47,9 +47,12 @@ export async function getLiveDoc(documentId: string, actor: AuthUser, opts: Live
   const snapshot = await withDoc(documentId, (ydoc) => {
     if (!tabsOf(ydoc).some((t) => t.id === tabId)) return null;
     const pmDoc = fragmentDoc(ydoc.getXmlFragment(tabFragmentName(tabId)));
+    // Only a `since` read needs the ids present in every tab.
     const present = new Set<string>();
-    for (const tab of tabsOf(ydoc)) {
-      for (const id of blockIds(fragmentDoc(ydoc.getXmlFragment(tabFragmentName(tab.id))))) present.add(id);
+    if (opts.since !== undefined) {
+      for (const tab of tabsOf(ydoc)) {
+        for (const id of blockIds(fragmentDoc(ydoc.getXmlFragment(tabFragmentName(tab.id))))) present.add(id);
+      }
     }
     // Taken in the same tick as the content, so it names exactly this state.
     const stored = persistedUpTo(ydoc);
@@ -84,7 +87,7 @@ export async function getLiveDoc(documentId: string, actor: AuthUser, opts: Live
 
   let deletedIds: string[] | undefined;
   if (opts.since !== undefined) {
-    const touched = await touchedSince(documentId, opts.since);
+    const touched = await touchedSince(documentId, opts.since, docVersion);
     flat = flat.filter((b) => touched.has(b.block.id));
     deletedIds = [...touched].filter((id) => !snapshot.present.has(id) && !snapshot.roots.has(id));
   }
@@ -144,9 +147,9 @@ function blockIds(pmDoc: PmNode): string[] {
 }
 
 /** Block ids (and auxiliary root names) the updates after `since` touched. */
-async function touchedSince(documentId: string, since: number): Promise<Set<string>> {
+async function touchedSince(documentId: string, since: number, upTo: number): Promise<Set<string>> {
   const rows = (await db.execute(sql`
-    SELECT DISTINCT unnest(touched) AS id FROM doc_updates WHERE document_id = ${documentId} AND id > ${since}
+    SELECT DISTINCT unnest(touched) AS id FROM doc_updates WHERE document_id = ${documentId} AND id > ${since} AND id <= ${upTo}
   `)) as unknown as { id: string }[];
   return new Set(rows.map((r) => r.id));
 }

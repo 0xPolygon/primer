@@ -549,6 +549,7 @@
   "deleteCommented.body": "未解決のコメントが指しているテキストを削除します。コメントは「テキストが削除されました」と表示されたまま残ります。",
   "deleteCommented.keep": "テキストを残す",
   "deleteCommented.confirm": "削除する",
+  "deleteCommented.stale": "確認している間にドキュメントが変更されました。何も削除されていません。もう一度操作してください。",
   "threads.notDeleted": "スレッドは削除ではなく解決します。",
   "request.failed": "リクエストに失敗しました（{status}）。",
   "suggestions.acceptFailed": "承認できませんでした（{status}）。",

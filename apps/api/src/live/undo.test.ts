@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AuthUser } from '../app.ts';
 import { liveDocName, liveInstance } from './instance.ts';
-import { createLiveDoc, makeAgent, markdownOf, ops, paragraph, seedBlocks, until, versions } from './live.testlib.ts';
+import { comment, createLiveDoc, makeAgent, markdownOf, ops, paragraph, seedBlocks, until, versions } from './live.testlib.ts';
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { claimRun, finishRun, requestRun } from './runs.ts';
@@ -151,6 +151,44 @@ describe('undoRun', () => {
 
     await undo(runId);
     expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta']);
+  });
+
+  it('undo of a whole-tab replacement restores the blocks', async () => {
+    const { agent, id, runId } = await setup();
+    const v = await versions(id, agent);
+    await ops(id, agent, {
+      runId,
+      ops: [{ op: 'replaceRange', from: main('a'), to: main('d'), blocks: ['Only'], expectVersions: { a: v.a, b: v.b, c: v.c, d: v.d } }],
+    });
+    expect(await markdownOf(id, agent)).toEqual(['Only']);
+
+    const result = await undo(runId);
+    expect(result.outcomes.every((o) => o.status === 'applied')).toBe(true);
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta']);
+  });
+
+  it('undo leaves a block a comment was added to since the run', async () => {
+    const { agent, id, runId } = await setup();
+    const v = await versions(id, agent);
+    await ops(id, agent, { runId, ops: [{ op: 'update', target: main('b'), block: 'Beta by agent', expectVersion: v.b }] });
+    await comment(id, 'b', 'Beta by agent');
+
+    const result = await undo(runId);
+    expect(result.outcomes[0]).toMatchObject({ status: 'conflict', refusal: { code: 'target_changed' } });
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta by agent', 'Gamma', 'Delta']);
+  });
+
+  it('undo of a move leaves a block a person moved since', async () => {
+    const { agent, id, runId } = await setup();
+    const v = await versions(id, agent);
+    await ops(id, agent, { runId, ops: [{ op: 'move', target: main('a'), at: main('c'), position: 'after', expectVersion: v.a }] });
+    const w = await versions(id, agent);
+    await ops(id, owner, { ops: [{ op: 'move', target: main('a'), at: main('d'), position: 'after', expectVersion: w.a }] });
+    expect(await markdownOf(id, agent)).toEqual(['Beta', 'Gamma', 'Delta', 'Alpha']);
+
+    const result = await undo(runId);
+    expect(result.outcomes[0]).toMatchObject({ status: 'conflict', refusal: { code: 'target_changed' } });
+    expect(await markdownOf(id, agent)).toEqual(['Beta', 'Gamma', 'Delta', 'Alpha']);
   });
 
   it("a requester demoted to commenter can't undo", async () => {
