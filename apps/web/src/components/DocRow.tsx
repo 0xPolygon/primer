@@ -4,6 +4,7 @@ import type { LibraryDocument, FolderDTO } from '@polygonlabs/primer-api-types';
 import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 import { DocKebabMenu } from './DocKebabMenu.tsx';
 import { DocFolderChip } from './DocFolderChip.tsx';
+import { useMe } from '../queries/me.ts';
 import { relativeTime } from '../lib/relativeTime.ts';
 
 export interface DocRowProps {
@@ -13,8 +14,10 @@ export interface DocRowProps {
 }
 
 export function DocRow({ doc, folders, selectedFolderId }: DocRowProps) {
+  // `mine` includes what the caller's agents uploaded; those keep their byline.
+  const { data: me } = useMe();
   const subtitle =
-    doc.ownership === 'mine'
+    doc.ownership === 'mine' && doc.uploaderId === me?.id
       ? doc.description ?? ''
       : doc.description
         ? t('docRow.byAuthorWithDescription', { name: doc.uploaderDisplayName, description: doc.description })

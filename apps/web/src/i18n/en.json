@@ -590,6 +590,7 @@
   "deleteCommented.body": "This removes text that open comments point at. The comments stay open, marked \"Text removed\".",
   "deleteCommented.keep": "Keep text",
   "deleteCommented.confirm": "Delete anyway",
+  "deleteCommented.stale": "The document changed while you were deciding. Nothing was deleted; make the change again.",
   "threads.notDeleted": "Threads are resolved, not deleted.",
   "request.failed": "Request failed ({status}).",
   "suggestions.acceptFailed": "Could not accept ({status}).",

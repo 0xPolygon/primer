@@ -590,6 +590,7 @@
   "deleteCommented.body": "Damit wird Text entfernt, auf den offene Kommentare verweisen. Die Kommentare bleiben offen und werden als „Text entfernt“ markiert.",
   "deleteCommented.keep": "Text behalten",
   "deleteCommented.confirm": "Trotzdem löschen",
+  "deleteCommented.stale": "Das Dokument hat sich geändert, während Sie entschieden haben. Es wurde nichts gelöscht; nehmen Sie die Änderung erneut vor.",
   "threads.notDeleted": "Threads werden erledigt, nicht gelöscht.",
   "suggestions.acceptFailed": "Annehmen fehlgeschlagen ({status}).",
   "suggestions.rejectFailed": "Ablehnen fehlgeschlagen ({status}).",
