@@ -73,15 +73,17 @@ function okText(text: string): ToolResult {
   return { content: [{ type: 'text', text }] };
 }
 
-function err(code: PrimerErrorCode | 'bad_request', message: string): ToolResult {
+function err(code: string, message: string, fix?: string): ToolResult {
   return {
     isError: true,
-    content: [{ type: 'text', text: JSON.stringify({ code, message }) }],
+    content: [{ type: 'text', text: JSON.stringify(fix ? { code, message, fix } : { code, message }) }],
   };
 }
 
 function errFromException(e: unknown): ToolResult {
-  if (e instanceof PrimerApiError) return err(e.code, e.message);
+  if (e instanceof PrimerApiError) {
+    return e.refusal ? err(e.refusal.code, e.message, e.refusal.fix) : err(e.code, e.message);
+  }
   const message = e instanceof Error ? e.message : String(e);
   return err('bad_request', message);
 }
@@ -93,7 +95,7 @@ function errFromException(e: unknown): ToolResult {
  *  byte-level reproduction errors on the way). */
 function resolveContent(
   args: Record<string, unknown>,
-): { ok: true; value: string } | { ok: false; result: ToolResult } {
+): { ok: true; value: string | Buffer } | { ok: false; result: ToolResult } {
   const hasInline = typeof args.content === 'string' && args.content.length > 0;
   const hasPath = typeof args.contentPath === 'string' && args.contentPath.length > 0;
   if (hasInline === hasPath) {
@@ -108,7 +110,7 @@ function resolveContent(
     return { ok: false, result: err('bad_request', '`contentPath` must be an absolute path.') };
   }
   try {
-    return { ok: true, value: fs.readFileSync(p, 'utf8') };
+    return { ok: true, value: fs.readFileSync(p) };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return { ok: false, result: err('bad_request', `Could not read contentPath: ${message}`) };
