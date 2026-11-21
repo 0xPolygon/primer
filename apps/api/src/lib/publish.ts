@@ -148,6 +148,8 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       if (existingId === undefined) {
         await tx.insert(documents).values({ id: documentId, title: title!, description, uploaderId: actor.id });
       } else {
+        // NO KEY UPDATE still serialises version allocation but does not conflict with the KEY SHARE
+        // an events writer takes (FK check) while holding the events lock.
         await tx.execute(sql`SELECT id FROM documents WHERE id = ${documentId} FOR NO KEY UPDATE`);
         const [row] = (await tx.execute(sql`
           SELECT COALESCE(MAX(version_number), 0)::int AS latest FROM versions WHERE document_id = ${documentId}
