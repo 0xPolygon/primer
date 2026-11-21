@@ -117,11 +117,13 @@ export async function replyToThread(
     FROM threads t
     INNER JOIN documents d ON d.id = t.document_id
     LEFT JOIN LATERAL (
-      -- A thread carried onto newer versions lives on its newest placement.
+      -- A thread carried onto newer versions lives on its newest placement; a
+      -- live thread (no version of its own) has a placement per checkpoint but
+      -- stays on the live document.
       SELECT pv.id, pv.version_number
       FROM thread_placements tp
       INNER JOIN versions pv ON pv.id = tp.version_id
-      WHERE tp.thread_id = t.id
+      WHERE tp.thread_id = t.id AND t.version_id IS NOT NULL
       UNION ALL
       SELECT ov.id, ov.version_number FROM versions ov WHERE ov.id = t.version_id
       ORDER BY version_number DESC
