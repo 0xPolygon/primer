@@ -173,8 +173,12 @@ describe('undoRun', () => {
     await ops(id, agent, { runId, ops: [{ op: 'update', target: main('b'), block: 'Beta by agent', expectVersion: v.b }] });
     await comment(id, 'b', 'Beta by agent');
 
+    // Like any block changed since, it becomes a restore suggestion, which
+    // can't be accepted while the comment is on it.
     const result = await undo(runId);
-    expect(result.outcomes[0]).toMatchObject({ status: 'conflict', refusal: { code: 'target_changed' } });
+    expect(result.outcomes[0]).toMatchObject({ status: 'suggested', suggestionId: expect.any(String) });
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta by agent', 'Gamma', 'Delta']);
+    expect(await decideSuggestion(result.outcomes[0]!.suggestionId!, owner, 'accept')).toMatchObject({ ok: false });
     expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta by agent', 'Gamma', 'Delta']);
   });
 
