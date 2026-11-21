@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { placeReopened } from '../lib/threadCarry.ts';
 import { v7 as uuidv7 } from 'uuid';
 import { eq, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps } from '../app.ts';
@@ -265,6 +266,7 @@ export async function replyToThread(
       .update(threads)
       .set({ resolvedAt: null, resolvedBy: null })
       .where(eq(threads.id, threadId));
+    await placeReopened(tx, threadId);
   });
 
   void notifier
