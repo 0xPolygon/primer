@@ -24,11 +24,13 @@ export interface MenuInput {
   includeShare?: boolean;
   /** Live documents export their content (Markdown or text, and HTML). */
   live?: boolean;
+  /** A page document exports as HTML only (it has no Markdown). */
+  page?: boolean;
 }
 
 /** Pure function: given who's viewing, return the ordered menu items. The
  *  caller maps each item to a click handler. */
-export function buildMenuItems({ isUploader, includeShare = false, live = false }: MenuInput): MenuItem[] {
+export function buildMenuItems({ isUploader, includeShare = false, live = false, page = false }: MenuInput): MenuItem[] {
   const items: MenuItem[] = [];
   if (includeShare && isUploader) {
     items.push({ id: 'share', label: t('libDocumentActionsMenu.share') });
@@ -36,7 +38,7 @@ export function buildMenuItems({ isUploader, includeShare = false, live = false 
   }
   if (live) {
     items.push(
-      { id: 'export-markdown', label: t('libDocumentActionsMenu.exportMarkdown') },
+      ...(page ? [] : [{ id: 'export-markdown' as const, label: t('libDocumentActionsMenu.exportMarkdown') }]),
       { id: 'export-html', label: t('libDocumentActionsMenu.exportHtml') },
       { id: 'export-print', label: t('libDocumentActionsMenu.printPdf') },
       { id: 'separator' },

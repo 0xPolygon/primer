@@ -102,6 +102,8 @@ export function DocumentSurface(props: {
   role: ViewerRole;
   canComment: boolean;
   onOpenLegacyVersion?: (versionNumber: number) => void;
+  onArtifactMessage?: (msg: InboundProtocolMessage) => void;
+  registerArtifactSender?: (send: ((msg: OutboundProtocolMessage) => void) | null) => void;
   frame: () => ReactNode;
 }) {
   if (!props.live) return <>{props.frame()}</>;
@@ -117,6 +119,8 @@ export function DocumentSurface(props: {
         role={props.role}
         canComment={props.canComment}
         onOpenLegacyVersion={props.onOpenLegacyVersion}
+        onArtifactMessage={props.onArtifactMessage}
+        registerArtifactSender={props.registerArtifactSender}
       />
     </Suspense>
   );
@@ -874,6 +878,7 @@ function DocumentPageInner() {
     onAddVersion: canEdit && !readMostly && !isLive ? () => setShowAddVersion(true) : undefined,
     onSaveCheckpoint: liveView && canEdit ? saveCheckpoint : undefined,
     onExport: isLive ? exportAs : undefined,
+    page: docQuery.data?.document.format === 'html',
     isUploader,
     onShare: () => setShowShare(true),
     onOpenFullScreen: openFullScreen,
@@ -1040,6 +1045,8 @@ function DocumentPageInner() {
             role={docQuery.data?.myRole ?? 'stranger'}
             canComment={docQuery.data?.canComment ?? false}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
+            onArtifactMessage={onMessage}
+            registerArtifactSender={registerSender}
             frame={() =>
               currentVersionId && (
                 <ArtifactIframe

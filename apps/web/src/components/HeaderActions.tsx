@@ -35,6 +35,8 @@ interface Props {
   onSaveCheckpoint?: () => Promise<ActionFeedback>;
   /** Live documents: downloads the content in a format. */
   onExport?: (format: 'markdown' | 'html' | 'print') => void;
+  /** The document is a page: no Markdown export. */
+  page?: boolean;
 }
 
 type MenuState = 'closed' | 'menu' | 'confirm';
@@ -56,6 +58,7 @@ export function HeaderActions({
   onDelete,
   onSaveCheckpoint,
   onExport,
+  page,
 }: Props) {
   const [menuState, setMenuState] = useState<MenuState>('closed');
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
@@ -198,7 +201,7 @@ export function HeaderActions({
             role="menu"
             className="absolute right-0 z-10 mt-1 w-56 overflow-hidden rounded border border-neutral-200 bg-white py-1 shadow-md dark:border-neutral-800 dark:bg-neutral-900"
           >
-            {buildMenuItems({ isUploader, includeShare: variant === 'mobile', live: onExport !== undefined }).map(
+            {buildMenuItems({ isUploader, includeShare: variant === 'mobile', live: onExport !== undefined, page }).map(
               (item, index) => {
                 if (item.id === 'separator') {
                   return (
