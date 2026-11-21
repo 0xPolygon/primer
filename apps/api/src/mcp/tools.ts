@@ -46,7 +46,12 @@ export type PrimerErrorCode =
 
 export interface TextContent { type: 'text'; text: string; }
 export interface ToolResult { isError?: boolean; content: TextContent[]; }
-export type ToolHandler = (args: Record<string, unknown>, user: AuthUser) => Promise<ToolResult>;
+/** `scopes` are the request token's (null or absent = an unrestricted credential). */
+export type ToolHandler = (
+  args: Record<string, unknown>,
+  user: AuthUser,
+  scopes?: readonly ApiTokenScope[] | null,
+) => Promise<ToolResult>;
 
 export interface ToolDeps {
   storage: Storage;
@@ -988,7 +993,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       return ok(found);
     },
 
-    primer_add_collaborator: async (args, user) => {
+    primer_add_collaborator: async (args, user, scopes) => {
       const doc = documentIdArg(args);
       if ('error' in doc) return doc.error;
       const userId = typeof args.userId === 'string' && args.userId.length > 0 ? args.userId : undefined;
@@ -998,6 +1003,10 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       }
       if (!isCollaboratorRole(args.role)) {
         return err('bad_request', 'role must be commenter, responder or editor');
+      }
+      // Resolving an email is a user lookup: it needs the same scope as primer_lookup_user.
+      if (email !== undefined && scopes != null && !scopes.includes('users:read')) {
+        return err('forbidden', 'adding by email needs the users:read scope; pass userId instead');
       }
       const out = await addCollaborator(user, doc.id, { userId, email, role: args.role }, deps.notifier);
       return out.ok ? ok(out.value) : collaboratorErr(out);
