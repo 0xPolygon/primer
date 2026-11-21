@@ -374,7 +374,7 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
         details: { editsApplied: now.editsApplied, blocksRemoved: now.blocksRemoved },
       };
     },
-    afterPersist: async ({ inverses }: { inverses: BlockInverse[] }) => {
+    beforeWrite: async ({ inverses }: { inverses: BlockInverse[] }) => {
       if (inverses.length === 0) return;
       await db.insert(runInverses).values(
         inverses.map((inv) => ({

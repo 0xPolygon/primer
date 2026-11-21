@@ -168,7 +168,7 @@ async function applyScoped(
       }
       return null;
     },
-    afterPersist: hooks?.afterPersist,
+    beforeWrite: hooks?.beforeWrite,
   });
 
   const outcomes: EditOutcome[] = [];

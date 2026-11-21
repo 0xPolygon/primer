@@ -76,8 +76,12 @@ export type Plan = {
    *  Y.Doc (e.g. to `dryRun` the plan); a refusal turns every edit into a
    *  conflict carrying it (e.g. a cancelled run). */
   guard?: (doc: Y.Doc) => Promise<Refusal | null>;
-  /** Runs once the update is stored, with its docVersion (e.g. to write the
-   *  run's inverses). */
+  /** Runs on the queue after the edits are built and before the update
+   *  commits (e.g. to write the run's inverses, so a crash can't leave an
+   *  edit without them; if the write then fails the rows are inert: their
+   *  `after_version` never matches). */
+  beforeWrite?: (result: { inverses: BlockInverse[] }) => Promise<void>;
+  /** Runs once the update is stored, with its docVersion. */
   afterPersist?: (result: { docVersion: number; inverses: BlockInverse[] }) => Promise<void>;
 };
 
@@ -107,6 +111,7 @@ export async function applyPlan(documentId: string, origin: LiveOrigin, plan: Pl
         return { outcomes, inverses: [] as BlockInverse[] };
       }
       const prepared = prepare(doc, plan.edits);
+      if (plan.beforeWrite && prepared.inverses.length > 0) await plan.beforeWrite({ inverses: prepared.inverses });
       if (prepared.writes.length > 0) {
         await connection.transact(() => {
           for (const write of prepared.writes) {
