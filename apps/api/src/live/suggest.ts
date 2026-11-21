@@ -18,14 +18,14 @@ import { canEdit } from '../lib/permissions.ts';
 import { fenceUntrusted } from '../lib/untrusted.ts';
 import { blockVersion, findBlock } from './blocks.ts';
 import { serverEditor } from './editor.ts';
-import { liveDocName, liveInstance } from './instance.ts';
+import { liveDocName, liveInstance, withLiveDocument } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
 import { removeBlock } from './ops.ts';
 import { originFor, SYSTEM_ORIGIN } from './origin.ts';
 import { applyPlan, contentVersion, type PlannedEdit } from './pipeline.ts';
 import type { SuggestedEdit } from './proposals.ts';
 import { docQueue } from './queue.ts';
-import { fragmentName } from './reach.ts';
+import { fragmentName, reachableFragments } from './reach.ts';
 import { insertAt } from './undo.ts';
 
 export type { SuggestedEdit, Proposal } from './proposals.ts';
@@ -164,7 +164,7 @@ export async function decideSuggestion(id: string, actor: AuthUser, decision: De
   let accepted = false;
   const result = await applyPlan(row.documentId, originFor(actor), {
     onConflict: 'refuse',
-    edits: [acceptEdit(row)],
+    edits: [acceptEdit(row, (await goneRows(row.documentId, [row])).has(row.id))],
     guard: async () => {
       const [open] = (await db.execute(sql`
         SELECT 1 AS hit FROM suggestions WHERE id = ${row.id} AND document_id = ${row.documentId} AND status = 'open'
@@ -218,9 +218,10 @@ export async function decideChangeSet(
     });
     return { ok: true, value: { docVersion: await currentDocVersion(documentId), outcomes: [] } };
   }
+  const gone = await goneRows(documentId, rows);
   const result = await applyPlan(documentId, originFor(actor), {
     onConflict: 'refuse',
-    edits: rows.map(acceptEdit),
+    edits: rows.map((r) => acceptEdit(r, gone.has(r.id))),
     guard: async () => {
       const [open] = (await db.execute(sql`
         SELECT count(*)::int AS n FROM suggestions
@@ -266,13 +267,20 @@ function closedRefusal(): { ok: false; status: 409; refusal: Refusal } {
 
 /** The whole suggestion as one planned edit, so it applies entirely or not
  *  at all: every edit's base is checked against the document as it is. */
-function acceptEdit(row: Row): PlannedEdit {
+function acceptEdit(row: Row, gone: boolean): PlannedEdit {
   const schema = serverEditor().editor.pmSchema;
   const first = row.edits[0]!;
   return {
     target: { ...first.target, tabId: row.tabId },
     inverse: false,
     build: (tr) => {
+      if (gone) {
+        return {
+          code: 'target_missing',
+          message: 'The page text or label this suggestion changes is no longer in the document; nothing was applied.',
+          fix: 'Reject it: its text was removed after it was made.',
+        };
+      }
       const stale: { blockId: string; reason: string }[] = [];
       for (const edit of row.edits) {
         const reason = staleness(tr.doc, edit);
@@ -293,6 +301,13 @@ function acceptEdit(row: Row): PlannedEdit {
       }
     },
   };
+}
+
+/** The suggestions of `rows` whose page text, embed or widget label fragment the document no longer reaches. */
+async function goneRows(documentId: string, rows: Row[]): Promise<Set<string>> {
+  const reachable = new Set(await withLiveDocument(documentId, (doc) => reachableFragments(doc)));
+  const sub = (e: SuggestedEdit) => e.target.pid !== undefined || e.target.textId !== undefined || e.target.embedId !== undefined;
+  return new Set(rows.filter((r) => r.edits.some((e) => sub(e) && !reachable.has(fragmentName({ ...e.target, tabId: r.tabId })))).map((r) => r.id));
 }
 
 /** Why an edit no longer applies to `doc`, or null when it does. */
