@@ -241,10 +241,14 @@ export class PrimerClient {
   }
 
   /** The open suggestions on a live document (fenced for agents). */
-  listSuggestions(documentId: string): Promise<SuggestionsResponse> {
+  listSuggestions(documentId: string, opts: { tabId?: string; after?: string } = {}): Promise<SuggestionsResponse> {
+    const query = new URLSearchParams();
+    if (opts.tabId) query.set('tabId', opts.tabId);
+    if (opts.after) query.set('after', opts.after);
+    const qs = query.size > 0 ? `?${query}` : '';
     return this.request<SuggestionsResponse>({
       method: 'GET',
-      path: `/api/documents/${encodeURIComponent(documentId)}/suggestions`,
+      path: `/api/documents/${encodeURIComponent(documentId)}/suggestions${qs}`,
     });
   }
 

@@ -13,6 +13,7 @@ import { docQueue } from './queue.ts';
 import { effectiveAgentMode } from '../lib/permissions.ts';
 import { fragmentName } from './reach.ts';
 import { storeProposals, type Proposal, type SuggestedEdit } from './proposals.ts';
+import type { SourceEntry } from './sources.ts';
 
 export type { LiveOrigin } from './origin.ts';
 export type { BlockPlace } from '@polygonlabs/primer-api-types';
@@ -50,6 +51,10 @@ export type PlannedEdit = {
   inverse: boolean;
   /** Called with the blocks the edit created or changed (as stored), once it applied. */
   applied?: (blocks: AppliedBlock[]) => void;
+  /** The import provenance this edit gives its blocks (`entry`) or takes from
+   *  a group it removes (`drop`, the entry's key). A suggestion of the edit
+   *  carries it, so accepting it writes the same `sources`. */
+  source?: { entry?: SourceEntry; drop?: string };
 };
 
 /**
@@ -102,7 +107,7 @@ export type Plan = {
   guard?: (doc: Y.Doc, ctx: { suggesting: boolean }) => Promise<Refusal | null>;
   /** Runs once the update is stored, with its docVersion (e.g. to write the
    *  run's inverses). */
-  afterPersist?: (result: { docVersion: number; inverses: BlockInverse[] }) => Promise<void>;
+  afterPersist?: (result: { docVersion: number; inverses: BlockInverse[]; outcomes: EditOutcome[] }) => Promise<void>;
   /** Runs inside the write's Yjs transaction, after the fragments were
    *  written (e.g. to rewrite `sources`). Synchronous. */
   alsoWrite?: (doc: Y.Doc, outcomes: EditOutcome[], suggesting: boolean) => void;
@@ -154,7 +159,7 @@ export async function applyPlan(documentId: string, origin: LiveOrigin, plan: Pl
       return { outcomes: prepared.outcomes, inverses: prepared.inverses };
     });
     const docVersion = await persistedUpTo(doc);
-    if (plan.afterPersist) await plan.afterPersist({ docVersion, inverses: step.inverses });
+    if (plan.afterPersist) await plan.afterPersist({ docVersion, inverses: step.inverses, outcomes: step.outcomes });
     return { docVersion, outcomes: step.outcomes };
   } finally {
     await connection.disconnect({ unloadImmediately: false });
@@ -205,7 +210,7 @@ export function dryRun(doc: Y.Doc, edits: PlannedEdit[]): DryRun {
 /** Synchronous: locate, check, build and capture inverses for every edit;
  *  edits that become suggestions are diffed into proposals, never written. */
 function prepare(doc: Y.Doc, plan: Plan, suggestMode: boolean) {
-  const fragments = new Map<string, { fragment: Y.XmlFragment; tr: Transform }>();
+  const fragments = new Map<string, { fragment: Y.XmlFragment; tr: Transform; virtual?: Transform }>();
   const outcomes: EditOutcome[] = [];
   const inverses: BlockInverse[] = [];
   const movedAll = new Set<string>();
@@ -216,6 +221,10 @@ function prepare(doc: Y.Doc, plan: Plan, suggestMode: boolean) {
   const propose = (index: number, edit: PlannedEdit, scratch: Transform, moved: Set<string>, conflict: boolean): boolean => {
     const edits = forwardDiff(scratch.before, scratch.doc, moved, edit.target.tabId);
     if (edits.length === 0) return false;
+    if (edit.source) {
+      const carrier = edits.find((e) => e.target.blockId === (edit.source!.entry?.groupIds[0] ?? edit.target.blockId)) ?? edits[0]!;
+      carrier.source = edit.source;
+    }
     const id = uuidv7();
     proposals.push({ id, tabId: edit.target.tabId, edits, conflict });
     outcomes.push({
@@ -251,7 +260,10 @@ function prepare(doc: Y.Doc, plan: Plan, suggestMode: boolean) {
       entry = { fragment, tr: new Transform(toPmDoc(fragment)) };
       fragments.set(name, entry);
     }
-    const base = entry.tr.doc;
+    // Suggestions are never written, but each is built on the document as the
+    // earlier ones would leave it, so two new neighbours anchor in order.
+    if (suggestMode && !entry.virtual) entry.virtual = new Transform(entry.tr.doc);
+    const base = suggestMode ? entry.virtual!.doc : entry.tr.doc;
     const at = findBlock(base, edit.target.blockId);
     const conflict = (refusal: Refusal) => {
       if (refusal.code === 'target_changed' && plan.onConflict === 'suggest' && suggestInstead(index, edit, base, at)) return;
@@ -277,6 +289,7 @@ function prepare(doc: Y.Doc, plan: Plan, suggestMode: boolean) {
     }
     if (suggestMode) {
       if (!propose(index, edit, scratch, moved, false)) outcomes.push({ index, target: edit.target, status: 'unchanged' });
+      else for (const step of scratch.steps) entry.virtual!.step(step);
       return;
     }
     for (const step of scratch.steps) entry.tr.step(step);
@@ -335,6 +348,55 @@ export function indexBlocks(root: PmNode): Map<string, Indexed> {
     if (child.type.name === 'blockGroup') walk(child, null, 0);
   });
   return out;
+}
+
+/** Indexes of `seq` (distinct numbers) that make a longest increasing subsequence. */
+export function longestIncreasing(seq: number[]): Set<number> {
+  const tails: number[] = [];
+  const prev: number[] = new Array(seq.length).fill(-1);
+  seq.forEach((value, i) => {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (seq[tails[mid]!]! < value) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0) prev[i] = tails[lo - 1]!;
+    tails[lo] = i;
+  });
+  const keep = new Set<number>();
+  for (let i = tails.length > 0 ? tails[tails.length - 1]! : -1; i >= 0; i = prev[i]!) keep.add(i);
+  return keep;
+}
+
+/** Blocks present in both docs that changed parent or, within their parent,
+ *  left the longest run of siblings that kept their relative order. */
+export function movedBlocks(before: PmNode, after: PmNode): Set<string> {
+  const b = indexBlocks(before);
+  const a = indexBlocks(after);
+  const moved = new Set<string>();
+  const order = new Map<string, number>();
+  for (const id of a.keys()) order.set(id, order.size);
+  const byParent = new Map<string | null, string[]>();
+  for (const [id, old] of b) {
+    const now = a.get(id);
+    if (!now) continue;
+    if (now.place.parentId !== old.place.parentId) {
+      moved.add(id);
+      continue;
+    }
+    const siblings = byParent.get(old.place.parentId) ?? [];
+    siblings.push(id);
+    byParent.set(old.place.parentId, siblings);
+  }
+  for (const siblings of byParent.values()) {
+    const keep = longestIncreasing(siblings.map((id) => order.get(id)!));
+    siblings.forEach((id, i) => {
+      if (!keep.has(i)) moved.add(id);
+    });
+  }
+  return moved;
 }
 
 /** The blocks one edit created, removed, changed or moved. */

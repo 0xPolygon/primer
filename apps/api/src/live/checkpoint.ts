@@ -12,7 +12,7 @@ import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
-import { applyPlan, type PlannedEdit } from './pipeline.ts';
+import { applyPlan, movedBlocks, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 import { tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
@@ -142,7 +142,9 @@ export async function restoreCheckpoint(
       return {
         target: { tabId: tab.id, blockId: '' },
         inverse: false,
-        build: (tr) => {
+        build: (tr, _at, ctx) => {
+          // Reordered blocks are moves: a suggestion lists them too.
+          for (const id of movedBlocks(tr.doc, tr.doc.copy(content))) ctx.moved(id);
           tr.replaceWith(0, tr.doc.content.size, content);
         },
       };
