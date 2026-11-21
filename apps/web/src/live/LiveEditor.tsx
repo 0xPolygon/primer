@@ -73,6 +73,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // Choice and task blocks reach the API through these (people pick; the
   // browser is always a person's session).
   const { services, store } = useBlockServices(props.documentId, { canPick: !props.readOnly, canVote: props.canVote });
+  useEffect(() => store.watch(props.live.doc), [store, props.live.doc]);
   return (
     <PrimerBlocksContext.Provider value={services}>
       <div className="flex h-full flex-col" data-live-editor={props.documentId}>

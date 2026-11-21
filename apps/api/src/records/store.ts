@@ -598,13 +598,14 @@ export async function revertChange(changeId: number, actor: AuthUser): Promise<R
   const notFound = refuse('not_found', 'Change not found.');
   if (!row) return notFound;
   if (row.scope === 'personal' && row.ownerUserId !== actor.id) return notFound;
-  const reserved = reservedWrite(row);
-  if (reserved) return refuse('bad_request', reserved);
   const a = await access(row.documentId, actor);
   if (!a) return notFound;
   if (row.scope === 'shared' ? !canEdit(a.role) : !a.canWrite) {
     return refuse('forbidden', 'Only the document owner or an editor can revert shared record changes.');
   }
+  // After the access checks, so a caller without access learns nothing (change ids are sequential).
+  const reserved = reservedWrite(row);
+  if (reserved) return refuse('bad_request', reserved);
   const op: RecordBatchOp = row.before === null
     ? { verb: 'delete', collection: row.collection, scope: row.scope, recordId: row.recordId }
     : { verb: 'set', collection: row.collection, scope: row.scope, recordId: row.recordId, data: row.before };
