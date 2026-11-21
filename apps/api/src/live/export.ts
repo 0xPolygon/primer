@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import * as Y from 'yjs';
-import { optionLabel } from '@primer/blocks';
+import { embedDocumentId, embedUrl, optionLabel } from '@primer/blocks';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
 import { MAIN_TAB, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { sourcePreview } from './import.ts';
@@ -190,7 +190,7 @@ function assemble(parts: Part[], texts: (string | null)[]): string {
 /** Changed blocks as Markdown. Source blocks are their (edited) Markdown. */
 async function markdownOf(blocks: PrimerBlock[]): Promise<string> {
   const out: string[] = [];
-  for (const segment of segments(blocks)) {
+  for (const segment of segments(flattenColumns(blocks))) {
     out.push(
       isSource(segment[0]!)
         ? segment.map((b) => String((b.props as { markdown: string }).markdown).replace(/\n+$/, '')).join('\n\n')
@@ -212,6 +212,16 @@ async function htmlOf(blocks: PrimerBlock[]): Promise<string> {
   return out.join('');
 }
 
+/** Column lists as their columns' blocks in reading order, so source blocks
+ *  inside columns are emitted as written and the rest serialised normally. */
+function flattenColumns(blocks: PrimerBlock[]): PrimerBlock[] {
+  return blocks.flatMap((block) =>
+    block.type === 'columnList'
+      ? flattenColumns((block.children as PrimerBlock[]).flatMap((column) => column.children as PrimerBlock[]))
+      : [block],
+  );
+}
+
 /** Runs of consecutive blocks that are all `source` blocks or all not. */
 function segments(blocks: PrimerBlock[]): PrimerBlock[][] {
   const out: PrimerBlock[][] = [];
@@ -227,8 +237,16 @@ function isSource(block: PrimerBlock): boolean {
   return block.type === 'source';
 }
 
+/** An embed as text: its validated link (another document as its path). */
+function embedText(block: PrimerBlock): string {
+  const props = block.props as Record<string, unknown>;
+  const documentId = embedDocumentId(props.documentId);
+  return documentId ? `/d/${documentId}` : embedUrl(props.url);
+}
+
 /** A block's text, hard breaks as newlines, children indented below it. */
 export function plainText(block: PrimerBlock): string {
+  if (block.type === 'embed') return embedText(block);
   const inline = (content: unknown): string => {
     if (typeof content === 'string') return content;
     if (!Array.isArray(content)) {

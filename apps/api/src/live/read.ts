@@ -11,7 +11,7 @@ import { liveDocName, liveInstance } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
 import type { AppliedBlock } from './pipeline.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
-import { persistedUpTo } from './persist.ts';
+import { BLOCK_ELEMENTS, persistedUpTo } from './persist.ts';
 import { MAIN_TAB, tabFragmentName, tabsOf } from './reach.ts';
 
 export type LiveReadOptions = {
@@ -103,7 +103,7 @@ type FlatBlock = { block: PrimerBlock; version: string; depth: number; parentId:
 function flatten(pmDoc: PmNode, tabId: string): FlatBlock[] {
   const versions = new Map<string, string>();
   pmDoc.descendants((node) => {
-    if (node.type.name === 'blockContainer') versions.set(node.attrs.id as string, blockVersion(node));
+    if (BLOCK_ELEMENTS.has(node.type.name)) versions.set(node.attrs.id as string, blockVersion(node));
     return true;
   });
   const out: FlatBlock[] = [];
@@ -137,7 +137,7 @@ async function toDTO(entry: FlatBlock, format: LiveReadFormat): Promise<LiveBloc
 function blockIds(pmDoc: PmNode): string[] {
   const ids: string[] = [];
   pmDoc.descendants((node) => {
-    if (node.type.name === 'blockContainer') ids.push(node.attrs.id as string);
+    if (BLOCK_ELEMENTS.has(node.type.name)) ids.push(node.attrs.id as string);
     return true;
   });
   return ids;

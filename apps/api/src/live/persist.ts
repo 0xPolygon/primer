@@ -173,7 +173,7 @@ export function compact(documentId: string, opts: { above?: number } = {}): Prom
 }
 
 /** Elements that are blocks: BlockNote's container plus Primer's layout blocks. */
-const BLOCK_ELEMENTS = new Set([
+export const BLOCK_ELEMENTS = new Set([
   'blockContainer',
   ...Object.values(primerSchema.blockSpecs).flatMap((spec) => (spec.config.layoutOnly ? [spec.config.type] : [])),
 ]);

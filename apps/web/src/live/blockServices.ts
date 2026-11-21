@@ -159,20 +159,21 @@ export function useEmbedState(documentId: string, blockId: string, url: string, 
     let timer: ReturnType<typeof setTimeout> | undefined;
     const ask = async (attempt: number) => {
       let answer: EmbedState = { status: 'none' };
-      let current = false;
+      // Only an answer for another URL (the document changed under the request) is worth asking again.
+      let stale = false;
       try {
         const res = await fetchImpl(`/api/documents/${encodeURIComponent(documentId)}/embeds/${encodeURIComponent(blockId)}`);
         if (res.ok) {
           const body = (await res.json()) as EmbedResponse;
-          current = embedUrl(body.echo.url) === url && embedDocumentId(body.echo.documentId) === targetId;
-          if (body.kind === 'link') answer = { status: 'link', url: body.url, title: body.title, description: body.description, siteName: body.siteName, image: body.image };
+          if (embedUrl(body.echo.url) !== url || embedDocumentId(body.echo.documentId) !== targetId) stale = true;
+          else if (body.kind === 'link') answer = { status: 'link', url: body.url, title: body.title, description: body.description, siteName: body.siteName, image: body.image };
           else if (body.kind === 'document') answer = { status: 'document', documentId: body.documentId, title: body.title, excerpt: body.excerpt };
         }
       } catch {
         // Offline: nothing to show.
       }
       if (!live) return;
-      if (!current && attempt < 4) timer = setTimeout(() => void ask(attempt + 1), 600 * (attempt + 1));
+      if (stale && attempt < 4) timer = setTimeout(() => void ask(attempt + 1), 600 * (attempt + 1));
       else setState(answer);
     };
     timer = setTimeout(() => void ask(0), 250);
