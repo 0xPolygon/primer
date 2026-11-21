@@ -389,7 +389,11 @@ function DocumentPageInner() {
       },
       onDocChange: (row) =>
         row.type === 'version.published' ? follower.onVersionPublished() : onDocChangeRef.current(row),
-      onResync: () => onResyncRef.current(),
+      // A version.published that landed before the stream was up never came through it.
+      onResync: () => {
+        onResyncRef.current();
+        follower.onVersionPublished();
+      },
       fetchImpl: (url) => api(url),
       eventSourceFactory: browserEventSourceFactory,
     });

@@ -8,7 +8,7 @@ import type {
   CheckpointResponse, DocFileUploadResponse, ExportFormat, Refusal, RestoreCheckpointResponse,
 } from '@polygonlabs/primer-api-types';
 import { docFiles, documents, versions, users } from '../db/schema.ts';
-import { exportFileOf, readBundleFile } from '../live/bundle.ts';
+import { exportFileOf, readBundleFile, storedFiles } from '../live/bundle.ts';
 import { createCheckpoint, restoreCheckpoint } from '../live/checkpoint.ts';
 import { exportHtml, exportMarkdown, exportText } from '../live/export.ts';
 import { withLiveDocument } from '../live/instance.ts';
@@ -431,6 +431,9 @@ export function registerDocumentRoutes(
       } catch {
         return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
       }
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return c.json({ error: 'invalid_body', message: 'body must be a JSON object' }, 400);
+      }
       if (body.note !== undefined && body.note !== null && typeof body.note !== 'string') {
         return c.json({ error: 'invalid_body', message: 'note must be a string' }, 400);
       }
@@ -474,6 +477,12 @@ export function registerDocumentRoutes(
     if (format !== 'markdown' && format !== 'text' && format !== 'html') {
       return c.json({ error: 'invalid_query', message: 'format must be markdown, text or html' }, 400);
     }
+    // The document keeps its own format: asking for the other one is refused
+    // the same way for the live state and for a checkpoint.
+    const own = exportFileOf(access.format);
+    if (format !== 'html' && own !== (format === 'text' ? 'export.txt' : 'export.md')) {
+      return c.json({ error: 'invalid_query', message: `this document exports ${own} and export.html` }, 400);
+    }
     const versionParam = c.req.query('version');
     let body: string | Uint8Array<ArrayBuffer>;
     if (versionParam !== undefined) {
@@ -485,16 +494,12 @@ export function registerDocumentRoutes(
             .where(sql`${versions.documentId} = ${docId} AND ${versions.versionNumber} = ${number}`)
         : [];
       if (!version?.bundleKey) return c.json({ error: 'not_found' }, 404);
-      const own = exportFileOf(access.format);
       const file = format === 'html' ? 'export.html' : own;
-      if (format !== 'html' && file !== (format === 'text' ? 'export.txt' : 'export.md')) {
-        return c.json({ error: 'invalid_query', message: `checkpoints keep ${own} and export.html` }, 400);
-      }
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
       await ensureSigningKey(deps.storage);
       body = await withLiveDocument(docId, (doc) =>
-        format === 'html' ? exportHtml(doc, access.title) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
+        format === 'html' ? exportHtml(doc, access.title, storedFiles(deps.storage, docId)) : format === 'text' ? exportText(doc, docId) : exportMarkdown(doc, docId),
       );
     }
     const ext = format === 'html' ? 'html' : format === 'text' ? 'txt' : 'md';
