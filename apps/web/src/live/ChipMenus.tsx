@@ -26,7 +26,7 @@ export function ChipMenus({ editor }: { editor: PrimerEditor }) {
           aliases: ['date', 'today', 'when', 'due'],
           group: t('chips.group'),
           onItemClick: () => {
-            editor.insertInlineContent([{ type: 'date', props: { date: new Date().toISOString().slice(0, 10) } }, ' ']);
+            editor.insertInlineContent([{ type: 'date', props: { date: localDate(new Date()) } }, ' ']);
           },
         },
         {
@@ -65,4 +65,10 @@ export function ChipMenus({ editor }: { editor: PrimerEditor }) {
       <SuggestionMenuController triggerCharacter="@" getItems={mentionItems} />
     </>
   );
+}
+
+/** Today as the reader's calendar date (YYYY-MM-DD); toISOString is UTC and can be a day off. */
+function localDate(d: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
 }

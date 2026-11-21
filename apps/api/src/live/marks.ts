@@ -119,6 +119,25 @@ export function quoteMarkEdit(threadId: string, target: Target, quote: string): 
   };
 }
 
+/** Removes the comment mark of `threadId` from a whole tab: the undo of a mark
+ *  placed for a thread whose rows could not be written. */
+export function removeMarkEdit(threadId: string, tabId: string): PlannedEdit {
+  return {
+    target: { tabId, blockId: '' },
+    inverse: false,
+    build: (tr) => {
+      const marks: { from: number; to: number; mark: ReturnType<Schema['mark']> }[] = [];
+      tr.doc.descendants((node, pos) => {
+        for (const mark of node.marks) {
+          if (mark.type.name === COMMENT && mark.attrs.threadId === threadId) marks.push({ from: pos, to: pos + node.nodeSize, mark });
+        }
+        return true;
+      });
+      for (const m of marks) tr.removeMark(m.from, m.to, m.mark);
+    },
+  };
+}
+
 function addComment(
   doc: PmNode,
   range: { from: number; to: number },

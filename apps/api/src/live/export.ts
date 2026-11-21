@@ -4,6 +4,7 @@ import * as Y from 'yjs';
 import { readBlocks, serverEditor, type PrimerBlock } from './editor.ts';
 import { MAIN_TAB, tabFragmentName, tabsOf, type Tab } from './reach.ts';
 import { sourcePreview } from './import.ts';
+import { blockIndex } from './blocks.ts';
 import { groupVersion, pmDocOf, trustedMeta, trustedSources } from './sources.ts';
 
 /**
@@ -13,32 +14,51 @@ import { groupVersion, pmDocOf, trustedMeta, trustedSources } from './sources.ts
  * order, each under a `# <title>` heading.
  */
 export async function exportMarkdown(doc: Y.Doc, documentId: string): Promise<string> {
+  // Every tab is planned before the first await, so a concurrent edit to the
+  // live document can't change what the later tabs or the titles see.
+  const list = tabsOf(doc);
+  const planned = list.map((tab) => planTab(doc, documentId, tab.id));
   const tabs: string[] = [];
-  for (const tab of tabsOf(doc)) {
-    const parts = planTab(doc, documentId, tab.id);
+  for (const parts of planned) {
     tabs.push(assemble(parts, await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(p.run) : null)))));
   }
-  return joinTabs(tabsOf(doc), tabs, (title) => `# ${title}`);
+  return joinTabs(list, tabs, (title) => `# ${title}`, true);
 }
 
 /** The document as plain text, by the same rule; tabs follow under their title. */
 export function exportText(doc: Y.Doc, documentId: string): string {
-  const tabs = tabsOf(doc).map((tab) => {
+  const list = tabsOf(doc);
+  const tabs = list.map((tab) => {
     const parts = planTab(doc, documentId, tab.id);
     return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
   });
-  return joinTabs(tabsOf(doc), tabs, (title) => title);
+  return joinTabs(list, tabs, (title) => title);
 }
 
 /** Main's text, then each later tab under its heading, a blank line between. */
-function joinTabs(tabs: Tab[], texts: string[], heading: (title: string) => string): string {
+function joinTabs(tabs: Tab[], texts: string[], heading: (title: string) => string, markdown = false): string {
   let out = texts[0] ?? '';
   tabs.slice(1).forEach((tab, k) => {
+    // A tab that ends inside a code fence must not swallow the next heading.
+    if (markdown) out = closeOpenFence(out);
     if (out.length > 0) out = out.replace(/\n*$/, '\n\n');
-    const body = texts[k + 1]!.replace(/\n+$/, '');
+    const body = markdown ? closeOpenFence(texts[k + 1]!).replace(/\n+$/, '') : texts[k + 1]!.replace(/\n+$/, '');
     out += heading(oneLine(tab.title) || 'Untitled') + '\n' + (body ? `\n${body}\n` : '');
   });
   return out;
+}
+
+/** `text` with its last fenced code block closed, when it was left open. */
+function closeOpenFence(text: string): string {
+  let open: { char: string; length: number } | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!m) continue;
+    const fence = m[1]!;
+    if (!open) open = { char: fence[0]!, length: fence.length };
+    else if (fence[0] === open.char && fence.length >= open.length && m[2]!.trim() === '') open = null;
+  }
+  return open ? text.replace(/\n*$/, '\n') + open.char.repeat(open.length) + '\n' : text;
 }
 
 function oneLine(title: string): string {
@@ -52,17 +72,43 @@ function oneLine(title: string): string {
  * Tabs after `main` follow under their titles. Shares, previews, print and
  * email all use this.
  */
-export async function exportHtml(doc: Y.Doc, title = ''): Promise<string> {
+export async function exportHtml(doc: Y.Doc, title = '', files?: FileResolver): Promise<string> {
   let body = '';
   for (const tab of tabsOf(doc)) {
     if (tab.id !== MAIN_TAB) body += `<h1 class="primer-tab-title">${escapeHtml(oneLine(tab.title) || 'Untitled')}</h1>`;
     body += await htmlOf(readBlocks(doc, tab.id));
   }
+  body = await inlineImages(body, files);
   return (
     '<!doctype html><html><head><meta charset="utf-8">' +
     `<title>${escapeHtml(title)}</title><style>${blocknoteCss()}</style><style>${STATIC_CSS}</style></head>` +
     `<body><div class="bn-root bn-container"><div class="bn-default-styles">${body}</div></div></body></html>`
   );
+}
+
+/** A stored file's type and bytes by id (its document's files only), or null. */
+export type FileResolver = (id: string) => Promise<{ contentType: string; bytes: Uint8Array } | null>;
+
+const INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/svg+xml']);
+const BLOB_URL = /primer-blob:\/\/([0-9a-f-]{36})/gi;
+
+/**
+ * The static page is served to a sandboxed frame whose requests carry no
+ * session, so a `primer-blob://` image can't be fetched from the API there.
+ * Images become data: URIs (the page's CSP allows them) and the page is
+ * self-contained, as a frozen checkpoint should be. Other files keep their
+ * opaque reference: the CSP blocks media from the page anyway.
+ */
+async function inlineImages(html: string, files?: FileResolver): Promise<string> {
+  if (!files) return html;
+  const resolved = new Map<string, string>();
+  for (const id of new Set([...html.matchAll(BLOB_URL)].map((m) => m[1]!.toLowerCase()))) {
+    const file = await files(id);
+    if (file && INLINE_IMAGES.has(file.contentType)) {
+      resolved.set(id, `data:${file.contentType};base64,${Buffer.from(file.bytes).toString('base64')}`);
+    }
+  }
+  return html.replace(BLOB_URL, (whole, id: string) => resolved.get(id.toLowerCase()) ?? whole);
 }
 
 type Part =
@@ -79,7 +125,7 @@ type Part =
  */
 function planTab(doc: Y.Doc, documentId: string, tabId: string): Part[] {
   const blocks = readBlocks(doc, tabId);
-  const pm = pmDocOf(doc.getXmlFragment(tabFragmentName(tabId)));
+  const nodes = blockIndex(pmDocOf(doc.getXmlFragment(tabFragmentName(tabId))));
   const sources = trustedSources(doc, documentId);
   const index = new Map(blocks.map((b, i) => [b.id, i]));
 
@@ -88,7 +134,7 @@ function planTab(doc: Y.Doc, documentId: string, tabId: string): Part[] {
     const at = index.get(key);
     if (at === undefined) return false;
     if (!entry.groupIds.every((id, k) => blocks[at + k]?.id === id)) return false;
-    return groupVersion(pm, entry.groupIds) === entry.version;
+    return groupVersion(nodes, entry.groupIds) === entry.version;
   };
   const intactKeys = new Set([...sources.keys()].filter(intact));
   const definers = new Map<string, string[]>();
@@ -123,6 +169,8 @@ function assemble(parts: Part[], texts: (string | null)[]): string {
   let afterGroup = false;
   parts.forEach((part, k) => {
     if (part.kind !== 'run') {
+      // A group moved after one whose source has no final newline starts its own line.
+      if (out.length > 0 && !/[\r\n]$/.test(out) && part.text.length > 0) out += '\n';
       out += part.text;
       afterGroup ||= part.kind === 'group';
       return;

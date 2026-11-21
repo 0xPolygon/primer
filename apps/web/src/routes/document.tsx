@@ -397,7 +397,11 @@ function DocumentPageInner() {
       },
       onDocChange: (row) =>
         row.type === 'version.published' ? follower.onVersionPublished() : onDocChangeRef.current(row),
-      onResync: () => onResyncRef.current(),
+      // A version.published that landed before the stream was up never came through it.
+      onResync: () => {
+        onResyncRef.current();
+        follower.onVersionPublished();
+      },
       fetchImpl: (url) => api(url),
       eventSourceFactory: browserEventSourceFactory,
     });
@@ -871,7 +875,8 @@ function DocumentPageInner() {
     // Live documents are edited in place, not republished.
     onAddVersion: canEdit && !readMostly && !isLive ? () => setShowAddVersion(true) : undefined,
     onSaveCheckpoint: liveView && canEdit ? saveCheckpoint : undefined,
-    onExport: isLive ? exportAs : undefined,
+    // A version from before the document went live has no bundle to export or print.
+    onExport: isLive && (liveView || currentVersion?.bundled !== false) ? exportAs : undefined,
     isUploader,
     onShare: () => setShowShare(true),
     onOpenFullScreen: openFullScreen,

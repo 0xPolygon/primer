@@ -2,12 +2,12 @@ import * as Y from 'yjs';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { comments, docFiles, threads } from '../db/schema.ts';
+import type { DocumentFormat } from '@polygonlabs/primer-api-types';
 import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { readBlocks } from './editor.ts';
-import { exportHtml, exportMarkdown, exportText } from './export.ts';
+import { exportHtml, exportMarkdown, exportText, type FileResolver } from './export.ts';
 import { tabsOf } from './reach.ts';
-import { trustedMeta } from './sources.ts';
 
 /**
  * A checkpoint's render bundle (C11): everything shares, previews, print,
@@ -43,8 +43,8 @@ export function exportFileOf(format: string): 'export.md' | 'export.txt' {
 }
 
 /** The static rendering of a document state, served like any version's content. */
-export async function renderStatic(doc: Y.Doc, title: string): Promise<{ html: string; served: string }> {
-  const html = await exportHtml(doc, title);
+export async function renderStatic(doc: Y.Doc, title: string, files?: FileResolver): Promise<{ html: string; served: string }> {
+  const html = await exportHtml(doc, title, files);
   const served = transformHtml(html, { themeManaged: true });
   if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
   return { html, served: served.html };
@@ -73,13 +73,14 @@ export function printable(staticHtml: string): string {
 
 export async function renderBundle(
   storage: Storage,
-  opts: { versionId: string; documentId: string; title: string; state: Uint8Array },
+  opts: { versionId: string; documentId: string; title: string; state: Uint8Array; format: DocumentFormat },
 ): Promise<{ bundleKey: string; staticKey: string; staticBytes: number; staticHtml: string }> {
   const doc = new Y.Doc();
   Y.applyUpdate(doc, opts.state);
   try {
-    const { format } = trustedMeta(doc, opts.documentId);
-    const { html, served } = await renderStatic(doc, opts.title);
+    // The document row is the authority: the Y.Doc's meta is writable by every editor.
+    const { format } = opts;
+    const { html, served } = await renderStatic(doc, opts.title, storedFiles(storage, opts.documentId));
     const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
@@ -95,10 +96,16 @@ export async function renderBundle(
     const key = bundleKeyOf(opts.versionId);
     const encoder = new TextEncoder();
     let staticBytes = 0;
-    for (const [name, content] of Object.entries(files)) {
-      const bytes = typeof content === 'string' ? encoder.encode(content) : content;
-      if (name === 'static.html') staticBytes = bytes.byteLength;
-      await storage.put(key + name, bytes);
+    try {
+      for (const [name, content] of Object.entries(files)) {
+        const bytes = typeof content === 'string' ? encoder.encode(content) : content;
+        if (name === 'static.html') staticBytes = bytes.byteLength;
+        await storage.put(key + name, bytes);
+      }
+    } catch (err) {
+      // Don't leave the files that did land behind.
+      await deleteBundle(storage, key);
+      throw err;
     }
     return { bundleKey: key, staticKey: `${key}static.html`, staticBytes, staticHtml: served };
   } finally {
@@ -152,6 +159,18 @@ async function openThreads(documentId: string): Promise<BundleThread[]> {
 /** The text a thread is about. */
 export function quoteOf(anchor: { type: string; selectorText?: string; innerText?: string }): string {
   return anchor.type === 'text-range' ? (anchor.selectorText ?? '') : (anchor.innerText ?? '');
+}
+
+/** The document's own stored files, for rendering them into a page. */
+export function storedFiles(storage: Storage, documentId: string): FileResolver {
+  return async (id) => {
+    const [file] = await db
+      .select({ storageKey: docFiles.storageKey, contentType: docFiles.contentType })
+      .from(docFiles)
+      .where(and(eq(docFiles.documentId, documentId), eq(docFiles.id, id)));
+    if (!file) return null;
+    return { contentType: file.contentType, bytes: new Uint8Array(await new Response(await storage.get(file.storageKey)).arrayBuffer()) };
+  };
 }
 
 const BLOB = /primer-blob:\/\/([0-9a-f-]{36})/g;
