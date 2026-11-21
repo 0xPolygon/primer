@@ -54,10 +54,12 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
   // Bumped to reload a record-reading page from Primer after it navigated itself.
   const [reload, setReload] = useState(0);
   const breachesRef = useRef(0);
+  // Set at the breach cap: the frame is unmounted, which also drops its listeners.
+  const [blanked, setBlanked] = useState(false);
   const hostRef = useRef<RecordsHost | null>(null);
   // Loads seen before the page's binding arrived, replayed once it does.
   const pendingLoadsRef = useRef(0);
-  useEffect(() => { breachesRef.current = 0; }, [src]);
+  useEffect(() => { breachesRef.current = 0; setBlanked(false); }, [src]);
 
   // Latest-value refs so deferred handlers see current props, not the values
   // closed over at mount.
@@ -194,7 +196,7 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
       portRef.current?.close();
       portRef.current = null;
     };
-  }, [src, reload]);
+  }, [src, reload, blanked]);
 
   // Every load of the frame, counted from its creation (React attaches this
   // before the first load can fire). A second load of a record-reading page
@@ -212,7 +214,10 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
     portRef.current?.close();
     portRef.current = null;
     registerSenderRef.current?.(null);
-    if (breachesRef.current >= MAX_BREACH_RELOADS) return;
+    if (breachesRef.current >= MAX_BREACH_RELOADS) {
+      setBlanked(true);
+      return;
+    }
     breachesRef.current += 1;
     setReload((n) => n + 1);
   };
@@ -234,15 +239,17 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
       className="h-full w-full"
       style={{ overflowX: allowPanX ? 'auto' : 'hidden', overflowY: 'hidden' }}
     >
-      <iframe
-        key={`${src}#${reload}`}
-        ref={iframeRef}
-        src={src}
-        onLoad={onFrameLoad}
-        sandbox="allow-scripts allow-forms allow-modals allow-downloads"
-        title="Artifact"
-        style={{ border: 0, display: 'block', ...fitStyle }}
-      />
+      {!blanked && (
+        <iframe
+          key={`${src}#${reload}`}
+          ref={iframeRef}
+          src={src}
+          onLoad={onFrameLoad}
+          sandbox="allow-scripts allow-forms allow-modals allow-downloads"
+          title="Artifact"
+          style={{ border: 0, display: 'block', ...fitStyle }}
+        />
+      )}
     </div>
   );
 }
