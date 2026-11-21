@@ -46,12 +46,16 @@ export type PrimerErrorCode =
 export class PrimerApiError extends Error {
   readonly code: PrimerErrorCode;
   readonly status?: number;
+  /** The server's refusal (publish and thread refusals), when it sent one: its own
+   *  code (e.g. `stale_base`) and the fix to follow, as hosted MCP returns them. */
+  readonly refusal?: { code: string; fix?: string };
 
-  constructor(code: PrimerErrorCode, message: string, status?: number) {
+  constructor(code: PrimerErrorCode, message: string, status?: number, refusal?: { code: string; fix?: string }) {
     super(message);
     this.name = 'PrimerApiError';
     this.code = code;
     this.status = status;
+    this.refusal = refusal;
   }
 }
 
@@ -70,13 +74,13 @@ export type DocumentFormat = 'markdown' | 'html' | 'text';
 export interface CreateDocumentInput {
   title: string;
   description?: string;
-  content: string;
+  content: string | Uint8Array;
   format: DocumentFormat;
 }
 
 export interface AddVersionInput {
   documentId: string;
-  content: string;
+  content: string | Uint8Array;
   format: DocumentFormat;
   versionNote?: string;
   /** The version the caller read; a newer one refuses the publish (409 stale_base). */
@@ -97,7 +101,7 @@ interface ApiErrorBody {
   error?: string;
   message?: string;
   /** Present on refusals: its code and what to do instead. */
-  refusal?: { code?: string; fix?: string };
+  refusal?: { code?: string; message?: string; fix?: string };
 }
 
 /** Refusal codes the tool layer branches on, kept as the server sent them. */
@@ -422,9 +426,12 @@ export class PrimerClient {
       const body = await parseErrorBody(res);
       const refused = body?.refusal?.code;
       const code = refused !== undefined && PASSED_THROUGH.has(refused) ? (refused as PrimerErrorCode) : statusToCode(res.status);
-      const base = body?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
-      const message = body?.refusal?.fix ? `${base} ${body.refusal.fix}` : base;
-      throw new PrimerApiError(code, message, res.status);
+      const base = body?.message ?? body?.refusal?.message ?? body?.error ?? res.statusText ?? `HTTP ${res.status}`;
+      const refusal = body?.refusal?.code
+        ? { code: body.refusal.code, fix: body.refusal.fix }
+        : undefined;
+      const message = body?.refusal?.fix && !refusal ? `${base} ${body.refusal.fix}` : base;
+      throw new PrimerApiError(code, message, res.status, refusal);
     }
 
     return res;
@@ -439,6 +446,6 @@ function contentTypeFor(format: DocumentFormat): string {
   return format === 'markdown' ? 'text/markdown' : format === 'text' ? 'text/plain' : 'text/html';
 }
 
-function buildFileBlob(content: string, format: DocumentFormat): Blob {
-  return new Blob([content], { type: contentTypeFor(format) });
+function buildFileBlob(content: string | Uint8Array, format: DocumentFormat): Blob {
+  return new Blob([content as BlobPart], { type: contentTypeFor(format) });
 }

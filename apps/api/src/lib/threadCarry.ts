@@ -17,7 +17,7 @@
 // use or skip. Anywhere else a space is part of the words: "now here" is not
 // "nowhere".
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { AnchorData, TextRangeAnchor } from '@polygonlabs/primer-api-types';
 import { isElementPathAnchor, isTextRangeAnchor } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
@@ -216,6 +216,44 @@ export function placeTextRange(
     suffix: domText(target, to, to + CONTEXT_CHARS),
     containerPath: 'body',
   };
+}
+
+/**
+ * A thread's stored anchor, kept for a live version's static rendering only
+ * where it still points at its words. Position anchors index the text they
+ * were made on, so on text whose offsets moved they are re-found by their
+ * quote (exactly one place, else null: "context changed"). Element anchors
+ * carry over, as in `carryOpenThreads`.
+ */
+export function anchorOnRender(anchor: AnchorData, render: BodyText): AnchorData | null {
+  if (!isTextRangeAnchor(anchor)) return anchor;
+  return placeTextRange(anchor, render, render);
+}
+
+/**
+ * Gives a reopened thread a placement on the document's latest version. Resolved
+ * threads stay behind at publish, so one reopened later has none there and would
+ * be invisible until the next publish. Element anchors carry over unchanged; a
+ * text range cannot be matched without the version text, so it shows as "context
+ * changed" until the next publish matches it. No-op when it is already placed.
+ */
+export async function placeReopened(tx: Tx, threadId: string): Promise<void> {
+  const [t] = await tx
+    .select({ documentId: threads.documentId, anchor: threads.anchor })
+    .from(threads)
+    .where(eq(threads.id, threadId));
+  if (!t) return;
+  const [latest] = await tx
+    .select({ id: versions.id })
+    .from(versions)
+    .where(eq(versions.documentId, t.documentId))
+    .orderBy(desc(versions.versionNumber))
+    .limit(1);
+  if (!latest) return;
+  await tx
+    .insert(threadPlacements)
+    .values({ threadId, versionId: latest.id, anchor: isElementPathAnchor(t.anchor) ? t.anchor : null })
+    .onConflictDoNothing();
 }
 
 const OPEN_THREADS_WHERE = (documentId: string) =>
