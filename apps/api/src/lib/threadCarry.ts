@@ -18,7 +18,7 @@
 // "nowhere".
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
-import type { AnchorData, TextRangeAnchor } from '@polygonlabs/primer-api-types';
+import type { AnchorData, TextRangeAnchor, ThreadAnchor } from '@polygonlabs/primer-api-types';
 import { isElementPathAnchor, isTextRangeAnchor } from '@polygonlabs/primer-api-types';
 import { db } from '../db/client.ts';
 import { threadPlacements, threads, versions } from '../db/schema.ts';
@@ -222,10 +222,10 @@ export function placeTextRange(
  * A thread's stored anchor, kept for a live version's static rendering only
  * where it still points at its words. Position anchors index the text they
  * were made on, so on text whose offsets moved they are re-found by their
- * quote (exactly one place, else null: "context changed"). Element anchors
- * carry over, as in `carryOpenThreads`.
+ * quote (exactly one place, else null: "context changed"). Element and live
+ * anchors carry over, as in `carryOpenThreads`.
  */
-export function anchorOnRender(anchor: AnchorData, render: BodyText): AnchorData | null {
+export function anchorOnRender(anchor: ThreadAnchor, render: BodyText): ThreadAnchor | null {
   if (!isTextRangeAnchor(anchor)) return anchor;
   return placeTextRange(anchor, render, render);
 }
