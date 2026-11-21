@@ -306,9 +306,14 @@ async function publishLive(
     const sourceKey = sourceKeyOf(documentId, versionId);
     await storage.put(sourceKey, new TextEncoder().encode(page.stamped));
     written.push(sourceKey);
-    const built = await buildPageDoc(documentId, doc.title, page, sourceKey);
-    ydoc = built.doc;
-    anchored = anchorPageThreads(ydoc, built.blockId, page, open);
+    try {
+      const built = await buildPageDoc(documentId, doc.title, page, sourceKey);
+      ydoc = built.doc;
+      anchored = anchorPageThreads(ydoc, built.blockId, page, open);
+    } catch (err) {
+      await storage.delete(sourceKey).catch(() => undefined);
+      throw err;
+    }
   } else {
     let imported: ImportResult;
     try {
