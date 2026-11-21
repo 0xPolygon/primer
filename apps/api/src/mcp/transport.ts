@@ -47,7 +47,7 @@ export async function handleMcpRequest(
       name,
       { description: config.description, inputSchema: config.inputSchema },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      async (args: Record<string, unknown>) => handler(args ?? {}, user) as any,
+      async (args: Record<string, unknown>) => handler(args ?? {}, user, tokenScopes(c)) as any,
     );
   }
 

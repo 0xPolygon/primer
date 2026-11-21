@@ -37,6 +37,8 @@ interface Props {
   onSaveCheckpoint?: () => Promise<ActionFeedback>;
   /** Live documents: downloads the content in a format. */
   onExport?: (format: 'markdown' | 'html' | 'print') => void;
+  /** The document is a page: no Markdown export. */
+  page?: boolean;
 }
 
 type MenuState = 'closed' | 'menu' | 'confirm';
@@ -58,6 +60,7 @@ export function HeaderActions({
   onDelete,
   onSaveCheckpoint,
   onExport,
+  page,
 }: Props) {
   const [menuState, setMenuState] = useState<MenuState>('closed');
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
@@ -242,6 +245,7 @@ export function HeaderActions({
               isBranch: Boolean(detail?.branchOf),
               isTemplate: Boolean(detail?.isTemplate),
               isOwner: docQuery.data?.myRole === 'owner',
+              page,
             }).map(
               (item, index) => {
                 if (item.id === 'separator') {

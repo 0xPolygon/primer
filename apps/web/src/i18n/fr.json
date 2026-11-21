@@ -610,6 +610,7 @@
   "deleteCommented.body": "Cela supprime du texte visé par des commentaires ouverts. Les commentaires restent ouverts, marqués « Texte supprimé ».",
   "deleteCommented.keep": "Garder le texte",
   "deleteCommented.confirm": "Supprimer quand même",
+  "deleteCommented.stale": "Le document a changé pendant votre décision. Rien n'a été supprimé ; refaites la modification.",
   "threads.notDeleted": "Les fils se résolvent, ils ne se suppriment pas.",
   "request.failed": "La requête a échoué ({status}).",
   "suggestions.acceptFailed": "Impossible d’accepter ({status}).",
