@@ -173,7 +173,7 @@ Read a live document's blocks (see `authoring.md` for the editing workflow).
 
 Edit a live document by block. Read it first with `primer_get_doc`; `authoring.md` describes the workflow.
 
-- **Input:** `{ documentId, baseVersion, ops, runId?, onConflict?: "refuse" | "suggest", allowCommentedDelete? }`. Ops:
+- **Input:** `{ documentId, baseVersion?, ops, runId?, onConflict?: "refuse" | "suggest", allowCommentedDelete? }`. Ops:
   - `{ op: "add", at: Target, position: "before" | "after", blocks: BlockInput[] }`
   - `{ op: "update", target, block: BlockInput, expectVersion }`
   - `{ op: "replaceRange", from, to, blocks, expectVersions: { [blockId]: version } }` (every block from `from` to `to`, siblings)

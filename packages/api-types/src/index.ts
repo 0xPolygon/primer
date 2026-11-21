@@ -583,7 +583,7 @@ export type LiveOp =
 
 export interface ApplyOpsRequest {
   /** The docVersion the agent read (informational: preconditions are per block). */
-  baseVersion: number;
+  baseVersion?: number;
   ops: LiveOp[];
   /** The agent run these edits belong to (undo, status, cancel). */
   runId?: string;
