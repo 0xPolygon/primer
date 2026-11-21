@@ -65,9 +65,11 @@ export async function writeCheckpoint(
   captured: CapturedState,
   /** A republish: the uploaded file, kept with the version. */
   original?: { versionId: string; originalKey: string; sourceFormat: 'markdown' | 'text' | 'html' },
+  /** The id this checkpoint takes when something already points at it (a copy's page sources). */
+  fixedVersionId?: string,
 ): Promise<CheckpointResponse> {
   const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
-  const versionId = original?.versionId ?? uuidv7();
+  const versionId = original?.versionId ?? fixedVersionId ?? uuidv7();
   const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
   const anchored = anchoredIn(captured.state);
   try {

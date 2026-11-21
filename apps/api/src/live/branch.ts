@@ -181,11 +181,13 @@ async function ownedToParent(storage: Storage, branchId: string, parentId: strin
   const owned: Owned = { pageSources: new Map(), widgetHashes: new Map(), refused: new Map() };
   const { pages, widgets } = await withLiveDocument(branchId, (doc) => ({ pages: pageBlocks(doc), widgets: widgetBlocks(doc) }));
   const basePages = new Map(pageBlocks(baseDoc).map((p) => [p.blockId, p]));
-  const read = async (key: string) => new Response(await storage.get(key)).text();
+  // An unreadable source (a key an editor wrote naming no object) is a page the branch can't prove is the base's: refused alone.
+  const read = async (key: string) => new Response(await storage.get(key)).text().catch(() => null);
   for (const page of pages) {
     if (!isOwnSourceKey(branchId, page.sourceKey)) continue;
     const base = basePages.get(page.blockId);
-    if (base && isOwnSourceKey(parentId, base.sourceKey) && (await read(page.sourceKey)) === (await read(base.sourceKey))) {
+    const mine = base && isOwnSourceKey(parentId, base.sourceKey) ? await read(page.sourceKey) : null;
+    if (base && mine !== null && mine === (await read(base.sourceKey))) {
       owned.pageSources.set(page.sourceKey, base.sourceKey);
     } else owned.refused.set(page.blockId, branchOnlyEdit(page, 'The page'));
   }

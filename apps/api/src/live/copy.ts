@@ -8,6 +8,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { commentReactions, comments, docFiles, docUpdates, documents, threads, versions, widgets } from '../db/schema.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
+import { logger } from '../logger.ts';
 import type { Storage } from '../storage/types.ts';
 import { referencedFiles } from './bundle.ts';
 import { captureState, writeCheckpoint } from './checkpoint.ts';
@@ -89,7 +90,8 @@ export async function copyDocument(
   // The latest original is checkpoint 1's; a page's stamped source is keyed by
   // that checkpoint's id, which is where purging looks for it.
   const original = await copyOriginal(storage, sourceId);
-  const pageSources = await copyPageSources(storage, sourceId, documentId, pageBlocks(ydoc), original?.versionId);
+  const firstVersionId = original?.versionId ?? uuidv7();
+  const pageSources = await copyPageSources(storage, sourceId, documentId, pageBlocks(ydoc), firstVersionId);
   const widgetHashes = new Map<string, string>();
   const widgetRows = await copyWidgets(sourceId, documentId, widgetBlocks(ydoc), ids, widgetHashes);
   const tabs = tabsOf(ydoc);
@@ -157,7 +159,7 @@ export async function copyDocument(
   // A fork's task blocks are its own tracked tasks; a branch's stay the parent's.
   if (kind === 'fork') await rebuildTaskIndex(documentId);
 
-  await writeCheckpoint(storage, documentId, actor, null, await captureState(documentId, actor), original);
+  await writeCheckpoint(storage, documentId, actor, null, await captureState(documentId, actor), original, firstVersionId);
   return { ok: true, documentId };
 }
 
@@ -244,13 +246,21 @@ async function copyPageSources(
   sourceId: string,
   documentId: string,
   pages: ReturnType<typeof pageBlocks>,
-  firstVersionId?: string,
+  firstVersionId: string,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (const page of pages) {
     if (out.has(page.sourceKey) || !isOwnSourceKey(sourceId, page.sourceKey)) continue;
-    const to = sourceKeyOf(documentId, out.size === 0 && firstVersionId ? firstVersionId : uuidv7());
-    await storage.put(to, new Uint8Array(await new Response(await storage.get(page.sourceKey)).arrayBuffer()));
+    // A key naming no object (an editor wrote it) is left uncopied: the page shows as unavailable, the copy still happens.
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await new Response(await storage.get(page.sourceKey)).arrayBuffer());
+    } catch (err) {
+      logger.warn({ sourceId, blockId: page.blockId, err }, 'copy: page source unreadable, not copied');
+      continue;
+    }
+    const to = sourceKeyOf(documentId, out.size === 0 ? firstVersionId : uuidv7());
+    await storage.put(to, bytes);
     out.set(page.sourceKey, to);
   }
   return out;
