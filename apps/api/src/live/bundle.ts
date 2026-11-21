@@ -2,13 +2,13 @@ import * as Y from 'yjs';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { comments, docFiles, threads } from '../db/schema.ts';
+import type { DocumentFormat } from '@polygonlabs/primer-api-types';
 import type { Storage } from '../storage/types.ts';
 import { transformHtml } from '../upload/htmlPipeline.ts';
 import { readBlocks } from './editor.ts';
-import { exportHtml, exportMarkdown, exportText, type ExportDecisions } from './export.ts';
+import { exportHtml, exportMarkdown, exportText, type ExportDecisions, type FileResolver } from './export.ts';
 import { exportDecisions } from './choices.ts';
 import { tabsOf } from './reach.ts';
-import { trustedMeta } from './sources.ts';
 import { currentPageHtml } from '../page/publish.ts';
 import { bundleWidgets } from '../widgets/bundle.ts';
 
@@ -64,8 +64,9 @@ export async function renderStatic(
   page: string | null = null,
   /** Puts each widget's SVG in place of its block (widgets/bundle.ts `bundleWidgets`). */
   embedWidgets: (html: string) => string = (html) => html,
+  files?: FileResolver,
 ): Promise<{ html: string; served: string }> {
-  const html = page ?? embedWidgets(await exportHtml(doc, title, decisions));
+  const html = page ?? embedWidgets(await exportHtml(doc, title, decisions, files));
   const served = transformHtml(html, { themeManaged: page === null });
   if (!served.ok) throw new Error(`static rendering failed: ${served.message}`);
   return { html, served: served.html };
@@ -94,19 +95,24 @@ export function printable(staticHtml: string): string {
 
 export async function renderBundle(
   storage: Storage,
-  opts: { versionId: string; documentId: string; title: string; state: Uint8Array },
+  opts: { versionId: string; documentId: string; title: string; state: Uint8Array; format: DocumentFormat },
 ): Promise<{ bundleKey: string; staticKey: string; staticBytes: number; staticHtml: string }> {
   const doc = new Y.Doc();
   Y.applyUpdate(doc, opts.state);
   try {
-    const { format } = trustedMeta(doc, opts.documentId);
+    // The document row is the authority: the Y.Doc's meta is writable by every editor.
+    const { format } = opts;
     const decisions = await exportDecisions(opts.documentId);
     const page = format === 'html' ? await currentPageHtml(storage, opts.documentId, doc) : null;
     if (format === 'html' && page === null) throw new Error('page document has no readable page');
     const widgets = await bundleWidgets(doc, opts.documentId);
-    const { html, served } = await renderStatic(doc, opts.title, decisions, page, widgets.embed);
+    const { html, served } = await renderStatic(doc, opts.title, decisions, page, widgets.embed, storedFiles(storage, opts.documentId));
     const exported =
-      format === 'html' ? html : format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
+      format === 'html'
+        ? html
+        : format === 'text'
+          ? exportText(doc, opts.documentId, decisions)
+          : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
       [exportFileOf(format)]: exported,
@@ -122,10 +128,16 @@ export async function renderBundle(
     const key = bundleKeyOf(opts.versionId);
     const encoder = new TextEncoder();
     let staticBytes = 0;
-    for (const [name, content] of Object.entries(files)) {
-      const bytes = typeof content === 'string' ? encoder.encode(content) : content;
-      if (name === 'static.html') staticBytes = bytes.byteLength;
-      await storage.put(key + name, bytes);
+    try {
+      for (const [name, content] of Object.entries(files)) {
+        const bytes = typeof content === 'string' ? encoder.encode(content) : content;
+        if (name === 'static.html') staticBytes = bytes.byteLength;
+        await storage.put(key + name, bytes);
+      }
+    } catch (err) {
+      // Don't leave the files that did land behind.
+      await deleteBundle(storage, key);
+      throw err;
     }
     return { bundleKey: key, staticKey: `${key}static.html`, staticBytes, staticHtml: served };
   } finally {
@@ -189,6 +201,18 @@ async function openThreads(documentId: string): Promise<BundleThread[]> {
 /** The text a thread is about. */
 export function quoteOf(anchor: { type: string; selectorText?: string; innerText?: string }): string {
   return anchor.type === 'text-range' ? (anchor.selectorText ?? '') : (anchor.innerText ?? '');
+}
+
+/** The document's own stored files, for rendering them into a page. */
+export function storedFiles(storage: Storage, documentId: string): FileResolver {
+  return async (id) => {
+    const [file] = await db
+      .select({ storageKey: docFiles.storageKey, contentType: docFiles.contentType })
+      .from(docFiles)
+      .where(and(eq(docFiles.documentId, documentId), eq(docFiles.id, id)));
+    if (!file) return null;
+    return { contentType: file.contentType, bytes: new Uint8Array(await new Response(await storage.get(file.storageKey)).arrayBuffer()) };
+  };
 }
 
 const BLOB = /primer-blob:\/\/([0-9a-f-]{36})/g;

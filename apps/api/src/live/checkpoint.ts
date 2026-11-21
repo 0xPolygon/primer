@@ -7,12 +7,13 @@ import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { effectiveAgentMode } from '../lib/permissions.ts';
+import { anchorOnRender, bodyText } from '../lib/threadCarry.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
-import { applyPlan, type PlannedEdit } from './pipeline.ts';
+import { applyPlan, movedBlocks, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
 import { blockOfFragment, fragmentName, isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
 import { restoreWidgets, widgetsChangedSince } from '../widgets/bundle.ts';
@@ -67,9 +68,19 @@ export async function writeCheckpoint(
   /** A republish: the uploaded file, kept with the version. */
   original?: { versionId: string; originalKey: string; sourceFormat: 'markdown' | 'text' | 'html' },
 ): Promise<CheckpointResponse> {
-  const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
+  const [doc] = await db
+    .select({ title: documents.title, format: documents.format })
+    .from(documents)
+    .where(eq(documents.id, documentId));
   const versionId = original?.versionId ?? uuidv7();
-  const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
+  const bundle = await renderBundle(storage, {
+    versionId,
+    documentId,
+    title: doc?.title ?? '',
+    state: captured.state,
+    format: doc?.format ?? 'markdown',
+  });
+  const render = bodyText(bundle.staticHtml);
   const anchored = anchoredIn(captured.state);
   try {
     const versionNumber = await transactionWithEvents(async (tx, emit) => {
@@ -99,7 +110,11 @@ export async function writeCheckpoint(
         const anchor = thread.anchor as WidgetPartAnchor | DataPointAnchor;
         const drawn = anchor.type !== 'widget-part' && anchor.type !== 'data-point' ? true : await widgetAnchorPublished(documentId, anchor);
         const placed = anchored(thread) && drawn;
-        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: placed ? thread.anchor : null });
+        await tx.insert(threadPlacements).values({
+          threadId: thread.id,
+          versionId,
+          anchor: placed ? anchorOnRender(thread.anchor, render) : null,
+        });
       }
       emit({
         documentId,
@@ -121,9 +136,9 @@ export async function writeCheckpoint(
  * Restores a checkpoint as a new edit by `actor` (C12 restore column): every
  * tab's content is replaced by the bundle's through the pipeline, which
  * writes only what differs, so untouched blocks keep their Yjs identity and
- * marks. Later history stays: the restore is one more update. The tab list
- * is restored first (a tab deleted since comes back, one added since goes),
- * as an edit by the same person.
+ * marks. Later history stays: the restore is one more update. Once the
+ * content is in, the tab list is restored (a tab deleted since comes back,
+ * one added since goes), as an edit by the same person.
  */
 export async function restoreCheckpoint(
   storage: Storage,
@@ -138,18 +153,19 @@ export async function restoreCheckpoint(
     // Nor can a published widget, and accepting its block alone would point
     // the block at a publish that isn't there, so such a restore is refused.
     const suggesting = (await effectiveAgentMode(checkpoint.documentId, actor.id)) === 'suggest';
-    if (!suggesting) await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
     // The import provenance (front matter, verbatim source slices) comes back
     // with the content, in the same write.
     const sources = trustedSources(frozen, checkpoint.documentId);
     const meta = trustedMeta(frozen, checkpoint.documentId);
-    let restoredMeta = false;
+    let landed = false;
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {
         target: { tabId: tab.id, blockId: '' },
         inverse: false,
-        build: (tr) => {
+        build: (tr, _at, ctx) => {
+          // Reordered blocks are moves: a suggestion lists them too.
+          for (const id of movedBlocks(tr.doc, tr.doc.copy(content))) ctx.moved(id);
           tr.replaceWith(0, tr.doc.content.size, content);
         },
       };
@@ -164,7 +180,7 @@ export async function restoreCheckpoint(
     }
     // Widget rows first, as a publish does: viewers refetch when the block's hash changes.
     if (!suggesting) await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
-    return await applyPlan(checkpoint.documentId, originFor(actor), {
+    const result = await applyPlan(checkpoint.documentId, originFor(actor), {
       onConflict: 'refuse',
       ...(suggesting
         ? {
@@ -183,14 +199,20 @@ export async function restoreCheckpoint(
       alsoWrite: (doc, outcomes) => {
         if (suggesting || outcomes.some((o) => o.status === 'conflict')) return;
         rewriteSources(doc, checkpoint.documentId, sources, { ...meta, format: trustedMeta(doc, checkpoint.documentId).format });
-        restoredMeta = true;
+        landed = true;
       },
       afterWrite: async () => {
-        if (!restoredMeta) return;
+        if (!landed) return;
         const metadata = meta.frontMatter ? splitFrontMatter(meta.frontMatter).data : {};
         await db.update(documents).set({ metadata }).where(eq(documents.id, checkpoint.documentId));
       },
     });
+    // The tab list follows the content, and only when the content landed: a
+    // refused restore leaves the document as it was, tabs included. The tab
+    // list is no block edit, so it can't be suggested: a plan that only
+    // suggests (an agent in suggest mode) leaves it as it is.
+    if (landed) await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    return result;
   } finally {
     frozen.destroy();
   }
