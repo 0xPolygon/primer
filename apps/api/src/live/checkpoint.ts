@@ -6,6 +6,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
+import { anchorOnRender, bodyText } from '../lib/threadCarry.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -60,9 +61,19 @@ export async function writeCheckpoint(
   note: string | null,
   captured: CapturedState,
 ): Promise<CheckpointResponse> {
-  const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
+  const [doc] = await db
+    .select({ title: documents.title, format: documents.format })
+    .from(documents)
+    .where(eq(documents.id, documentId));
   const versionId = uuidv7();
-  const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
+  const bundle = await renderBundle(storage, {
+    versionId,
+    documentId,
+    title: doc?.title ?? '',
+    state: captured.state,
+    format: doc?.format ?? 'markdown',
+  });
+  const render = bodyText(bundle.staticHtml);
   const marked = markedThreads(captured.state);
   try {
     const versionNumber = await transactionWithEvents(async (tx, emit) => {
@@ -88,7 +99,11 @@ export async function writeCheckpoint(
         .from(threads)
         .where(and(eq(threads.documentId, documentId), isNull(threads.resolvedAt)));
       for (const thread of open) {
-        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: marked.has(thread.id) ? thread.anchor : null });
+        await tx.insert(threadPlacements).values({
+          threadId: thread.id,
+          versionId,
+          anchor: marked.has(thread.id) ? anchorOnRender(thread.anchor, render) : null,
+        });
       }
       emit({
         documentId,
@@ -110,9 +125,9 @@ export async function writeCheckpoint(
  * Restores a checkpoint as a new edit by `actor` (C12 restore column): every
  * tab's content is replaced by the bundle's through the pipeline, which
  * writes only what differs, so untouched blocks keep their Yjs identity and
- * marks. Later history stays: the restore is one more update. The tab list
- * is restored first (a tab deleted since comes back, one added since goes),
- * as an edit by the same person.
+ * marks. Later history stays: the restore is one more update. Once the
+ * content is in, the tab list is restored (a tab deleted since comes back,
+ * one added since goes), as an edit by the same person.
  */
 export async function restoreCheckpoint(
   storage: Storage,
@@ -121,7 +136,6 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
-    await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {
@@ -132,7 +146,11 @@ export async function restoreCheckpoint(
         },
       };
     });
-    return await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    const result = await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    // The tab list follows the content, and only when the content landed: a
+    // refused restore leaves the document as it was, tabs included.
+    if (result.outcomes.every((o) => o.status !== 'conflict')) await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    return result;
   } finally {
     frozen.destroy();
   }

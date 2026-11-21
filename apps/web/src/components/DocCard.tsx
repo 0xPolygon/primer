@@ -5,6 +5,7 @@ import { PrivateLockIcon } from './PrivateLockIcon.tsx';
 import { DocKebabMenu } from './DocKebabMenu.tsx';
 import { DocFolderChip } from './DocFolderChip.tsx';
 import { hashHue } from '../lib/library.ts';
+import { useMe } from '../queries/me.ts';
 import { relativeTime } from '../lib/relativeTime.ts';
 
 export interface DocCardProps {
@@ -21,7 +22,12 @@ export function DocCard({ doc, folders, selectedFolderId }: DocCardProps) {
       ? { background: 'linear-gradient(135deg, hsl(220, 15%, 25%), hsl(220, 15%, 45%))' }
       : { background: `linear-gradient(135deg, hsl(${hue}, 65%, 55%), hsl(${hue2}, 65%, 55%))` };
 
-  const byline = doc.ownership === 'mine' ? t('docCard.justYou') : t('docCard.byAuthor', { name: doc.uploaderDisplayName });
+  // `mine` includes what the caller's agents uploaded; those keep their byline.
+  const { data: me } = useMe();
+  const byline =
+    doc.ownership === 'mine' && doc.uploaderId === me?.id
+      ? t('docCard.justYou')
+      : t('docCard.byAuthor', { name: doc.uploaderDisplayName });
 
   const assignedFolder =
     doc.folderId !== null && doc.folderId !== selectedFolderId

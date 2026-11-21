@@ -171,6 +171,19 @@ describe('threads across versions', () => {
       expect(await threadsOn(p.app, v3.versionId as string)).toEqual([]);
     });
   });
+
+  it('a thread reopened after a publish shows on the latest version', async () => {
+    await withPrimer(async (p) => {
+      const created = await call(p.tools, 'primer_create_document', { title: 'Plan', content: V1, format: 'html' });
+      const thread = await startThread(p, created.versionId as string, 'launch date', 'Is this confirmed?');
+      await call(p.tools, 'primer_resolve_thread', { thread_id: thread });
+      const v2 = await call(p.tools, 'primer_add_version', { documentId: created.documentId, format: 'html', content: V1 });
+      expect(await threadsOn(p.app, v2.versionId as string)).toEqual([]);
+
+      await call(p.tools, 'primer_reply_to_thread', { thread_id: thread, body: 'Still open.' });
+      expect((await threadsOn(p.app, v2.versionId as string)).map((t) => t.id)).toEqual([thread]);
+    });
+  });
 });
 
 describe('selections across block boundaries', () => {
