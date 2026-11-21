@@ -244,7 +244,9 @@ function formatRefusal(format: PublishFormat, live: string): Refused {
  * version, with the uploaded file kept as its original. When nothing was
  * applied (an agent in suggest mode gets every change as a suggestion), the
  * live document is unchanged, so no original is stored and no checkpoint
- * written: an agent's suggestions never become the published version.
+ * written: an agent's suggestions never become the published version. When
+ * everything was already applied (a retry after a failed checkpoint) but the
+ * live content is newer than the last version, it is checkpointed.
  */
 async function republishLive(
   storage: Storage,
@@ -271,8 +273,19 @@ async function republishLive(
     return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
   }
 
+  // The live content as it was before this merge, against the last version:
+  // newer means an earlier publish applied its changes but never checkpointed.
+  const [before] = (await db.execute(sql`
+    SELECT COALESCE(MAX(id), 0)::int AS v,
+           (SELECT doc_version FROM versions WHERE document_id = ${documentId} ORDER BY version_number DESC LIMIT 1) AS "lastVersion"
+      FROM doc_updates WHERE document_id = ${documentId}
+  `)) as unknown as { v: number; lastVersion: number | null }[];
   const reconciliation = await mergeRepublish(documentId, input.actor, imported);
-  if (!reconciliation.outcomes.some((o) => o.status === 'applied')) return { ok: true, documentId, reconciliation };
+  if (!reconciliation.outcomes.some((o) => o.status === 'applied')) {
+    // A retry after a failed checkpoint finds everything already applied.
+    const retry = reconciliation.outcomes.every((o) => o.status === 'unchanged') && before!.lastVersion !== null && before!.v > before!.lastVersion;
+    if (!retry) return { ok: true, documentId, reconciliation };
+  }
   await db.update(documents).set({ metadata: imported.metadata }).where(eq(documents.id, documentId));
   const versionId = uuidv7();
   const originalKey = `v1/${versionId}.orig`;
