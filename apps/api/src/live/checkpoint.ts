@@ -110,9 +110,9 @@ export async function writeCheckpoint(
  * Restores a checkpoint as a new edit by `actor` (C12 restore column): every
  * tab's content is replaced by the bundle's through the pipeline, which
  * writes only what differs, so untouched blocks keep their Yjs identity and
- * marks. Later history stays: the restore is one more update. The tab list
- * is restored first (a tab deleted since comes back, one added since goes),
- * as an edit by the same person.
+ * marks. Later history stays: the restore is one more update. Once the
+ * content is in, the tab list is restored (a tab deleted since comes back,
+ * one added since goes), as an edit by the same person.
  */
 export async function restoreCheckpoint(
   storage: Storage,
@@ -121,7 +121,6 @@ export async function restoreCheckpoint(
 ): Promise<Reconciliation> {
   const frozen = await loadBundleDoc(storage, checkpoint.bundleKey);
   try {
-    await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {
@@ -132,7 +131,11 @@ export async function restoreCheckpoint(
         },
       };
     });
-    return await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    const result = await applyPlan(checkpoint.documentId, originFor(actor), { onConflict: 'refuse', edits });
+    // The tab list follows the content, and only when the content landed: a
+    // refused restore leaves the document as it was, tabs included.
+    if (result.outcomes.every((o) => o.status !== 'conflict')) await restoreTabs(checkpoint.documentId, tabsOf(frozen), actor);
+    return result;
   } finally {
     frozen.destroy();
   }

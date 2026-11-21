@@ -13,32 +13,51 @@ import { groupVersion, pmDocOf, trustedMeta, trustedSources } from './sources.ts
  * order, each under a `# <title>` heading.
  */
 export async function exportMarkdown(doc: Y.Doc, documentId: string): Promise<string> {
+  // Every tab is planned before the first await, so a concurrent edit to the
+  // live document can't change what the later tabs or the titles see.
+  const list = tabsOf(doc);
+  const planned = list.map((tab) => planTab(doc, documentId, tab.id));
   const tabs: string[] = [];
-  for (const tab of tabsOf(doc)) {
-    const parts = planTab(doc, documentId, tab.id);
+  for (const parts of planned) {
     tabs.push(assemble(parts, await Promise.all(parts.map((p) => (p.kind === 'run' ? markdownOf(p.run) : null)))));
   }
-  return joinTabs(tabsOf(doc), tabs, (title) => `# ${title}`);
+  return joinTabs(list, tabs, (title) => `# ${title}`, true);
 }
 
 /** The document as plain text, by the same rule; tabs follow under their title. */
 export function exportText(doc: Y.Doc, documentId: string): string {
-  const tabs = tabsOf(doc).map((tab) => {
+  const list = tabsOf(doc);
+  const tabs = list.map((tab) => {
     const parts = planTab(doc, documentId, tab.id);
     return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
   });
-  return joinTabs(tabsOf(doc), tabs, (title) => title);
+  return joinTabs(list, tabs, (title) => title);
 }
 
 /** Main's text, then each later tab under its heading, a blank line between. */
-function joinTabs(tabs: Tab[], texts: string[], heading: (title: string) => string): string {
+function joinTabs(tabs: Tab[], texts: string[], heading: (title: string) => string, markdown = false): string {
   let out = texts[0] ?? '';
   tabs.slice(1).forEach((tab, k) => {
+    // A tab that ends inside a code fence must not swallow the next heading.
+    if (markdown) out = closeOpenFence(out);
     if (out.length > 0) out = out.replace(/\n*$/, '\n\n');
-    const body = texts[k + 1]!.replace(/\n+$/, '');
+    const body = markdown ? closeOpenFence(texts[k + 1]!).replace(/\n+$/, '') : texts[k + 1]!.replace(/\n+$/, '');
     out += heading(oneLine(tab.title) || 'Untitled') + '\n' + (body ? `\n${body}\n` : '');
   });
   return out;
+}
+
+/** `text` with its last fenced code block closed, when it was left open. */
+function closeOpenFence(text: string): string {
+  let open: { char: string; length: number } | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!m) continue;
+    const fence = m[1]!;
+    if (!open) open = { char: fence[0]!, length: fence.length };
+    else if (fence[0] === open.char && fence.length >= open.length && m[2]!.trim() === '') open = null;
+  }
+  return open ? text.replace(/\n*$/, '\n') + open.char.repeat(open.length) + '\n' : text;
 }
 
 function oneLine(title: string): string {
