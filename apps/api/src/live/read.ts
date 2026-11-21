@@ -6,12 +6,13 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { blockVersion, findBlock } from './blocks.ts';
+import { DECISION_PROPS } from './export.ts';
 import { serverEditor, type PrimerBlock } from './editor.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
 import type { AppliedBlock } from './pipeline.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
-import { persistedUpTo } from './persist.ts';
+import { BLOCK_ELEMENTS, persistedUpTo } from './persist.ts';
 import { MAIN_TAB, fragmentFor, pageBlocks, tabFragmentName, tabsOf } from './reach.ts';
 import { fenceUntrusted } from '../lib/untrusted.ts';
 import { loadStamped } from '../page/publish.ts';
@@ -53,9 +54,12 @@ export async function getLiveDoc(documentId: string, actor: AuthUser, opts: Live
   const snapshot = await withDoc(documentId, (ydoc) => {
     if (!tabsOf(ydoc).some((t) => t.id === tabId)) return null;
     const pmDoc = fragmentDoc(ydoc.getXmlFragment(tabFragmentName(tabId)));
+    // Only a `since` read needs the ids present in every tab.
     const present = new Set<string>();
-    for (const tab of tabsOf(ydoc)) {
-      for (const id of blockIds(fragmentDoc(ydoc.getXmlFragment(tabFragmentName(tab.id))))) present.add(id);
+    if (opts.since !== undefined) {
+      for (const tab of tabsOf(ydoc)) {
+        for (const id of blockIds(fragmentDoc(ydoc.getXmlFragment(tabFragmentName(tab.id))))) present.add(id);
+      }
     }
     // Taken in the same tick as the content, so it names exactly this state.
     const stored = persistedUpTo(ydoc);
@@ -91,7 +95,7 @@ export async function getLiveDoc(documentId: string, actor: AuthUser, opts: Live
   let deletedIds: string[] | undefined;
   let touched: Set<string> | undefined;
   if (opts.since !== undefined) {
-    touched = await touchedSince(documentId, opts.since);
+    touched = await touchedSince(documentId, opts.since, docVersion);
     const changed = touched;
     flat = flat.filter((b) => changed.has(b.block.id));
     deletedIds = [...changed].filter((id) => !snapshot.present.has(id) && !snapshot.roots.has(id));
@@ -116,7 +120,7 @@ type FlatBlock = { block: PrimerBlock; version: string; depth: number; parentId:
 function flatten(pmDoc: PmNode, tabId: string): FlatBlock[] {
   const versions = new Map<string, string>();
   pmDoc.descendants((node) => {
-    if (node.type.name === 'blockContainer') versions.set(node.attrs.id as string, blockVersion(node));
+    if (BLOCK_ELEMENTS.has(node.type.name)) versions.set(node.attrs.id as string, blockVersion(node));
     return true;
   });
   const out: FlatBlock[] = [];
@@ -130,8 +134,17 @@ function flatten(pmDoc: PmNode, tabId: string): FlatBlock[] {
   return out;
 }
 
+/** A choice's decision slots are the server's to fill (the document's own are
+ *  editor-writable, so a forged decision must not read as a real one). */
+function withoutDecision(block: PrimerBlock): PrimerBlock {
+  if (block.type !== 'choice') return block;
+  const props: Record<string, unknown> = { ...block.props };
+  for (const key of DECISION_PROPS) props[key] = '';
+  return { ...block, props } as PrimerBlock;
+}
+
 async function toDTO(entry: FlatBlock, format: LiveReadFormat): Promise<LiveBlockDTO> {
-  const { block } = entry;
+  const block = withoutDecision(entry.block);
   const own = { ...block, children: [] } as PrimerBlock;
   const dto: LiveBlockDTO = {
     target: { tabId: entry.tabId, blockId: block.id },
@@ -150,16 +163,16 @@ async function toDTO(entry: FlatBlock, format: LiveReadFormat): Promise<LiveBloc
 function blockIds(pmDoc: PmNode): string[] {
   const ids: string[] = [];
   pmDoc.descendants((node) => {
-    if (node.type.name === 'blockContainer') ids.push(node.attrs.id as string);
+    if (BLOCK_ELEMENTS.has(node.type.name)) ids.push(node.attrs.id as string);
     return true;
   });
   return ids;
 }
 
 /** Block ids (and auxiliary root names) the updates after `since` touched. */
-async function touchedSince(documentId: string, since: number): Promise<Set<string>> {
+async function touchedSince(documentId: string, since: number, upTo: number): Promise<Set<string>> {
   const rows = (await db.execute(sql`
-    SELECT DISTINCT unnest(touched) AS id FROM doc_updates WHERE document_id = ${documentId} AND id > ${since}
+    SELECT DISTINCT unnest(touched) AS id FROM doc_updates WHERE document_id = ${documentId} AND id > ${since} AND id <= ${upTo}
   `)) as unknown as { id: string }[];
   return new Set(rows.map((r) => r.id));
 }

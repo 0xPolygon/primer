@@ -87,6 +87,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
   // Choice and task blocks reach the API through these (people pick; the
   // browser is always a person's session).
   const { services, store } = useBlockServices(props.documentId, { canPick: !props.readOnly, canVote: props.canVote });
+  useEffect(() => store.watch(props.live.doc), [store, props.live.doc]);
   // Page blocks render their frame and overlay through the block services.
   const { live, documentId, readOnly, theme, userId, role, userName, canComment, onArtifactMessage, registerArtifactSender } = props;
   const pageContext = useMemo<PageViewContext>(
