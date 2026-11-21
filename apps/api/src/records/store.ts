@@ -110,6 +110,7 @@ function checkData(raw: unknown): string | null {
     return 'data is not JSON-serializable';
   }
   if (json === undefined) return 'data is not JSON-serializable';
+  if (/<\/?untrusted-record-/i.test(json)) return 'data holds <untrusted-record-…> fence markup: write only the keys you change, never text read back from a fenced record';
   return null;
 }
 

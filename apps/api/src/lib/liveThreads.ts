@@ -95,7 +95,7 @@ export async function createLiveThread(
   if (!mentions.ok) return badRequest(mentions.message, 'Mention user ids from primer_lookup_user.');
 
   if (anchor.type === 'data-point' && (await isDataTableTarget(documentId, anchor.target))) {
-    const problem = await dataTableAnchorProblem(documentId, anchor, user);
+    const problem = await dataTableAnchorProblem(documentId, anchor);
     if (problem) return badRequest(problem, 'Comment on a row of the table: row is its record id, column a column key or "" for the whole row.');
   } else if (anchor.type === 'widget-part' || anchor.type === 'data-point') {
     const problem = await widgetAnchorProblem(documentId, anchor);
