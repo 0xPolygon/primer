@@ -58,6 +58,8 @@ export interface PublishInput {
   /** The version the caller read. When set and the document has moved on,
    *  the publish is refused with `stale_base`. */
   baseVersionNumber?: number;
+  /** A new document's visibility from its first row (the default otherwise). */
+  visibility?: Visibility;
 }
 
 export type Published = { ok: true; documentId: string; versionId: string; versionNumber: number; reconciliation?: Reconciliation };
@@ -352,6 +354,7 @@ async function publishLive(
           uploaderId: input.actor.id,
           format,
           metadata,
+          ...(input.visibility ? { visibility: input.visibility } : {}),
         });
       } else {
         next = (await lockForVersion(tx, documentId, input.baseVersionNumber)) + 1;
