@@ -14,9 +14,10 @@ import { originFor } from './origin.ts';
 import { persistedUpTo } from './persist.ts';
 import { applyPlan, type PlannedEdit } from './pipeline.ts';
 import { docQueue } from './queue.ts';
-import { fragmentName, isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
+import { blockOfFragment, fragmentName, isTabFragment, reachableFragments, tabFragmentName, tabsOf, targetOfFragment, type Tab } from './reach.ts';
 import { restoreWidgets, widgetsChangedSince } from '../widgets/bundle.ts';
 import { widgetAnchorPublished } from '../widgets/anchors.ts';
+import { tabOfBlock } from '../widgets/labels.ts';
 import { pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
 import { splitFrontMatter } from '../upload/markdown.ts';
 
@@ -155,7 +156,9 @@ export async function restoreCheckpoint(
     });
     // The sub-fragments the restored content reaches (widget labels) come back too.
     for (const name of reachableFragments(frozen).filter((n) => !isTabFragment(n))) {
-      const target = targetOfFragment(name)!;
+      // A sub-fragment's name carries no tab: it is the tab of its block.
+      const owner = blockOfFragment(name);
+      const target = targetOfFragment(name, (owner && tabOfBlock(frozen, owner)) || undefined)!;
       const content = pmDocOf(frozen.getXmlFragment(name)).content;
       edits.push({ target, inverse: false, build: (tr) => void tr.replaceWith(0, tr.doc.content.size, content) });
     }
