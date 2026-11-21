@@ -5,6 +5,8 @@ import { docTasks, documents, events } from '../db/schema.ts';
 import { AGENT, OWNER, READER, seedRecordsDoc } from '../records/records.testlib.ts';
 import { readBlocks } from './editor.ts';
 import { seedBlocks, withLiveDoc } from './live.testlib.ts';
+import { addChoice } from './choices.ts';
+import { requestRun } from './runs.ts';
 import { addTask, flushTaskSync, listDocumentTasks, listMyTasks, rebuildTaskIndex, updateTask } from './tasks.ts';
 
 async function liveDoc(): Promise<string> {
@@ -17,6 +19,28 @@ async function taskEvents(doc: string) {
   const rows = await db.select().from(events).where(eq(events.documentId, doc)).orderBy(events.id);
   return rows.filter((r) => r.type.startsWith('task.')).map((r) => ({ type: r.type, author: r.authorId, payload: r.payload }));
 }
+
+describe('block writes', () => {
+  it('an agent with an active run must write through it, and an unknown tab is refused', async () => {
+    const doc = await liveDoc();
+    expect(await addTask(OWNER, doc, { title: 'Elsewhere', tabId: 'nope' })).toMatchObject({ ok: false, refusal: { code: 'not_found' } });
+
+    const asked = await requestRun(OWNER, doc, {
+      agentId: AGENT.id,
+      request: { kind: 'send', prompt: 'work', viewer: { tabId: 'main', selectedBlockIds: [], cursorBlockId: null } },
+    });
+    if (!asked.ok) throw new Error(asked.refusal.message);
+    expect(await addTask(AGENT, doc, { title: 'Sneaked in' })).toMatchObject({ ok: false, refusal: { code: 'run_required' } });
+  });
+
+  it('a block can be added after a choice', async () => {
+    const doc = await liveDoc();
+    const choice = await addChoice(OWNER, doc, { question: 'Which?', options: ['A', 'B'] });
+    if (!choice.ok) throw new Error(choice.refusal.message);
+    const task = await addTask(OWNER, doc, { title: 'After the choice', afterBlockId: choice.value.target.blockId });
+    expect(task.ok).toBe(true);
+  });
+});
 
 describe('task blocks', () => {
   it('a due date PostgreSQL cannot store is refused', async () => {
