@@ -4,7 +4,7 @@ import type { Reconciliation, Refusal } from '@polygonlabs/primer-api-types';
 import type { AuthUser } from '../app.ts';
 import { similarity, similarityCost } from '../lib/similarity.ts';
 import { markdownTokenizer as md } from '../upload/markdown.ts';
-import { findBlock } from './blocks.ts';
+import { blockIndex, findBlock } from './blocks.ts';
 import { serverEditor } from './editor.ts';
 import type { ImportResult } from './import.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -97,7 +97,7 @@ export async function mergeRepublish(documentId: string, actor: AuthUser, theirs
     alsoWrite: (doc, outcomes, suggesting) => {
       if (suggesting) return;
       const applied = new Set(outcomes.filter((o) => o.status === 'applied').map((o) => o.index));
-      const final = pmDocOf(doc.getXmlFragment(tabFragmentName(MAIN_TAB)));
+      const final = blockIndex(pmDocOf(doc.getXmlFragment(tabFragmentName(MAIN_TAB))));
       const entries = new Map<string, SourceEntry>();
       const removed = new Set<number>();
       const replaced = new Set<number>();
@@ -151,7 +151,7 @@ function sameEntry(a: SourceEntry, b: SourceEntry): boolean {
 
 /** Adds `entry` keyed by its first block, with the version of the blocks as
  *  they are now (skipped when one is gone). */
-function put(entries: Map<string, SourceEntry>, final: PmNode, entry: SourceEntry) {
+function put(entries: Map<string, SourceEntry>, final: Map<string, PmNode>, entry: SourceEntry) {
   const version = groupVersion(final, entry.groupIds);
   if (version !== null) entries.set(entry.groupIds[0]!, { ...entry, version });
 }
@@ -271,7 +271,7 @@ export function align(
 /** The group's blocks are all there, siblings in order, and unchanged since
  *  import. */
 function untouched(doc: PmNode, entry: SourceEntry): boolean {
-  if (groupVersion(doc, entry.groupIds) !== entry.version) return false;
+  if (groupVersion(blockIndex(doc), entry.groupIds) !== entry.version) return false;
   const first = findBlock(doc, entry.groupIds[0]!)!;
   const $first = doc.resolve(first.pos);
   const index = $first.index();

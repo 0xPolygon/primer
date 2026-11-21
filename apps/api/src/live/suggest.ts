@@ -16,7 +16,7 @@ import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canEdit } from '../lib/permissions.ts';
 import { fenceUntrusted } from '../lib/untrusted.ts';
-import { blockVersion, findBlock } from './blocks.ts';
+import { blockIndex, blockVersion, findBlock } from './blocks.ts';
 import { serverEditor } from './editor.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
@@ -185,7 +185,7 @@ export async function decideSuggestion(id: string, actor: AuthUser, decision: De
     alsoWrite: (doc, outcomes) => {
       if (outcomes[0]?.status !== 'applied' || !row.edits.some((e) => e.source)) return;
       const entries = trustedSources(doc, row.documentId);
-      const final = pmDocOf(doc.getXmlFragment(tabFragmentName(row.tabId)));
+      const final = blockIndex(pmDocOf(doc.getXmlFragment(tabFragmentName(row.tabId))));
       for (const { source } of row.edits) {
         if (source?.drop) entries.delete(source.drop);
         if (!source?.entry) continue;
