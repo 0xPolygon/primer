@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { placeReopened } from '../lib/threadCarry.ts';
 import { eq, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
@@ -395,7 +396,14 @@ export function registerThreadRoutes(
     const commentId = uuidv7();
     const insertedAt = new Date();
 
-    await transactionWithEvents(async (tx, emit) => {
+    // Lock the document row (a publish holds it exclusively) and recheck: a publish that
+    // committed since the check above would leave this thread placed only on the old version.
+    const stale = await transactionWithEvents(async (tx, emit) => {
+      await tx.execute(sql`SELECT id FROM documents WHERE id = ${latestRow.doc_id} FOR SHARE`);
+      const [now] = (await tx.execute(sql`
+        SELECT MAX(version_number)::int AS max_n FROM versions WHERE document_id = ${latestRow.doc_id}
+      `)) as unknown as { max_n: number }[];
+      if (now?.max_n !== latestRow.this_n) return true;
       await tx.insert(threads).values({
         id: threadId,
         documentId: latestRow.doc_id,
@@ -423,7 +431,11 @@ export function registerThreadRoutes(
           author_id: user.id,
         },
       });
+      return false;
     });
+    if (stale) {
+      return c.json({ error: 'not_latest_version', message: 'Cannot post to a non-latest version.' }, 409);
+    }
 
     void deps.notifier
       .notifyComment({
@@ -461,6 +473,7 @@ export function registerThreadRoutes(
         .update(threads)
         .set({ resolvedAt: null, resolvedBy: null })
         .where(eq(threads.id, threadId));
+      await placeReopened(tx, threadId);
       emit({
         documentId: ctx.docId,
         actorId: user.id,
