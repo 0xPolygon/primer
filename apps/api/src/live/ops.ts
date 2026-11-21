@@ -18,6 +18,7 @@ import { blockVersion, findBlock } from './blocks.ts';
 import { InputError, inputToBlocks } from './convert.ts';
 import { originFor } from './origin.ts';
 import { applyPlan, dryRun, type AppliedBlock, type Located, type PlannedEdit } from './pipeline.ts';
+import { fragmentName, reachableFragments } from './reach.ts';
 import { appliedBlockDTO } from './read.ts';
 import { rebaseUpdate, type UpdateInput } from './rebase.ts';
 import { activeRequestedRunIds, finishDirectRun, runHooks, startDirectRun } from './runs.ts';
@@ -142,12 +143,14 @@ async function applyScoped(
   }
 
   const open = new Set<string>();
+  const reachable: { names: Set<string> | null } = { names: null };
   const notes = new Map<number, string>();
   const applied = new Map<number, AppliedBlock[]>();
   const edits = prepared.map((p, index) =>
     toEdit(p, {
       inverse: hooks !== null,
       open,
+      reachable,
       allowCommentedDelete,
       note: (n) => notes.set(index, n),
       applied: (blocks) => applied.set(index, blocks),
@@ -156,7 +159,7 @@ async function applyScoped(
     }),
   );
   // The same builds without side effects, for the budget's dry run.
-  const inert = prepared.map((p) => toEdit(p, { inverse: false, open, allowCommentedDelete, note: () => {} }));
+  const inert = prepared.map((p) => toEdit(p, { inverse: false, open, reachable, allowCommentedDelete, note: () => {} }));
 
   const result = await applyPlan(documentId, originFor(actor, runId), {
     edits,
@@ -167,6 +170,7 @@ async function applyScoped(
     guard: async (doc, { suggesting }) => {
       // Threads first: the dry run must refuse what the real apply refuses.
       for (const id of await openThreadIds(documentId)) open.add(id);
+      reachable.names = new Set(reachableFragments(doc));
       if (hooks) {
         // The run's budget is charged with what the batch does to the live
         // document, counted by a dry run of these very edits. Suggestions
@@ -314,6 +318,8 @@ async function convert(input: BlockInput) {
 type EditContext = {
   inverse: boolean;
   open: Set<string>;
+  /** The fragments the live document reaches (set by the plan's guard, on the queue). */
+  reachable?: { names: Set<string> | null };
   allowCommentedDelete: boolean;
   note: (note: string) => void;
   applied?: (blocks: AppliedBlock[]) => void;
@@ -352,7 +358,24 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
       };
     case 'pageText': {
       const edit = setPidText(p.target, p.text);
-      return { ...base, target: p.target, expectVersion: p.expectVersion, build: guarded(p.target, edit.build) };
+      return {
+        ...base,
+        target: p.target,
+        expectVersion: p.expectVersion,
+        build: guarded(p.target, (tr, at, bctx) => {
+          // A pid the page dropped keeps its old fragment, but nothing shows it.
+          const names = ctx.reachable?.names;
+          if (names && !names.has(fragmentName(p.target))) {
+            return {
+              code: 'pid_unknown',
+              message: `The page has no text element ${p.target.pid}.`,
+              fix: 'Read the page again (primer_get_doc) and use a pid it lists.',
+              details: { blockId: p.target.blockId, pid: p.target.pid },
+            };
+          }
+          return edit.build(tr, at, bctx);
+        }),
+      };
     }
     case 'delete':
       return {

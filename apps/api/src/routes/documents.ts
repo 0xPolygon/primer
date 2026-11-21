@@ -523,15 +523,18 @@ export function registerDocumentRoutes(
       body = await readBundleFile(deps.storage, version.bundleKey, file);
     } else {
       const decisions = await exportDecisions(docId);
-      body = await withLiveDocument(docId, async (doc) =>
+      const live = await withLiveDocument(docId, async (doc) =>
         access.format === 'html'
-          ? ((await currentPageHtml(deps.storage, docId, doc)) ?? '')
+          ? await currentPageHtml(deps.storage, docId, doc)
           : format === 'html'
           ? exportHtml(doc, access.title, decisions)
           : format === 'text'
             ? exportText(doc, docId)
             : exportMarkdown(doc, docId, decisions),
       );
+      // A page whose source can't be read is an error, not an empty download.
+      if (live === null) return c.json({ error: 'not_found', message: 'The page source is missing.' }, 404);
+      body = live;
     }
     const ext = format === 'html' ? 'html' : format === 'text' ? 'txt' : 'md';
     const type = format === 'html' ? 'text/html' : format === 'text' ? 'text/plain' : 'text/markdown';

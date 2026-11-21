@@ -89,17 +89,20 @@ export async function getLiveDoc(documentId: string, actor: AuthUser, opts: Live
   }
 
   let deletedIds: string[] | undefined;
+  let touched: Set<string> | undefined;
   if (opts.since !== undefined) {
-    const touched = await touchedSince(documentId, opts.since);
-    flat = flat.filter((b) => touched.has(b.block.id));
-    deletedIds = [...touched].filter((id) => !snapshot.present.has(id) && !snapshot.roots.has(id));
+    touched = await touchedSince(documentId, opts.since);
+    const changed = touched;
+    flat = flat.filter((b) => changed.has(b.block.id));
+    deletedIds = [...changed].filter((id) => !snapshot.present.has(id) && !snapshot.roots.has(id));
   }
 
   const blocks: LiveBlockDTO[] = [];
   for (const entry of flat) blocks.push(await toDTO(entry, opts.format));
   const value: LiveDocDTO = { documentId, docVersion, at: 'live', format: opts.format, tabId, blocks };
-  if (opts.storage && !opts.since && !opts.range) {
-    const pages = await readPages(opts.storage, documentId, tabId);
+  if (opts.storage && !opts.range) {
+    // A `since` read carries the pages whose text or embeds changed.
+    const pages = await readPages(opts.storage, documentId, tabId, touched);
     if (pages.length > 0) value.pages = pages;
   }
   if (deletedIds) value.deletedIds = deletedIds;
@@ -194,10 +197,10 @@ const MAX_PIDS = 5000;
  *  current text (fenced: people write it) with its version. Page refs come
  *  from the editor-writable document, so a page whose source can't be read
  *  is listed as unavailable and never fails the read. */
-async function readPages(storage: Storage, documentId: string, tabId: string): Promise<LivePageDTO[]> {
+async function readPages(storage: Storage, documentId: string, tabId: string, only?: Set<string>): Promise<LivePageDTO[]> {
   const refs = await withDoc(documentId, (ydoc) =>
     pageBlocks(ydoc)
-      .filter((p) => p.tabId === tabId)
+      .filter((p) => p.tabId === tabId && (!only || only.has(p.blockId)))
       .slice(0, MAX_PAGES)
       .map((p) => ({
         ref: p,
