@@ -96,7 +96,11 @@ export function registerEventRoutes(
   // Open streams re-resolve their credentials on every recheck, so a revoked
   // token, expired session or logout stops them.
   const stillSignedIn = (c: Context<{ Variables: AppVariables }>) =>
-    stillResolves(deps.resolver, c.req.raw.headers, c.get('user'));
+    stillResolves(deps.resolver, c.req.raw.headers, {
+      userId: c.get('user').id,
+      authMethod: c.get('authMethod') ?? 'cookie',
+      credentialHash: accessKey(c).credentialHash,
+    });
 
   // ── Write: atomic batch ────────────────────────────────────────────
   // Body is uniformly { events: [event…] } — a single send is a batch of

@@ -39,9 +39,12 @@ export function liveInstance(): Hocuspocus {
     // WebSocket peers only (live/hub.ts resolved `auth` at the upgrade); server
     // writes open direct connections, which skip this hook.
     async onAuthenticate({ context, documentName, connectionConfig }) {
-      const auth = (context as LiveContext).auth;
+      const { auth: opened, reauth } = context as LiveContext;
       const documentId = documentIdOf(documentName);
-      if (!auth || !documentId) throw new Error('forbidden');
+      if (!opened || !documentId) throw new Error('forbidden');
+      // The upgrade's auth may be stale: a token revoked since then must not join.
+      const auth = reauth ? await reauth() : opened;
+      if (!auth) throw new Error('forbidden');
       const access = await liveAccess(auth, documentId);
       if (access === 'none') throw new Error('forbidden');
       connectionConfig.readOnly = access !== 'write';
