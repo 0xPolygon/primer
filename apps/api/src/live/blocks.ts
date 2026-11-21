@@ -40,3 +40,16 @@ export function findBlock(doc: PmNode, blockId: string): { pos: number; node: Pm
   });
   return found;
 }
+
+/** Every `blockContainer` by id, from one pass over the document. Callers
+ *  that look up many blocks build this once instead of calling findBlock
+ *  per block, which rescans the whole document each time. */
+export function blockIndex(doc: PmNode): Map<string, PmNode> {
+  const out = new Map<string, PmNode>();
+  doc.descendants((node) => {
+    if (node.type.name !== 'blockContainer') return true;
+    if (!out.has(node.attrs.id as string)) out.set(node.attrs.id as string, node);
+    return true;
+  });
+  return out;
+}

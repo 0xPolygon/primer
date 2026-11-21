@@ -35,7 +35,7 @@ import { transformHtml } from '../upload/htmlPipeline.ts';
 import { MAX_BYTES, MAX_DESCRIPTION, MAX_TITLE } from '../upload/validate.ts';
 import { transactionWithEvents } from './events.ts';
 import { canEdit, canRead, loadEffectiveRole, type Visibility } from './permissions.ts';
-import { carryOpenThreads, loadCarryOrigins } from './threadCarry.ts';
+import { anchorOnRender, bodyText, carryOpenThreads, loadCarryOrigins } from './threadCarry.ts';
 
 export const MAX_VERSION_NOTE = 500;
 
@@ -258,12 +258,13 @@ async function publishLive(
   await storage.put(originalKey, input.content);
   let bundle: Awaited<ReturnType<typeof renderBundle>>;
   try {
-    bundle = await renderBundle(storage, { versionId, documentId, title: doc.title, state });
+    bundle = await renderBundle(storage, { versionId, documentId, title: doc.title, state, format });
   } catch (err) {
     await storage.delete(originalKey).catch(() => undefined);
     throw err;
   }
 
+  const render = bodyText(bundle.staticHtml);
   let versionNumber: number;
   try {
     versionNumber = await transactionWithEvents(async (tx, emit) => {
@@ -304,7 +305,7 @@ async function publishLive(
         await tx.insert(threadPlacements).values({
           threadId: thread.threadId,
           versionId,
-          anchor: anchored.has(thread.threadId) ? thread.anchor : null,
+          anchor: anchored.has(thread.threadId) ? anchorOnRender(thread.anchor, render) : null,
         });
       }
       emit({

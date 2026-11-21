@@ -6,6 +6,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
+import { anchorOnRender, bodyText } from '../lib/threadCarry.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -60,9 +61,19 @@ export async function writeCheckpoint(
   note: string | null,
   captured: CapturedState,
 ): Promise<CheckpointResponse> {
-  const [doc] = await db.select({ title: documents.title }).from(documents).where(eq(documents.id, documentId));
+  const [doc] = await db
+    .select({ title: documents.title, format: documents.format })
+    .from(documents)
+    .where(eq(documents.id, documentId));
   const versionId = uuidv7();
-  const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
+  const bundle = await renderBundle(storage, {
+    versionId,
+    documentId,
+    title: doc?.title ?? '',
+    state: captured.state,
+    format: doc?.format ?? 'markdown',
+  });
+  const render = bodyText(bundle.staticHtml);
   const marked = markedThreads(captured.state);
   try {
     const versionNumber = await transactionWithEvents(async (tx, emit) => {
@@ -88,7 +99,11 @@ export async function writeCheckpoint(
         .from(threads)
         .where(and(eq(threads.documentId, documentId), isNull(threads.resolvedAt)));
       for (const thread of open) {
-        await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: marked.has(thread.id) ? thread.anchor : null });
+        await tx.insert(threadPlacements).values({
+          threadId: thread.id,
+          versionId,
+          anchor: marked.has(thread.id) ? anchorOnRender(thread.anchor, render) : null,
+        });
       }
       emit({
         documentId,

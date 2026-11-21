@@ -218,6 +218,18 @@ export function placeTextRange(
   };
 }
 
+/**
+ * A thread's stored anchor, kept for a live version's static rendering only
+ * where it still points at its words. Position anchors index the text they
+ * were made on, so on text whose offsets moved they are re-found by their
+ * quote (exactly one place, else null: "context changed"). Element anchors
+ * carry over, as in `carryOpenThreads`.
+ */
+export function anchorOnRender(anchor: AnchorData, render: BodyText): AnchorData | null {
+  if (!isTextRangeAnchor(anchor)) return anchor;
+  return placeTextRange(anchor, render, render);
+}
+
 const OPEN_THREADS_WHERE = (documentId: string) =>
   and(
     eq(threads.documentId, documentId),
