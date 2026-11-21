@@ -27,6 +27,16 @@ function stripAnnotations(json: NodeJson): NodeJson {
   return out;
 }
 
+/** Whether any text or inline node of `node` carries an annotation mark. */
+export function hasAnnotations(node: PmNode): boolean {
+  let found = false;
+  node.descendants((child) => {
+    if (child.marks.some((m) => ANNOTATION_MARKS.has(m.type.name))) found = true;
+    return !found;
+  });
+  return found;
+}
+
 /** The `blockContainer` with this id, and its position, or null. */
 export function findBlock(doc: PmNode, blockId: string): { pos: number; node: PmNode } | null {
   let found: { pos: number; node: PmNode } | null = null;

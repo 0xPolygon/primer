@@ -60,6 +60,8 @@ export type BlockInverse = {
   prior: Record<string, unknown> | null;
   afterVersion: string | null;
   place: BlockPlace | null;
+  /** Where a moved block stands after the edit (undo moves it back only from there). */
+  afterPlace?: BlockPlace;
 };
 
 /** A block an edit created or changed, as stored, with its place in the tree. */
@@ -290,6 +292,7 @@ function blockDiff(before: PmNode, after: PmNode, moved: Set<string>) {
         prior: old.node.toJSON(),
         afterVersion: contentVersion(now.node),
         place: moved.has(id) ? old.place : null,
+        ...(moved.has(id) ? { afterPlace: now.place } : {}),
       });
     }
   }

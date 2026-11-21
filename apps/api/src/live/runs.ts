@@ -400,7 +400,8 @@ export async function runHooks(documentId: string, actor: AuthUser, runId: strin
           target: inv.target as unknown as Record<string, unknown>,
           prior: inv.prior,
           afterVersion: inv.afterVersion,
-          place: inv.place as unknown as Record<string, unknown> | null,
+          // A moved block's post-run place rides along as `after` (undo checks it).
+          place: (inv.afterPlace ? { ...inv.place, after: inv.afterPlace } : inv.place) as unknown as Record<string, unknown> | null,
         })),
       );
     },
