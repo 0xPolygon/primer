@@ -606,18 +606,23 @@
   }
 
   /** An element's text by the server's rule (page/stamp.ts pageText): <br>
-   *  is a newline; outside <pre> each line's whitespace collapses. */
+   *  is a newline; outside <pre> every whitespace run (newlines in the source
+   *  too) collapses to one space and each line is trimmed. */
   function pidText(el) {
+    const pre = !!el.closest('pre');
+    // Source whitespace (a hard-wrapped paragraph's newlines too) is a space
+    // outside <pre>; only <br> is a newline.
+    const flow = (text) => (pre ? text : text.replace(/[ \t\n\r\f]+/g, ' '));
     let raw = '';
     el.childNodes.forEach((node) => {
-      if (node.nodeType === Node.TEXT_NODE) raw += node.nodeValue;
+      if (node.nodeType === Node.TEXT_NODE) raw += flow(node.nodeValue);
       else if (node.nodeName === 'BR') raw += '\n';
-      else if (node.nodeType === Node.ELEMENT_NODE) raw += node.textContent || '';
+      else if (node.nodeType === Node.ELEMENT_NODE) raw += flow(node.textContent || '');
     });
-    if (el.closest('pre')) return raw;
+    if (pre) return raw;
     return raw
       .split('\n')
-      .map((line) => line.replace(/[ \t\r\f]+/g, ' ').trim())
+      .map((line) => line.trim())
       .join('\n');
   }
 

@@ -103,6 +103,8 @@ export function DocumentSurface(props: {
   canComment: boolean;
   onOpenLegacyVersion?: (versionNumber: number) => void;
   lastView?: CatchUpSince | null;
+  onArtifactMessage?: (msg: InboundProtocolMessage) => void;
+  registerArtifactSender?: (send: ((msg: OutboundProtocolMessage) => void) | null) => void;
   frame: () => ReactNode;
 }) {
   if (!props.live) return <>{props.frame()}</>;
@@ -119,6 +121,8 @@ export function DocumentSurface(props: {
         canComment={props.canComment}
         onOpenLegacyVersion={props.onOpenLegacyVersion}
         lastView={props.lastView}
+        onArtifactMessage={props.onArtifactMessage}
+        registerArtifactSender={props.registerArtifactSender}
       />
     </Suspense>
   );
@@ -184,6 +188,12 @@ function DocumentPageInner() {
   const { docId, versionNumber: versionNumberParam } = useParams();
   const navigate = useNavigate();
   const docQuery = useDocument(docId ?? '');
+  // This visit's baseline: the previous visit as the server reported it on this
+  // page's own fetch, not the cached copy of an earlier one.
+  const [visit, setVisit] = useState<{ docId: string; lastView: CatchUpSince | null } | null>(null);
+  useEffect(() => {
+    if (docId && docQuery.data && !docQuery.isFetching && visit?.docId !== docId) setVisit({ docId, lastView: docQuery.data.lastView ?? null });
+  }, [docId, docQuery.data, docQuery.isFetching, visit?.docId]);
   const versionsQuery = useVersionsQuery(docId ?? '');
   const queryClient = useQueryClient();
   const versions = versionsQuery.data?.versions ?? [];
@@ -401,7 +411,11 @@ function DocumentPageInner() {
       },
       onDocChange: (row) =>
         row.type === 'version.published' ? follower.onVersionPublished() : onDocChangeRef.current(row),
-      onResync: () => onResyncRef.current(),
+      // A version.published that landed before the stream was up never came through it.
+      onResync: () => {
+        onResyncRef.current();
+        follower.onVersionPublished();
+      },
       fetchImpl: (url) => api(url),
       eventSourceFactory: browserEventSourceFactory,
     });
@@ -875,7 +889,9 @@ function DocumentPageInner() {
     // Live documents are edited in place, not republished.
     onAddVersion: canEdit && !readMostly && !isLive ? () => setShowAddVersion(true) : undefined,
     onSaveCheckpoint: liveView && canEdit ? saveCheckpoint : undefined,
-    onExport: isLive ? exportAs : undefined,
+    // A version from before the document went live has no bundle to export or print.
+    onExport: isLive && (liveView || currentVersion?.bundled !== false) ? exportAs : undefined,
+    page: docQuery.data?.document.format === 'html',
     isUploader,
     onShare: () => setShowShare(true),
     onOpenFullScreen: openFullScreen,
@@ -1042,7 +1058,9 @@ function DocumentPageInner() {
             role={docQuery.data?.myRole ?? 'stranger'}
             canComment={docQuery.data?.canComment ?? false}
             onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
-            lastView={docQuery.data?.lastView ?? null}
+            lastView={visit && visit.docId === docId ? visit.lastView : undefined}
+            onArtifactMessage={onMessage}
+            registerArtifactSender={registerSender}
             frame={() =>
               currentVersionId && (
                 <ArtifactIframe
