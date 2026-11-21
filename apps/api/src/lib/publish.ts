@@ -133,8 +133,13 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       try { await storage.delete(key); } catch {}
     }
   };
-  await storage.put(storageKey, htmlBytes);
-  await storage.put(originalKey, input.content);
+  try {
+    await storage.put(storageKey, htmlBytes);
+    await storage.put(originalKey, input.content);
+  } catch (e) {
+    await cleanup();
+    throw e;
+  }
 
   let versionNumber: number;
   try {
@@ -143,7 +148,9 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       if (existingId === undefined) {
         await tx.insert(documents).values({ id: documentId, title: title!, description, uploaderId: actor.id });
       } else {
-        await tx.execute(sql`SELECT id FROM documents WHERE id = ${documentId} FOR UPDATE`);
+        // NO KEY UPDATE still serialises version allocation but does not conflict with the KEY SHARE
+        // an events writer takes (FK check) while holding the events lock.
+        await tx.execute(sql`SELECT id FROM documents WHERE id = ${documentId} FOR NO KEY UPDATE`);
         const [row] = (await tx.execute(sql`
           SELECT COALESCE(MAX(version_number), 0)::int AS latest FROM versions WHERE document_id = ${documentId}
         `)) as unknown as { latest: number }[];

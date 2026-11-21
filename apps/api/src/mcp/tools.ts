@@ -593,7 +593,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       // Library scope: docs the caller has accessed — created, collaborates on,
       // or an org doc they've opened (has a document_views row). Org docs the
       // caller never opened are excluded, mirroring the dashboard library.
-      const accessedPredicate = sql`(${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${me}) OR (${documents.visibility} = 'org' AND EXISTS (SELECT 1 FROM document_views dv WHERE dv.document_id = ${documents.id} AND dv.user_id = ${me})))`;
+      const accessedPredicate = sql`(${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id IN (${me}, ${user.id})) OR (${documents.visibility} = 'org' AND EXISTS (SELECT 1 FROM document_views dv WHERE dv.document_id = ${documents.id} AND dv.user_id = ${me})))`;
 
       const rows = await db
         .select({
@@ -665,7 +665,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
         ? sql`(${documents.createdAt}, ${documents.id}) < (${cursorCreatedAt.toISOString()}::timestamptz, ${cursor}::uuid)`
         : undefined;
       // canRead filter: exclude private docs the caller cannot read.
-      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id = ${me}))`;
+      const canReadPredicate = sql`(${documents.visibility} = 'org' OR ${isSelfOrAgentOf(documents.uploaderId, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = ${documents.id} AND dc.user_id IN (${me}, ${user.id})))`;
 
       const rows = await db
         .select({
@@ -823,7 +823,7 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       const scopeFilter = scope === 'mine' ? sql`AND c.author_id = ${user.id}` : sql``;
       // canRead filter: exclude comments on private docs the caller can't read.
       const me = libraryOwnerId(user);
-      const canReadFilter = sql`AND (d.visibility = 'org' OR ${isSelfOrAgentOf(sql`d.uploader_id`, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = d.id AND dc.user_id = ${me}))`;
+      const canReadFilter = sql`AND (d.visibility = 'org' OR ${isSelfOrAgentOf(sql`d.uploader_id`, me)} OR EXISTS (SELECT 1 FROM document_collaborators dc WHERE dc.document_id = d.id AND dc.user_id IN (${me}, ${user.id})))`;
 
       const rows = (await db.execute(sql`
         SELECT c.id AS "id",
