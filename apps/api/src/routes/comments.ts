@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { placeReopened } from '../lib/threadCarry.ts';
 import { v7 as uuidv7 } from 'uuid';
 import { eq, sql } from 'drizzle-orm';
 import type { AppVariables, AppDeps, AuthUser } from '../app.ts';
@@ -181,11 +182,21 @@ export async function replyToThread(
       body: validation.body,
       mentions: cleanedMentions,
     });
-    // Auto-reopen if resolved (no-op when not resolved).
-    await tx
-      .update(threads)
-      .set({ resolvedAt: null, resolvedBy: null })
-      .where(eq(threads.id, threadId));
+    // Auto-reopen if resolved (no-op when not resolved). An agent's reply never reopens a
+    // thread a person wrote in: reopening is the people's call (M1.3).
+    const [personWrote] = user.kind === 'agent'
+      ? ((await tx.execute(sql`
+          SELECT 1 FROM comments c INNER JOIN users a ON a.id = c.author_id
+          WHERE c.thread_id = ${threadId} AND a.kind <> 'agent' LIMIT 1
+        `)) as unknown as unknown[])
+      : [];
+    if (!personWrote) {
+      await tx
+        .update(threads)
+        .set({ resolvedAt: null, resolvedBy: null })
+        .where(eq(threads.id, threadId));
+      await placeReopened(tx, threadId);
+    }
     emit({
       documentId: threadCtx.doc_id,
       versionId: threadCtx.version_id ?? undefined,

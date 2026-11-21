@@ -16,7 +16,7 @@ import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canEdit } from '../lib/permissions.ts';
 import { fenceUntrusted } from '../lib/untrusted.ts';
-import { blockVersion, findBlock } from './blocks.ts';
+import { blockIndex, blockVersion, findBlock } from './blocks.ts';
 import { serverEditor } from './editor.ts';
 import { liveDocName, liveInstance, withLiveDocument } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
@@ -25,7 +25,8 @@ import { originFor, SYSTEM_ORIGIN } from './origin.ts';
 import { applyPlan, contentVersion, type PlannedEdit } from './pipeline.ts';
 import type { SuggestedEdit } from './proposals.ts';
 import { docQueue } from './queue.ts';
-import { fragmentName, reachableFragments } from './reach.ts';
+import { fragmentName, reachableFragments, tabFragmentName } from './reach.ts';
+import { groupVersion, pmDocOf, rewriteSources, trustedMeta, trustedSources } from './sources.ts';
 import { insertAt } from './undo.ts';
 
 export type { SuggestedEdit, Proposal } from './proposals.ts';
@@ -53,6 +54,9 @@ const COLUMNS = sql`
   s.run_id AS "runId", s.change_set_id AS "changeSetId", s.status, s.tab_id AS "tabId", s.edits, s.conflict,
   s.created_at AS "createdAt"`;
 
+/** Suggestions per list call; page on with `after` (the last id returned). */
+const LIST_LIMIT = 200;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const notFound = (): SuggestionResult<never> => ({
@@ -62,18 +66,25 @@ const notFound = (): SuggestionResult<never> => ({
 });
 
 /**
- * The open suggestions of a live document, oldest first, each edit with the
+ * The open suggestions of a live document, oldest first (at most 200 per call;
+ * pass the last id as `after` for the next page, `tabId` for one tab), each edit with the
  * block as it is now and as proposed (Markdown and BlockNote JSON) so a client
  * can diff them. What people and agents proposed is untrusted text: an agent
  * gets the Markdown fenced and no JSON.
  */
-export async function listSuggestions(actor: AuthUser, documentId: string): Promise<SuggestionResult<SuggestionDTO[]>> {
+export async function listSuggestions(
+  actor: AuthUser,
+  documentId: string,
+  opts: { tabId?: string; after?: string } = {},
+): Promise<SuggestionResult<SuggestionDTO[]>> {
   const doc = await readableLiveDoc(documentId, actor);
   if (!doc) return { ok: false, status: 404, refusal: { code: 'not_found', message: 'Live document not found.', fix: 'Check the document id.' } };
   const rows = (await db.execute(sql`
     SELECT ${COLUMNS} FROM suggestions s JOIN users u ON u.id = s.author_id
      WHERE s.document_id = ${documentId} AND s.status = 'open'
-     ORDER BY s.created_at, s.id LIMIT 200
+       ${opts.tabId ? sql`AND s.tab_id = ${opts.tabId}` : sql``}
+       ${opts.after && UUID.test(opts.after) ? sql`AND (s.created_at, s.id) > (SELECT created_at, id FROM suggestions WHERE id = ${opts.after})` : sql``}
+     ORDER BY s.created_at, s.id LIMIT ${LIST_LIMIT}
   `)) as unknown as Row[];
   if (rows.length === 0) return { ok: true, value: [] };
   const pmDocs = await withDoc(documentId, (ydoc) => {
@@ -171,7 +182,22 @@ export async function decideSuggestion(id: string, actor: AuthUser, decision: De
       `)) as unknown as { hit: number }[];
       return open ? null : closedRefusal().refusal;
     },
-    afterWrite: async (outcomes) => {
+    // The republish's `sources` follow the accepted groups, so the next
+    // republish still recognises them.
+    alsoWrite: (doc, outcomes) => {
+      if (outcomes[0]?.status !== 'applied' || !row.edits.some((e) => e.source)) return;
+      const entries = trustedSources(doc, row.documentId);
+      const final = blockIndex(pmDocOf(doc.getXmlFragment(tabFragmentName(row.tabId))));
+      for (const { source } of row.edits) {
+        if (source?.drop) entries.delete(source.drop);
+        if (!source?.entry) continue;
+        const version = groupVersion(final, source.entry.groupIds);
+        if (version !== null) entries.set(source.entry.groupIds[0]!, { ...source.entry, version });
+      }
+      rewriteSources(doc, row.documentId, entries, trustedMeta(doc, row.documentId));
+    },
+    // Closed once the edit is stored, so a crash can't leave it accepted but lost.
+    afterPersist: async ({ outcomes }) => {
       if (outcomes[0]?.status === 'applied' || outcomes[0]?.status === 'unchanged') accepted = await close(row, actor, 'accepted');
     },
   });
@@ -282,7 +308,10 @@ function acceptEdit(row: Row, gone: boolean): PlannedEdit {
         };
       }
       const stale: { blockId: string; reason: string }[] = [];
-      for (const edit of row.edits) {
+      // Inserts first and deletes last, so a whole-tab replacement never
+      // empties the tab on the way (removing the last block is refused).
+      const order = { insert: 0, replace: 1, move: 1, delete: 2 } as const;
+      for (const edit of [...row.edits].sort((a, b) => order[a.kind] - order[b.kind])) {
         const reason = staleness(tr.doc, edit);
         if (reason) {
           stale.push({ blockId: edit.target.blockId, reason });
@@ -316,7 +345,22 @@ function staleness(doc: PmNode, edit: SuggestedEdit): string | null {
   if (edit.kind === 'insert') return at ? 'already exists' : null;
   if (!at) return 'gone';
   const now = edit.kind === 'delete' ? blockVersion(at.node) : contentVersion(at.node);
-  return now === edit.base ? null : 'changed';
+  if (now !== edit.base) return 'changed';
+  // Replacing the content would drop a comment added since the suggestion.
+  if (edit.kind === 'replace' && edit.proposed) {
+    const kept = commentThreads(PmNode.fromJSON(doc.type.schema, edit.proposed).firstChild!);
+    if ([...commentThreads(at.node.firstChild!)].some((id) => !kept.has(id))) return 'commented';
+  }
+  return null;
+}
+
+/** The threads whose comment mark is on a node's inline content. */
+function commentThreads(content: PmNode): Set<string> {
+  const ids = new Set<string>();
+  content.descendants((node) => {
+    for (const mark of node.marks) if (mark.type.name === 'comment') ids.add(mark.attrs.threadId as string);
+  });
+  return ids;
 }
 
 function replay(tr: Transform, edit: SuggestedEdit, schema: PmNode['type']['schema']): Refusal | void {

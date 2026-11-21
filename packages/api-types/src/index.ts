@@ -534,6 +534,8 @@ export type RefusalCode =
   | 'deletes_commented_text'
   /** An op is malformed or can't apply to the document's structure. */
   | 'invalid_op'
+  /** A page text op names a pid the page no longer has. */
+  | 'pid_unknown'
   /** The run's edits would pass the large-edit threshold: post a plan and
    *  wait for a person to approve it. */
   | 'approval_required'
@@ -677,7 +679,7 @@ export type LiveOp =
 
 export interface ApplyOpsRequest {
   /** The docVersion the agent read (informational: preconditions are per block). */
-  baseVersion: number;
+  baseVersion?: number;
   ops: LiveOp[];
   /** The agent run these edits belong to (undo, status, cancel). */
   runId?: string;
