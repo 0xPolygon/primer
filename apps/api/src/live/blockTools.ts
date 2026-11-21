@@ -133,7 +133,7 @@ function planOf(edit: PlannedEdit, tabId: string, hooks: RunHooks | null, extra:
       if (!hooks) return null;
       return hooks.guard(suggesting ? { edits: 0, removals: 0, unresolved: false } : dryRun(doc, [{ ...edit, inverse: false }]));
     },
-    afterPersist: hooks?.afterPersist,
+    beforeWrite: hooks?.beforeWrite,
     ...extra,
   };
 }

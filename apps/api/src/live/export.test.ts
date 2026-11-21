@@ -150,7 +150,7 @@ describe('export', () => {
   it('static HTML inlines the document images', async () => {
     const png = 'primer-blob://01900000-0000-7000-8000-0000000000aa';
     const doc = buildLiveDoc(await importMarkdown(`![pic](${png})\n`), 'markdown', 'doc-img');
-    const html = await exportHtml(doc, 'T', async () => ({ contentType: 'image/png', bytes: Uint8Array.from([1, 2, 3]) }));
+    const html = await exportHtml(doc, 'T', new Map(), async () => ({ contentType: 'image/png', bytes: Uint8Array.from([1, 2, 3]) }));
     expect(html).toContain('data:image/png;base64,AQID');
     expect(html).not.toContain(png);
   });
