@@ -6,6 +6,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { blockVersion } from './blocks.ts';
+import { DECISION_PROPS } from './export.ts';
 import { serverEditor, type PrimerBlock } from './editor.ts';
 import { liveDocName, liveInstance } from './instance.ts';
 import { fragmentDoc } from './marks.ts';
@@ -117,8 +118,17 @@ function flatten(pmDoc: PmNode, tabId: string): FlatBlock[] {
   return out;
 }
 
+/** A choice's decision slots are the server's to fill (the document's own are
+ *  editor-writable, so a forged decision must not read as a real one). */
+function withoutDecision(block: PrimerBlock): PrimerBlock {
+  if (block.type !== 'choice') return block;
+  const props: Record<string, unknown> = { ...block.props };
+  for (const key of DECISION_PROPS) props[key] = '';
+  return { ...block, props } as PrimerBlock;
+}
+
 async function toDTO(entry: FlatBlock, format: LiveReadFormat): Promise<LiveBlockDTO> {
-  const { block } = entry;
+  const block = withoutDecision(entry.block);
   const own = { ...block, children: [] } as PrimerBlock;
   const dto: LiveBlockDTO = {
     target: { tabId: entry.tabId, blockId: block.id },

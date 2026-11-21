@@ -86,7 +86,7 @@ export async function renderBundle(
     const { format } = trustedMeta(doc, opts.documentId);
     const decisions = await exportDecisions(opts.documentId);
     const { html, served } = await renderStatic(doc, opts.title, decisions);
-    const exported = format === 'text' ? exportText(doc, opts.documentId) : await exportMarkdown(doc, opts.documentId, decisions);
+    const exported = format === 'text' ? exportText(doc, opts.documentId, decisions) : await exportMarkdown(doc, opts.documentId, decisions);
     const files: Record<string, string | Uint8Array> = {
       'state.ydoc': opts.state,
       [exportFileOf(format)]: exported,

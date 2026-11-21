@@ -523,7 +523,7 @@ export function registerDocumentRoutes(
         format === 'html'
           ? exportHtml(doc, access.title, decisions)
           : format === 'text'
-            ? exportText(doc, docId)
+            ? exportText(doc, docId, decisions)
             : exportMarkdown(doc, docId, decisions),
       );
     }

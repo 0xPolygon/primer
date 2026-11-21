@@ -26,10 +26,10 @@ export async function exportMarkdown(doc: Y.Doc, documentId: string, decisions: 
 }
 
 /** The document as plain text, by the same rule; tabs follow under their title. */
-export function exportText(doc: Y.Doc, documentId: string): string {
+export function exportText(doc: Y.Doc, documentId: string, decisions: ExportDecisions = new Map()): string {
   const tabs = tabsOf(doc).map((tab) => {
     const parts = planTab(doc, documentId, tab.id);
-    return assemble(parts, parts.map((p) => (p.kind === 'run' ? p.run.map(plainText).join('\n\n') : null)));
+    return assemble(parts, parts.map((p) => (p.kind === 'run' ? withDecisions(p.run, decisions).map((b) => plainText(b)).join('\n\n') : null)));
   });
   return joinTabs(tabsOf(doc), tabs, (title) => title);
 }
@@ -82,7 +82,7 @@ export type ExportDecision = {
 export type ExportDecisions = Map<string, ExportDecision>;
 
 /** The choice's render-only decision props (the server fills them here). */
-const DECISION_PROPS = ['decidedOptionId', 'decidedLabel', 'decidedQuestion', 'decisionChanged', 'rationale', 'decidedByName'];
+export const DECISION_PROPS = ['decidedOptionId', 'decidedLabel', 'decidedQuestion', 'decisionChanged', 'rationale', 'decidedByName'];
 
 /**
  * Choice blocks with their decision props filled from the server's record
@@ -244,9 +244,19 @@ export function plainText(block: PrimerBlock): string {
       .map((n) => (n.type === 'text' ? (n.text ?? '') : n.type === 'link' ? inline(n.content) : chipText(n)))
       .join('');
   };
-  const own = isSource(block) ? String((block.props as { markdown: string }).markdown).replace(/\n+$/, '') : inline(block.content);
-  const children = (block.children as PrimerBlock[]).map(plainText).filter((t) => t.length > 0);
-  return [own, ...children].filter((t) => t.length > 0).join('\n');
+  const props = block.props as Record<string, string>;
+  const own = isSource(block)
+    ? String(props.markdown).replace(/\n+$/, '')
+    : block.type === 'choice'
+      ? `Choice: ${props.question ?? ''}`
+      : inline(block.content);
+  const children = (block.children as PrimerBlock[]).map((child) => plainText(child)).filter((t) => t.length > 0);
+  // A choice's recorded decision (filled in by `withDecisions`).
+  const decision =
+    block.type === 'choice' && props.decidedOptionId
+      ? `Decision: ${props.decidedLabel}${props.decidedByName ? ` (by ${props.decidedByName})` : ''}${props.rationale ? `: ${props.rationale}` : ''}`
+      : '';
+  return [own, ...children, decision].filter((t) => t.length > 0).join('\n');
 }
 
 /**
