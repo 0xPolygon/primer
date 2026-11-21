@@ -39,6 +39,20 @@ describe('records store', () => {
     await flushDataChanged();
   });
 
+  it('a recreated record keeps counting up, and an uppercase document id works', async () => {
+    const doc = await seedRecordsDoc();
+    const api = recordsApi(OWNER, doc.toUpperCase());
+    const target = { collection: 'notes', scope: 'shared' as const, recordId: 'n1' };
+    await api.set({ ...target, data: { a: 1 } });
+    await api.delete(target);
+    const again = await api.set({ ...target, data: { a: 2 } });
+    expect(again.ok && again.value.record.version).toBe(3);
+    const bad = await api.query({ collection: 'notes', scope: 'shared', orderBy: null as never });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.refusal.code).toBe('bad_request');
+    await flushDataChanged();
+  });
+
   it('caps refuse the write that crosses them', async () => {
     const doc = await seedRecordsDoc();
     const api = recordsApi(OWNER, doc);

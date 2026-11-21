@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { BlockNoteViewEditor, useCreateBlockNote } from '@blocknote/react';
 import { insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions';
 import { VersioningSidebar } from '@blocknote/react/versioning';
@@ -30,7 +30,7 @@ import { ThreadActions } from './ThreadActions.tsx';
 import { CatchUpPanel, ChangeHighlights, useCheckpointChanges } from './changes.tsx';
 import { useBlockServices, type ChoiceStore } from './blockServices.ts';
 import { DecisionRegister } from './DecisionRegister.tsx';
-import { PageView } from './PageView.tsx';
+import { PageView, type PageViewContext } from './PageView.tsx';
 import './blocks.css';
 
 export type LiveEditorProps = {
@@ -48,7 +48,20 @@ export type LiveEditorProps = {
   onOpenLegacyVersion?: (versionNumber: number) => void;
   /** The viewer's previous visit (document detail `lastView`): catch-up shows what changed since. */
   lastView?: CatchUpSince | null;
+  /** The document route's handling of what a page frame asks of the host
+   *  (open_external, submit_events) and the sender it acks through. */
+  onArtifactMessage?: PageViewContext['onArtifactMessage'];
+  registerArtifactSender?: PageViewContext['registerArtifactSender'];
 };
+
+/** What every page block of this editor needs; read by one stable component
+ *  so a change here updates the frames instead of remounting them. */
+const PageContext = createContext<PageViewContext | null>(null);
+
+function BoundPageView(p: { blockId: string; title: string; sourceKey: string }) {
+  const context = useContext(PageContext);
+  return context ? <PageView {...context} {...p} /> : null;
+}
 
 /**
  * A live document in BlockNote, synced over `/collab`, one editor per tab: stock blocks, the
@@ -85,22 +98,26 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
     if (since === undefined && props.lastView !== undefined) setSince(props.lastView);
   }, [since, props.lastView]);
   const [catchUp, setCatchUp] = useState<Target[]>([]);
+  useEffect(() => store.watch(props.live.doc), [store, props.live.doc]);
   // Page blocks render their frame and overlay through the block services.
-  const { live, documentId, readOnly, theme, userId, role, userName, canComment } = props;
-  const withPages = useMemo(() => {
-    const context = {
+  const { live, documentId, readOnly, theme, userId, role, userName, canComment, onArtifactMessage, registerArtifactSender } = props;
+  const pageContext = useMemo<PageViewContext>(
+    () => ({
       doc: live.doc,
       documentId,
       tabId: active,
       canEdit: !readOnly,
       theme,
       viewer: { id: userId, isOwner: role === 'owner', canComment, name: userName },
-    };
-    const BoundPageView = (p: { blockId: string; title: string }) => <PageView {...context} {...p} />;
-    return { ...services, PageView: BoundPageView };
-  }, [services, live.doc, documentId, active, readOnly, theme, userId, role, userName, canComment]);
+      onArtifactMessage,
+      registerArtifactSender,
+    }),
+    [live.doc, documentId, active, readOnly, theme, userId, role, userName, canComment, onArtifactMessage, registerArtifactSender],
+  );
+  const withPages = useMemo(() => ({ ...services, PageView: BoundPageView }), [services]);
   return (
     <PrimerBlocksContext.Provider value={withPages}>
+      <PageContext.Provider value={pageContext}>
       <div className="flex h-full flex-col" data-live-editor={props.documentId}>
         <ConnectionStatus provider={props.live.provider} />
         <AgentStatus provider={props.live.provider} />
@@ -109,6 +126,7 @@ function LiveEditorView(props: LiveEditorProps & { live: LiveProvider }) {
         {/* One editor per tab fragment, mounted when its tab is opened. */}
         <TabEditor key={active} tabId={active} store={store} catchUp={catchUp} {...props} />
       </div>
+      </PageContext.Provider>
     </PrimerBlocksContext.Provider>
   );
 }

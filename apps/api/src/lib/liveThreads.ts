@@ -12,7 +12,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { commentReactions, comments, documents, threads, users } from '../db/schema.ts';
 import { withLiveDocument } from '../live/instance.ts';
-import { AnchorMissingError, commentMarkEdit, quoteMarkEdit, type RelativeSelection } from '../live/marks.ts';
+import { AnchorMissingError, commentMarkEdit, quoteMarkEdit, removeMarkEdit, type RelativeSelection } from '../live/marks.ts';
 import { originFor } from '../live/origin.ts';
 import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
 import { fragmentName, reachableFragments } from '../live/reach.ts';
@@ -106,16 +106,26 @@ export async function createLiveThread(
   }
 
   const commentId = uuidv7();
-  await transactionWithEvents(async (tx, emit) => {
-    await tx.insert(threads).values({ id: threadId, documentId, versionId: null, anchor });
-    await tx.insert(comments).values({ id: commentId, threadId, authorId: user.id, body, mentions: mentions.mentions });
-    emit({
-      documentId,
-      actorId: user.id,
-      type: 'comment.created',
-      payload: { document_id: documentId, version_id: null, thread_id: threadId, comment_id: commentId, author_id: user.id },
+  try {
+    await transactionWithEvents(async (tx, emit) => {
+      await tx.insert(threads).values({ id: threadId, documentId, versionId: null, anchor });
+      await tx.insert(comments).values({ id: commentId, threadId, authorId: user.id, body, mentions: mentions.mentions });
+      emit({
+        documentId,
+        actorId: user.id,
+        type: 'comment.created',
+        payload: { document_id: documentId, version_id: null, thread_id: threadId, comment_id: commentId, author_id: user.id },
+      });
     });
-  });
+  } catch (err) {
+    // The mark is in the document already; without rows it would point at nothing.
+    if (anchor.type === 'prose') {
+      await applyPlan(documentId, originFor(user), { onConflict: 'refuse', edits: [removeMarkEdit(threadId, anchor.target.tabId)] }).catch(
+        (undoErr) => logger.error({ err: undoErr, threadId }, 'live thread: mark left behind after a failed insert'),
+      );
+    }
+    throw err;
+  }
 
   const [owner] = (await db.execute(sql`
     SELECT ${ownerPersonOf(sql`d.uploader_id`)} AS id FROM documents d WHERE d.id = ${documentId}

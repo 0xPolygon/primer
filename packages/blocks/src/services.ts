@@ -65,7 +65,7 @@ export type PrimerBlockServices = {
   /** The blocks' strings in the viewer's locale. */
   text: BlockText;
   /** Renders a page block's frame and overlay (the web editor). */
-  PageView?: ComponentType<{ blockId: string; title: string }>;
+  PageView?: ComponentType<{ blockId: string; title: string; sourceKey: string }>;
 };
 
 export const PrimerBlocksContext = createContext<PrimerBlockServices | null>(null);
