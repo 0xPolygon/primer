@@ -12,7 +12,7 @@ import { MAX_ROWS, renderBoth, widgetIdPrefix, type WidgetRow } from './render.t
 import { labelsOf, withLabels } from './serialize.ts';
 
 /** A widget block in a document state. */
-type PlacedWidget = { blockId: string; widgetId: string; hash: string; textIds: string[] };
+type PlacedWidget = { blockId: string; widgetId: string; hash: string; textIds: string[]; element: Y.XmlElement };
 
 /** What a checkpoint keeps of a widget (`widgets/<id>.json`): enough to republish it. */
 type BundledWidget = { widgetId: string; blockId: string; hash: string; source: string; rows: WidgetRow[] | null };
@@ -35,7 +35,7 @@ function placedWidgets(doc: Y.Doc): PlacedWidget[] {
         const widgetId = String(child.getAttribute('widgetId') ?? '');
         const hash = String(child.getAttribute('hash') ?? '');
         const textIds = String(child.getAttribute('textIds') ?? '').split(' ').filter(Boolean);
-        if (blockId && BLOCK_ID.test(blockId) && UUID.test(widgetId) && hash) out.push({ blockId, widgetId, hash, textIds });
+        if (blockId && BLOCK_ID.test(blockId) && UUID.test(widgetId) && hash) out.push({ blockId, widgetId, hash, textIds, element: child });
       } else walk(child);
     }
   };
@@ -156,6 +156,8 @@ export async function restoreWidgets(storage: Storage, bundleKey: string, frozen
         updatedAt: new Date(),
       })
       .where(and(eq(widgets.id, kept.widgetId), eq(widgets.documentId, documentId), eq(widgets.blockId, kept.blockId)));
+    // The block shows the hash of the render just restored (the frozen state may name an earlier live redraw).
+    widget.element.setAttribute('hash', rendered.hash);
   }
 }
 

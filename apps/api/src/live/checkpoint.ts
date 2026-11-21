@@ -7,6 +7,9 @@ import { db } from '../db/client.ts';
 import { documents, threadPlacements, threads, versions } from '../db/schema.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { effectiveAgentMode } from '../lib/permissions.ts';
+import { logger } from '../logger.ts';
+import { dataTableAnchorFrozen } from '../records/table.ts';
+import { readFrozenRecords } from '../records/snapshot.ts';
 import type { Storage } from '../storage/types.ts';
 import { deleteBundle, loadBundleDoc, renderBundle } from './bundle.ts';
 import { liveDocName, liveInstance } from './instance.ts';
@@ -70,6 +73,9 @@ export async function writeCheckpoint(
   const versionId = original?.versionId ?? uuidv7();
   const bundle = await renderBundle(storage, { versionId, documentId, title: doc?.title ?? '', state: captured.state });
   const anchored = anchoredIn(captured.state);
+  const capturedDoc = new Y.Doc();
+  Y.applyUpdate(capturedDoc, captured.state);
+  const frozenRecords = await readFrozenRecords(storage, bundle.bundleKey);
   try {
     const versionNumber = await transactionWithEvents(async (tx, emit) => {
       await tx.execute(sql`SELECT id FROM documents WHERE id = ${documentId} FOR UPDATE`);
@@ -96,7 +102,9 @@ export async function writeCheckpoint(
         .where(and(eq(threads.documentId, documentId), isNull(threads.resolvedAt)));
       for (const thread of open) {
         const anchor = thread.anchor as WidgetPartAnchor | DataPointAnchor;
-        const drawn = anchor.type !== 'widget-part' && anchor.type !== 'data-point' ? true : await widgetAnchorPublished(documentId, anchor);
+        // A row of a data table is drawn when the checkpoint's frozen records have it; other points and parts by the published widget.
+        const onTable = anchor.type === 'data-point' ? dataTableAnchorFrozen(capturedDoc, frozenRecords, anchor) : null;
+        const drawn = onTable ?? (anchor.type !== 'widget-part' && anchor.type !== 'data-point' ? true : await widgetAnchorPublished(documentId, anchor));
         const placed = anchored(thread) && drawn;
         await tx.insert(threadPlacements).values({ threadId: thread.id, versionId, anchor: placed ? thread.anchor : null });
       }
@@ -113,6 +121,8 @@ export async function writeCheckpoint(
   } catch (err) {
     await deleteBundle(storage, bundle.bundleKey);
     throw err;
+  } finally {
+    capturedDoc.destroy();
   }
 }
 
@@ -143,6 +153,10 @@ export async function restoreCheckpoint(
     const sources = trustedSources(frozen, checkpoint.documentId);
     const meta = trustedMeta(frozen, checkpoint.documentId);
     let restoredMeta = false;
+    // Widget rows first, as a publish does: viewers refetch when the block's
+    // hash changes. The frozen state takes on each restored render's hash
+    // before its content is read below.
+    if (!suggesting) await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
     const edits: PlannedEdit[] = tabsOf(frozen).map((tab) => {
       const content = pmDocOf(frozen.getXmlFragment(tabFragmentName(tab.id))).content;
       return {
@@ -159,8 +173,6 @@ export async function restoreCheckpoint(
       const content = pmDocOf(frozen.getXmlFragment(name)).content;
       edits.push({ target, inverse: false, build: (tr) => void tr.replaceWith(0, tr.doc.content.size, content) });
     }
-    // Widget rows first, as a publish does: viewers refetch when the block's hash changes.
-    if (!suggesting) await restoreWidgets(storage, checkpoint.bundleKey, frozen, checkpoint.documentId);
     const out = await applyPlan(checkpoint.documentId, originFor(actor), {
       onConflict: 'refuse',
       ...(suggesting
@@ -188,7 +200,8 @@ export async function restoreCheckpoint(
         await db.update(documents).set({ metadata }).where(eq(documents.id, checkpoint.documentId));
       },
     });
-    if (!suggesting) await redrawBoundWidgets(checkpoint.documentId);
+    // The restore is committed: a failed redraw must not report it as failed.
+    if (!suggesting) await redrawBoundWidgets(checkpoint.documentId).catch((err: unknown) => logger.warn({ error: String(err), documentId: checkpoint.documentId }, 'restore: bound widgets not redrawn'));
     return out;
   } finally {
     frozen.destroy();
