@@ -19,8 +19,8 @@ import { canEdit, canRead, effectiveAgentMode, loadEffectiveRole, type Visibilit
 import { serverEditor } from '../live/editor.ts';
 import { originFor } from '../live/origin.ts';
 import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
-import { MAIN_TAB } from '../live/reach.ts';
-import { carryLabels, labelEdit, readLabel, tabOfBlock } from './labels.ts';
+import { MAIN_TAB, tabsOf } from '../live/reach.ts';
+import { carryEdit, carryFor, fragmentLabels, readLabel, tabOfBlock } from './labels.ts';
 import { withLiveDocument } from '../live/instance.ts';
 import { fenceUntrusted } from '../lib/untrusted.ts';
 import { blockVersion, findBlock } from '../live/blocks.ts';
@@ -90,6 +90,14 @@ async function documentAccess(
       refusal: { code: 'bad_request', message: 'Widgets live in live documents; this one is a legacy HTML document.', fix: 'Draw the widget in a Markdown or text document.' },
     };
   }
+  // A stamped page renders as itself: its exports, shares and print have no place for a drawing.
+  if (doc.format === 'html' && need === 'edit') {
+    return {
+      ok: false,
+      status: 400,
+      refusal: { code: 'bad_request', message: 'Widgets are not drawn in HTML page documents.', fix: 'Draw the widget in a Markdown or text document.' },
+    };
+  }
   return { ok: true };
 }
 
@@ -123,19 +131,6 @@ async function labelList(row: WidgetRowRecord, actor: AuthUser): Promise<WidgetL
 /** Words people wrote reach an agent fenced as untrusted data. */
 function fenced(actor: AuthUser, text: string): string {
   return actor.kind === 'agent' ? fenceUntrusted(text, 'label') : text;
-}
-
-/** Each label's words once `theirs` (a new render's labels) is published. */
-async function carryFor(row: Pick<WidgetRowRecord, 'documentId' | 'blockId' | 'publishedSvgLight'>, theirs: Record<string, string>) {
-  const base = row.publishedSvgLight ? labelsOf(row.publishedSvgLight) : {};
-  return carryLabels(base, await fragmentLabels(row, Object.keys(theirs)), theirs);
-}
-
-async function fragmentLabels(row: Pick<WidgetRowRecord, 'documentId' | 'blockId'>, textIds: string[]): Promise<Record<string, string | null>> {
-  if (textIds.length === 0) return {};
-  return withLiveDocument(row.documentId, (doc) =>
-    Object.fromEntries(textIds.map((textId) => [textId, readLabel(doc, row.blockId, textId)])),
-  );
 }
 
 function checkInput(source: unknown, rows: unknown, collection: unknown): WidgetError[] {
@@ -228,6 +223,10 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
 /** Places a new, empty widget block after `afterBlockId` (or at the end of the tab). */
 async function placeBlock(actor: AuthUser, documentId: string, widgetId: string, req: WidgetDraftRequest): Promise<WidgetResult<string>> {
   const tabId = req.tabId ?? MAIN_TAB;
+  // A fragment for an unknown or deleted tab is written but never shown.
+  if (!(await withLiveDocument(documentId, (doc) => tabsOf(doc).some((t) => t.id === tabId)))) {
+    return { ok: false, status: 409, refusal: { code: 'target_missing', message: `Tab ${tabId} does not exist.`, fix: 'Read the document for its tabs and pass a current tabId.' } };
+  }
   if (req.afterBlockId !== undefined) {
     const tab = await withLiveDocument(documentId, (doc) => tabOfBlock(doc, req.afterBlockId!));
     if (tab !== tabId) {
@@ -322,8 +321,9 @@ export async function publishWidget(actor: AuthUser, widgetId: string, previewHa
   const theirs = rendered.light.labels;
   const carried = await carryFor(row, theirs);
   const tabId = (await withLiveDocument(row.documentId, (doc) => tabOfBlock(doc, row.blockId))) ?? MAIN_TAB;
-  const edits: PlannedEdit[] = Object.entries(carried.texts).map(([textId, text]) =>
-    labelEdit({ tabId, blockId: row.blockId, textId }, text),
+  const base = row.publishedSvgLight ? labelsOf(row.publishedSvgLight) : {};
+  const edits: PlannedEdit[] = Object.entries(theirs).map(([textId, agentText]) =>
+    carryEdit({ tabId, blockId: row.blockId, textId }, base[textId], agentText),
   );
   edits.push({
     target: { tabId, blockId: row.blockId },
