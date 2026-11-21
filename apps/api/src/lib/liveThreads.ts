@@ -11,9 +11,11 @@ import {
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { commentReactions, comments, documents, threads, users } from '../db/schema.ts';
+import { withLiveDocument } from '../live/instance.ts';
 import { AnchorMissingError, commentMarkEdit, quoteMarkEdit, type RelativeSelection } from '../live/marks.ts';
 import { originFor } from '../live/origin.ts';
 import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
+import { fragmentName, reachableFragments } from '../live/reach.ts';
 import { logger } from '../logger.ts';
 import { validateAndCleanMentions } from '../notifications/mentions.ts';
 import type { Notifier } from '../notifications/notifier.ts';
@@ -173,6 +175,10 @@ export async function reanchorThread(
   if (req.target !== undefined && !isTarget(req.target)) return badRequest('The target is invalid.', 'Send target: { tabId, blockId }.');
   let target: Target = req.target ?? row.anchor.target;
 
+  // A deleted tab or page keeps its fragment in the Y.Doc; a mark there is on nothing a reader sees.
+  if (!(await withLiveDocument(row.documentId, (ydoc) => reachableFragments(ydoc).includes(fragmentName(target))))) {
+    return targetMissing('The text this comment was on is no longer in the document (its tab or page was removed).');
+  }
   let quote = typeof req.quote === 'string' && req.quote !== '' ? req.quote : row.anchor.quote;
   let edit: PlannedEdit;
   if (typeof req.anchor === 'string' && typeof req.head === 'string') {
