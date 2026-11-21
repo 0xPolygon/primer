@@ -173,8 +173,8 @@ Write structured document events as ONE atomic batch (a single event is a batch 
 Share a document you created with the person who asked for it, over MCP. These mirror `GET /api/users/lookup`, `POST` and `GET /api/documents/:docId/collaborators` and run the same code.
 
 - **`primer_lookup_user`:** `{ email }` returns `{ id, email, displayName }`, or `not_found`. It never creates users.
-- **`primer_add_collaborator`:** `{ documentId | url, email | userId, role }` with `role` one of `commenter` (private documents only), `responder` or `editor`. Returns the collaborator row; the person is notified. Errors: `forbidden`, `user_not_found`, `collaborator_exists`, `owner_not_collaborator`, `invalid_role_for_visibility`, `role_exceeds_own`.
-- **`primer_list_collaborators`:** `{ documentId | url }` returns `{ collaborators }`.
+- **`primer_add_collaborator`:** `{ documentId | url, email | userId, role }` (the stdio server takes `documentId` only: resolve a URL with `primer_resolve_url` first; adding by `email` over a scoped token needs `users:read`) with `role` one of `commenter` (private documents only), `responder` or `editor`. Returns the collaborator row; the person is notified. Errors: `forbidden`, `user_not_found`, `collaborator_exists`, `owner_not_collaborator`, `invalid_role_for_visibility`, `role_exceeds_own`.
+- **`primer_list_collaborators`:** `{ documentId | url }` returns `{ collaborators }` (stdio: `documentId` only).
 - **Who:** only the document's owner. An agent owns the documents it created, and never grants a role above its own. The person it acts for is also an owner, so they can revoke from the UI.
 - **Add only:** there is no tool to change a role, remove anyone, change visibility or transfer ownership.
 
