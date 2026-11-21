@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import * as Y from 'yjs';
 import {
   PRIMER_EVENT_NAMESPACE,
   type AssigneesResponse,
@@ -39,7 +40,24 @@ export type ChoiceStore = {
   subscribeAll(listener: () => void): () => void;
   /** Follows the document's event stream until the returned function runs. */
   connect(): () => void;
+  /** Re-reads the tallies when an update changes a choice or its options (a
+   *  removed or relabelled option changes what a tally counts). */
+  watch(doc: Y.Doc): () => void;
 };
+
+const CHOICE_REFRESH_MS = 500;
+
+/** Whether a transaction changed a choice block or anything inside one. */
+function touchesChoice(tr: Y.Transaction): boolean {
+  for (const changed of tr.changed.keys()) {
+    let type: Y.AbstractType<any> | null = changed;
+    while (type) {
+      if (type instanceof Y.XmlElement && (type.nodeName === 'choice' || type.nodeName === 'choiceOption')) return true;
+      type = (type._item?.parent as Y.AbstractType<any> | undefined) ?? null;
+    }
+  }
+  return false;
+}
 
 export function createChoiceStore(
   documentId: string,
@@ -122,6 +140,19 @@ export function createChoiceStore(
         }
       };
       return () => stream.close();
+    },
+    watch(doc) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const onUpdate = (_update: Uint8Array, _origin: unknown, _doc: Y.Doc, tr: Y.Transaction) => {
+        if (!touchesChoice(tr)) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => refresh(), CHOICE_REFRESH_MS);
+      };
+      doc.on('update', onUpdate);
+      return () => {
+        doc.off('update', onUpdate);
+        clearTimeout(timer);
+      };
     },
   };
 }

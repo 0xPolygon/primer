@@ -39,7 +39,7 @@ import { transformHtml } from '../upload/htmlPipeline.ts';
 import { MAX_BYTES, MAX_DESCRIPTION, MAX_TITLE } from '../upload/validate.ts';
 import { transactionWithEvents } from './events.ts';
 import { canEdit, canRead, loadEffectiveRole, type Visibility } from './permissions.ts';
-import { carryOpenThreads, loadCarryOrigins } from './threadCarry.ts';
+import { anchorOnRender, bodyText, carryOpenThreads, loadCarryOrigins } from './threadCarry.ts';
 
 export const MAX_VERSION_NOTE = 500;
 
@@ -156,8 +156,13 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
       try { await storage.delete(key); } catch {}
     }
   };
-  await storage.put(storageKey, htmlBytes);
-  await storage.put(originalKey, input.content);
+  try {
+    await storage.put(storageKey, htmlBytes);
+    await storage.put(originalKey, input.content);
+  } catch (e) {
+    await cleanup();
+    throw e;
+  }
 
   let versionNumber: number;
   try {
@@ -201,9 +206,11 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /** Locks the document row and returns its latest version number, refusing a
- *  stale base and a document that went live meanwhile. */
+ *  stale base and a document that went live meanwhile. NO KEY UPDATE still
+ *  serialises version allocation but does not conflict with the KEY SHARE an
+ *  events writer takes (FK check) while holding the events lock. */
 async function lockForVersion(tx: Tx, documentId: string, base: number | undefined): Promise<number> {
-  const [doc] = (await tx.execute(sql`SELECT format FROM documents WHERE id = ${documentId} FOR UPDATE`)) as unknown as {
+  const [doc] = (await tx.execute(sql`SELECT format FROM documents WHERE id = ${documentId} FOR NO KEY UPDATE`)) as unknown as {
     format: string | null;
   }[];
   if (doc?.format) throw new Republish();
@@ -244,7 +251,9 @@ function formatRefusal(format: PublishFormat, live: string): Refused {
  * version, with the uploaded file kept as its original. When nothing was
  * applied (an agent in suggest mode gets every change as a suggestion), the
  * live document is unchanged, so no original is stored and no checkpoint
- * written: an agent's suggestions never become the published version.
+ * written: an agent's suggestions never become the published version. When
+ * everything was already applied (a retry after a failed checkpoint) but the
+ * live content is newer than the last version, it is checkpointed.
  */
 async function republishLive(
   storage: Storage,
@@ -271,8 +280,19 @@ async function republishLive(
     return refuse(400, 'bad_request', 'Document body is empty.', 'Publish a file with some content.', 'parse_failed');
   }
 
+  // The live content as it was before this merge, against the last version:
+  // newer means an earlier publish applied its changes but never checkpointed.
+  const [before] = (await db.execute(sql`
+    SELECT COALESCE(MAX(id), 0)::int AS v,
+           (SELECT doc_version FROM versions WHERE document_id = ${documentId} ORDER BY version_number DESC LIMIT 1) AS "lastVersion"
+      FROM doc_updates WHERE document_id = ${documentId}
+  `)) as unknown as { v: number; lastVersion: number | null }[];
   const reconciliation = await mergeRepublish(documentId, input.actor, imported);
-  if (!reconciliation.outcomes.some((o) => o.status === 'applied')) return { ok: true, documentId, reconciliation };
+  if (!reconciliation.outcomes.some((o) => o.status === 'applied')) {
+    // A retry after a failed checkpoint finds everything already applied.
+    const retry = reconciliation.outcomes.every((o) => o.status === 'unchanged') && before!.lastVersion !== null && before!.v > before!.lastVersion;
+    if (!retry) return { ok: true, documentId, reconciliation };
+  }
   await db.update(documents).set({ metadata: imported.metadata }).where(eq(documents.id, documentId));
   const versionId = uuidv7();
   const originalKey = `v1/${versionId}.orig`;
@@ -327,12 +347,13 @@ async function publishLive(
   await storage.put(originalKey, input.content);
   let bundle: Awaited<ReturnType<typeof renderBundle>>;
   try {
-    bundle = await renderBundle(storage, { versionId, documentId, title: doc.title, state });
+    bundle = await renderBundle(storage, { versionId, documentId, title: doc.title, state, format });
   } catch (err) {
     await storage.delete(originalKey).catch(() => undefined);
     throw err;
   }
 
+  const render = bodyText(bundle.staticHtml);
   let versionNumber: number;
   try {
     versionNumber = await transactionWithEvents(async (tx, emit) => {
@@ -373,7 +394,7 @@ async function publishLive(
         await tx.insert(threadPlacements).values({
           threadId: thread.threadId,
           versionId,
-          anchor: anchored.has(thread.threadId) ? thread.anchor : null,
+          anchor: anchored.has(thread.threadId) ? anchorOnRender(thread.anchor, render) : null,
         });
       }
       emit({

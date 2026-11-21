@@ -5,7 +5,7 @@ import type { PlannedEdit } from './pipeline.ts';
 import { applyPlan } from './pipeline.ts';
 import { SYSTEM_ORIGIN } from './origin.ts';
 import { buildLiveDoc, importMarkdown, importText } from './import.ts';
-import { exportMarkdown, exportText } from './export.ts';
+import { exportHtml, exportMarkdown, exportText } from './export.ts';
 import { readBlocks } from './editor.ts';
 import { createLiveDoc, seedBlocks, withLiveDoc } from './live.testlib.ts';
 
@@ -167,5 +167,13 @@ describe('export', () => {
     const markdown = await withLiveDoc(id, (doc) => exportMarkdown(doc, id));
     expect(markdown.indexOf('Left')).toBeGreaterThanOrEqual(0);
     expect(markdown.indexOf('Left')).toBeLessThan(markdown.indexOf('Right'));
+  });
+
+  it('static HTML inlines the document images', async () => {
+    const png = 'primer-blob://01900000-0000-7000-8000-0000000000aa';
+    const doc = buildLiveDoc(await importMarkdown(`![pic](${png})\n`), 'markdown', 'doc-img');
+    const html = await exportHtml(doc, 'T', new Map(), async () => ({ contentType: 'image/png', bytes: Uint8Array.from([1, 2, 3]) }));
+    expect(html).toContain('data:image/png;base64,AQID');
+    expect(html).not.toContain(png);
   });
 });

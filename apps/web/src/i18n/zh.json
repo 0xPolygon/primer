@@ -610,6 +610,7 @@
   "deleteCommented.body": "这会删除未解决评论所指向的文本。评论仍保持打开，并标记为“文本已删除”。",
   "deleteCommented.keep": "保留文本",
   "deleteCommented.confirm": "仍然删除",
+  "deleteCommented.stale": "您在决定时文档已发生变化。未删除任何内容，请重新操作。",
   "threads.notDeleted": "讨论串只能解决，不能删除。",
   "suggestions.acceptFailed": "无法接受（{status}）。",
   "suggestions.rejectFailed": "无法拒绝（{status}）。",
