@@ -635,6 +635,8 @@
   "libDocumentActionsMenu.unmarkTemplate": "Ne plus utiliser comme modèle",
   "headerActions.copyDocumentFailed": "Impossible de copier le document.",
   "headerActions.proposeFailed": "Impossible de proposer la branche : {reason}",
+  "headerActions.proposeRefused": "{count} modifications n'ont pas pu être proposées : {reason}",
+  "suggestions.leftOpen": "{count} suggestions sont restées ouvertes : {reason}",
   "libraryToolbar.templates": "Modèles",
   "library.useTemplate": "Utiliser le modèle",
   "suggestions.changeSet": "{count} modifications proposées ensemble",

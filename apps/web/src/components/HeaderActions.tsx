@@ -159,7 +159,12 @@ export function HeaderActions({
     propose: () => {
       setMenuState('closed');
       propose.mutate(undefined, {
-        onSuccess: (out) => navigate(`/d/${out.documentId}`),
+        onSuccess: (out) => {
+          // A 200 can carry refused edits (a tab added on the branch): say so, stay.
+          const refused = out.outcomes.filter((o) => o.refusal);
+          if (refused.length === 0) return navigate(`/d/${out.documentId}`);
+          showFeedback({ kind: 'error', message: t('headerActions.proposeRefused', { count: refused.length, reason: refused[0]!.refusal!.message }) }, 8000);
+        },
         onError: (err) => showFeedback({ kind: 'error', message: t('headerActions.proposeFailed', { reason: err.message }) }, 5000),
       });
     },

@@ -635,6 +635,8 @@
   "libDocumentActionsMenu.unmarkTemplate": "取消模板",
   "headerActions.copyDocumentFailed": "无法复制文档。",
   "headerActions.proposeFailed": "无法提议该分支：{reason}",
+  "headerActions.proposeRefused": "有 {count} 处修改无法提议：{reason}",
+  "suggestions.leftOpen": "有 {count} 条建议仍未处理：{reason}",
   "libraryToolbar.templates": "模板",
   "library.useTemplate": "使用模板",
   "suggestions.changeSet": "一起提议的 {count} 处修改",

@@ -635,6 +635,8 @@
   "libDocumentActionsMenu.unmarkTemplate": "Dejar de usar como plantilla",
   "headerActions.copyDocumentFailed": "No se pudo copiar el documento.",
   "headerActions.proposeFailed": "No se pudo proponer la rama: {reason}",
+  "headerActions.proposeRefused": "No se pudieron proponer {count} cambios: {reason}",
+  "suggestions.leftOpen": "{count} sugerencias quedaron abiertas: {reason}",
   "libraryToolbar.templates": "Plantillas",
   "library.useTemplate": "Usar plantilla",
   "suggestions.changeSet": "{count} cambios propuestos juntos",
