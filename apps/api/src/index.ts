@@ -8,7 +8,7 @@ import { notifierFromEnv } from './notifications/fromEnv.ts';
 import { startPurgeInterval } from './jobs/purge.ts';
 import { mockResolver, makeOktaResolver, type UserResolver } from './auth/resolver.ts';
 import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from './auth/okta.ts';
-import { makeProxyResolver } from './auth/proxy.ts';
+import { makeProxyResolver, parseMaxTokenAgeSec } from './auth/proxy.ts';
 import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
 import { makeOAuthBearerResolver } from './auth/oauth/bearer.ts';
 import { sql } from './db/client.ts';
