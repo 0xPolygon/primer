@@ -106,8 +106,18 @@ export function draftOps(base: DraftBlock[], draft: DraftBlock[], versions: Map<
         return;
       }
       const version = versions.get(block.id);
-      const to = stays.has(block.id) ? null : place();
-      if (to && version) ops.push({ op: 'move', target: at(block.id), at: at(to[0]), position: to[1], expectVersion: version });
+      let to = stays.has(block.id) ? null : place();
+      // New blocks already go at that spot (they come first in the draft), and a
+      // move there would land above them: anchor before the next block that
+      // stays instead, else move first so the adds go in above it.
+      const added = to && to[1] !== 'before' ? adds.get(`${to[1]}:${to[0]}`) : undefined;
+      const stay = added && later.find((s) => stays.has(s.id));
+      if (stay) to = [stay.id, 'before'];
+      if (to && version) {
+        const move: LiveOp = { op: 'move', target: at(block.id), at: at(to[0]), position: to[1], expectVersion: version };
+        if (added && !stay) ops.splice(ops.indexOf(added), 0, move);
+        else ops.push(move);
+      }
       keep(block);
       previous = block.id;
     });

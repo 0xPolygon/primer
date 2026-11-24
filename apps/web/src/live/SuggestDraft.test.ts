@@ -81,4 +81,20 @@ describe('draftOps keeps structure', () => {
       { op: 'delete', target: at('c') },
     ]);
   });
+
+  it('a moved block after new ones keeps its place below them', () => {
+    const [P, X, Y, Z, A] = [p('p', 'P'), p('x', 'X'), p('y', 'Y'), p('z', 'Z'), p('a', 'A')];
+    const v = new Map([['p', 'vp'], ['x', 'vx'], ['y', 'vy'], ['z', 'vz']]);
+    const added = { op: 'add', at: at('p'), position: 'after', blocks: [{ json: { type: 'paragraph', props: {}, content: A.content, children: [] } }] };
+    // Base P X Y Z, draft P A Z X Y: Z goes before X, which stays, not after P.
+    expect(draftOps([P, X, Y, Z], [P, A, Z, X, Y], v, 'main')).toEqual([
+      added,
+      { op: 'move', target: at('z'), at: at('x'), position: 'before', expectVersion: 'vz' },
+    ]);
+    // Nothing stays after it: the move comes first, so the add lands above it.
+    expect(draftOps([Z, P], [P, A, Z], v, 'main')).toEqual([
+      { op: 'move', target: at('z'), at: at('p'), position: 'after', expectVersion: 'vz' },
+      added,
+    ]);
+  });
 });
