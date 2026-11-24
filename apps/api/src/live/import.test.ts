@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { buildLiveDoc, importMarkdown, importText, type ImportedBlock } from './import.ts';
 import { exportHtml, exportMarkdown, plainText } from './export.ts';
@@ -12,6 +14,19 @@ const flatten = (blocks: ImportedBlock[]): ImportedBlock[] => blocks.flatMap((b)
 const types = (blocks: ImportedBlock[]) => flatten(blocks).map((b) => b.type);
 
 describe('importMarkdown', () => {
+  it('a file of about 2,000 blocks imports under a capped heap', () => {
+    // The signature check once opened a JSDOM window per group and never closed
+    // it: this size crashed a 560 MB heap. A child process, so a regression
+    // fails here instead of taking the test worker down.
+    const fixture = fileURLToPath(new URL('./import.heap.fixture.ts', import.meta.url));
+    const out = execFileSync(process.execPath, ['--max-old-space-size=250', '--import', 'tsx', fixture], {
+      encoding: 'utf8',
+      cwd: fileURLToPath(new URL('../../', import.meta.url)),
+      timeout: 60_000,
+    });
+    expect(Number(out.trim())).toBeGreaterThanOrEqual(2000);
+  }, 90_000);
+
   it('no text is dropped from real-world samples', async () => {
     for (const name of markdownFixtures) {
       const source = fixture(name);
