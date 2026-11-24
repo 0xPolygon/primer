@@ -13,6 +13,10 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # v2 requires Changesets CLI v3; see the note in release.yml.
+      - dependency-name: changesets/action
+        update-types: ["version-update:semver-major"]
 
   # Security updates only: a limit of 0 suppresses routine version-bump PRs
   # without affecting security PRs.

@@ -225,7 +225,8 @@ async function copyThreads(tx: Tx, sourceId: string, documentId: string, ids: Ma
   if (rows.length === 0) return;
   for (const t of rows) ids.set(t.id.toLowerCase(), uuidv7());
   await tx.insert(threads).values(rows.map((t) => ({ ...t, id: ids.get(t.id.toLowerCase())!, documentId, copiedFrom: t.id })));
-  const commentRows = await tx.select().from(comments).where(inArray(comments.threadId, rows.map((t) => t.id)));
+  // Soft-deleted comments stay behind: a branch must not resurrect what was deleted.
+  const commentRows = await tx.select().from(comments).where(and(inArray(comments.threadId, rows.map((t) => t.id)), isNull(comments.deletedAt)));
   if (commentRows.length === 0) return;
   const commentIds = new Map(commentRows.map((c) => [c.id, uuidv7()]));
   await tx.insert(comments).values(commentRows.map((c) => ({ ...c, id: commentIds.get(c.id)!, threadId: ids.get(c.threadId.toLowerCase())! })));

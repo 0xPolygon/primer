@@ -213,6 +213,9 @@ describe('checkpoints', () => {
       expect(frozenHtml).toContain('window.print()');
       expect(frozenHtml).toContain('@page');
       expect(frozen.headers.get('content-security-policy')).toContain("connect-src 'none'");
+      // The print URL opened top-level stays sandboxed.
+      expect(frozen.headers.get('content-security-policy')).toContain('sandbox allow-scripts');
+      expect(frozen.headers.get('content-security-policy')).not.toMatch(/allow-same-origin/);
 
       const live = await (await app.request(`/api/documents/${documentId}/print`)).text();
       expect(live).toContain('Then tabs, and comments.');

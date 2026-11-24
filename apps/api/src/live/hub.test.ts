@@ -20,7 +20,8 @@ import { generateToken } from '../auth/tokens.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { asUser } from '../test/harness.ts';
-import { createHub, CLOSE_FORBIDDEN, CLOSE_SAVE_FAILED, type Hub } from './hub.ts';
+import { createHub, CLOSE_FORBIDDEN, CLOSE_SAVE_FAILED, MAX_MESSAGE_BYTES, type Hub } from './hub.ts';
+import { MAX_AWARENESS_BYTES } from './instance.ts';
 import { loadYDoc } from './persist.ts';
 import { createLiveDoc } from './live.testlib.ts';
 
@@ -64,13 +65,14 @@ const asPerson = (userId: string, origin = APP_ORIGIN) => ({ 'x-mock-user-id': u
 type Client = { provider: HocuspocusProvider; doc: Y.Doc; outcome: 'synced' | 'denied'; closed: Promise<number> };
 
 /** Opens a provider with these upgrade headers; resolves once it synced or was denied. */
-async function connect(documentId: string, headers: Record<string, string>): Promise<Client> {
+async function connect(documentId: string, headers: Record<string, string>, clientId?: number): Promise<Client> {
   class HeaderWebSocket extends WebSocket {
     constructor(target: string | URL) {
       super(target, { headers } as never);
     }
   }
   const doc = new Y.Doc();
+  if (clientId !== undefined) doc.clientID = clientId;
   let onClosed!: (code: number) => void;
   const closed = new Promise<number>((resolve) => (onClosed = resolve));
   const provider = new HocuspocusProvider({
@@ -265,6 +267,85 @@ describe('live hub', () => {
     expect(res.status).toBe(204);
 
     expect(await client.closed).toBe(CLOSE_FORBIDDEN);
+  });
+
+  it('closes a socket that sends a message over the size limit', async () => {
+    const socket = new WebSocket(url, { headers: asPerson(OWNER) } as never);
+    socket.binaryType = 'arraybuffer';
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => resolve();
+      socket.onerror = () => reject(new Error('upgrade failed'));
+    });
+    const code = new Promise<number>((resolve) => (socket.onclose = (e) => resolve(e.code)));
+    socket.send(new Uint8Array(MAX_MESSAGE_BYTES + 1));
+    expect(await code).toBe(1009);
+  });
+
+  describe('presence', () => {
+    const states = (id: string) => (hub.hocuspocus.documents.get(`doc:${id}`)!.awareness.getStates());
+
+    it("a peer can't overwrite or remove another peer's presence", async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      await addCollaborator(id, OTHER, 'editor');
+      const victim = await connect(id, asPerson(OWNER));
+      const attacker = await connect(id, asPerson(OTHER));
+      const victimId = victim.provider.awareness!.clientID;
+      victim.provider.awareness!.setLocalState({ name: 'victim' });
+      await until(async () => states(id).get(victimId)?.name === 'victim');
+
+      // Forge the victim's client id with a higher clock than the server holds.
+      const forged = attacker.provider.awareness!;
+      forged.clientID = victimId;
+      for (let i = 0; i < 20; i++) forged.setLocalState({ name: `evil${i}` });
+      forged.setLocalState(null);
+      attacker.provider.awareness!.setLocalState({ name: 'attacker' });
+      await sleep(300);
+      expect(states(id).get(victimId)?.name).toBe('victim');
+    });
+
+    it('a reconnecting peer keeps publishing under its own client id', async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      const stays = await connect(id, asPerson(OWNER));
+      const first = await connect(id, asPerson(OWNER));
+      const clientId = first.provider.awareness!.clientID;
+      first.provider.awareness!.setLocalState({ name: 'one' });
+      await until(async () => states(id).get(clientId)?.name === 'one');
+      first.provider.destroy();
+      await until(async () => !states(id).has(clientId));
+
+      // A new provider's clock restarts; a real reconnect keeps counting.
+      const again = await connect(id, asPerson(OWNER), clientId);
+      for (let i = 0; i < 10; i++) again.provider.awareness!.setLocalState({ name: 'tmp' });
+      again.provider.awareness!.setLocalState({ name: 'two' });
+      await until(async () => states(id).get(clientId)?.name === 'two');
+      again.provider.awareness!.setLocalState({ name: 'three' });
+      await until(async () => states(id).get(clientId)?.name === 'three');
+      expect(stays.provider.awareness!.getStates().get(clientId)?.name).toBe('three');
+    });
+
+    it('a reconnect that beats the old socket closing keeps its presence', async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      const old = await connect(id, asPerson(OWNER));
+      const clientId = old.provider.awareness!.clientID;
+      old.provider.awareness!.setLocalState({ name: 'one' });
+      await until(async () => states(id).get(clientId)?.name === 'one');
+
+      const again = await connect(id, asPerson(OWNER), clientId); // the old socket is still open
+      for (let i = 0; i < 10; i++) again.provider.awareness!.setLocalState({ name: 'tmp' });
+      again.provider.awareness!.setLocalState({ name: 'two' });
+      await until(async () => states(id).get(clientId)?.name === 'two');
+    });
+
+    it('drops an oversized awareness state but keeps normal ones', async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      const client = await connect(id, asPerson(OWNER));
+      const awareness = client.provider.awareness!;
+      awareness.setLocalState({ blob: 'é'.repeat(MAX_AWARENESS_BYTES / 2) });
+      await sleep(300);
+      expect(states(id).has(awareness.clientID)).toBe(false);
+      awareness.setLocalState({ name: 'ok' });
+      await until(async () => states(id).get(awareness.clientID)?.name === 'ok');
+    });
   });
 
   it.todo('proxy-auth headers authenticate (with #141, through makeProxyResolver)');
