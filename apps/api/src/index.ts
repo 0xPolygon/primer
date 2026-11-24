@@ -12,6 +12,7 @@ import { mockResolver, makeOktaResolver, type UserResolver } from './auth/resolv
 import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from './auth/okta.ts';
 import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
 import { makeOAuthBearerResolver } from './auth/oauth/bearer.ts';
+import { flushAutoCheckpoints } from './live/autoCheckpoint.ts';
 import { createHub } from './live/hub.ts';
 import { loadSigningKey } from './live/signing.ts';
 
@@ -134,6 +135,8 @@ server.on('upgrade', hub.handleUpgrade);
 const shutdown = async () => {
   await stopPurge();
   hub.close();
+  // Checkpoints still settling are history: write them before exiting.
+  await flushAutoCheckpoints().catch((err: unknown) => logger.error({ err }, 'flushing automatic checkpoints failed'));
   if ('close' in server) {
     const http = server as { close: (cb?: () => void) => void; closeAllConnections?: () => void };
     http.close(() => process.exit(0));
