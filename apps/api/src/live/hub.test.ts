@@ -353,7 +353,10 @@ describe('live hub', () => {
   it('refuses a socket whose authentication is still pending when the hub closes', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const resolving = new Promise<void>((resolve) => (reached = resolve));
     const slow: UserResolver = async (c) => {
+      reached();
       await gate;
       return mockMultiResolver(c);
     };
@@ -362,19 +365,20 @@ describe('live hub', () => {
     lateServer.on('upgrade', late.handleUpgrade);
     await new Promise<void>((resolve) => lateServer.listen(0, '127.0.0.1', resolve));
     const lateUrl = `ws://127.0.0.1:${(lateServer.address() as AddressInfo).port}/collab`;
+    const socket = new WebSocket(lateUrl, { headers: asPerson(OWNER) } as never);
     try {
-      const socket = new WebSocket(lateUrl, { headers: asPerson(OWNER) } as never);
       const outcome = new Promise<'open' | 'refused'>((resolve) => {
         socket.addEventListener('open', () => resolve('open'));
         socket.addEventListener('error', () => resolve('refused'));
         socket.addEventListener('close', () => resolve('refused'));
       });
-      await sleep(100); // the upgrade is now waiting on the resolver
+      await resolving; // the upgrade is now waiting on the resolver
       late.close();
       release();
       expect(await outcome).toBe('refused');
     } finally {
       release();
+      socket.close();
       await new Promise<void>((resolve) => lateServer.close(() => resolve()));
     }
   });
