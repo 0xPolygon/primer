@@ -71,6 +71,7 @@ if (authMode === 'okta') {
   const jwksUrl = process.env.PROXY_AUTH_JWKS_URL;
   const proxyIssuer = process.env.PROXY_AUTH_ISSUER;
   const audience = process.env.PROXY_AUTH_AUDIENCE;
+  const maxTokenAge = process.env.PROXY_AUTH_MAX_TOKEN_AGE_SEC;
   if (!header || !proxyIssuer || !audience || (!publicKeyPem && !jwksUrl) || (publicKeyPem && jwksUrl)) {
     throw new Error(
       'AUTH_MODE=proxy needs PROXY_AUTH_HEADER, PROXY_AUTH_ISSUER, PROXY_AUTH_AUDIENCE and exactly one of ' +
@@ -84,6 +85,7 @@ if (authMode === 'okta') {
     jwksUrl,
     issuer: proxyIssuer,
     audience,
+    maxTokenAgeSec: maxTokenAge ? Number(maxTokenAge) : undefined,
   });
   oktaAdapter = makeDisabledOktaAdapter();
 } else {

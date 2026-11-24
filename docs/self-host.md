@@ -30,6 +30,7 @@ database. Back up the `primer-pg` and `primer-blobs` volumes.
 | `PROXY_AUTH_JWKS_URL` | one of | URL of a JWKS the proxy publishes (cached, keys rotate). Must be `https://` (`http://` only for localhost) |
 | `PROXY_AUTH_ISSUER` | proxy mode | Required `iss` |
 | `PROXY_AUTH_AUDIENCE` | proxy mode | Required `aud` |
+| `PROXY_AUTH_MAX_TOKEN_AGE_SEC` | no | Oldest accepted token by `iat`, in seconds (default 300). Raise it for a proxy that reuses one token for a whole session (Cloudflare Access: up to your session length) |
 | `MAILGUN_API_KEY`, `EMAIL_FROM` | no | Email notifications. Without them nothing is emailed, and external-share one-time codes (which are emailed) are unavailable. `MAILGUN_DOMAIN`, `MAILGUN_API_BASE_URL` optional |
 
 Everything else in the [README configuration table](../README.md#configuration)
@@ -40,11 +41,13 @@ applies too.
 Put a reverse proxy in front of Primer that authenticates people however you
 like (SSO, mTLS, a Cloudflare Access policy, oauth2-proxy...) and forwards a
 short-lived signed JWT in a header. Primer verifies it on every request:
-signature, `iss`, `aud` and `exp` (30 s clock skew). Tokens with `alg: none` or
+signature, `iss`, `aud`, `exp` and `iat` (30 s clock skew; a token issued
+more than `PROXY_AUTH_MAX_TOKEN_AGE_SEC`, default 5 minutes, ago is refused). Tokens with `alg: none` or
 symmetric algorithms are rejected.
 
 Claims:
 
+- `iat` (required): when the token was issued.
 - `sub` (required): the stable user id. People are keyed by it. The Primer user id is `proxy:<sub>`, so a token can never collide with (or overwrite) the built-in service user or users from another auth mode.
 - `email` (optional): shown to collaborators and matched against `ADMIN_EMAILS`.
   Defaults to `<sub>@proxy.invalid`.
@@ -73,6 +76,8 @@ PROXY_AUTH_HEADER=cf-access-jwt-assertion
 PROXY_AUTH_JWKS_URL=https://<team>.cloudflareaccess.com/cdn-cgi/access/certs
 PROXY_AUTH_ISSUER=https://<team>.cloudflareaccess.com
 PROXY_AUTH_AUDIENCE=<application AUD tag>
+# Cloudflare reuses one assertion for the whole session, so allow its age:
+PROXY_AUTH_MAX_TOKEN_AGE_SEC=86400
 ```
 
 Example minting a token yourself (Node, with `jose`), e.g. from a small auth
@@ -85,6 +90,7 @@ const jwt = await new SignJWT({ email: 'ada@example.com', name: 'Ada' })
   .setSubject('user-123')
   .setIssuer('https://sso.example.com')
   .setAudience('primer')
+  .setIssuedAt()
   .setExpirationTime('5m')
   .sign(privateKey);
 // proxy forwards:  x-identity: <jwt>
