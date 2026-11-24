@@ -148,7 +148,7 @@ export async function writeCheckpoint(
         const anchor = thread.anchor as WidgetPartAnchor | DataPointAnchor;
         // A row of a data table is drawn when the checkpoint's frozen records have it; other points and parts by the published widget.
         const onTable = anchor.type === 'data-point' ? dataTableAnchorFrozen(capturedDoc, frozenRecords, anchor) : null;
-        const drawn = onTable ?? (anchor.type !== 'widget-part' && anchor.type !== 'data-point' ? true : await widgetAnchorPublished(documentId, anchor));
+        const drawn = onTable ?? (anchor.type !== 'widget-part' && anchor.type !== 'data-point' ? true : await widgetAnchorPublished(documentId, anchor, tx));
         const placed = anchored(thread) && drawn;
         await tx.insert(threadPlacements).values({
           threadId: thread.id,

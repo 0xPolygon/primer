@@ -23,3 +23,8 @@ export function docQueue(documentId: string): <T>(job: () => Promise<T>) => Prom
     return run;
   };
 }
+
+/** Waits until every queue is empty, jobs queued meanwhile included (shutdown). */
+export async function drainDocQueues(): Promise<void> {
+  while (tails.size > 0) await Promise.all([...tails.values()]);
+}

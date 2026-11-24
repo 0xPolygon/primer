@@ -12,7 +12,8 @@ import { mockResolver, makeOktaResolver, type UserResolver } from './auth/resolv
 import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from './auth/okta.ts';
 import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
 import { makeOAuthBearerResolver } from './auth/oauth/bearer.ts';
-import { flushAutoCheckpoints } from './live/autoCheckpoint.ts';
+import { sql } from './db/client.ts';
+import { drainPendingWork } from './shutdown.ts';
 import { createHub } from './live/hub.ts';
 import { loadSigningKey } from './live/signing.ts';
 
@@ -141,8 +142,9 @@ const shutdown = async () => {
     // Open event streams would otherwise hold the exit; browsers reconnect.
     http.closeAllConnections?.();
   }
-  // No more writes come in: write the checkpoints still settling, then exit.
-  await flushAutoCheckpoints().catch((err: unknown) => logger.error({ err }, 'flushing automatic checkpoints failed'));
+  // No more writes come in: write everything still pending, then close the pool.
+  await drainPendingWork();
+  await sql.end({ timeout: 5 }).catch((err: unknown) => logger.error({ error: String(err) }, 'closing the database pool failed'));
   process.exit(0);
 };
 process.on('SIGTERM', () => { void shutdown(); });
