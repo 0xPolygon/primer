@@ -347,6 +347,8 @@ export async function getWidget(actor: AuthUser, widgetId: string): Promise<Widg
   const access = await documentAccess(row.documentId, actor, 'read');
   if (!access.ok) return access;
   const labels = await labelList(row, actor);
+  // A draft is the editors' work in progress; readers see only what is published.
+  const editor = (await documentAccess(row.documentId, actor, 'edit')).ok;
   return {
     ok: true,
     value: {
@@ -359,7 +361,7 @@ export async function getWidget(actor: AuthUser, widgetId: string): Promise<Widg
       publishedHash: row.publishedHash,
       labels,
       draft:
-        row.draftSource === null
+        row.draftSource === null || !editor
           ? null
           : { source: row.draftSource, rows: row.draftRows as WidgetRowInput[] | null, collection: row.draftCollection, errors: row.draftErrors as WidgetError[] | null },
       updatedAt: row.updatedAt.toISOString(),

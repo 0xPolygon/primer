@@ -1,6 +1,7 @@
 import type { Context, Hono } from 'hono';
 import type { WidgetDraftRequest } from '@polygonlabs/primer-api-types';
 import type { AppVariables } from '../app.ts';
+import { checkRateLimit } from '../lib/rateLimiter.ts';
 import { draftWidget, getWidget, publishWidget, widgetImage, type WidgetResult } from '../widgets/store.ts';
 
 type Ctx = Context<{ Variables: AppVariables }>;
@@ -24,6 +25,8 @@ export function registerWidgetRoutes(app: Hono<{ Variables: AppVariables }>): vo
   app.post('/api/documents/:docId/widgets/draft', async (c) => {
     const req = await body<WidgetDraftRequest>(c);
     if (!req) return c.json({ error: 'invalid_body', message: 'JSON parse failed' }, 400);
+    // Every draft renders two PNGs on the server's worker pool.
+    if (!checkRateLimit(`widget-draft:${c.get('user').id}`, 30)) return c.json({ error: 'rate_limited' }, 429);
     const result = await draftWidget(c.get('user'), c.req.param('docId'), req);
     return result.ok ? c.json(result.value) : refused(c, result);
   });
@@ -45,6 +48,7 @@ export function registerWidgetRoutes(app: Hono<{ Variables: AppVariables }>): vo
   app.get('/api/widgets/:widgetId/image', async (c) => {
     const theme = c.req.query('theme') === 'dark' ? 'dark' : 'light';
     const format = c.req.query('format') === 'png' ? 'png' : 'svg';
+    if (format === 'png' && !checkRateLimit(`widget-png:${c.get('user').id}`, 120)) return c.json({ error: 'rate_limited' }, 429);
     const result = await widgetImage(c.get('user'), c.req.param('widgetId'), theme, format);
     if (!result.ok) return refused(c, result);
     c.header('Cache-Control', 'private, no-cache');
