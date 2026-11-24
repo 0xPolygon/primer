@@ -117,6 +117,17 @@ describe('OAuth agent owning a document', () => {
       const widen = await app.request(base, { method: 'PATCH', headers: person, body: JSON.stringify({ visibility: 'org' }) });
       expect(widen.status).toBe(200);
       expect((await app.request(base, { headers: colleague })).status).toBe(200);
+
+      // A live (Markdown) upload starts private too.
+      const md = new FormData();
+      md.append('file', new Blob(['# Notes\n\nhi\n'], { type: 'text/markdown' }), 'a.md');
+      md.append('title', 'Agent notes');
+      const mdUp = await app.request('/api/upload', { method: 'POST', headers: auth, body: md });
+      expect(mdUp.status).toBeLessThan(300);
+      const mdBase = `/api/documents/${((await mdUp.json()) as { documentId: string }).documentId}`;
+      const mdRow = (await (await app.request(mdBase, { headers: person })).json()) as { document: { visibility: string } };
+      expect(mdRow.document.visibility).toBe('private');
+      expect((await app.request(mdBase, { headers: colleague })).status).toBe(404);
     });
   });
 });
