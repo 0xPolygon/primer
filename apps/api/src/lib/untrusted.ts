@@ -22,10 +22,10 @@ export function fenceUntrusted(text: string, label?: string): string {
   return `<${tag}>\n${text}\n</${tag}>`;
 }
 
-/** Whether `text` holds fence markup (`<untrusted-…>` or its closing tag): text
+/** Whether `text` holds a complete fence tag (`<untrusted-…-nonce>` or its closing tag): text
  *  read back from a fence must be unwrapped before it is written. */
 export function hasFenceMarkup(text: string): boolean {
-  return /<\/?untrusted-/i.test(text);
+  return /<\/?untrusted-(?:[a-z]+-)?[0-9a-f]{16}>/i.test(text);
 }
 
 /** Which names of a DTO are Primer's own: `keys` are its field names (any

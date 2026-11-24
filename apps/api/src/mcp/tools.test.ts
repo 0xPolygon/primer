@@ -1363,6 +1363,11 @@ describe('untrusted-content fencing on /mcp', () => {
       expect((await h.primer_create_document({ title: 'T', content: fenced, format: 'markdown' }, owner)).isError).toBe(true);
       expect((await h.primer_add_version({ documentId: id, content: fenced, format: 'markdown' }, owner)).isError).toBe(true);
       expect(unfence((await read()).markdown)).toBe(text);
+
+      // A literal example that merely mentions the tag syntax is ordinary text and writes fine.
+      const example = 'Fences look like <untrusted-content-abc> in docs';
+      const ex = await h.primer_apply_ops({ documentId: id, ops: [{ op: 'update', target: after.target, expectVersion: (await read()).version, block: example }] }, owner);
+      expect(ex.isError).toBeFalsy();
     });
   });
 
