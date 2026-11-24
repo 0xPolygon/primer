@@ -32,7 +32,11 @@ export function useInstances(svg: string): number {
     if (id !== null && !size.has(id)) size.set(id, 1);
     const owners = ['', ...[...open.map((o) => o.id), id].filter((i): i is string => i !== null)];
     for (const [, href, url] of attrs!.matchAll(/\shref="#([^"]*)"|url\(#([^)]*)\)/g)) {
-      for (const owner of owners) refs.set(owner, [...(refs.get(owner) ?? []), (href ?? url)!]);
+      for (const owner of owners) {
+        const list = refs.get(owner);
+        if (list) list.push((href ?? url)!);
+        else refs.set(owner, [(href ?? url)!]);
+      }
     }
     if (!selfClosing) open.push({ tag: name!, id });
   }
