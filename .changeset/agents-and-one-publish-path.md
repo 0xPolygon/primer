@@ -67,6 +67,8 @@ app back does not restore the tokens. Before releasing:
    `comments:write`). Scoped tokens cannot delete, externally share or widen
    documents to org, which the old service tokens could.
 4. Documents the service account created stay attributed to `service-claude`
-   (now an agent acting via no one); they keep working but have no person
-   owner, so a person must be granted access through collaborators if they
-   need to manage them.
+   (now an agent acting via no one) and have no person owner: only an owner
+   can manage collaborators, sharing and deletion, and collaborators cannot
+   change that. To hand them to a person (or to one of that person's
+   agents), reassign them in the database, before or after the upgrade:
+   `UPDATE documents SET uploader_id = '<person-or-agent-id>' WHERE uploader_id = 'service-claude';`
