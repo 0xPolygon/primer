@@ -4,7 +4,51 @@ import type { WidgetError } from './parse.ts';
 import { RUN_LIMITS, type WidgetNode } from './run.ts';
 import { isColourKeyword } from './validate.ts';
 
-export const SVG_LIMITS = { nodes: RUN_LIMITS.nodes, bytes: 512 * 1024, viewBox: 4096 };
+export const SVG_LIMITS = { nodes: RUN_LIMITS.nodes, bytes: 512 * 1024, viewBox: 4096, uses: 2000 };
+
+/**
+ * How many element instances the `<use>` references of a serialized SVG draw
+ * when expanded (a `<use>` of an element that holds `<use>`s multiplies), or
+ * Infinity for a cycle. A few KB of nested `<use>` can otherwise take a
+ * renderer a minute. A `<use>` is attributed to every id'd element around it
+ * and to the root, and each instance counts its whole subtree, so this over-counts a `<defs>` nothing references.
+ */
+export function useInstances(svg: string): number {
+  const refs = new Map<string, string[]>(); // id (or '') -> ids its `<use>`s draw
+  const size = new Map<string, number>(); // id -> elements in its subtree, itself included
+  const open: { tag: string; id: string | null }[] = [];
+  const tag = /<(\/?)([A-Za-z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/g;
+  for (const [, closing, name, attrs, selfClosing] of svg.matchAll(tag) as Iterable<RegExpMatchArray>) {
+    if (closing) {
+      open.pop();
+      continue;
+    }
+    const id = /\sid="([^"]*)"/.exec(attrs!)?.[1] ?? null;
+    for (const o of open) if (o.id !== null) size.set(o.id, (size.get(o.id) ?? 1) + 1);
+    if (id !== null && !size.has(id)) size.set(id, 1);
+    if (name === 'use') {
+      const target = /\shref="#([^"]*)"/.exec(attrs!)?.[1];
+      if (target !== undefined) for (const owner of ['', ...open.map((o) => o.id).filter((i): i is string => i !== null)]) refs.set(owner, [...(refs.get(owner) ?? []), target]);
+    }
+    if (!selfClosing) open.push({ tag: name!, id });
+  }
+  const memo = new Map<string, number>();
+  const visiting = new Set<string>();
+  const cost = (id: string): number => {
+    if (memo.has(id)) return memo.get(id)!;
+    if (visiting.has(id)) return Infinity;
+    visiting.add(id);
+    let total = size.get(id) ?? 1;
+    for (const target of refs.get(id) ?? []) total += cost(target);
+    visiting.delete(id);
+    memo.set(id, total);
+    return total;
+  };
+  let total = 0;
+  for (const target of refs.get('') ?? []) total += cost(target);
+  return total;
+}
+
 
 /** The one font widgets draw with, on the server (raster.ts) and in the page. */
 export const WIDGET_FONT = 'Roboto';
@@ -171,6 +215,7 @@ export function serializeSvg(tree: WidgetNode, ctx: SerializeContext): Serialize
   }
   if (errors.length > 0) return fail([...new Set(errors)]);
   if (Buffer.byteLength(svg) > SVG_LIMITS.bytes) return fail([`The SVG is larger than ${SVG_LIMITS.bytes / 1024} KB.`]);
+  if (useInstances(svg) > SVG_LIMITS.uses) return fail([`The <use> references expand to more than ${SVG_LIMITS.uses} elements (nested or circular <use>).`]);
   return { svg, labels, warnings: [...warnings] };
 }
 

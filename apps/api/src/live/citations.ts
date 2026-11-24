@@ -3,7 +3,7 @@ import type { CitationDTO, CitationsResponse, Target } from '@polygonlabs/primer
 import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { canRead, loadEffectiveRole, type Visibility } from '../lib/permissions.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceUntrusted, readsUntrusted } from '../lib/untrusted.ts';
 import { liveBlocks, liveDocAccess, type Result } from './blockTools.ts';
 import { withLiveDocument } from './instance.ts';
 
@@ -98,7 +98,7 @@ export async function listCitations(actor: AuthUser, documentId: string): Promis
   const citations: CitationDTO[] = [];
   for (const [i, { target, props }] of found.entries()) {
     const quote = String(props.quote ?? '');
-    const entry: CitationDTO = { number: i + 1, target, quote: actor.kind === 'agent' ? fenceUntrusted(quote, 'content') : quote };
+    const entry: CitationDTO = { number: i + 1, target, quote: readsUntrusted(actor) ? fenceUntrusted(quote, 'content') : quote };
     if (UUID.test(props.docId ?? '')) {
       entry.docId = props.docId!;
       if (VERSION.test(props.versionNumber ?? '')) entry.versionNumber = Number(props.versionNumber);
@@ -109,7 +109,7 @@ export async function listCitations(actor: AuthUser, documentId: string): Promis
       // The Y.Doc is client-writable: only http(s) links go out, as on the write path.
       entry.url = props.url;
     }
-    if (actor.kind === 'agent') entry.untrusted = true;
+    if (readsUntrusted(actor)) entry.untrusted = true;
     citations.push(entry);
   }
   return { ok: true, value: { citations } };

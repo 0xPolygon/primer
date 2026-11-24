@@ -13,6 +13,8 @@ const METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
 // Refresh this long before the metadata server's stated expiry.
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
+// A storage call that has not finished by now is treated as failed.
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export interface GcsStorageConfig {
   bucket: string;
@@ -20,19 +22,23 @@ export interface GcsStorageConfig {
   /** Returns an OAuth access token. Defaults to the GKE metadata server. */
   getAccessToken?: () => Promise<string>;
   fetch?: typeof fetch;
+  /** Per-request timeout, covering the response body. Default 30 s. */
+  timeoutMs?: number;
 }
 
 export class GcsStorage implements Storage {
   private readonly bucket: string;
   private readonly apiBaseUrl: string;
   private readonly fetch: typeof fetch;
+  private readonly timeoutMs: number;
   private readonly getAccessToken: () => Promise<string>;
 
   constructor(config: GcsStorageConfig) {
     this.bucket = config.bucket;
     this.apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, '');
     this.fetch = config.fetch ?? globalThis.fetch;
-    this.getAccessToken = config.getAccessToken ?? makeMetadataTokenProvider(this.fetch);
+    this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.getAccessToken = config.getAccessToken ?? makeMetadataTokenProvider(this.fetch, this.timeoutMs);
   }
 
   async put(key: string, bytes: Uint8Array): Promise<void> {
@@ -46,6 +52,23 @@ export class GcsStorage implements Storage {
       body: new Uint8Array(bytes),
     });
     if (!res.ok) throw await gcsError('put', key, res);
+  }
+
+  async putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
+    const name = encodeURIComponent(validateKey(key));
+    // ifGenerationMatch=0: GCS accepts the write only if no object exists.
+    const url = `${this.apiBaseUrl}/upload/storage/v1/b/${this.bucketPath()}/o?uploadType=media&ifGenerationMatch=0&name=${name}`;
+    const res = await this.request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: new Uint8Array(bytes),
+    });
+    if (res.status === 412) {
+      await res.body?.cancel();
+      return false;
+    }
+    if (!res.ok) throw await gcsError('put', key, res);
+    return true;
   }
 
   async get(key: string): Promise<ReadableStream<Uint8Array>> {
@@ -76,7 +99,7 @@ export class GcsStorage implements Storage {
     const token = await this.getAccessToken();
     const headers = new Headers(init.headers);
     headers.set('authorization', `Bearer ${token}`);
-    return this.fetch(url, { ...init, headers });
+    return this.fetch(url, { ...init, headers, signal: AbortSignal.timeout(this.timeoutMs) });
   }
 }
 
@@ -102,7 +125,10 @@ async function gcsError(op: string, key: string, res: Response): Promise<Error> 
   return new Error(`gcs ${op} failed for ${key}: ${res.status} ${detail}`);
 }
 
-export function makeMetadataTokenProvider(fetchImpl: typeof fetch = globalThis.fetch): () => Promise<string> {
+export function makeMetadataTokenProvider(
+  fetchImpl: typeof fetch = globalThis.fetch,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): () => Promise<string> {
   let cached: { token: string; expiresAt: number } | undefined;
   let inflight: Promise<string> | undefined;
 
@@ -111,7 +137,10 @@ export function makeMetadataTokenProvider(fetchImpl: typeof fetch = globalThis.f
     // Collapse concurrent refreshes into one metadata-server call.
     inflight ??= (async () => {
       try {
-        const res = await fetchImpl(METADATA_TOKEN_URL, { headers: { 'metadata-flavor': 'Google' } });
+        const res = await fetchImpl(METADATA_TOKEN_URL, {
+          headers: { 'metadata-flavor': 'Google' },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
         if (!res.ok) throw new Error(`metadata token request failed: ${res.status}`);
         const body = (await res.json()) as { access_token?: string; expires_in?: number };
         if (!body.access_token || typeof body.expires_in !== 'number') {

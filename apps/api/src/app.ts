@@ -64,6 +64,9 @@ export type AuthUser = {
   displayName: string;
   kind: 'person' | 'agent';
   viaUserId: string | null;
+  /** Set by the MCP tool layer on every caller, whoever the credential is:
+   *  what comes back goes into an agent's context. Fencing only, never authz. */
+  viaMcp?: true;
 };
 
 export type AppVariables = {

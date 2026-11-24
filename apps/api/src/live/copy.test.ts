@@ -126,6 +126,28 @@ describe('branches', () => {
     });
   });
 
+  it('a branch does not copy soft-deleted comments', async () => {
+    await withStorage(async (storage) => {
+      const parent = await createLiveDoc();
+      await seedBlocks(parent, [paragraph('a', 'Alpha')]);
+      const threadId = await comment(parent, 'a', 'Alpha');
+      const keptId = uuidv7();
+      await db.execute(sql`
+        INSERT INTO comments (id, thread_id, author_id, body, mentions)
+        VALUES (${keptId}, ${threadId}, 'mock-user-1', 'keep me', '{}'),
+               (${uuidv7()}, ${threadId}, 'mock-user-1', 'deleted one', '{}')
+      `);
+      await db.execute(sql`UPDATE comments SET deleted_at = now() WHERE thread_id = ${threadId} AND body = 'deleted one'`);
+
+      const out = await copyDocument(storage, owner, parent, 'branch');
+      if (!out.ok) throw new Error(out.refusal.message);
+      const copied = (await db.execute(sql`
+        SELECT c.body FROM comments c JOIN threads t ON t.id = c.thread_id WHERE t.document_id = ${out.documentId}
+      `)) as unknown as { body: string }[];
+      expect(copied.map((c) => c.body)).toEqual(['keep me']);
+    });
+  });
+
   it('a block changed on both sides is a conflict', async () => {
     await withStorage(async (storage) => {
       const { parent, branch } = await branched(storage);

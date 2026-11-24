@@ -215,4 +215,37 @@ export default function render({ tokens }) {
       expect(isWidgetAttributeValue(name!, value!), `${name}="${value}"`).toBe(true);
     }
   });
+
+  describe('nested <use> expansion', () => {
+    // Four levels of ten <use>s of the level below: 10,000 instances from a few hundred bytes.
+    const level = (n: number) => (n === 0 ? '<rect id="a0" width="1" height="1"/>' : `<g id="a${n}">${`<use href="#a${n - 1}"/>`.repeat(10)}</g>`);
+    const bomb = `<svg viewBox="0 0 100 100"><defs>${[0, 1, 2, 3, 4].map(level).join('')}</defs><use href="#a4"/></svg>`;
+
+    it('rasterise refuses it at once, without rendering', async () => {
+      const started = Date.now();
+      await expect(rasterise(bomb, 'light')).rejects.toThrow(/too many <use>/);
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it('a drawing whose <use> expands past the bound is refused at serialization', () => {
+      const source = `export default function render() {
+  const level = (n) => n === 0 ? <rect id="a0" width="1" height="1" /> : <g id={'a' + n}>{Array.from({ length: 10 }, () => <use href={'#a' + (n - 1)} />)}</g>;
+  return <svg viewBox="0 0 100 100"><defs>{[0, 1, 2, 3, 4].map(level)}</defs><use href="#a4" /></svg>;
+}`;
+      const out = renderWidget(source, [], 'light');
+      return out.then((r) => expect('errors' in r && r.errors.map((e) => e.message).join()).toMatch(/expand to more than/));
+    });
+
+    it('counts what each instance clones, not just its nested <use>s', async () => {
+      const wide = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><g id="g">${'<rect width="1" height="1"/>'.repeat(100)}</g></defs>${'<use href="#g"/>'.repeat(30)}</svg>`;
+      await expect(rasterise(wide, 'light')).rejects.toThrow(/too many <use>/);
+    });
+
+    it('a few <use>s still draw, and a self-reference is refused', async () => {
+      const ok = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><rect id="a0" width="1" height="1"/></defs>${'<use href="#a0"/>'.repeat(20)}</svg>`;
+      expect((await rasterise(ok, 'light')).subarray(1, 4).toString()).toBe('PNG');
+      const loop = '<svg viewBox="0 0 100 100"><g id="x"><use href="#x"/></g><use href="#x"/></svg>';
+      await expect(rasterise(loop, 'light')).rejects.toThrow(/too many <use>/);
+    });
+  });
 });

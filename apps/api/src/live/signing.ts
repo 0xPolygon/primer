@@ -23,7 +23,11 @@ export async function loadSigningKey(storage: Storage): Promise<void> {
     // must not replace the key every existing signature depends on.
     if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
     stored = randomBytes(32);
-    await storage.put(KEY_PATH, stored);
+    // Only the first writer's key stands: a starter that loses the race
+    // loads the winner's key instead of replacing it.
+    if (!(await storage.putIfAbsent(KEY_PATH, stored))) {
+      stored = Buffer.from(await new Response(await storage.get(KEY_PATH)).arrayBuffer());
+    }
   }
   if (stored.length < 32) throw new Error(`live: the signing key at ${KEY_PATH} is too short`);
   key = stored;
