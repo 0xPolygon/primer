@@ -755,8 +755,8 @@ export type SuggestionStatus = 'open' | 'accepted' | 'rejected' | 'withdrawn';
  *  `insert` a block subtree, `delete` one, `move` one to `place`). */
 export type SuggestedEditKind = 'replace' | 'insert' | 'delete' | 'move';
 
-/** Where a block goes: after `prevId`, else before `nextId`, else first in
- *  `parentId` (null: the document). */
+/** Where a block goes: after `prevId`, else before `nextId` (each only while
+ *  still in `parentId`), else first in `parentId` (null: the document). */
 export interface BlockPlace {
   parentId: string | null;
   prevId: string | null;
