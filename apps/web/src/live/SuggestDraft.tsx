@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/ariakit';
 import { primerSchema } from '@primer/blocks';
@@ -19,6 +19,15 @@ function flatten(blocks: DraftBlock[], parentId: string | null = null, out: Flat
     flatten(block.children ?? [], block.id, out);
   });
   return out;
+}
+
+/** The props an update sets: those that changed (all of them on a type
+ *  change). Props the draft didn't touch stay as the document has them. */
+function changedProps(was: DraftBlock, now: DraftBlock): Record<string, unknown> {
+  const props = (now.props ?? {}) as Record<string, unknown>;
+  if (was.type !== now.type) return props;
+  const old = (was.props ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(props).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(old[k])));
 }
 
 /** The siblings that were siblings already and keep their order (the longest
@@ -107,8 +116,9 @@ export function draftOps(base: DraftBlock[], draft: DraftBlock[], versions: Map<
   const keep = (block: DraftBlock) => {
     kept.add(block.id);
     const version = versions.get(block.id);
+    const props = changedProps(before.get(block.id)!.block, block);
     if (before.get(block.id)!.key !== keyOf(block) && version) {
-      const { type, props, content } = block;
+      const { type, content } = block;
       ops.push({ op: 'update', target: at(block.id), block: { json: { type, props, content } as Record<string, unknown> }, expectVersion: version });
     }
     walk(block.children ?? [], block.id);
@@ -123,28 +133,38 @@ export function draftOps(base: DraftBlock[], draft: DraftBlock[], versions: Map<
   return ops;
 }
 
+/** The tab's blocks as a tree, from a live read (flattened depth-first,
+ *  children after their parent). */
+function treeOf(blocks: LiveDocDTO['blocks']): DraftBlock[] {
+  const roots: DraftBlock[] = [];
+  const byId = new Map<string, DraftBlock>();
+  for (const b of blocks) {
+    const node = { ...(b.json as DraftBlock), children: [] as DraftBlock[] };
+    byId.set(b.target.blockId, node);
+    (b.parentId ? byId.get(b.parentId)!.children! : roots).push(node);
+  }
+  return roots;
+}
+
 /**
  * Suggesting: the tab as it was, in a draft editor of its own. Nothing
  * reaches the document until Send, which stores each change as a suggestion
  * (apply ops with `mode: 'suggest'`) for the owner or an editor to decide.
+ * The draft starts from one live read, so its blocks and the versions its
+ * ops expect are the same snapshot: whatever changed after it is a conflict.
  */
 export function SuggestDraft(props: {
   documentId: string;
   tabId: string;
-  base: DraftBlock[];
   theme: 'light' | 'dark';
   onDiscard: () => void;
   onSent: (count: number) => void;
 }) {
-  const { documentId, tabId, base } = props;
-  const [versions, setVersions] = useState<Map<string, string> | null>(null);
+  const { documentId, tabId } = props;
+  const [start, setStart] = useState<{ blocks: DraftBlock[]; versions: Map<string, string> } | null>(null);
   const [count, setCount] = useState(0);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const draft = useCreateBlockNote(
-    { schema: primerSchema, initialContent: base.length > 0 ? (base as never) : undefined, dictionary: editorDictionary() },
-    [],
-  );
 
   useEffect(() => {
     let live = true;
@@ -152,7 +172,7 @@ export function SuggestDraft(props: {
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status));
         const body = (await res.json()) as LiveDocDTO;
-        if (live) setVersions(new Map(body.blocks.map((b) => [b.target.blockId, b.version])));
+        if (live) setStart({ blocks: treeOf(body.blocks), versions: new Map(body.blocks.map((b) => [b.target.blockId, b.version])) });
       })
       .catch((err: unknown) => live && setError(t('suggestDraft.failed', { status: String((err as Error).message) })));
     return () => {
@@ -160,12 +180,23 @@ export function SuggestDraft(props: {
     };
   }, [documentId, tabId]);
 
-  const ops = () => (versions ? draftOps(base, draft.document as DraftBlock[], versions, tabId) : []);
+  const draft = useCreateBlockNote(
+    {
+      schema: primerSchema,
+      initialContent: start && start.blocks.length > 0 ? (start.blocks as never) : undefined,
+      dictionary: editorDictionary(),
+    },
+    [start],
+  );
+  // The draft as the editor first holds it: the base its ops are diffed from.
+  const base = useMemo(() => draft.document as DraftBlock[], [draft]);
+
+  const ops = () => (start ? draftOps(base, draft.document as DraftBlock[], start.versions, tabId) : []);
   useEffect(() => {
     setCount(ops().length);
     return draft.onChange(() => setCount(ops().length));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, versions]);
+  }, [draft, base, start]);
 
   const send = async () => {
     const list = ops();
@@ -220,7 +251,7 @@ export function SuggestDraft(props: {
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto border-l-2 border-emerald-500 py-4">
-        <BlockNoteView editor={draft} theme={props.theme} />
+        {start && <BlockNoteView editor={draft} theme={props.theme} />}
       </div>
     </div>
   );
