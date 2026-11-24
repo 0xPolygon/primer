@@ -1,5 +1,15 @@
 # @primer/api
 
+## 0.4.1
+
+### Patch Changes
+
+- [#191](https://github.com/0xPolygon/primer/pull/191) [`3030bb2`](https://github.com/0xPolygon/primer/commit/3030bb2101e1a06a6a729135b33f96a461cacb96) Thanks [@taylanpince](https://github.com/taylanpince)! - Uploaded pages now stay sandboxed when opened on their own. The artifact
+  content response carries a CSP `sandbox` directive matching the viewer's
+  iframe, so opening a page full screen or from a pasted link no longer runs its
+  scripts on Primer's origin. A page can also no longer ask Primer to open one of
+  Primer's own URLs.
+
 ## 0.4.0
 
 ### Patch Changes
