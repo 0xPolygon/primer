@@ -223,7 +223,7 @@ export default function render({ tokens }) {
 
     it('rasterise refuses it at once, without rendering', async () => {
       const started = Date.now();
-      await expect(rasterise(bomb, 'light')).rejects.toThrow(/too many <use>/);
+      await expect(rasterise(bomb, 'light')).rejects.toThrow(/too many instances/);
       expect(Date.now() - started).toBeLessThan(1000);
     });
 
@@ -238,14 +238,35 @@ export default function render({ tokens }) {
 
     it('counts what each instance clones, not just its nested <use>s', async () => {
       const wide = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><g id="g">${'<rect width="1" height="1"/>'.repeat(100)}</g></defs>${'<use href="#g"/>'.repeat(30)}</svg>`;
-      await expect(rasterise(wide, 'light')).rejects.toThrow(/too many <use>/);
+      await expect(rasterise(wide, 'light')).rejects.toThrow(/too many instances/);
     });
 
     it('a few <use>s still draw, and a self-reference is refused', async () => {
       const ok = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><rect id="a0" width="1" height="1"/></defs>${'<use href="#a0"/>'.repeat(20)}</svg>`;
       expect((await rasterise(ok, 'light')).subarray(1, 4).toString()).toBe('PNG');
       const loop = '<svg viewBox="0 0 100 100"><g id="x"><use href="#x"/></g><use href="#x"/></svg>';
-      await expect(rasterise(loop, 'light')).rejects.toThrow(/too many <use>/);
+      await expect(rasterise(loop, 'light')).rejects.toThrow(/too many instances/);
+    });
+
+    // Patterns of ten rects each filled with the pattern below, four deep: ~3 KB
+    // that took resvg 34 s at 2048 px while url(#…) counted nothing.
+    const patternLevel = (n: number) =>
+      `<pattern id="p${n}" patternUnits="userSpaceOnUse" width="1024" height="1024">${Array.from({ length: 10 }, (_, i) => `<rect x="${i}" width="1024" height="1024" fill="${n === 0 ? 'black' : `url(#p${n - 1})`}"/>`).join('')}</pattern>`;
+    const patterns = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs>${[0, 1, 2, 3].map(patternLevel).join('')}</defs><rect width="1024" height="1024" fill="url(#p3)"/></svg>`;
+
+    it('counts url(#…) references too: nested patterns are refused at once', async () => {
+      const started = Date.now();
+      await expect(rasterise(patterns, 'light')).rejects.toThrow(/too many instances/);
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it('nested patterns are refused at serialization', async () => {
+      const source = `export default function render({ tokens }) {
+  const level = (n) => <pattern id={'p' + n} patternUnits="userSpaceOnUse" width="1024" height="1024">{Array.from({ length: 10 }, (_, i) => <rect x={i} width="1024" height="1024" fill={n === 0 ? tokens.fg : 'url(#p' + (n - 1) + ')'} />)}</pattern>;
+  return <svg viewBox="0 0 1024 1024"><defs>{[0, 1, 2, 3].map(level)}</defs><rect width="1024" height="1024" fill="url(#p3)" /></svg>;
+}`;
+      const out = await renderWidget(source, [], 'light');
+      expect('errors' in out && out.errors.map((e) => e.message).join()).toMatch(/expand to more than/);
     });
   });
 });

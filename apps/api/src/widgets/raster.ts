@@ -83,9 +83,11 @@ export function woffToSfnt(woff: Buffer): Buffer {
  */
 export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
   if (Buffer.byteLength(svg) > SVG_LIMITS.bytes) return Promise.reject(new Error('widget SVG over the size bound'));
-  if (useInstances(svg) > SVG_LIMITS.uses) return Promise.reject(new Error('widget SVG expands to too many <use> instances'));
+  if (useInstances(svg) > SVG_LIMITS.uses) return Promise.reject(new Error('widget SVG references expand to too many instances'));
   // Rendering holds a libuv worker for as long as it takes, so each distinct
-  // drawing renders once: concurrent and repeat requests share the result.
+  // drawing renders once (concurrent and repeat requests share the result)
+  // and at most RENDERS_AT_ONCE run across the process, leaving the other
+  // workers to the rest of the API.
   const key = createHash('sha256').update(theme).update('\0').update(svg).digest('hex');
   const hit = cache.get(key);
   if (hit) {
@@ -93,7 +95,7 @@ export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
     cache.set(key, hit);
     return hit;
   }
-  const png = render(svg, theme);
+  const png = renderSlot(() => render(svg, theme));
   cache.set(key, png);
   if (cache.size > CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
   png.catch(() => {
@@ -104,6 +106,23 @@ export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
 
 const CACHE_ENTRIES = 64;
 const cache = new Map<string, Promise<Buffer>>();
+
+/** resvg can't stop a render once started, so the bound is how many run at once. */
+const RENDERS_AT_ONCE = 2;
+let rendering = 0;
+const waiting: (() => void)[] = [];
+
+async function renderSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (rendering < RENDERS_AT_ONCE) rendering++;
+  else await new Promise<void>((resolve) => waiting.push(resolve));
+  try {
+    return await run();
+  } finally {
+    const next = waiting.shift();
+    if (next) next(); // hand the slot straight on
+    else rendering--;
+  }
+}
 
 async function render(svg: string, theme: WidgetTheme): Promise<Buffer> {
   const [, , width, height] = /viewBox="([^"]+)"/.exec(svg)![1]!.trim().split(/[\s,]+/).map(Number) as number[];
