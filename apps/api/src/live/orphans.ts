@@ -55,14 +55,18 @@ export async function syncOrphans(documentId: string, doc: Y.Doc): Promise<void>
 }
 
 const timers = new Map<string, { timer: NodeJS.Timeout; doc: Y.Doc }>();
-const running = new Set<Promise<void>>();
+/** Each document's latest check: the next one runs after it. */
+const running = new Map<string, Promise<void>>();
 
 function run(documentId: string, doc: Y.Doc): void {
-  const job = persistedUpTo(doc)
+  const job = (running.get(documentId) ?? Promise.resolve())
+    .then(() => persistedUpTo(doc))
     .then(() => syncOrphans(documentId, doc))
     .catch((err: unknown) => logger.warn({ documentId, error: String(err) }, 'live document: thread orphan check failed'));
-  running.add(job);
-  void job.finally(() => running.delete(job));
+  running.set(documentId, job);
+  void job.finally(() => {
+    if (running.get(documentId) === job) running.delete(documentId);
+  });
 }
 
 /** Rechecks the document's threads once its updates are stored and it has
@@ -88,5 +92,5 @@ export async function flushOrphanSync(): Promise<void> {
     timers.delete(documentId);
     run(documentId, doc);
   }
-  await Promise.all([...running]);
+  await Promise.all([...running.values()]);
 }

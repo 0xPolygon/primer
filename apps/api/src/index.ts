@@ -152,7 +152,13 @@ const shutdown = async () => {
   if ('close' in server) {
     const http = server as { close: (cb?: () => void) => void; closeAllConnections?: () => void };
     http.close();
-    while (writing.size > 0) await Promise.allSettled([...writing]);
+    // A stalled request (an upload whose body never arrives) gets a grace
+    // period, not the pending writes' whole shutdown window.
+    const grace = new Promise((r) => setTimeout(r, 10_000).unref());
+    const settled = (async () => {
+      while (writing.size > 0) await Promise.allSettled([...writing]);
+    })();
+    await Promise.race([settled, grace]);
     // Open event streams would otherwise hold the exit; browsers reconnect.
     http.closeAllConnections?.();
   }
