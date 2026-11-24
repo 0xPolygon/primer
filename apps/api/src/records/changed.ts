@@ -23,6 +23,7 @@ interface Pending {
 }
 
 const pending = new Map<string, Pending>();
+const running = new Set<Promise<void>>();
 
 /** Notes committed shared-record changes by `actorId` on a document. */
 export function scheduleDataChanged(
@@ -44,10 +45,16 @@ export function scheduleDataChanged(
     collections: new Set(change.collections),
     fromChangeId: change.fromChangeId,
     toChangeId: change.toChangeId,
-    timer: setTimeout(() => void emit(key), DATA_CHANGED_WINDOW_MS),
+    timer: setTimeout(() => run(key), DATA_CHANGED_WINDOW_MS),
   };
   entry.timer.unref?.();
   pending.set(key, entry);
+}
+
+function run(key: string): void {
+  const job = emit(key);
+  running.add(job);
+  void job.finally(() => running.delete(job));
 }
 
 async function emit(key: string): Promise<void> {
@@ -79,7 +86,9 @@ async function emit(key: string): Promise<void> {
   );
 }
 
-/** Writes every open window now (tests, shutdown). */
+/** Writes every open window now and waits, windows already being written
+ *  included (tests, shutdown). */
 export async function flushDataChanged(): Promise<void> {
-  await Promise.all([...pending.keys()].map((key) => emit(key)));
+  for (const key of [...pending.keys()]) run(key);
+  await Promise.all([...running]);
 }

@@ -1,9 +1,10 @@
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { createApp } from './app.ts';
 import { MOCK_USER } from './auth/resolver.ts';
 import { db } from './db/client.ts';
@@ -62,4 +63,53 @@ describe('shutdown', () => {
     expect(stored).toHaveLength(DOCS * 5);
     await Promise.all(connections.map((c) => c.disconnect({ unloadImmediately: false })));
   });
+
+  it('a terminated server writes every settling checkpoint, more than the pool holds, and exits', async () => {
+    const storageRoot = await mkdtemp(join(tmpdir(), 'primer-shutdown-test-'));
+    const port = 33000 + Math.floor(Math.random() * 2000);
+    const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+      cwd: join(import.meta.dirname, '..'),
+      env: { ...process.env, PORT: String(port), AUTH_MODE: 'mock', STORAGE_BACKEND: 'filesystem', STORAGE_ROOT: storageRoot, PURGE_INTERVAL_MS: '3600000' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    // Also when the test times out (a server stuck in shutdown).
+    onTestFinished(() => void (child.exitCode === null && child.kill('SIGKILL')));
+    let out = '';
+    child.stdout!.on('data', (d) => (out += d));
+    child.stderr!.on('data', (d) => (out += d));
+    const exited = new Promise<number | null>((r) => child.once('exit', (code) => r(code)));
+    try {
+      for (let i = 0; i < 200 && !out.includes('primer api listening'); i++) await new Promise((r) => setTimeout(r, 100));
+      expect(out).toContain('primer api listening');
+      const call = (path: string, init?: RequestInit) => fetch(`http://localhost:${port}${path}`, { ...init, headers: { 'x-primer-csrf': '1', ...init?.headers } });
+
+      const ids: string[] = [];
+      for (let i = 0; i < DOCS; i++) {
+        const form = new FormData();
+        form.set('file', new File([`Paragraph ${i}.\n`], 'doc.md', { type: 'text/markdown' }));
+        form.set('title', `Doc ${i}`);
+        const { documentId } = (await (await call('/api/upload', { method: 'POST', body: form })).json()) as { documentId: string };
+        const live = (await (await call(`/api/documents/${documentId}/live?format=json`)).json()) as { blocks: { target: { tabId: string; blockId: string }; version: string }[] };
+        const [block] = live.blocks;
+        await db.insert(threads).values({ id: uuidv7(), documentId, anchor: { type: 'widget-part', target: block!.target, anchor: 'bars' } });
+        // A person's edit: its automatic checkpoint settles minutes later.
+        const edited = await call(`/api/documents/${documentId}/ops`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ baseVersion: 0, ops: [{ op: 'update', target: block!.target, block: `Paragraph ${i}, edited.`, expectVersion: block!.version }] }),
+        });
+        expect(edited.status).toBe(200);
+        ids.push(documentId);
+      }
+
+      child.kill('SIGTERM');
+      expect(await exited).toBe(0);
+      for (const id of ids) {
+        const saved = await db.select({ automatic: versions.automatic }).from(versions).where(eq(versions.documentId, id));
+        expect(saved.filter((v) => v.automatic)).toHaveLength(1);
+      }
+    } finally {
+      await rm(storageRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
