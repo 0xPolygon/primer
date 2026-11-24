@@ -21,6 +21,7 @@ function harness(binding: Parameters<typeof createRecordsHost>[0]) {
   });
   const host = createRecordsHost(binding, {
     fetchImpl,
+    hasUserActivation: () => false,
     eventSourceFactory: (url) => {
       const s = { url, closed: false, onmessage: null, onopen: null, onerror: null, close() { s.closed = true; } } as EventSourceLike & { url: string; closed: boolean };
       streams.push(s);

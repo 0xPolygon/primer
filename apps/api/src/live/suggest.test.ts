@@ -385,6 +385,37 @@ describe('suggested structure changes', () => {
     expect(await outline(id)).toEqual(['Delta', 'Gamma', 'Alpha', 'Beta']);
   });
 
+  it('a block moved below new ones keeps the drafted order, whichever is accepted first', async () => {
+    // The ops the suggesting draft sends for base P X Y Z and draft P A Z X Y (web SuggestDraft.test.ts).
+    const text = (t: string) => [{ type: 'text', text: t, styles: {} }];
+    for (const reverse of [false, true]) {
+      const id = await createLiveDoc();
+      await seedBlocks(id, [paragraph('p', 'P'), paragraph('x', 'X'), paragraph('y', 'Y'), paragraph('z', 'Z')]);
+      const v = await versions(id, owner);
+      const list = [
+        { op: 'add', at: main('p'), position: 'after', blocks: [{ json: { type: 'paragraph', props: {}, content: text('A'), children: [] } }] },
+        { op: 'move', target: main('z'), at: main('x'), position: 'before', expectVersion: v.z },
+      ];
+      const result = await ops(id, owner, { mode: 'suggest', ops: list });
+      expect(result.outcomes.map((o) => o.status)).toEqual(['suggested', 'suggested']);
+      const suggestions = await open(id);
+      for (const s of reverse ? suggestions.reverse() : suggestions) expect(await decideSuggestion(s.id, owner, 'accept')).toMatchObject({ ok: true });
+      expect(await outline(id)).toEqual(['P', 'A', 'Z', 'X', 'Y']);
+    }
+  });
+
+  it('a move sent ahead of an add at the same spot lands below it', async () => {
+    // Base Z P, draft P A Z: nothing stays after Z, so the move is sent first.
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('z', 'Z'), paragraph('p', 'P')]);
+    const v = await versions(id, owner);
+    await suggestAndAccept(id, [
+      { op: 'move', target: main('z'), at: main('p'), position: 'after', expectVersion: v.z },
+      { op: 'add', at: main('p'), position: 'after', blocks: [{ json: { type: 'paragraph', props: {}, content: [{ type: 'text', text: 'A', styles: {} }], children: [] } }] },
+    ]);
+    expect(await outline(id)).toEqual(['P', 'A', 'Z']);
+  });
+
   it('an indent', async () => {
     const id = await createLiveDoc();
     await seedBlocks(id, [paragraph('a', 'Alpha'), paragraph('b', 'Beta'), paragraph('c', 'Gamma')]);

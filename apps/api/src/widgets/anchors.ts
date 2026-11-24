@@ -28,9 +28,14 @@ export async function widgetAnchorProblem(documentId: string, anchor: WidgetPart
 }
 
 /** Whether the widget published on the anchor's block still draws its part
- *  or has its data point (where a checkpoint places the thread). */
-export async function widgetAnchorPublished(documentId: string, anchor: WidgetPartAnchor | DataPointAnchor): Promise<boolean> {
-  const [row] = await db
+ *  or has its data point (where a checkpoint places the thread). Inside a
+ *  transaction pass it, so the read takes no second pooled connection. */
+export async function widgetAnchorPublished(
+  documentId: string,
+  anchor: WidgetPartAnchor | DataPointAnchor,
+  executor: Pick<typeof db, 'select'> = db,
+): Promise<boolean> {
+  const [row] = await executor
     .select({ svg: widgets.publishedSvgLight, rows: widgets.rows })
     .from(widgets)
     .where(and(eq(widgets.documentId, documentId), eq(widgets.blockId, anchor.target.blockId)));

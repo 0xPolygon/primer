@@ -42,7 +42,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
-import { fenceStrings } from '../lib/untrusted.ts';
+import { fenceStrings, readsUntrusted } from '../lib/untrusted.ts';
 import { recordsApi } from '../records/store.ts';
 import {
   checkPlacement,
@@ -203,7 +203,7 @@ export async function choiceTally(actor: AuthUser, documentId: string, choiceId:
   if (!choice) return refuse('not_found', 'Choice not found.');
   const tally = await countVotes(actor, documentId, choiceId, choice.options);
   const decision = await decisionFor(documentId, choiceId, choice);
-  return { ok: true, value: { ...tally, decision: decision && actor.kind === 'agent' ? forAgent(cleanEvidence(decision)) : decision } };
+  return { ok: true, value: { ...tally, decision: decision && readsUntrusted(actor) ? forAgent(cleanEvidence(decision)) : decision } };
 }
 
 /** Records the caller's vote (`optionId: null` withdraws it). People only. */
@@ -411,7 +411,7 @@ export async function listDecisions(actor: AuthUser, documentId: string): Promis
         ? { optionId: proposed.id, label: proposed.label, by: c.props.proposedBy ?? '', note: c.props.proposalNote ?? '' }
         : null,
     };
-    decisions.push(actor.kind === 'agent' ? forAgent({ ...entry, decided: entry.decided && cleanEvidence(entry.decided), untrusted: true as const }) : entry);
+    decisions.push(readsUntrusted(actor) ? forAgent({ ...entry, decided: entry.decided && cleanEvidence(entry.decided), untrusted: true as const }) : entry);
   }
   decisions.sort((a, b) => (a.status === b.status ? 0 : a.status === 'decided' ? -1 : 1));
   return { ok: true, value: { decisions } };

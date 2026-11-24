@@ -31,6 +31,7 @@ import { logger } from '../logger.ts';
 import { isCollaboratorRole } from '@polygonlabs/primer-api-types';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope, PublishFormat, Refusal, Target } from '@polygonlabs/primer-api-types';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
+import { fencedHandler } from './fence.ts';
 import {
   canRead, isSelfOrAgentOf, libraryOwnerId, loadEffectiveRole, type Visibility,
 } from '../lib/permissions.ts';
@@ -273,9 +274,17 @@ export function toolsForScopes(scopes: readonly ApiTokenScope[] | null): ToolNam
   });
 }
 
+/** Every tool handler, run as an MCP caller with people's text fenced (mcp/fence.ts). */
 export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandler> {
+  const handlers = buildToolHandlers(deps);
+  return Object.fromEntries(
+    (Object.keys(handlers) as ToolName[]).map((name) => [name, fencedHandler(name, handlers[name])]),
+  ) as Record<ToolName, ToolHandler>;
+}
+
+function buildToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandler> {
   return {
-    primer_whoami: async (_args, user) => ok(user),
+    primer_whoami: async (_args, { id, email, displayName, kind, viaUserId }) => ok({ id, email, displayName, kind, viaUserId }),
 
     primer_resolve_url: async (args) => {
       const url = typeof args.url === 'string' ? args.url : '';
@@ -537,15 +546,16 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       // Load the doc-of-record for the permission gate. Both branches (versionId
       // direct and documentId-resolved) converge here with `versionId` set.
       const [docRow] = (await db.execute(sql`
-        SELECT d.id AS "documentId", d.uploader_id AS "uploaderId", d.visibility AS "visibility"
+        SELECT d.id AS "documentId", d.uploader_id AS "uploaderId", d.visibility AS "visibility",
+               d.deleted_at AS "deletedAt"
         FROM versions v
         INNER JOIN documents d ON d.id = v.document_id
         WHERE v.id = ${versionId}
         LIMIT 1
       `)) as unknown as {
-        documentId: string; uploaderId: string; visibility: Visibility;
+        documentId: string; uploaderId: string; visibility: Visibility; deletedAt: Date | null;
       }[];
-      if (!docRow) return err('not_found', 'version not found');
+      if (!docRow || docRow.deletedAt !== null) return err('not_found', 'version not found');
 
       const eff = await loadEffectiveRole({ id: docRow.documentId, uploaderId: docRow.uploaderId, visibility: docRow.visibility as Visibility }, user);
       if (!canRead(docRow.visibility, eff)) {

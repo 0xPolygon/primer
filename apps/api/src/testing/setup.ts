@@ -9,6 +9,7 @@ beforeAll(async () => {
       throw Object.assign(new Error('missing'), { code: 'ENOENT' });
     },
     put: async () => undefined,
+    putIfAbsent: async () => true,
     delete: async () => undefined,
   });
 });

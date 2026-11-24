@@ -105,6 +105,9 @@ describe('page documents', () => {
       const res = await app.request(`/api/documents/${r.documentId}/pages/${page.blockId}/content`);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-security-policy')).toContain("connect-src 'none'");
+      // Sandboxed by header, so the URL opened top-level is not on Primer's origin.
+      expect(res.headers.get('content-security-policy')).toContain('sandbox allow-scripts');
+      expect(res.headers.get('content-security-policy')).not.toMatch(/allow-same-origin/);
       const body = await res.text();
       // The stamped source is served; people's text arrives over the bridge.
       expect(body).toContain('<p data-pid="p2">Ship the editor in May.</p>');

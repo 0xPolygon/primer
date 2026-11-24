@@ -12,6 +12,7 @@ import { createLiveDoc, paragraph, seedBlocks } from '../live/live.testlib.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { FilesystemStorage } from '../storage/filesystem.ts';
 import { asUser, asUserJson } from '../test/harness.ts';
+import { _resetRateLimiterForTests } from '../lib/rateLimiter.ts';
 
 type App = ReturnType<typeof createApp>;
 const ADMIN_ID = 'widget-admin';
@@ -122,5 +123,19 @@ describe('the widget skill resource', () => {
       const { result } = JSON.parse(line.slice(6)) as { result: { contents: { text: string }[] } };
       expect(result.contents[0]!.text).toContain('# Widgets: diagrams and charts in Primer');
     });
+  });
+});
+
+describe('widget rate limits', () => {
+  it('drafts are limited per person', async () => {
+    _resetRateLimiterForTests();
+    const documentId = await createLiveDoc();
+    await withApp(async (app) => {
+      const draft = () =>
+        app.request(`/api/documents/${documentId}/widgets/draft`, { method: 'POST', headers: asUserJson('mock-user-1'), body: JSON.stringify({ source: 'x' }) });
+      for (let i = 0; i < 30; i++) expect((await draft()).status).not.toBe(429);
+      expect((await draft()).status).toBe(429);
+    });
+    _resetRateLimiterForTests();
   });
 });

@@ -11,7 +11,8 @@ import { OpenIdClientAdapter, makeDisabledOktaAdapter, type OktaAdapter } from '
 import { makeProxyResolver } from './auth/proxy.ts';
 import { makeBearerResolver, composeResolvers } from './auth/bearer.ts';
 import { makeOAuthBearerResolver } from './auth/oauth/bearer.ts';
-import { flushAutoCheckpoints } from './live/autoCheckpoint.ts';
+import { sql } from './db/client.ts';
+import { drainPendingWork } from './shutdown.ts';
 import { createHub } from './live/hub.ts';
 import { loadSigningKey } from './live/signing.ts';
 
@@ -123,7 +124,20 @@ const purgeIntervalMs = process.env.PURGE_INTERVAL_MS
   : undefined;
 const stopPurge = startPurgeInterval({ storage, intervalMs: purgeIntervalMs });
 
-const server = serve({ fetch: app.fetch, port }, () => {
+// Writes still being handled; shutdown lets them finish before draining.
+// Reads are left out: event streams and long polls never finish on their own.
+const writing = new Set<Promise<unknown>>();
+const fetch: typeof app.fetch = (req, ...rest) => {
+  const res = app.fetch(req, ...rest);
+  if (req.method === 'GET' || req.method === 'HEAD') return res;
+  const job = Promise.resolve(res);
+  writing.add(job);
+  const done = () => void writing.delete(job);
+  job.then(done, done);
+  return res;
+};
+
+const server = serve({ fetch, port }, () => {
   logger.info({ port, storage: storageDescription, authMode }, 'primer api listening');
 });
 server.on('upgrade', hub.handleUpgrade);
@@ -134,12 +148,21 @@ const shutdown = async () => {
   if ('close' in server) {
     const http = server as { close: (cb?: () => void) => void; closeAllConnections?: () => void };
     http.close();
+    // A stalled request (an upload whose body never arrives) gets a grace
+    // period, not the pending writes' whole shutdown window.
+    const grace = new Promise((r) => setTimeout(r, 10_000).unref());
+    const settled = (async () => {
+      while (writing.size > 0) await Promise.allSettled([...writing]);
+    })();
+    await Promise.race([settled, grace]);
     // Open event streams would otherwise hold the exit; browsers reconnect.
     http.closeAllConnections?.();
   }
-  // No more writes come in: write the checkpoints still settling, then exit.
-  await flushAutoCheckpoints().catch((err: unknown) => logger.error({ err }, 'flushing automatic checkpoints failed'));
+  // No more writes come in: write everything still pending, then close the pool.
+  await drainPendingWork();
+  await sql.end({ timeout: 5 }).catch((err: unknown) => logger.error({ error: String(err) }, 'closing the database pool failed'));
   process.exit(0);
 };
-process.on('SIGTERM', () => { void shutdown(); });
-process.on('SIGINT', () => { void shutdown(); });
+let stopping: Promise<void> | null = null;
+process.on('SIGTERM', () => { stopping ??= shutdown(); });
+process.on('SIGINT', () => { stopping ??= shutdown(); });

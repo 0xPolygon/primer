@@ -33,7 +33,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { transactionWithEvents, type EmitLifecycle } from '../lib/events.ts';
 import { canRead, loadEffectiveRole, type Visibility } from '../lib/permissions.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceUntrusted, readsUntrusted } from '../lib/untrusted.ts';
 import { logger } from '../logger.ts';
 import {
   checkPlacement,
@@ -119,14 +119,17 @@ export async function reconcileTasks(
   documentId: string,
   opts: { actors?: BlockActors; emit: boolean; rebuild?: boolean },
 ): Promise<void> {
-  await transactionWithEvents(async (tx, emit) => {
+  // The live document is opened (loaded, if it must be) before the
+  // transaction, so nothing inside it takes a second pooled connection.
+  await withLiveDocument(documentId, (live) => transactionWithEvents(async (tx, emit) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(${TASKS_LOCK_KEY}, hashtext(${documentId}))`);
     if (opts.rebuild) await tx.execute(sql`DELETE FROM doc_tasks WHERE document_id = ${documentId}`);
     const [doc] = (await tx.execute(sql`
       SELECT uploader_id AS "uploaderId", format, deleted_at AS "deletedAt" FROM documents WHERE id = ${documentId}
     `)) as unknown as { uploaderId: string; format: string | null; deletedAt: Date | null }[];
     if (!doc || !doc.format) return;
-    const { found, tabIds } = await withLiveDocument(documentId, (d) => ({ found: tasksIn(d), tabIds: new Set(tabsOf(d).map((t) => t.id)) }));
+    const found = tasksIn(live);
+    const tabIds = new Set(tabsOf(live).map((t) => t.id));
     const touchedBy = [...(opts.actors?.values() ?? [])].flatMap((set) => [...set]);
     const ids = [...new Set([...found.map((t) => t.assigneeId), ...touchedBy].filter((id): id is string => Boolean(id)))];
     const known = new Set(
@@ -202,7 +205,7 @@ export async function reconcileTasks(
         tabIds.has(row.tabId) ? undefined : 'tabs',
       );
     }
-  });
+  }));
 }
 
 /** Recreates a document's task index from its Y.Doc in one transaction,
@@ -285,7 +288,7 @@ function dto(r: ListRow, actor: AuthUser): TaskDTO {
     createdAt: iso(r.createdAt),
     updatedAt: iso(r.updatedAt),
   };
-  if (actor.kind === 'agent') {
+  if (readsUntrusted(actor)) {
     out.untrusted = true;
     out.title = fenceUntrusted(out.title, 'content');
   }

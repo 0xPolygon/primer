@@ -15,7 +15,7 @@ import { actorNameOf } from '../lib/actors.ts';
 import { transactionWithEvents } from '../lib/events.ts';
 import { readableLiveDoc } from '../lib/liveThreads.ts';
 import { canEdit } from '../lib/permissions.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceUntrusted, readsUntrusted } from '../lib/untrusted.ts';
 import { blockIndex, blockVersion, findBlock } from './blocks.ts';
 import { serverEditor } from './editor.ts';
 import { liveDocName, liveInstance, withLiveDocument } from './instance.ts';
@@ -96,7 +96,7 @@ export async function listSuggestions(
     }
     return out;
   });
-  const forAgent = actor.kind === 'agent';
+  const forAgent = readsUntrusted(actor);
   const value: SuggestionDTO[] = [];
   for (const row of rows) {
     const pm = pmDocs.get(fragmentName({ ...row.edits[0]!.target, tabId: row.tabId }))!;

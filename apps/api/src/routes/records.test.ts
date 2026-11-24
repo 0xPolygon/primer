@@ -29,6 +29,36 @@ function call(app: ReturnType<typeof createApp>, userId: string, doc: string, ve
   });
 }
 
+describe('records from a page', () => {
+  it('a marked page call never touches personal records', async () => {
+    await withApp(async (app) => {
+      const doc = await seedRecordsDoc();
+      const page = (verb: string, body: unknown) =>
+        app.request(`/api/documents/${doc}/records/${verb}`, {
+          method: 'POST',
+          headers: { ...asUserJson(VIEWER.id), 'x-primer-page-bridge': '1' },
+          body: JSON.stringify(body),
+        });
+      // The viewer's own personal record exists (written directly, not by a page).
+      expect((await call(app, VIEWER.id, doc, 'set', { collection: 'notes', scope: 'personal', recordId: 'n', data: { secret: 1 } })).status).toBe(200);
+      expect((await call(app, VIEWER.id, doc, 'set', { collection: 'votes', scope: 'shared', recordId: 'v', data: {} })).status).toBe(200);
+
+      expect((await page('list', { collection: 'notes', scope: 'personal' })).status).toBe(403);
+      expect((await page('set', { collection: 'notes', scope: 'personal', recordId: 'x', data: {} })).status).toBe(403);
+      const batch = await page('batch', { ops: [{ verb: 'set', collection: 'votes', scope: 'shared', recordId: 'a', data: {} }, { verb: 'set', collection: 'notes', scope: 'personal', recordId: 'b', data: {} }] });
+      expect(batch.status).toBe(403);
+      expect((await page('get', { collection: 'votes', scope: 'shared', recordId: 'a' })).status).toBe(200);
+      expect(((await (await page('get', { collection: 'votes', scope: 'shared', recordId: 'a' })).json()) as { record: unknown }).record).toBeNull();
+
+      const feed = (extra: Record<string, string>) =>
+        app.request(`/api/documents/${doc}/records/changes?since=0`, { headers: { ...asUser(VIEWER.id), ...extra } });
+      const scopes = async (r: Response) => ((await r.json()) as { changes: { scope: string }[] }).changes.map((c) => c.scope).sort();
+      expect(await scopes(await feed({}))).toEqual(['personal', 'shared']);
+      expect(await scopes(await feed({ 'x-primer-page-bridge': '1' }))).toEqual(['shared']);
+    });
+  });
+});
+
 describe('records over REST and MCP', () => {
   it('REST verbs share the service rules', async () => {
     await withApp(async (app) => {
