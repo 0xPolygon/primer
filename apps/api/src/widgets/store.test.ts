@@ -23,6 +23,7 @@ import { reachableFragments } from '../live/reach.ts';
 import { labelEdit, readLabel } from './labels.ts';
 import { draftWidget, getWidget, publishWidget, widgetImage } from './store.ts';
 import { renderBoth, widgetIdPrefix } from './render.ts';
+import { RENDER_LIMITS } from './raster.ts';
 
 const owner: AuthUser = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock', kind: 'person', viaUserId: null };
 
@@ -87,6 +88,27 @@ describe('widget drafts and publishes', () => {
     expect((await publishWidget(owner, draft.widgetId, draft.previewHash)).ok).toBe(false);
     const image = await widgetImage(owner, draft.widgetId, 'light', 'svg');
     expect(image.ok && 'svg' in image.value && image.value.svg).toContain('>Review</text>');
+  });
+
+  it('a draft that takes too long to draw is refused, and cannot be published', async () => {
+    const documentId = await createLiveDoc();
+    await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+    const { draft } = await draftAndPublish(documentId, flow('Review'));
+    const slow = `export default function render({ tokens }) {
+  return <svg viewBox="0 0 2048 2048">{Array.from({ length: 990 }, () => <rect width="2048" height="2048" fill={tokens.fg} opacity="0.01" />)}</svg>;
+}`;
+    const ms = RENDER_LIMITS.ms;
+    RENDER_LIMITS.ms = 300;
+    try {
+      const refused = await draftWidget(owner, documentId, { widgetId: draft.widgetId, source: slow });
+      expect(refused).toMatchObject({ ok: false, status: 422, refusal: { code: 'widget_invalid', details: { errors: [{ message: 'The drawing takes too long to draw.' }] } } });
+    } finally {
+      RENDER_LIMITS.ms = ms;
+    }
+    const [row] = await db.select().from(widgets).where(eq(widgets.id, draft.widgetId));
+    expect(row!.draftErrors).not.toBeNull();
+    const { hash } = await renderBoth(slow, [], widgetIdPrefix(draft.widgetId)) as { hash: string };
+    expect((await publishWidget(owner, draft.widgetId, hash)).ok).toBe(false);
   });
 
   it('publish with a stale previewHash is refused', async () => {

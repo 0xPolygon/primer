@@ -28,7 +28,7 @@ import { fragmentFor } from '../live/reach.ts';
 import { pmDocOf } from '../live/sources.ts';
 
 import { checkRateLimit } from '../lib/rateLimiter.ts';
-import { rasterise } from './raster.ts';
+import { rasterise, TooCostlyToDraw } from './raster.ts';
 import { renderBoth, widgetIdPrefix, type WidgetRow, type WidgetTheme } from './render.ts';
 import { labelsOf, withLabels } from './serialize.ts';
 import { collectionRows } from './records.ts';
@@ -42,6 +42,22 @@ const MAX_ROWS_BYTES = 1024 * 1024;
 function overRate(actor: AuthUser, kind: 'draft' | 'png', max: number): { ok: false; status: 429; refusal: Refusal } | null {
   if (checkRateLimit(`widget-${kind}:${actor.id}`, max)) return null;
   return { ok: false, status: 429, refusal: { code: 'bad_request', message: `Too many widget ${kind === 'draft' ? 'drafts' : 'images'} this minute.`, fix: 'Wait a minute and try again.' } };
+}
+
+const TOO_COSTLY: WidgetError = {
+  line: 1,
+  message: 'The drawing takes too long to draw.',
+  fix: 'Draw fewer and smaller shapes: large overlapping shapes, patterns, masks and filters are slow to draw.',
+};
+
+/** A render that ran past its time limit becomes a refusal, not a server error. */
+async function drawn<T>(render: Promise<T>): Promise<WidgetResult<T>> {
+  try {
+    return { ok: true, value: await render };
+  } catch (e) {
+    if (e instanceof TooCostlyToDraw) return invalid('The drawing is too costly to draw.', [TOO_COSTLY]);
+    throw e;
+  }
 }
 
 const NOT_FOUND: Refusal = { code: 'not_found', message: 'No such widget or document.', fix: 'Check the id; you may not have access.' };
@@ -212,10 +228,16 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
   }
 
   const carried = await carryFor({ documentId, blockId, publishedSvgLight: existing?.publishedSvgLight ?? null }, rendered.light.labels);
-  const [light, dark] = await Promise.all([
+  const pngs = await drawn(Promise.all([
     rasterise(withLabels(rendered.light.svg, carried.texts), 'light'),
     rasterise(withLabels(rendered.dark.svg, carried.texts), 'dark'),
-  ]);
+  ]));
+  if (!pngs.ok) {
+    // Recorded as the draft's error, so it can't be published.
+    await db.update(widgets).set({ draftErrors: [TOO_COSTLY] }).where(eq(widgets.id, widgetId));
+    return pngs;
+  }
+  const [light, dark] = pngs.value;
   return {
     ok: true,
     value: {
@@ -396,7 +418,9 @@ export async function widgetImage(
     return { ok: false, status: 404, refusal: { code: 'not_found', message: 'The widget has not been published yet.', fix: 'Publish a draft first.' } };
   }
   const svg = withLabels(published, await currentLabels(row));
-  return { ok: true, value: format === 'svg' ? { svg } : { png: await rasterise(svg, theme) } };
+  if (format === 'svg') return { ok: true, value: { svg } };
+  const png = await drawn(rasterise(svg, theme));
+  return png.ok ? { ok: true, value: { png: png.value } } : png;
 }
 
 export type { WidgetLabelOutcome };

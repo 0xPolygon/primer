@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseWidget } from './parse.ts';
-import { rasterise } from './raster.ts';
+import { RENDER_LIMITS, rasterise, TooCostlyToDraw } from './raster.ts';
 import { renderWidget, WIDGET_TOKENS, type WidgetRow } from './render.ts';
 import { runWidget } from './run.ts';
 import { serializeSvg, withLabels } from './serialize.ts';
@@ -267,6 +267,31 @@ export default function render({ tokens }) {
 }`;
       const out = await renderWidget(source, [], 'light');
       expect('errors' in out && out.errors.map((e) => e.message).join()).toMatch(/expand to more than/);
+    });
+  });
+
+  describe('render time limit', () => {
+    // Under every count bound, yet resvg spends ~16 s on it at 2048 px.
+    const slow = (opacity: number) =>
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048">${`<rect width="2048" height="2048" fill="#1f2328" fill-opacity="${opacity}"/>`.repeat(990)}</svg>`;
+
+    it('kills a render past the limit, two at a time, and the next drawing still renders', async () => {
+      const ms = RENDER_LIMITS.ms;
+      RENDER_LIMITS.ms = 500;
+      try {
+        const started = Date.now();
+        const refused = await Promise.allSettled([rasterise(slow(0.01), 'light'), rasterise(slow(0.02), 'light')]);
+        expect(refused.map((r) => r.status === 'rejected' && r.reason instanceof TooCostlyToDraw)).toEqual([true, true]);
+        expect(Date.now() - started).toBeLessThan(3000);
+        // A refusal is cached: asking again doesn't render again.
+        const again = Date.now();
+        await expect(rasterise(slow(0.01), 'light')).rejects.toThrow(/to draw/);
+        expect(Date.now() - again).toBeLessThan(100);
+      } finally {
+        RENDER_LIMITS.ms = ms;
+      }
+      const ok = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="50" height="50" fill="#1f2328"/></svg>`;
+      expect((await rasterise(ok, 'light')).subarray(1, 4).toString()).toBe('PNG');
     });
   });
 });

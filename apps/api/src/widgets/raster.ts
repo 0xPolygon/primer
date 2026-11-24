@@ -1,10 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
-import { renderAsync } from '@resvg/resvg-js';
-import { createHash } from 'node:crypto';
 import { SVG_LIMITS, WIDGET_FONT, useInstances } from './serialize.ts';
 import { WIDGET_TOKENS, type WidgetTheme } from './render.ts';
 
@@ -84,10 +85,10 @@ export function woffToSfnt(woff: Buffer): Buffer {
 export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
   if (Buffer.byteLength(svg) > SVG_LIMITS.bytes) return Promise.reject(new Error('widget SVG over the size bound'));
   if (useInstances(svg) > SVG_LIMITS.uses) return Promise.reject(new Error('widget SVG references expand to too many instances'));
-  // Rendering holds a libuv worker for as long as it takes, so each distinct
-  // drawing renders once (concurrent and repeat requests share the result)
-  // and at most RENDERS_AT_ONCE run across the process, leaving the other
-  // workers to the rest of the API.
+  // Each render runs in a child process (off the API's workers) and is killed
+  // after RENDER_LIMITS.ms. Each distinct drawing renders once (concurrent and
+  // repeat requests share the result, a refusal included) and at most
+  // RENDER_LIMITS.atOnce children run across the process.
   const key = createHash('sha256').update(theme).update('\0').update(svg).digest('hex');
   const hit = cache.get(key);
   if (hit) {
@@ -98,8 +99,8 @@ export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
   const png = renderSlot(() => render(svg, theme));
   cache.set(key, png);
   if (cache.size > CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
-  png.catch(() => {
-    if (cache.get(key) === png) cache.delete(key);
+  png.catch((e) => {
+    if (!(e instanceof TooCostlyToDraw) && cache.get(key) === png) cache.delete(key);
   });
   return png;
 }
@@ -107,13 +108,21 @@ export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
 const CACHE_ENTRIES = 64;
 const cache = new Map<string, Promise<Buffer>>();
 
-/** resvg can't stop a render once started, so the bound is how many run at once. */
-const RENDERS_AT_ONCE = 2;
+/** How long one render may run, and how many run at once. */
+export const RENDER_LIMITS = { ms: 10_000, atOnce: 2 };
+
+/** A drawing that didn't finish within RENDER_LIMITS.ms. */
+export class TooCostlyToDraw extends Error {
+  constructor() {
+    super(`widget SVG took more than ${RENDER_LIMITS.ms / 1000} s to draw`);
+  }
+}
+
 let rendering = 0;
 const waiting: (() => void)[] = [];
 
 async function renderSlot<T>(run: () => Promise<T>): Promise<T> {
-  if (rendering < RENDERS_AT_ONCE) rendering++;
+  if (rendering < RENDER_LIMITS.atOnce) rendering++;
   else await new Promise<void>((resolve) => waiting.push(resolve));
   try {
     return await run();
@@ -124,16 +133,52 @@ async function renderSlot<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function render(svg: string, theme: WidgetTheme): Promise<Buffer> {
+// Dev and tests run this file from src/widgets/; production runs the bundle in
+// dist/, where build.mjs copies the script to dist/widgets/.
+const HERE = dirname(fileURLToPath(import.meta.url));
+let childScript: string | null = null;
+function rasterChild(): string {
+  childScript ??= [join(HERE, 'raster-child.mjs'), join(HERE, 'widgets', 'raster-child.mjs')].find((p) => existsSync(p)) ?? null;
+  if (!childScript) throw new Error(`widget raster script not found beside ${HERE}`);
+  return childScript;
+}
+
+function render(svg: string, theme: WidgetTheme): Promise<Buffer> {
   const [, , width, height] = /viewBox="([^"]+)"/.exec(svg)![1]!.trim().split(/[\s,]+/).map(Number) as number[];
   const long = Math.max(width!, height!);
   const fitTo = width! >= height!
     ? { mode: 'width' as const, value: Math.round(Math.min(width!, (MAX_RASTER_PX * width!) / long)) }
     : { mode: 'height' as const, value: Math.round(Math.min(height!, (MAX_RASTER_PX * height!) / long)) };
-  const image = await renderAsync(svg, {
+  const options = {
     fitTo,
     background: WIDGET_TOKENS[theme].surface,
     font: { loadSystemFonts: false, fontFiles: widgetFontFiles(), defaultFontFamily: WIDGET_FONT, sansSerifFamily: WIDGET_FONT },
+  };
+  return new Promise((resolve, reject) => {
+    // The slot is held until the child has exited, so atOnce bounds processes.
+    const child = spawn(process.execPath, [rasterChild()], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, RENDER_LIMITS.ms);
+    const out: Buffer[] = [];
+    let err = '';
+    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (err.length < 4096) err += chunk.toString();
+    });
+    child.stdin.on('error', () => {}); // EPIPE from a child that died first: 'close' reports it
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut) reject(new TooCostlyToDraw());
+      else if (code === 0) resolve(Buffer.concat(out));
+      else reject(new Error(`widget raster failed (${signal ?? code}): ${err.trim()}`));
+    });
+    child.stdin.end(JSON.stringify({ svg, options }));
   });
-  return image.asPng();
 }
