@@ -18,7 +18,7 @@
 import { PRIMER_EVENT_NAMESPACE, type EventRowDTO, type PageInfoResponse, type PrimerDataChangedPayload } from '@polygonlabs/primer-api-types';
 import type { BridgeFeature, InboundProtocolMessage, OutboundProtocolMessage } from '../companion/protocol.ts';
 import type { EventSourceLike } from '../lib/eventsFeed.ts';
-import { createRecordsCapability, type RecordsCapability } from './recordsCapability.ts';
+import { createRecordsCapability, PAGE_BRIDGE_HEADER, type RecordsCapability } from './recordsCapability.ts';
 import { t } from '../i18n/index.ts';
 
 
@@ -61,12 +61,14 @@ export interface RecordsHost {
 export interface RecordsHostDeps {
   fetchImpl: (url: string, init?: RequestInit) => Promise<Response>;
   eventSourceFactory: (url: string) => EventSourceLike;
+  /** True while the viewer's click or keypress inside the page's frame is live. */
+  hasUserActivation: () => boolean;
 }
 
 export function createRecordsHost(binding: PageBinding, deps: RecordsHostDeps): RecordsHost {
   const reads = typeof binding === 'object' && binding.policy === 'records';
   const capability = reads
-    ? createRecordsCapability({ documentId: binding.documentId, pageTarget: binding.versionId, fetchImpl: deps.fetchImpl })
+    ? createRecordsCapability({ documentId: binding.documentId, pageTarget: binding.versionId, fetchImpl: deps.fetchImpl, hasUserActivation: deps.hasUserActivation })
     : null;
   let post: ((msg: OutboundProtocolMessage) => void) | null = null;
   let stream: EventSourceLike | null = null;
@@ -114,6 +116,7 @@ export function createRecordsHost(binding: PageBinding, deps: RecordsHostDeps): 
         try {
           const res = await deps.fetchImpl(
             `/api/documents/${encodeURIComponent(cap.documentId)}/records/changes?since=${lastChangeId}&limit=200`,
+            { headers: { [PAGE_BRIDGE_HEADER]: '1' } },
           );
           if (!res.ok || cap.revoked) return;
           const body = (await res.json()) as { changes: { collection: string }[]; toChangeId: number; hasMore: boolean };
