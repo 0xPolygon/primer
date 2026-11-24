@@ -135,16 +135,15 @@ server.on('upgrade', hub.handleUpgrade);
 const shutdown = async () => {
   await stopPurge();
   hub.close();
-  // Checkpoints still settling are history: write them before exiting.
-  await flushAutoCheckpoints().catch((err: unknown) => logger.error({ err }, 'flushing automatic checkpoints failed'));
   if ('close' in server) {
     const http = server as { close: (cb?: () => void) => void; closeAllConnections?: () => void };
-    http.close(() => process.exit(0));
+    http.close();
     // Open event streams would otherwise hold the exit; browsers reconnect.
     http.closeAllConnections?.();
-  } else {
-    process.exit(0);
   }
+  // No more writes come in: write the checkpoints still settling, then exit.
+  await flushAutoCheckpoints().catch((err: unknown) => logger.error({ err }, 'flushing automatic checkpoints failed'));
+  process.exit(0);
 };
 process.on('SIGTERM', () => { void shutdown(); });
 process.on('SIGINT', () => { void shutdown(); });

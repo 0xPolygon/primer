@@ -100,12 +100,17 @@ describe('checkpoints', () => {
           VALUES (${documentId}, ${MOCK_USER.id}, 'collaborators', 'test', 'ping', '{}'::jsonb)
         `);
       });
-      await until(async () => (await db.execute(sql`SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted`)).length > 0);
-      const checkpoint = writeCheckpoint(storage, documentId, MOCK_USER, null, captured);
-      // The checkpoint holds its lock on the document and waits for the events lock.
-      await until(async () => (await db.execute(sql`SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)).length > 0, 10_000);
-      insert();
-      await Promise.all([writer, checkpoint]);
+      try {
+        await until(async () => (await db.execute(sql`SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted`)).length > 0);
+        const checkpoint = writeCheckpoint(storage, documentId, MOCK_USER, null, captured);
+        // The checkpoint holds its lock on the document and waits for the events lock.
+        await until(async () => (await db.execute(sql`SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)).length > 0, 10_000);
+        insert();
+        await Promise.all([writer, checkpoint]);
+      } finally {
+        insert();
+        await writer.catch(() => undefined);
+      }
     });
   });
 
