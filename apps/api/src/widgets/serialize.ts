@@ -11,10 +11,11 @@ export const SVG_LIMITS = { nodes: RUN_LIMITS.nodes, bytes: 512 * 1024, viewBox:
  * when expanded (a `<use>` of an element that holds `<use>`s multiplies), or
  * Infinity for a cycle. A few KB of nested `<use>` can otherwise take a
  * renderer a minute. A `<use>` is attributed to every id'd element around it
- * and to the root, so this over-counts a `<defs>` nothing references.
+ * and to the root, and each instance counts its whole subtree, so this over-counts a `<defs>` nothing references.
  */
 export function useInstances(svg: string): number {
   const refs = new Map<string, string[]>(); // id (or '') -> ids its `<use>`s draw
+  const size = new Map<string, number>(); // id -> elements in its subtree, itself included
   const open: { tag: string; id: string | null }[] = [];
   const tag = /<(\/?)([A-Za-z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/g;
   for (const [, closing, name, attrs, selfClosing] of svg.matchAll(tag) as Iterable<RegExpMatchArray>) {
@@ -23,6 +24,8 @@ export function useInstances(svg: string): number {
       continue;
     }
     const id = /\sid="([^"]*)"/.exec(attrs!)?.[1] ?? null;
+    for (const o of open) if (o.id !== null) size.set(o.id, (size.get(o.id) ?? 1) + 1);
+    if (id !== null && !size.has(id)) size.set(id, 1);
     if (name === 'use') {
       const target = /\shref="#([^"]*)"/.exec(attrs!)?.[1];
       if (target !== undefined) for (const owner of ['', ...open.map((o) => o.id).filter((i): i is string => i !== null)]) refs.set(owner, [...(refs.get(owner) ?? []), target]);
@@ -35,7 +38,7 @@ export function useInstances(svg: string): number {
     if (memo.has(id)) return memo.get(id)!;
     if (visiting.has(id)) return Infinity;
     visiting.add(id);
-    let total = 1;
+    let total = size.get(id) ?? 1;
     for (const target of refs.get(id) ?? []) total += cost(target);
     visiting.delete(id);
     memo.set(id, total);

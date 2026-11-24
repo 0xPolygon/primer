@@ -96,7 +96,9 @@ export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
   const png = render(svg, theme);
   cache.set(key, png);
   if (cache.size > CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
-  png.catch(() => cache.delete(key));
+  png.catch(() => {
+    if (cache.get(key) === png) cache.delete(key);
+  });
   return png;
 }
 

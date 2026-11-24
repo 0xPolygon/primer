@@ -236,6 +236,11 @@ export default function render({ tokens }) {
       return out.then((r) => expect('errors' in r && r.errors.map((e) => e.message).join()).toMatch(/expand to more than/));
     });
 
+    it('counts what each instance clones, not just its nested <use>s', async () => {
+      const wide = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><g id="g">${'<rect width="1" height="1"/>'.repeat(100)}</g></defs>${'<use href="#g"/>'.repeat(30)}</svg>`;
+      await expect(rasterise(wide, 'light')).rejects.toThrow(/too many <use>/);
+    });
+
     it('a few <use>s still draw, and a self-reference is refused', async () => {
       const ok = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><rect id="a0" width="1" height="1"/></defs>${'<use href="#a0"/>'.repeat(20)}</svg>`;
       expect((await rasterise(ok, 'light')).subarray(1, 4).toString()).toBe('PNG');
