@@ -13,13 +13,20 @@ export type PrimerServerEditor = ServerBlockNoteEditor<
 export type PrimerBlock = ReturnType<PrimerServerEditor['yDocToBlocks']>[number];
 
 let editor: PrimerServerEditor | null = null;
+let dom: ReturnType<typeof getDocument> | null = null;
+
+/** The one JSDOM document every conversion shares: each `getDocument()` is a
+ *  whole new window, so callers never make their own. */
+export function serverDocument(): ReturnType<typeof getDocument> {
+  return (dom ??= getDocument());
+}
 
 /** The one server editor (Primer's schema, one shared JSDOM document). Use it
  *  for conversions: `editor.pmSchema`, HTML/Markdown import and export. */
 export function serverEditor(): PrimerServerEditor {
   editor ??= ServerBlockNoteEditor.create(
     { schema: primerSchema, extensions: [commentMarkExtension] },
-    getDocument(),
+    serverDocument(),
   ) as unknown as PrimerServerEditor;
   return editor;
 }

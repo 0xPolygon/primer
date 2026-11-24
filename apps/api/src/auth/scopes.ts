@@ -154,6 +154,13 @@ function compile(path: string): RegExp {
 }
 
 const COMPILED = ROUTE_SCOPES.map((r) => ({ ...r, re: compile(r.path) }));
+const COMPILED_NOT_GRANTABLE = NOT_GRANTABLE.map((r) => ({ ...r, re: compile(r.path) }));
+
+/** True when a request targets a NOT_GRANTABLE route (HEAD matched as GET). */
+function isNotGrantable(method: string, path: string): boolean {
+  const m = method === 'HEAD' ? 'GET' : method;
+  return COMPILED_NOT_GRANTABLE.some((r) => r.method === m && r.re.test(path));
+}
 
 /**
  * Looks up the scoped-route entry for a request. HEAD is matched as GET,
@@ -195,13 +202,25 @@ export function tokenScopes(c: Context<{ Variables: AppVariables }>): readonly A
 
 /**
  * Enforces token scopes. Requests without scopes (browser sessions, mock
- * auth, unrestricted tokens, public paths) pass through untouched. A scoped
- * token may only call routes in ROUTE_SCOPES whose scope it holds; everything
- * else is 403 `insufficient_scope` — default deny.
+ * auth, unrestricted tokens, public paths) pass through untouched, except
+ * that an agent without scopes (an OAuth client) is refused the
+ * NOT_GRANTABLE routes: the same boundary a scoped agent token gets, so
+ * owning a document (an upload, a fork) never lets an agent delete or
+ * externally share it. A scoped token may only call routes in ROUTE_SCOPES
+ * whose scope it holds; everything else is 403 `insufficient_scope` —
+ * default deny.
  */
 export const scopeMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const scopes = tokenScopes(c);
-  if (scopes === null) return next();
+  if (scopes === null) {
+    if (c.get('user')?.kind === 'agent' && isNotGrantable(c.req.method, c.req.path)) {
+      return c.json(
+        { error: 'forbidden', message: 'Agents cannot call this endpoint.' },
+        403,
+      );
+    }
+    return next();
+  }
 
   const route = findScopedRoute(c.req.method, c.req.path);
   if (route && (route.scope === null || scopes.includes(route.scope))) return next();
