@@ -354,6 +354,8 @@ async function runWrites<T>(
   fn: (tx: Tx, changes: Change[]) => Promise<T>,
 ): Promise<RecordsResult<T>> {
   const changes: Change[] = [];
+  // Looked up before the transaction takes its connection (a second one from inside could starve the pool).
+  const suggestOnly = actor.kind === 'agent' && (await effectiveAgentMode(documentId, actor.id)) === 'suggest';
   let value: T;
   try {
     value = await db.transaction(async (tx) => {
@@ -362,7 +364,7 @@ async function runWrites<T>(
       const out = await fn(tx, changes);
       // A suggest-mode agent proposes; it never changes what every reader (and
       // every widget bound to the records) sees. Throwing rolls the writes back.
-      if (actor.kind === 'agent' && changes.some((c) => c.scope === 'shared') && (await effectiveAgentMode(documentId, actor.id)) === 'suggest') {
+      if (suggestOnly && changes.some((c) => c.scope === 'shared')) {
         throw new Refused(
           refuse('forbidden', 'This agent is in suggest mode on this document: it cannot change shared records.').refusal,
         );
