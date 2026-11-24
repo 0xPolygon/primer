@@ -200,9 +200,12 @@ function toDTO(row: RecordRow, actor: AuthUser): RecordDTO {
   return dto;
 }
 
-/** An agent trusts only content it alone wrote. */
+/** An agent identity trusts only content it alone wrote. A person's token on
+ *  /mcp proves nothing about who wrote what the agent reads, so all of it is
+ *  fenced. */
 function untrustedFor(actor: AuthUser, contributors: (string[] | null)[]): boolean {
-  return readsUntrusted(actor) && contributors.some((list) => (list ?? []).some((id) => id !== actor.id));
+  if (!readsUntrusted(actor)) return false;
+  return actor.kind !== 'agent' || contributors.some((list) => (list ?? []).some((id) => id !== actor.id));
 }
 
 /** The owner column for a scope: the caller for personal records. */

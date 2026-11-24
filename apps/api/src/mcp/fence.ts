@@ -14,11 +14,18 @@ import type { ToolHandler, ToolName, ToolResult } from './tools.ts';
 
 const fence = (s: unknown): unknown => (typeof s === 'string' ? fenceUntrusted(s, 'content') : s);
 
-/** Every string value in `v` fenced; shape, numbers and keys stay. */
-function fenceValues(v: unknown): unknown {
-  if (typeof v === 'string') return fenceUntrusted(v, 'content');
-  if (Array.isArray(v)) return v.map(fenceValues);
-  if (v !== null && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fenceValues(x)]));
+/** Block props that are the editor's own enums, not people's words. */
+const STRUCTURAL_PROPS = new Set(['textColor', 'backgroundColor', 'textAlignment']);
+
+/** BlockNote inline content with every text run fenced; node types, styles
+ *  and the rest of the shape stay, so clients still parse it. */
+function fenceInline(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(fenceInline);
+  if (v !== null && typeof v === 'object') {
+    return Object.fromEntries(
+      Object.entries(v).map(([k, x]) => [k, k === 'text' && typeof x === 'string' ? fence(x) : k === 'content' ? fenceInline(x) : x]),
+    );
+  }
   return v;
 }
 
@@ -44,8 +51,12 @@ const FENCERS: Partial<Record<ToolName, (out: Obj) => void>> = {
       if ('html' in b) b.html = fence(b.html);
       if (b.json && typeof b.json === 'object') {
         const j = b.json as Obj;
-        j.content = fenceValues(j.content);
-        j.props = fenceValues(j.props);
+        j.content = fenceInline(j.content);
+        if (j.props && typeof j.props === 'object') {
+          j.props = Object.fromEntries(
+            Object.entries(j.props as Obj).map(([k, x]) => [k, STRUCTURAL_PROPS.has(k) ? x : fence(x)]),
+          );
+        }
       }
     }
   },

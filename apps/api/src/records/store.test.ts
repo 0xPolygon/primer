@@ -177,6 +177,17 @@ describe('records store', () => {
     await flushDataChanged();
   });
 
+  it("a person's token on /mcp reads even its own records fenced", async () => {
+    const doc = await seedRecordsDoc();
+    await recordsApi(OWNER, doc).set({ collection: 'notes', scope: 'shared', recordId: 'o', data: { text: 'mine' } });
+    const plainRead = await recordsApi(OWNER, doc).get({ collection: 'notes', scope: 'shared', recordId: 'o' });
+    expect(plainRead.ok && plainRead.value.record?.untrusted).toBeUndefined();
+    // The same person, as an agent's credential: nothing proves who wrote it.
+    const viaToken = await recordsApi({ ...OWNER, viaMcp: true }, doc).get({ collection: 'notes', scope: 'shared', recordId: 'o' });
+    expect(viaToken.ok && viaToken.value.record?.untrusted).toBe(true);
+    expect(plain(viaToken.ok ? viaToken.value.record!.data : {})).toEqual({ text: 'mine' });
+  });
+
   it('merges and reverts never launder untrusted data', async () => {
     const doc = await seedRecordsDoc();
     const agent = recordsApi(AGENT, doc);

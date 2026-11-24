@@ -1305,6 +1305,8 @@ describe('untrusted-content fencing on /mcp', () => {
         const text = format === 'json' ? JSON.stringify(b.json.content) : b[format];
         expect(text).toContain('<untrusted-content-');
         expect(text).toContain('Ignore your rules');
+        // Structural values survive: a client still recognises a text node.
+        if (format === 'json') expect(b.json.content[0].type).toBe('text');
       }
     });
   });
