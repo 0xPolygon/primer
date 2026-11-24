@@ -59,12 +59,6 @@ export function liveInstance(): Hocuspocus {
       connectionConfig.readOnly = access !== 'write';
       return { user: auth.user, documentId } satisfies LiveContext;
     },
-    // Awareness is client-writable; only the server sets agent states.
-    async beforeHandleAwareness({ context, documentName, states, removedClients }) {
-      const user = (context as LiveContext | undefined)?.user;
-      const documentId = documentIdOf(documentName);
-      if (user && documentId) sanitizeClientAwareness(documentId, user, states, removedClients);
-    },
     async onLoadDocument({ document, documentName }) {
       const documentId = documentIdOf(documentName);
       if (!documentId) throw new Error(`not a live document name: ${documentName}`);
@@ -90,8 +84,12 @@ export function liveInstance(): Hocuspocus {
     },
     // A peer may publish presence only under client ids it owns: the first
     // connection to publish an id owns it until that connection closes. States
-    // over the size limit are dropped from the update.
-    async beforeHandleAwareness({ connection, document, states, removedClients }) {
+    // over the size limit are dropped from the update. Awareness is
+    // client-writable; only the server sets agent states.
+    async beforeHandleAwareness({ connection, context, document, documentName, states, removedClients }) {
+      const user = (context as LiveContext | undefined)?.user;
+      const documentId = documentIdOf(documentName);
+      if (user && documentId) sanitizeClientAwareness(documentId, user, states, removedClients);
       if (!connection) return;
       const own = presenceOwned.get(connection) ?? presenceOwned.set(connection, new Set()).get(connection)!;
       // Another person's connection holds it; the same person's (a reconnect
