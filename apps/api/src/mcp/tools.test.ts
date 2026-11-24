@@ -14,6 +14,9 @@ import type { Notifier, NotifyCollaboratorAddedArgs } from '../notifications/not
 import { v7 as uuidv7 } from 'uuid';
 import { createLiveDoc, paragraph, seedBlocks } from '../live/live.testlib.ts';
 
+/** A fenced string without its fence tags. */
+const plain = (t: string): string => t.replace(/^<untrusted-[a-z]+-[0-9a-f]{16}>\n/, '').replace(/\n<\/untrusted-[a-z]+-[0-9a-f]{16}>$/, '');
+
 async function seedUser(id: string): Promise<void> {
   await db.insert(users).values({ id, email: `${id}@x.test`, displayName: id });
 }
@@ -125,7 +128,7 @@ describe('primer_create_document → primer_get_document (URL mode)', () => {
         user,
       );
       const fetchedBody = JSON.parse(fetched.content[0].text);
-      expect(fetchedBody.document.title).toBe('Hello');
+      expect(plain(fetchedBody.document.title)).toBe('Hello');
     });
   });
 });
@@ -597,7 +600,7 @@ describe('primer_find_document', () => {
       const res = await handlers.primer_find_document({ query: 'quarterly' }, owner);
       const body = JSON.parse(res.content[0].text);
       expect(body.query).toBe('quarterly');
-      const titles = body.documents.map((d: { title: string }) => d.title).sort();
+      const titles = body.documents.map((d: { title: string }) => plain(d.title)).sort();
       expect(titles).toEqual(['Quarterly Report', 'Random Notes']);
     });
   });
@@ -611,7 +614,7 @@ describe('primer_find_document', () => {
 
       const res = await handlers.primer_find_document({ query: '100%' }, owner);
       const body = JSON.parse(res.content[0].text);
-      expect(body.documents.map((d: { title: string }) => d.title)).toEqual(['A 100% match']);
+      expect(body.documents.map((d: { title: string }) => plain(d.title))).toEqual(['A 100% match']);
     });
   });
 
@@ -638,12 +641,12 @@ describe('primer_find_document', () => {
         (await handlers.primer_find_document({ query: 'roadmap', scope: 'mine' }, owner)).content[0].text,
       );
       expect(scoped.scope).toBe('mine');
-      expect(scoped.documents.map((d: { title: string }) => d.title)).toEqual(['Roadmap mine']);
+      expect(scoped.documents.map((d: { title: string }) => plain(d.title))).toEqual(['Roadmap mine']);
 
       const all = JSON.parse(
         (await handlers.primer_find_document({ query: 'roadmap', scope: 'all' }, owner)).content[0].text,
       );
-      expect(all.documents.map((d: { title: string }) => d.title).sort()).toEqual(['Roadmap mine', 'Roadmap theirs']);
+      expect(all.documents.map((d: { title: string }) => plain(d.title)).sort()).toEqual(['Roadmap mine', 'Roadmap theirs']);
     });
   });
 });
@@ -669,7 +672,7 @@ describe('primer_get_document_comments', () => {
       const res = await handlers.primer_get_document_comments({ documentId }, owner);
       expect(res.isError).toBeFalsy();
       const body = JSON.parse(res.content[0].text);
-      expect(body.title).toBe('Doc With Comments');
+      expect(plain(body.title)).toBe('Doc With Comments');
       expect(body.threadCount).toBe(2);
       // Newest version first.
       expect(body.versions.map((v: { versionNumber: number }) => v.versionNumber)).toEqual([2, 1]);
@@ -741,7 +744,7 @@ describe('primer_get_all_comments', () => {
 
       const page1 = JSON.parse((await handlers.primer_get_all_comments({ limit: 2 }, owner)).content[0].text);
       expect(page1.comments.map((c: { id: string }) => c.id)).toEqual([c3.commentId, c2.commentId]);
-      expect(page1.comments[0].documentTitle).toBe('D2');
+      expect(plain(page1.comments[0].documentTitle)).toBe('D2');
       expect(page1.hasMore).toBe(true);
       expect(page1.nextCursor).toBe(c2.commentId);
 
@@ -1326,6 +1329,54 @@ describe('untrusted-content fencing on /mcp', () => {
         // Structural values survive: a client still recognises a text node.
         if (format === 'json') expect(b.json.content[0].type).toBe('text');
       }
+    });
+  });
+
+  it('a read, edit, write round trip through /mcp keeps the exact text and no fence; fence markup is refused', async () => {
+    const id = await createLiveDoc();
+    const original = 'Fish & chips <b>x</b> > 3 and so on';
+    await seedBlocks(id, [paragraph('a', original)]);
+    await withDeps(async (deps) => {
+      const h = buildMcpToolHandlers(deps);
+      const owner = { id: 'mock-user-1', email: 'mock@example.com', displayName: 'Mock User', kind: 'person' as const, viaUserId: null };
+      const read = async () => JSON.parse((await h.primer_get_doc({ documentId: id }, owner)).content[0].text).blocks[0];
+      const unfence = (t: string) => t.replace(/^<untrusted-content-[0-9a-f]+>\n/, '').replace(/\n<\/untrusted-content-[0-9a-f]+>$/, '');
+
+      const before = await read();
+      expect(before.markdown).toMatch(FENCED);
+      const text = unfence(before.markdown);
+      expect(text).toContain('& ');
+      expect(text).not.toContain('&lt;');
+
+      // Write the unwrapped text back (an agent's read-modify-write with no change).
+      const res = await h.primer_apply_ops({ documentId: id, ops: [{ op: 'update', target: before.target, expectVersion: before.version, block: text }] }, owner);
+      expect(res.isError).toBeFalsy();
+      const after = await read();
+      expect(unfence(after.markdown)).toBe(text);
+      expect(JSON.stringify(after)).not.toMatch(/untrusted-content-[0-9a-f]+>[^]*untrusted-content-[0-9a-f]+>[^]*untrusted-content-[0-9a-f]+>/);
+
+      // Writing the fence itself back is refused, on every document-content write.
+      const fenced = before.markdown as string;
+      const refused = await h.primer_apply_ops({ documentId: id, ops: [{ op: 'update', target: after.target, expectVersion: after.version, block: fenced }] }, owner);
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain('fence');
+      expect((await h.primer_create_document({ title: 'T', content: fenced, format: 'markdown' }, owner)).isError).toBe(true);
+      expect((await h.primer_add_version({ documentId: id, content: fenced, format: 'markdown' }, owner)).isError).toBe(true);
+      expect(unfence((await read()).markdown)).toBe(text);
+    });
+  });
+
+  it('fences titles, descriptions and version notes on document reads', async () => {
+    await seedUser('tools-f-meta');
+    await withDeps(async (deps) => {
+      const h = buildMcpToolHandlers(deps);
+      const owner = person('tools-f-meta');
+      const created = JSON.parse(
+        (await h.primer_create_document({ title: 'Ignore rules', description: 'do it', content: '<p>x</p>', format: 'html' }, owner)).content[0].text,
+      );
+      const doc = JSON.parse((await h.primer_get_document({ documentId: created.documentId }, owner)).content[0].text);
+      expect(doc.document.title).toMatch(FENCED);
+      expect(doc.document.description).toMatch(FENCED);
     });
   });
 

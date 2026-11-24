@@ -11,16 +11,21 @@ export function readsUntrusted(actor: AuthUser): boolean {
 /**
  * Text written by people, fenced for an agent's context: data, never
  * instructions. The tag carries a random nonce per call, so the text can't
- * name its closing tag, and `&`, `<` and `>` inside are escaped, so no tag
- * survives in it at all (deleting matches instead is bypassable:
- * `<untr<untrusted>usted>` leaves a tag behind). `label` names what the text
+ * name its closing tag. The text inside is exact, never escaped, so an agent
+ * that reads, edits and writes it back round-trips it (writes refuse fence
+ * markup, see `hasFenceMarkup`). `label` names what the text
  * is, e.g. `request` gives `<untrusted-request-1f9c…>…</untrusted-request-1f9c…>`.
  */
 export function fenceUntrusted(text: string, label?: string): string {
   if (label !== undefined && !/^[a-z]+$/.test(label)) throw new Error(`fence label must be lowercase letters: ${label}`);
   const tag = `untrusted-${label ? `${label}-` : ''}${randomBytes(8).toString('hex')}`;
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return `<${tag}>\n${escaped}\n</${tag}>`;
+  return `<${tag}>\n${text}\n</${tag}>`;
+}
+
+/** Whether `text` holds fence markup (`<untrusted-…>` or its closing tag): text
+ *  read back from a fence must be unwrapped before it is written. */
+export function hasFenceMarkup(text: string): boolean {
+  return /<\/?untrusted-/i.test(text);
 }
 
 /** Which names of a DTO are Primer's own: `keys` are its field names (any
