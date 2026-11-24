@@ -265,6 +265,33 @@ const CHART = `export default function render({ rows, tokens }) {
   );
 }`;
 
+describe('widgets in checkpoints (unpublished)', () => {
+  it('an agent that may only suggest cannot propose unpublishing a widget by restoring a checkpoint from before its publication', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'primer-widget-bundle-'));
+    const storage = new FilesystemStorage(root);
+    try {
+      const documentId = await createLiveDoc();
+      await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+      // Placed (a draft) but never published: its block holds an empty hash.
+      const draft = await draftWidget(owner, documentId, { source: flow('Before'), afterBlockId: 'intro' });
+      if (!draft.ok) throw new Error(JSON.stringify(draft.refusal));
+      const checkpoint = await createCheckpoint(storage, documentId, owner, null);
+      const [version] = await db.select().from(versions).where(eq(versions.id, checkpoint.versionId));
+      const published = await publishWidget(owner, draft.value.widgetId, draft.value.previewHash);
+      if (!published.ok) throw new Error(JSON.stringify(published.refusal));
+
+      await db.update(documents).set({ agentMode: 'suggest' }).where(eq(documents.id, documentId));
+      const restored = await restoreCheckpoint(storage, { documentId, bundleKey: version!.bundleKey! }, await makeAgent(owner.id));
+      expect(restored.outcomes.map((o) => o.status === 'conflict' && o.refusal?.code)).toEqual(restored.outcomes.map(() => 'forbidden'));
+      expect(await db.select().from(suggestions).where(eq(suggestions.documentId, documentId))).toEqual([]);
+      const [row] = await db.select().from(widgets).where(eq(widgets.id, draft.value.widgetId));
+      expect(row!.publishedHash).toBe(published.value.publishedHash);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('widgets with comments, ops and records', () => {
   it('data-point comment anchors to row and column', async () => {
     const documentId = await createLiveDoc();
@@ -334,4 +361,44 @@ describe('widgets with comments, ops and records', () => {
     expect(row!.publishedSvgLight).toContain('height="100"');
     await withLiveDoc(documentId, (doc) => expect(readBlocks(doc, 'main')[1]!.props).toMatchObject({ hash: row!.publishedHash }));
   });
+
+  it('a suggest-mode agent cannot redraw a bound widget by writing its records', async () => {
+    const documentId = await createLiveDoc();
+    await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+    await recordsApi(owner, documentId).set({ collection: 'signups', scope: 'shared', recordId: 'w1', data: { signups: 240 } });
+    await flushDataChanged();
+    const draft = await draftWidget(owner, documentId, { source: CHART, collection: 'signups', afterBlockId: 'intro' });
+    if (!draft.ok) throw new Error(JSON.stringify(draft.refusal));
+    await publishWidget(owner, draft.value.widgetId, draft.value.previewHash);
+    const [before] = await db.select().from(widgets).where(eq(widgets.id, draft.value.widgetId));
+
+    await db.update(documents).set({ agentMode: 'suggest' }).where(eq(documents.id, documentId));
+    const agent = await makeAgent(owner.id);
+    const write = await recordsApi(agent, documentId).set({ collection: 'signups', scope: 'shared', recordId: 'w2', data: { signups: 999 } });
+    expect(!write.ok && write.refusal.code).toBe('forbidden');
+    await flushDataChanged();
+
+    const [after] = await db.select().from(widgets).where(eq(widgets.id, draft.value.widgetId));
+    expect(after!.publishedHash).toBe(before!.publishedHash);
+    expect(after!.publishedSvgLight).toBe(before!.publishedSvgLight);
+    expect(after!.rows).toEqual(before!.rows);
+    const read = await recordsApi(owner, documentId).list({ collection: 'signups', scope: 'shared' });
+    expect(read.ok && read.value.records).toHaveLength(1);
+  });
+
+  it('readers see no draft; editors do', async () => {
+    const documentId = await createLiveDoc({ visibility: 'org' });
+    await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
+    const { draft } = await draftAndPublish(documentId, flow('Review'));
+    expect((await draftWidget(owner, documentId, { widgetId: draft.widgetId, source: flow('Work in progress') })).ok).toBe(true);
+    const stranger: AuthUser = { id: 'widget-stranger', email: 'stranger@example.com', displayName: 'Stranger', kind: 'person', viaUserId: null };
+    await db.insert(users).values({ id: stranger.id, email: stranger.email, displayName: stranger.displayName }).onConflictDoNothing();
+
+    const asEditor = await getWidget(owner, draft.widgetId);
+    expect(asEditor.ok && asEditor.value.draft?.source).toContain('Work in progress');
+    const asReader = await getWidget(stranger, draft.widgetId);
+    expect(asReader.ok && asReader.value.draft).toBeNull();
+    expect(asReader.ok && asReader.value.source).toContain('Review');
+  });
 });
+

@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
+import { db } from '../db/client.ts';
 import { listRecordChanges, purgePersonalRecords, recordsApi, revertChange } from './store.ts';
 import { flushDataChanged } from './changed.ts';
 import { AGENT, OWNER, READER, VIEWER, seedRecordsDoc } from './records.testlib.ts';
@@ -242,6 +244,37 @@ describe('records store', () => {
     for (const data of [{ '<b>': 1 }, { ok: { 'a b': 1 } }, { ok: [{ '</x>': 1 }] }, { text: '</untrusted-record-00>x' }]) {
       expect(await viewer.set({ collection: 'notes', scope: 'shared', recordId: 'y', data })).toMatchObject({ ok: false, refusal: { code: 'bad_request' } });
     }
+    await flushDataChanged();
+  });
+
+  it('a suggest-mode agent cannot change shared records, but may write personal ones', async () => {
+    const doc = await seedRecordsDoc();
+    const target = { collection: 'notes', scope: 'shared' as const, recordId: 'n' };
+    await recordsApi(OWNER, doc).set({ ...target, data: { text: 'before' } });
+    await flushDataChanged();
+    await db.execute(sql`UPDATE documents SET agent_mode = 'suggest' WHERE id = ${doc}`);
+    const agent = recordsApi(AGENT, doc);
+    const set = await agent.set({ ...target, data: { text: 'agent' } });
+    expect(!set.ok && set.refusal.code).toBe('forbidden');
+    expect((await agent.delete(target)).ok).toBe(false);
+    const batch = await agent.batch({
+      ops: [
+        { verb: 'set', collection: 'mine', scope: 'personal', recordId: 'p', data: { a: 1 } },
+        { verb: 'update', ...target, data: { text: 'agent' } },
+      ],
+    });
+    expect(batch.ok).toBe(false);
+    // Persisted state is untouched (the batch rolled back, personal write included) and no change was logged or announced.
+    const read = await recordsApi(OWNER, doc).get(target);
+    expect(read.ok && read.value.record).toMatchObject({ data: { text: 'before' }, version: 1 });
+    const personal = await agent.get({ collection: 'mine', scope: 'personal', recordId: 'p' });
+    expect(personal.ok && personal.value.record).toBeNull();
+    const log = await listRecordChanges(OWNER, doc, {});
+    expect(log.ok && log.value.changes).toHaveLength(1);
+    // Personal writes alone are still fine, and the owner's agent in edit mode may write shared.
+    expect((await agent.set({ collection: 'mine', scope: 'personal', recordId: 'p', data: { a: 1 } })).ok).toBe(true);
+    await db.execute(sql`UPDATE documents SET agent_mode = 'edit' WHERE id = ${doc}`);
+    expect((await agent.set({ ...target, data: { text: 'agent' } })).ok).toBe(true);
     await flushDataChanged();
   });
 });

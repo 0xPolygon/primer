@@ -15,6 +15,14 @@ import type { PagePolicy } from '@polygonlabs/primer-api-types';
 
 export type { PagePolicy };
 
+// The same sandbox as ArtifactIframe, applied by the browser to the document
+// itself. Without it, opening a content URL top-level (full screen, a pasted
+// link) runs the page's scripts on Primer's origin, where they can script a
+// same-origin window and call the API as the viewer. Every route that serves
+// page HTML (versions, live pages, print, external shares) gets it from here.
+// Keep in step with ArtifactIframe's sandbox attribute.
+const SANDBOX = 'sandbox allow-scripts allow-forms allow-modals allow-downloads';
+
 const STANDARD_CSP = [
   "default-src 'none'",
   // blob: required for self-bundled artifacts that decode JS/CSS/fonts from
@@ -39,6 +47,7 @@ const STANDARD_CSP = [
   "frame-ancestors 'self'",
   "base-uri 'self'",
   "object-src 'none'",
+  SANDBOX,
 ].join('; ');
 
 const RECORDS_CSP = [
@@ -54,6 +63,7 @@ const RECORDS_CSP = [
   "frame-ancestors 'self'",
   "base-uri 'none'",
   "object-src 'none'",
+  SANDBOX,
 ].join('; ');
 
 export function artifactCsp(policy: PagePolicy): string {
