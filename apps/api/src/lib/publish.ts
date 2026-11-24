@@ -153,7 +153,16 @@ export async function publishDocument(storage: Storage, input: PublishInput): Pr
     versionNumber = await transactionWithEvents(async (tx, emit) => {
       let next = 1;
       if (existingId === undefined) {
-        await tx.insert(documents).values({ id: documentId, title: title!, description, uploaderId: actor.id });
+        // An agent's new document starts private (the PATCH guard in routes/documents.ts
+        // likewise stops agents widening to org). The person behind the agent owns it
+        // (loadEffectiveRole) and chooses who else sees it.
+        await tx.insert(documents).values({
+          id: documentId,
+          title: title!,
+          description,
+          uploaderId: actor.id,
+          ...(actor.kind === 'agent' ? { visibility: 'private' as const } : {}),
+        });
       } else {
         next = (await lockForVersion(tx, documentId, input.baseVersionNumber)) + 1;
       }
