@@ -21,11 +21,6 @@ function flatten(blocks: DraftBlock[], parentId: string | null = null, out: Flat
   return out;
 }
 
-/** A new block as partial-block JSON, without ids (the server makes them). */
-function fresh(block: DraftBlock): Record<string, unknown> {
-  return { type: block.type, props: block.props, content: block.content, children: (block.children ?? []).map(fresh) };
-}
-
 /** The siblings that were siblings already and keep their order (the longest
  *  such run); every other existing sibling moved here. */
 function staying(siblings: DraftBlock[], parentId: string | null, before: Map<string, Flat>): Set<string> {
@@ -55,8 +50,9 @@ function staying(siblings: DraftBlock[], parentId: string | null, before: Map<st
  * parent or out of order among its siblings a move, a removed one a delete,
  * and new blocks (with their children) are added after their previous sibling,
  * else as their parent's first child, else before the next sibling that stays.
- * `versions` are the blocks' versions at the start, so a block someone changed
- * since is a conflict to decide.
+ * An existing block nested under a new one goes in with it as `{ existing: id }`,
+ * so it keeps its id and the add moves it in whole. `versions` are the blocks'
+ * versions at the start, so a block someone changed since is a conflict to decide.
  */
 export function draftOps(base: DraftBlock[], draft: DraftBlock[], versions: Map<string, string>, tabId: string): LiveOp[] {
   const before = new Map(flatten(base).map((f) => [f.block.id, f]));
@@ -83,20 +79,39 @@ export function draftOps(base: DraftBlock[], draft: DraftBlock[], versions: Map<
           adds.set(`${position}:${anchor}`, add);
           ops.push(add);
         }
-        add.blocks.push({ json: fresh(block) });
+        const into = add;
+        /** A new block as partial-block JSON without ids (the server makes
+         *  them); existing descendants are moved in by id. */
+        const fresh = (b: DraftBlock): Record<string, unknown> => {
+          const version = versions.get(b.id);
+          if (before.has(b.id) && version) {
+            into.expectVersions = { ...into.expectVersions, [b.id]: version };
+            pending.push(b);
+            return { existing: b.id };
+          }
+          return { type: b.type, props: b.props, content: b.content, children: (b.children ?? []).map(fresh) };
+        };
+        const pending: DraftBlock[] = [];
+        into.blocks.push({ json: fresh(block) });
+        for (const b of pending) keep(b);
         return;
       }
-      kept.add(block.id);
       const version = versions.get(block.id);
       const to = stays.has(block.id) ? null : place();
       if (to && version) ops.push({ op: 'move', target: at(block.id), at: at(to[0]), position: to[1], expectVersion: version });
-      if (old.key !== keyOf(block) && version) {
-        const { type, props, content } = block;
-        ops.push({ op: 'update', target: at(block.id), block: { json: { type, props, content } as Record<string, unknown> }, expectVersion: version });
-      }
+      keep(block);
       previous = block.id;
-      walk(block.children ?? [], block.id);
     });
+  };
+  /** An existing block in the draft: its own change, then its children. */
+  const keep = (block: DraftBlock) => {
+    kept.add(block.id);
+    const version = versions.get(block.id);
+    if (before.get(block.id)!.key !== keyOf(block) && version) {
+      const { type, props, content } = block;
+      ops.push({ op: 'update', target: at(block.id), block: { json: { type, props, content } as Record<string, unknown> }, expectVersion: version });
+    }
+    walk(block.children ?? [], block.id);
   };
   walk(draft, null);
 
