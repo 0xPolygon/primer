@@ -493,11 +493,9 @@ describe('run responses', () => {
     for (const fenced of [claimed.value.request!.prompt, (await runViewer(id, agent, asked.value.id))!.unsentText!]) {
       const m = fenced.match(/^<(untrusted-request-[0-9a-f]{16})>\n([\s\S]*)\n<\/\1>$/);
       expect(m).not.toBeNull();
-      // Exactly one opening and one closing tag: nothing inside reads as a tag.
-      expect(fenced.match(/</g)).toHaveLength(2);
-      expect(fenced.match(/>/g)).toHaveLength(2);
-      expect(m![2]).toContain('&lt;/untrusted-request&gt;');
-      expect(m![2]).toContain('&amp;lt;/untrusted-request&amp;gt;');
+      // The text inside is exact; only the fence's own nonce closes it, and the text can't name that.
+      expect(m![2]).toBe(hostile);
+      expect(fenced.split(`</${m![1]}>`)).toHaveLength(2);
     }
     // A fresh nonce per call: the text can't name the closing tag.
     expect(claimed.value.request!.prompt.slice(0, 40)).not.toBe((await runViewer(id, agent, asked.value.id))!.unsentText!.slice(0, 40));
