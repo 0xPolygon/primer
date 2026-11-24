@@ -446,15 +446,16 @@ export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandl
       // Load the doc-of-record for the permission gate. Both branches (versionId
       // direct and documentId-resolved) converge here with `versionId` set.
       const [docRow] = (await db.execute(sql`
-        SELECT d.id AS "documentId", d.uploader_id AS "uploaderId", d.visibility AS "visibility"
+        SELECT d.id AS "documentId", d.uploader_id AS "uploaderId", d.visibility AS "visibility",
+               d.deleted_at AS "deletedAt"
         FROM versions v
         INNER JOIN documents d ON d.id = v.document_id
         WHERE v.id = ${versionId}
         LIMIT 1
       `)) as unknown as {
-        documentId: string; uploaderId: string; visibility: Visibility;
+        documentId: string; uploaderId: string; visibility: Visibility; deletedAt: Date | null;
       }[];
-      if (!docRow) return err('not_found', 'version not found');
+      if (!docRow || docRow.deletedAt !== null) return err('not_found', 'version not found');
 
       const collabRole = await loadCollaboratorRole(docRow.documentId, user.id);
       const eff = effectiveRole(docRow, user.id, collabRole);
