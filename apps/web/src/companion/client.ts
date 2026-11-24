@@ -1,13 +1,18 @@
 import type { MsgOpenExternal } from './protocol.ts';
 
-export function isSafeExternalUrl(raw: string): boolean {
+// Primer's own origin is refused: opened top-level, a Primer URL (an
+// artifact's content route, say) is no longer inside the iframe sandbox.
+export function isSafeExternalUrl(
+  raw: string,
+  ownOrigin: string | undefined = globalThis.location?.origin,
+): boolean {
   let u: URL;
   try {
     u = new URL(raw);
   } catch {
     return false;
   }
-  return u.protocol === 'https:';
+  return u.protocol === 'https:' && u.origin !== ownOrigin;
 }
 
 export function handleOpenExternal(msg: MsgOpenExternal): void {
