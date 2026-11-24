@@ -92,4 +92,42 @@ describe('OAuth agent owning a document', () => {
       expect(narrow.status).toBe(200);
     });
   });
+
+  it('starts private: its person can read and widen it, another member cannot read it', async () => {
+    const token = await oauthToken();
+    const auth = { authorization: `Bearer ${token}` };
+    const person = { 'x-mock-user-id': 'oauth-owner', 'x-primer-csrf': '1', 'content-type': 'application/json' };
+    const colleague = { 'x-mock-user-id': 'colleague-x' };
+    await withApp(async (app) => {
+      const fd = new FormData();
+      fd.append('file', new Blob(['<html><body><p>hi</p></body></html>'], { type: 'text/html' }), 'a.html');
+      fd.append('title', 'Agent upload');
+      const up = await app.request('/api/upload', { method: 'POST', headers: auth, body: fd });
+      expect(up.status).toBeLessThan(300);
+      const { documentId } = (await up.json()) as { documentId: string };
+      const base = `/api/documents/${documentId}`;
+
+      const row = await app.request(base, { headers: person });
+      expect(row.status).toBe(200);
+      const detail = (await row.json()) as { document: { visibility: string } };
+      expect(detail.document.visibility).toBe('private');
+      expect((await app.request(base, { headers: colleague })).status).toBe(404);
+
+      // The person (the owner of what their agents upload) can widen it.
+      const widen = await app.request(base, { method: 'PATCH', headers: person, body: JSON.stringify({ visibility: 'org' }) });
+      expect(widen.status).toBe(200);
+      expect((await app.request(base, { headers: colleague })).status).toBe(200);
+
+      // A live (Markdown) upload starts private too.
+      const md = new FormData();
+      md.append('file', new Blob(['# Notes\n\nhi\n'], { type: 'text/markdown' }), 'a.md');
+      md.append('title', 'Agent notes');
+      const mdUp = await app.request('/api/upload', { method: 'POST', headers: auth, body: md });
+      expect(mdUp.status).toBeLessThan(300);
+      const mdBase = `/api/documents/${((await mdUp.json()) as { documentId: string }).documentId}`;
+      const mdRow = (await (await app.request(mdBase, { headers: person })).json()) as { document: { visibility: string } };
+      expect(mdRow.document.visibility).toBe('private');
+      expect((await app.request(mdBase, { headers: colleague })).status).toBe(404);
+    });
+  });
 });
