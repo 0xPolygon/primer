@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import * as Y from 'yjs';
 import sanitizeHtml from 'sanitize-html';
 import type Token from 'markdown-it/lib/token.mjs';
-import { getDocument } from '@blocknote/server-util/dom';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { Transform } from '@tiptap/pm/transform';
 import type { Node as PmNode } from '@tiptap/pm/model';
@@ -10,7 +9,7 @@ import { updateYFragment } from 'y-prosemirror';
 import type { DocumentFormat } from '@polygonlabs/primer-api-types';
 import { markdownTokenizer as md, splitFrontMatter } from '../upload/markdown.ts';
 import { sanitizeUploadedHtml } from '../upload/sanitize.ts';
-import { serverEditor } from './editor.ts';
+import { serverDocument, serverEditor } from './editor.ts';
 import { MAIN_TAB, tabFragmentName } from './reach.ts';
 import { blockIndex } from './blocks.ts';
 import { groupVersion, pmDocOf, writeSources, type SourceEntry } from './sources.ts';
@@ -311,7 +310,8 @@ function signature(s: Signature): string {
  * sources and checkbox states. The conversion must keep all of it.
  */
 function htmlSignature(html: string): Signature {
-  const el = getDocument().createElement('div');
+  // The shared document: a window per group exhausts the heap on a large file.
+  const el = serverDocument().createElement('div');
   el.innerHTML = html;
   return {
     text: el.textContent ?? '',

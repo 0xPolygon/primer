@@ -110,7 +110,14 @@ export function ArtifactIframe({ src, anchors, theme, onMessage, registerSender,
     pendingLoadsRef.current = 0;
     void loadPageBinding(src, api).then((binding) => {
       if (disposed) return;
-      host = createRecordsHost(binding, { fetchImpl: api, eventSourceFactory: browserEventSourceFactory });
+      host = createRecordsHost(binding, {
+        fetchImpl: api,
+        eventSourceFactory: browserEventSourceFactory,
+        // A user activation in a cross-origin child frame also activates every ancestor
+        // document, and page code cannot create one. Focus in the frame tells a click
+        // there from a click on Primer's own chrome.
+        hasUserActivation: () => navigator.userActivation?.isActive === true && document.activeElement === iframe,
+      });
       hostRef.current = host;
       const seen = pendingLoadsRef.current;
       pendingLoadsRef.current = 0;
