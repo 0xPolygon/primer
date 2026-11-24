@@ -31,6 +31,12 @@ export const ARTIFACT_CSP = [
   "frame-ancestors 'self'",
   "base-uri 'self'",
   "object-src 'none'",
+  // The same sandbox as ArtifactIframe, applied by the browser to the
+  // document itself. Without it, opening this URL top-level (full screen, a
+  // pasted link) runs the artifact's scripts on Primer's origin, where they
+  // can script a same-origin window and call the API as the viewer. Keep in
+  // step with ArtifactIframe's sandbox attribute.
+  'sandbox allow-scripts allow-forms allow-modals allow-downloads',
 ].join('; ');
 
 export function registerVersionContentRoute(
