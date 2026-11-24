@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { eq } from 'drizzle-orm';
@@ -10,7 +13,7 @@ const SERVICE_USER_ID = 'service-claude';
 import { sanitizeReturnTo } from '../routes/auth.ts';
 import { apiTokens, users } from '../db/schema.ts';
 import { composeResolvers, makeBearerResolver } from './bearer.ts';
-import { makeProxyResolver } from './proxy.ts';
+import { makeProxyResolver, makeProxyVerifier } from './proxy.ts';
 import { generateToken } from './tokens.ts';
 
 const ISSUER = 'https://sso.example.com';
@@ -23,20 +26,23 @@ const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }).toString(
 
 function sign(
   claims: Record<string, unknown>,
-  o: { key?: typeof privateKey; aud?: string; iss?: string; exp?: string | number } = {},
+  o: { key?: typeof privateKey; aud?: string; iss?: string; exp?: string | number; iat?: number } = {},
 ) {
   return new SignJWT(claims)
     .setProtectedHeader({ alg: 'EdDSA' })
     .setIssuer(o.iss ?? ISSUER)
     .setAudience(o.aud ?? AUDIENCE)
-    .setIssuedAt()
+    .setIssuedAt(o.iat)
     .setExpirationTime(o.exp ?? '5m')
     .sign(o.key ?? privateKey);
 }
 
+const blobRoot = mkdtempSync(join(tmpdir(), 'primer-proxy-test-'));
+afterAll(() => rmSync(blobRoot, { recursive: true, force: true }));
+
 function makeApp() {
   return createApp({
-    storage: new FilesystemStorage('/tmp/primer-proxy-test'),
+    storage: new FilesystemStorage(blobRoot),
     notifier: new NoopNotifier(),
     proxyAuth: true,
     userResolver: composeResolvers(
@@ -90,6 +96,24 @@ describe('AUTH_MODE=proxy', () => {
       const res = await app.request('/api/me', { headers: { [HEADER]: token } });
       expect(res.status).toBe(401);
     }
+  });
+
+  it('rejects an otherwise valid token older than the max token age', async () => {
+    const app = makeApp();
+    const now = Math.floor(Date.now() / 1000);
+    // Issued 10 minutes ago but not yet expired: valid by exp, too old by age.
+    const stale = await sign({ sub: 'p-old' }, { iat: now - 600, exp: now + 3600 });
+    expect((await app.request('/api/me', { headers: { [HEADER]: stale } })).status).toBe(401);
+    const fresh = await sign({ sub: 'p-fresh' }, { iat: now - 60, exp: now + 3600 });
+    expect((await app.request('/api/me', { headers: { [HEADER]: fresh } })).status).toBe(200);
+  });
+
+  it('a remote JWKS must use https (http only for localhost)', () => {
+    const base = { header: HEADER, issuer: ISSUER, audience: AUDIENCE };
+    expect(() => makeProxyVerifier({ ...base, jwksUrl: 'http://sso.example.com/jwks.json' })).toThrow(/https/);
+    expect(() => makeProxyVerifier({ ...base, jwksUrl: 'ftp://sso.example.com/jwks.json' })).toThrow(/https/);
+    expect(() => makeProxyVerifier({ ...base, jwksUrl: 'https://sso.example.com/jwks.json' })).not.toThrow();
+    expect(() => makeProxyVerifier({ ...base, jwksUrl: 'http://localhost:9000/jwks.json' })).not.toThrow();
   });
 
   it('no header: API gets 401 JSON, browsers get a 401 page (no Okta redirect)', async () => {

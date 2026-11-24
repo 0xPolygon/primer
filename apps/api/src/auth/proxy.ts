@@ -12,8 +12,9 @@ import type { UserResolver } from './resolver.ts';
  * only verifies that token (signature, issuer, audience, expiry); it never
  * trusts a bare "X-Forwarded-User" style header.
  *
- * Claims: `sub` (required; the Primer user id is `proxy:<sub>`), `email` and `name`
- * (optional; default to `<sub>@proxy.invalid` and `sub`).
+ * Claims: `sub` (required; the Primer user id is `proxy:<sub>`), `iat` (required;
+ * a token older than `maxTokenAgeSec` is refused even if its `exp` is later),
+ * `email` and `name` (optional; default to `<sub>@proxy.invalid` and `sub`).
  */
 export interface ProxyAuthOptions {
   /** Request header carrying the JWT, e.g. `x-identity`. */
@@ -26,6 +27,20 @@ export interface ProxyAuthOptions {
   audience: string;
   /** Allowed clock difference in seconds (default 30). */
   clockToleranceSec?: number;
+  /** Oldest accepted token, by `iat`, in seconds (default 300). */
+  maxTokenAgeSec?: number;
+}
+
+const DEFAULT_MAX_TOKEN_AGE_SEC = 300;
+
+/** A remote JWKS must come over HTTPS; plain http only for a local proxy. */
+function assertSecureJwksUrl(raw: string): URL {
+  const url = new URL(raw);
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
+    throw new Error('PROXY_AUTH_JWKS_URL must be an https:// URL (http:// is allowed only for localhost)');
+  }
+  return url;
 }
 
 const JWKS_ALGS = ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512', 'ES256', 'ES384', 'ES512', 'EdDSA'];
@@ -57,7 +72,7 @@ export function makeProxyVerifier(opts: ProxyAuthOptions) {
     key = k;
     algorithms = algorithmsFor(k);
   } else if (opts.jwksUrl) {
-    key = createRemoteJWKSet(new URL(opts.jwksUrl));
+    key = createRemoteJWKSet(assertSecureJwksUrl(opts.jwksUrl));
     algorithms = JWKS_ALGS;
   } else {
     throw new Error('proxy auth needs PROXY_AUTH_PUBLIC_KEY or PROXY_AUTH_JWKS_URL');
@@ -69,7 +84,8 @@ export function makeProxyVerifier(opts: ProxyAuthOptions) {
         audience: opts.audience,
         algorithms,
         clockTolerance: opts.clockToleranceSec ?? 30,
-        requiredClaims: ['sub', 'exp'],
+        maxTokenAge: opts.maxTokenAgeSec ?? DEFAULT_MAX_TOKEN_AGE_SEC,
+        requiredClaims: ['sub', 'exp', 'iat'],
       });
       const sub = payload.sub;
       if (!sub) return null;

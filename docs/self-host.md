@@ -27,7 +27,7 @@ database. Back up the `primer-pg` and `primer-blobs` volumes.
 | `ADMIN_EMAILS` | no | Comma-separated admin emails (may mint service tokens) |
 | `PROXY_AUTH_HEADER` | proxy mode | Request header carrying the identity JWT (e.g. `x-identity`) |
 | `PROXY_AUTH_PUBLIC_KEY` | one of | PEM public key (SPKI) that verifies the JWT: Ed25519, RSA or EC. `\n` escapes are accepted |
-| `PROXY_AUTH_JWKS_URL` | one of | URL of a JWKS the proxy publishes (cached, keys rotate) |
+| `PROXY_AUTH_JWKS_URL` | one of | URL of a JWKS the proxy publishes (cached, keys rotate). Must be `https://` (`http://` only for localhost) |
 | `PROXY_AUTH_ISSUER` | proxy mode | Required `iss` |
 | `PROXY_AUTH_AUDIENCE` | proxy mode | Required `aud` |
 | `MAILGUN_API_KEY`, `EMAIL_FROM` | no | Email notifications. Without them nothing is emailed, and external-share one-time codes (which are emailed) are unavailable. `MAILGUN_DOMAIN`, `MAILGUN_API_BASE_URL` optional |
