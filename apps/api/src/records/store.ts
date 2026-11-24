@@ -48,7 +48,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
 import { canWriteEvents, loadEventDocContext } from '../lib/events.ts';
-import { canEdit, canManage, canRead, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
+import { canEdit, canManage, canRead, effectiveAgentMode, loadEffectiveRole, type EffectiveRole } from '../lib/permissions.ts';
 import { scheduleDataChanged } from './changed.ts';
 
 export type RecordsResult<T> = { ok: true; value: T } | { ok: false; refusal: Refusal };
@@ -354,12 +354,21 @@ async function runWrites<T>(
   fn: (tx: Tx, changes: Change[]) => Promise<T>,
 ): Promise<RecordsResult<T>> {
   const changes: Change[] = [];
+  // Looked up before the transaction takes its connection (a second one from inside could starve the pool).
+  const suggestOnly = actor.kind === 'agent' && (await effectiveAgentMode(documentId, actor.id)) === 'suggest';
   let value: T;
   try {
     value = await db.transaction(async (tx) => {
       changes.length = 0;
       await tx.execute(sql`SELECT pg_advisory_xact_lock(${RECORDS_LOCK_KEY}, hashtext(${documentId}))`);
       const out = await fn(tx, changes);
+      // A suggest-mode agent proposes; it never changes what every reader (and
+      // every widget bound to the records) sees. Throwing rolls the writes back.
+      if (suggestOnly && changes.some((c) => c.scope === 'shared')) {
+        throw new Refused(
+          refuse('forbidden', 'This agent is in suggest mode on this document: it cannot change shared records.').refusal,
+        );
+      }
       await checkCaps(tx, documentId, actor, changes);
       return out;
     });
