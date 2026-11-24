@@ -17,7 +17,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { actorNameOf } from '../lib/actors.ts';
 import { canRead, libraryOwnerId, loadEffectiveRole, type Visibility } from '../lib/permissions.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceUntrusted, readsUntrusted } from '../lib/untrusted.ts';
 import { withLiveDocument } from './instance.ts';
 import { getLiveDoc } from './read.ts';
 import { blockOfFragment, tabsOf } from './reach.ts';
@@ -65,7 +65,7 @@ export async function getCatchUp(actor: AuthUser, documentId: string, since: Cat
   const role = await loadEffectiveRole({ id: doc.id, uploaderId: doc.uploaderId, visibility: doc.visibility }, actor);
   if (!canRead(doc.visibility, role)) return notFound;
 
-  const forAgent = actor.kind === 'agent';
+  const forAgent = readsUntrusted(actor);
   const text = (s: string) => (forAgent ? fenceUntrusted(s, 'content') : s);
   const excluded = [...new Set([actor.id, libraryOwnerId(actor)])];
   const isOwn = (id: string | null) => id !== null && excluded.includes(id);

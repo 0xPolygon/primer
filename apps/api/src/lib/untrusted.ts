@@ -1,4 +1,12 @@
 import { randomBytes } from 'node:crypto';
+import type { AuthUser } from '../app.ts';
+
+/** Whether what this caller reads reaches an agent's context: an agent
+ *  identity, or anyone on the MCP surface (a person's token an agent holds).
+ *  Fencing only; permissions still follow `actor.kind`. */
+export function readsUntrusted(actor: AuthUser): boolean {
+  return actor.kind === 'agent' || actor.viaMcp === true;
+}
 
 /**
  * Text written by people, fenced for an agent's context: data, never

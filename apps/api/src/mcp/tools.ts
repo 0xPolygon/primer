@@ -31,6 +31,7 @@ import { logger } from '../logger.ts';
 import { isCollaboratorRole } from '@polygonlabs/primer-api-types';
 import type { ThreadsListResponse, ThreadDTO, CommentDTO, DocumentSummary, ApiTokenScope, PublishFormat, Refusal, Target } from '@polygonlabs/primer-api-types';
 import { isTextRangeAnchor, isElementPathAnchor } from '@polygonlabs/primer-api-types';
+import { fencedHandler } from './fence.ts';
 import {
   canRead, isSelfOrAgentOf, libraryOwnerId, loadEffectiveRole, type Visibility,
 } from '../lib/permissions.ts';
@@ -273,9 +274,17 @@ export function toolsForScopes(scopes: readonly ApiTokenScope[] | null): ToolNam
   });
 }
 
+/** Every tool handler, run as an MCP caller with people's text fenced (mcp/fence.ts). */
 export function buildMcpToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandler> {
+  const handlers = buildToolHandlers(deps);
+  return Object.fromEntries(
+    (Object.keys(handlers) as ToolName[]).map((name) => [name, fencedHandler(name, handlers[name])]),
+  ) as Record<ToolName, ToolHandler>;
+}
+
+function buildToolHandlers(deps: ToolDeps): Record<ToolName, ToolHandler> {
   return {
-    primer_whoami: async (_args, user) => ok(user),
+    primer_whoami: async (_args, { id, email, displayName, kind, viaUserId }) => ok({ id, email, displayName, kind, viaUserId }),
 
     primer_resolve_url: async (args) => {
       const url = typeof args.url === 'string' ? args.url : '';

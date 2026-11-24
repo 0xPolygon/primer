@@ -20,7 +20,7 @@
 //   its current data. An agent reading a record (or a change) that anyone but
 //   itself contributed to gets it marked `untrusted`: record data is data,
 //   never instructions. A merge or a revert can't launder it.
-import { fenceStrings, fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceStrings, fenceUntrusted, readsUntrusted } from '../lib/untrusted.ts';
 import { sql } from 'drizzle-orm';
 import {
   DEFAULT_RECORDS_PAGE_SIZE,
@@ -192,7 +192,7 @@ function toDTO(row: RecordRow, actor: AuthUser): RecordDTO {
     writtenBy: row.writtenBy,
   };
   // A display name is text a person chose: fenced for any agent reader.
-  if (actor.kind === 'agent') dto.writtenBy = fenceUntrusted(dto.writtenBy, 'record');
+  if (readsUntrusted(actor)) dto.writtenBy = fenceUntrusted(dto.writtenBy, 'record');
   if (untrustedFor(actor, [row.contributors])) {
     dto.untrusted = true;
     dto.data = fenceStrings(dto.data, 'record');
@@ -202,7 +202,7 @@ function toDTO(row: RecordRow, actor: AuthUser): RecordDTO {
 
 /** An agent trusts only content it alone wrote. */
 function untrustedFor(actor: AuthUser, contributors: (string[] | null)[]): boolean {
-  return actor.kind === 'agent' && contributors.some((list) => (list ?? []).some((id) => id !== actor.id));
+  return readsUntrusted(actor) && contributors.some((list) => (list ?? []).some((id) => id !== actor.id));
 }
 
 /** The owner column for a scope: the caller for personal records. */
@@ -583,7 +583,7 @@ function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
     actorName: row.actorName,
     createdAt: iso(row.createdAt),
   };
-  if (actor.kind === 'agent') dto.actorName = fenceUntrusted(dto.actorName, 'record');
+  if (readsUntrusted(actor)) dto.actorName = fenceUntrusted(dto.actorName, 'record');
   if (untrustedFor(actor, [row.beforeContributors, row.afterContributors, [row.actorId]])) {
     dto.untrusted = true;
     dto.before = fenceStrings(dto.before, 'record');

@@ -80,6 +80,10 @@ describe('task blocks', () => {
     // ...and the title is fenced for the agent, plain for a person.
     expect(mine.ok && mine.value.tasks[0]!.title).toMatch(/^<untrusted-content-[0-9a-f]+>\nDraft the launch note\n<\/untrusted-content-[0-9a-f]+>$/);
     expect(listed.ok && listed.value.tasks[0]!.title).toBe('Draft the launch note');
+    // A person's token on /mcp reads fenced too: the transport, not the identity, decides.
+    const viaToken = await listDocumentTasks({ ...READER, viaMcp: true }, doc);
+    expect(viaToken.ok && viaToken.value.tasks[0]!.untrusted).toBe(true);
+    expect(viaToken.ok && viaToken.value.tasks[0]!.title).toMatch(/^<untrusted-content-[0-9a-f]+>\nDraft the launch note\n/);
   });
 
   it('checking it off updates status', async () => {

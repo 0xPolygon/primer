@@ -33,7 +33,7 @@ import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
 import { transactionWithEvents, type EmitLifecycle } from '../lib/events.ts';
 import { canRead, loadEffectiveRole, type Visibility } from '../lib/permissions.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceUntrusted, readsUntrusted } from '../lib/untrusted.ts';
 import { logger } from '../logger.ts';
 import {
   checkPlacement,
@@ -285,7 +285,7 @@ function dto(r: ListRow, actor: AuthUser): TaskDTO {
     createdAt: iso(r.createdAt),
     updatedAt: iso(r.updatedAt),
   };
-  if (actor.kind === 'agent') {
+  if (readsUntrusted(actor)) {
     out.untrusted = true;
     out.title = fenceUntrusted(out.title, 'content');
   }
