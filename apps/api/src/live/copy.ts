@@ -102,8 +102,9 @@ export async function copyDocument(
       title,
       description: row!.description,
       uploaderId: actor.id,
-      // A branch is private to its creator; a fork stays as private as its source.
-      visibility: kind === 'branch' ? 'private' : source.visibility,
+      // A branch is private to its creator; a person's fork stays as private as its
+      // source; an agent's fork starts private (agents cannot widen to org either).
+      visibility: kind === 'branch' || actor.kind === 'agent' ? 'private' : source.visibility,
       format: row!.format,
       metadata: row!.metadata,
       ...(kind === 'branch'
