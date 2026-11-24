@@ -138,7 +138,7 @@ const THEME_CSS =
  *  is published for it now (a different hash, or no publish at all; a block that was not yet
  *  published then counts too, restoring it would unpublish the widget). */
 export async function widgetsChangedSince(frozen: Y.Doc, documentId: string): Promise<boolean> {
-  const placed = placedWidgets(frozen);
+  const placed = widgetBlocks(frozen); // unpublished blocks too: restoring one would unpublish the widget
   if (placed.length === 0) return false;
   const rows = await db
     .select({ id: widgets.id, blockId: widgets.blockId, hash: widgets.publishedHash })
