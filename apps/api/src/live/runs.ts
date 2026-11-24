@@ -150,18 +150,24 @@ export async function listDocumentRuns(user: AuthUser, documentId: string): Prom
  *  for one document or status. What people wrote arrives fenced. Runs on
  *  documents the agent can no longer read are left out. */
 export async function listAgentRuns(agent: AuthUser, opts: { documentId?: string; status?: string }): Promise<AgentRunDTO[]> {
-  const rows = (await db.execute(sql`
-    SELECT ${RUN_COLUMNS} FROM agent_runs
-     WHERE agent_id = ${agent.id}
-       ${opts.documentId ? sql`AND document_id = ${opts.documentId}` : sql``}
-       ${opts.status ? sql`AND status = ${opts.status}` : sql`AND status in ('queued', 'running')`}
-     ORDER BY created_at LIMIT 100
-  `)) as unknown as RunRow[];
   const readable = new Map<string, boolean>();
-  for (const { documentId } of rows) {
-    if (!readable.has(documentId)) readable.set(documentId, (await readableLiveDoc(documentId, agent)) !== null);
+  const out: AgentRunDTO[] = [];
+  // Page through the matches so runs on unreadable documents never use up the 100 slots.
+  for (let offset = 0; out.length < 100; offset += 100) {
+    const rows = (await db.execute(sql`
+      SELECT ${RUN_COLUMNS} FROM agent_runs
+       WHERE agent_id = ${agent.id}
+         ${opts.documentId ? sql`AND document_id = ${opts.documentId}` : sql``}
+         ${opts.status ? sql`AND status = ${opts.status}` : sql`AND status in ('queued', 'running')`}
+       ORDER BY created_at, id LIMIT 100 OFFSET ${offset}
+    `)) as unknown as RunRow[];
+    for (const row of rows) {
+      if (!readable.has(row.documentId)) readable.set(row.documentId, (await readableLiveDoc(row.documentId, agent)) !== null);
+      if (readable.get(row.documentId) && out.length < 100) out.push(toDTOFor(agent, 'stranger', row));
+    }
+    if (rows.length < 100) break;
   }
-  return rows.filter((row) => readable.get(row.documentId)).map((row) => toDTOFor(agent, 'stranger', row));
+  return out;
 }
 
 type Transition = {
