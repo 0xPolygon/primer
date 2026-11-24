@@ -13,6 +13,8 @@ export const COLLAB_PATH = '/collab';
 /** Close codes the editor reacts to. */
 export const CLOSE_FORBIDDEN = 4403;
 export const CLOSE_SAVE_FAILED = 4500;
+/** The largest WebSocket message a peer may send (crossws defaults to 100 MiB). */
+export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
 /** The backstop recheck: bearer connections every tick, others every sixth. */
 const TICK_MS = 10_000;
 const TICKS_PER_SESSION_RECHECK = 6;
@@ -44,6 +46,7 @@ export function createHub(deps: { resolver: UserResolver; appOrigin: string }): 
   const hocuspocus = liveInstance();
 
   const ws = crossws({
+    serverOptions: { maxPayload: MAX_MESSAGE_BYTES },
     hooks: {
       upgrade: async (request) => {
         const auth = await resolveFromHeaders(deps.resolver, request.headers);
