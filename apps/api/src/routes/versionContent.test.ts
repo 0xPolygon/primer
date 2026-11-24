@@ -37,6 +37,9 @@ describe('GET /api/versions/:versionId/content', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
       expect(res.headers.get('content-security-policy')).toBe(ARTIFACT_CSP);
+      // Sandboxed even when opened top-level, with no same-origin or popups.
+      expect(ARTIFACT_CSP).toContain('sandbox allow-scripts allow-forms allow-modals allow-downloads');
+      expect(ARTIFACT_CSP).not.toMatch(/allow-same-origin|allow-popups/);
       expect(res.headers.get('x-frame-options')).toBe('SAMEORIGIN');
       expect(res.headers.get('x-content-type-options')).toBe('nosniff');
       expect(res.headers.get('referrer-policy')).toBe('no-referrer');
