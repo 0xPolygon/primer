@@ -1,3 +1,4 @@
+import { track } from '../inflight.ts';
 import type { Hono } from 'hono';
 import { placeReopened } from '../lib/threadCarry.ts';
 import { v7 as uuidv7 } from 'uuid';
@@ -212,7 +213,7 @@ export async function replyToThread(
     });
   });
 
-  void notifier
+  void track(notifier
     .notifyComment({
       doc: { id: threadCtx.doc_id, title: threadCtx.doc_title },
       version: threadCtx.version_id ? { id: threadCtx.version_id, versionNumber: threadCtx.version_number! } : null,
@@ -223,7 +224,7 @@ export async function replyToThread(
       uploaderUserId: threadCtx.uploader_id,
       actorUserId: user.id,
     })
-    .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
+    .catch((err) => logger.error({ err, commentId }, 'notifier failed')));
 
   const dto = await loadThread(threadId);
   if (!dto) return { ok: false, status: 404, error: 'not_found' };
@@ -317,7 +318,7 @@ export function registerCommentRoutes(
       }>;
 
       if (editCtx) {
-        void deps.notifier
+        void track(deps.notifier
           .notifyComment({
             doc: { id: editCtx.doc_id, title: editCtx.doc_title },
             version: editCtx.version_id ? { id: editCtx.version_id, versionNumber: editCtx.version_number! } : null,
@@ -328,7 +329,7 @@ export function registerCommentRoutes(
             uploaderUserId: null,
             actorUserId: user.id,
           })
-          .catch((err) => logger.error({ err, commentId }, 'notifier failed (edit)'));
+          .catch((err) => logger.error({ err, commentId }, 'notifier failed (edit)')));
       }
     }
 

@@ -13,6 +13,7 @@ import { liveDocName, liveInstance } from './live/instance.ts';
 import { createLiveDoc, paragraph, seedBlocks } from './live/live.testlib.ts';
 import { SYSTEM_ORIGIN, originFor } from './live/origin.ts';
 import { NoopNotifier } from './notifications/notifier.ts';
+import { track } from './inflight.ts';
 import { drainPendingWork } from './shutdown.ts';
 import { FilesystemStorage } from './storage/filesystem.ts';
 
@@ -112,4 +113,16 @@ describe('shutdown', () => {
       await rm(storageRoot, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it('awaits a slow notification send, and is not held past its bound by one that never settles', async () => {
+    let sent = false;
+    void track(new Promise<void>((resolve) => setTimeout(() => { sent = true; resolve(); }, 150)));
+    await drainPendingWork(5_000);
+    expect(sent).toBe(true);
+
+    void track(new Promise<void>(() => {}));
+    const started = Date.now();
+    await drainPendingWork(200);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
 });
