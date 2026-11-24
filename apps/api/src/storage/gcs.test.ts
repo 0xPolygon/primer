@@ -29,6 +29,32 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
   return new Response(stream).text();
 }
 
+describe('GcsStorage.putIfAbsent', () => {
+  it('writes with ifGenerationMatch=0 and reports a lost race on 412', async () => {
+    const { storage, calls } = makeStorage(() => new Response('{}', { status: 200 }));
+    expect(await storage.putIfAbsent('keys/k', new Uint8Array([1]))).toBe(true);
+    expect(calls[0].url).toContain('ifGenerationMatch=0');
+    const lost = makeStorage(() => new Response('{}', { status: 412 }));
+    expect(await lost.storage.putIfAbsent('keys/k', new Uint8Array([1]))).toBe(false);
+  });
+});
+
+describe('GcsStorage timeout', () => {
+  it('fails a request the backend never answers', async () => {
+    const hang = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      })) as unknown as typeof fetch;
+    const storage = new GcsStorage({
+      bucket: 'b',
+      getAccessToken: async () => 't',
+      fetch: hang,
+      timeoutMs: 20,
+    });
+    await expect(storage.get('v1/x.html')).rejects.toThrow();
+  });
+});
+
 describe('GcsStorage.put', () => {
   it('uploads the bytes as a media upload named by the URL-encoded key', async () => {
     const { storage, calls } = makeStorage(() => new Response('{}', { status: 200 }));
