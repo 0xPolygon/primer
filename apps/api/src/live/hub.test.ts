@@ -21,7 +21,7 @@ import { FilesystemStorage } from '../storage/filesystem.ts';
 import { NoopNotifier } from '../notifications/notifier.ts';
 import { asUser } from '../test/harness.ts';
 import { createHub, CLOSE_FORBIDDEN, CLOSE_SAVE_FAILED, MAX_MESSAGE_BYTES, type Hub } from './hub.ts';
-import { MAX_AWARENESS_BYTES } from './instance.ts';
+import { MAX_AWARENESS_BYTES, MAX_AWARENESS_CLIENTS } from './instance.ts';
 import { loadYDoc } from './persist.ts';
 import { createLiveDoc } from './live.testlib.ts';
 
@@ -346,6 +346,27 @@ describe('live hub', () => {
       awareness.setLocalState({ name: 'ok' });
       await until(async () => states(id).get(awareness.clientID)?.name === 'ok');
     });
+  });
+
+  it('refuses presence client ids beyond the per-connection cap and does not broadcast them', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const watcher = await connect(id, asPerson(OWNER));
+    const sender = await connect(id, asPerson(OWNER));
+    const awareness = sender.provider.awareness!;
+    awareness.setLocalState({ name: 'me' });
+    // One message of many small states, each under its own client id.
+    const fake = Array.from({ length: 200 }, (_, i) => 1_000_000 + i);
+    for (const clientId of fake) {
+      awareness.states.set(clientId, { name: `fake${clientId}` });
+      awareness.meta.set(clientId, { clock: 1, lastUpdated: Date.now() });
+    }
+    awareness.emit('update', [{ added: fake, updated: [], removed: [] }, 'test']);
+    await sleep(500);
+    const published = (map: Map<number, unknown>) => [...map.keys()].filter((clientId) => fake.includes(clientId));
+    const server = hub.hocuspocus.documents.get(`doc:${id}`)!.awareness.getStates();
+    expect(published(server).length).toBeLessThan(MAX_AWARENESS_CLIENTS);
+    expect(published(watcher.provider.awareness!.getStates()).length).toBeLessThan(MAX_AWARENESS_CLIENTS);
+    expect(server.get(awareness.clientID)?.name).toBe('me');
   });
 
   it.todo('proxy-auth headers authenticate (with #141, through makeProxyResolver)');
