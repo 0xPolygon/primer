@@ -14,6 +14,7 @@ import {
   finishRun,
   LARGE_RUN_EDITS,
   LARGE_RUN_REMOVALS,
+  listAgentRuns,
   listDocumentRuns,
   requestRun,
   retryRun,
@@ -273,6 +274,25 @@ describe('agent runs', () => {
     const v = await versions(a, agent);
     const deleted = await ops(a, agent, { ops: [{ op: 'delete', target: main('x'), expectVersion: v.x }] });
     expect(deleted.outcomes[0]!.status).toBe('applied');
+  });
+});
+
+describe('listing an agent\'s own runs', () => {
+  it('leaves out runs on a document the agent can no longer read', async () => {
+    await db.execute(sql`INSERT INTO users (id, email, display_name) VALUES ('other-user', 'o@example.com', 'Other') ON CONFLICT DO NOTHING`);
+    const agent = await makeAgent('other-user');
+    const id = await createLiveDoc();
+    await seedBlocks(id, [paragraph('a', 'Alpha')]);
+    await db.execute(sql`
+      INSERT INTO document_collaborators (id, document_id, user_id, role, granted_by)
+      VALUES (gen_random_uuid(), ${id}, ${agent.id}, 'editor', 'mock-user-1')
+    `);
+    const asked = await requestRun(owner, id, { agentId: agent.id, request: ask('Secret prompt') });
+    if (!asked.ok) throw new Error(asked.refusal.message);
+    expect((await listAgentRuns(agent, {})).map((r) => r.id)).toEqual([asked.value.id]);
+
+    await db.execute(sql`DELETE FROM document_collaborators WHERE document_id = ${id} AND user_id = ${agent.id}`);
+    expect(await listAgentRuns(agent, {})).toEqual([]);
   });
 });
 
