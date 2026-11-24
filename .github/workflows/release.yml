@@ -47,12 +47,12 @@ jobs:
           app-id: ${{ secrets.CHANGESET_RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.CHANGESET_RELEASE_BOT_APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           token: ${{ steps.app-token.outputs.token }}
 
-      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v4
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -69,7 +69,11 @@ jobs:
       # what is (or isn't yet) on npm.
       - run: pnpm install --no-frozen-lockfile --config.link-workspace-packages=true
 
-      - uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+      # Stays on changesets/action v1: v2 requires Changesets CLI v3 and exits
+      # immediately on this repo's CLI v2. v2 also renames every input below,
+      # so moving to it means migrating the CLI and these inputs together.
+      # Dependabot ignores major bumps of this action until then.
+      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           title: 'changesets: Release / Deploy'
           commit: 'release: version packages'

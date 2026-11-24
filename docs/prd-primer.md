@@ -414,8 +414,8 @@ the threat model:
 
 ### Shared records: pages that read records (threat model)
 
-A page reads and writes per-document records (`doc_records`, shared or
-personal to the viewer) only if its head says
+A page reads and writes per-document shared records (`doc_records`,
+`scope: shared`; never the viewer's personal ones) only if its head says
 `<meta name="primer-records" content="read">`. Records are worth more than
 page content (votes, sign-ups, what other viewers typed), so such pages get
 everything the CSP and the host can take away:
@@ -432,10 +432,19 @@ everything the CSP and the host can take away:
   no `init`, so the page has no port to call through.
 - **A document-bound capability.** The host binds records calls to the
   page's own document; `args` are rebuilt from an allow-list, so a page can't
-  name another document or another person's personal records. The server
-  decides access per viewer on every call (shared read: readers; writes:
-  owner, editor, responder; personal: the caller's own rows only). At most 8
-  calls in flight, 5 s each, 256 KB per call, 200 records per page.
+  name another document. Pages get shared records only: the host refuses
+  `scope: "personal"`, and the server refuses it too for calls the host marks
+  (`x-primer-page-bridge`), and leaves personal changes out of a page's change
+  feed. The server decides access per viewer on every call (shared read:
+  readers; writes: owner, editor, responder). At most 8 calls in flight, 5 s
+  each, 256 KB per call, 200 records per page.
+- **Writes need a real gesture.** The host applies a page's write only while
+  the viewer's click or keypress inside the page's frame is live (transient
+  user activation, which the browser also sets on the host document when the
+  frame is clicked, and which page code cannot create) and the frame has
+  focus, so a click on Primer's own chrome does not count. The activation
+  window (about 5 s) can cover several writes from one click. Writes without it are
+  refused with `forbidden`.
 - **Navigation revokes.** A record-reading frame that loads a second time
   navigated itself. The host revokes its record access at once (in-flight
   calls fail, later ones are refused), closes its change feed and reloads the
