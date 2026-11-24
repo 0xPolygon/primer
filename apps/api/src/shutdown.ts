@@ -19,29 +19,29 @@ export const DRAIN_BOUND_MS = 15_000;
  * threads); then the automatic checkpoints, of the final state; and last
  * whatever those queued (redraw writes, compactions). One failing step is
  * logged and the rest still run. Notification sends still in flight are awaited
- * alongside the writes. The whole drain is bounded: past `boundMs` it logs what
+ * last. The whole drain is bounded: past `boundMs` it logs what
  * was still running and returns, so shutdown carries on.
  */
 export async function drainPendingWork(boundMs: number = DRAIN_BOUND_MS): Promise<void> {
-  let running = 'starting';
+  const running = new Set<string>();
   let timer: NodeJS.Timeout | undefined;
   const expired = new Promise<'expired'>((resolve) => {
     timer = setTimeout(() => resolve('expired'), boundMs);
   });
-  const outcome = await Promise.race([drain((name) => { running = name; }).then(() => 'done' as const), expired]);
+  const outcome = await Promise.race([drain(running).then(() => 'done' as const), expired]);
   clearTimeout(timer);
   if (outcome === 'expired') {
-    logger.error({ boundMs, step: running, sendsInFlight: inflightCount() }, 'shutdown: pending work did not finish in time, continuing shutdown');
+    logger.error({ boundMs, steps: [...running], sendsInFlight: inflightCount() }, 'shutdown: pending work did not finish in time, continuing shutdown');
   }
 }
 
-async function drain(onStep: (name: string) => void): Promise<void> {
+async function drain(running: Set<string>): Promise<void> {
   const step = (name: string, work: () => Promise<unknown>) => {
-    onStep(name);
-    return work().catch((err: unknown) => logger.error({ error: String(err) }, `shutdown: ${name} failed`));
+    running.add(name);
+    return work()
+      .catch((err: unknown) => logger.error({ error: String(err) }, `shutdown: ${name} failed`))
+      .finally(() => running.delete(name));
   };
-  // Sends run alongside the writes, so one that never settles holds up nothing else.
-  const sends = step('notification sends', settleInflight);
   await step('saving live updates', drainDocQueues);
   await step('writing data.changed', flushDataChanged);
   await Promise.all([
@@ -52,5 +52,6 @@ async function drain(onStep: (name: string) => void): Promise<void> {
   ]);
   await step('automatic checkpoints', flushAutoCheckpoints);
   await step('saving live updates', drainDocQueues);
-  await sends;
+  // Sends already run on their own; waiting last also catches ones the writes above started.
+  await step('notification sends', settleInflight);
 }
