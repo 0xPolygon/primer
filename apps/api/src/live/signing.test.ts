@@ -31,7 +31,6 @@ describe('loadSigningKey', () => {
   });
 
   it('two starters racing on first boot end with the same key', async () => {
-    const { loadSigningKey, sign } = await import('./signing.ts');
     const objects = new Map<string, Buffer>();
     const racing = (): Storage => ({
       get: async (k) => {
@@ -49,11 +48,18 @@ describe('loadSigningKey', () => {
       },
       delete: async () => undefined,
     });
-    await Promise.all([loadSigningKey(racing()), loadSigningKey(racing())]);
+    // Each starter is its own process: its own module state.
+    const starter = async () => {
+      vi.resetModules();
+      const signing = await import('./signing.ts');
+      return signing;
+    };
+    const [a, b] = [await starter(), await starter()];
+    await Promise.all([a.loadSigningKey(racing()), b.loadSigningKey(racing())]);
     expect(objects.size).toBe(1);
-    const winner = objects.get('keys/live-import-hmac')!;
-    // The loaded key is the stored one: no starter kept its own losing key.
-    const expected = createHmac('sha256', winner).update(JSON.stringify(['d', 1])).digest('hex');
-    expect(sign('d', [1])).toBe(expected);
+    const stored = objects.get('keys/live-import-hmac')!;
+    const expected = createHmac('sha256', stored).update(JSON.stringify(['d', 1])).digest('hex');
+    expect(a.sign('d', [1])).toBe(expected);
+    expect(b.sign('d', [1])).toBe(expected);
   });
 });
