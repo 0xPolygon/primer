@@ -20,8 +20,8 @@ export class FilesystemStorage implements Storage {
     // Written whole to a temp file, then linked into place: link fails if the
     // key exists, and the key never shows partial contents to a racing reader.
     const temp = `${target}.${randomUUID()}.tmp`;
-    await writeFile(temp, bytes);
     try {
+      await writeFile(temp, bytes);
       await link(temp, target);
       return true;
     } catch (err: unknown) {
