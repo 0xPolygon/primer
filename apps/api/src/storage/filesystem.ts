@@ -13,6 +13,18 @@ export class FilesystemStorage implements Storage {
     await writeFile(target, bytes);
   }
 
+  async putIfAbsent(key: string, bytes: Uint8Array): Promise<boolean> {
+    const target = this.resolve(key);
+    await mkdir(dirname(target), { recursive: true });
+    try {
+      await writeFile(target, bytes, { flag: 'wx' });
+      return true;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException)?.code === 'EEXIST') return false;
+      throw err;
+    }
+  }
+
   async get(key: string): Promise<ReadableStream<Uint8Array>> {
     const target = this.resolve(key);
     await stat(target); // throws ENOENT for missing files
