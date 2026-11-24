@@ -13,7 +13,7 @@ const SERVICE_USER_ID = 'service-claude';
 import { sanitizeReturnTo } from '../routes/auth.ts';
 import { apiTokens, users } from '../db/schema.ts';
 import { composeResolvers, makeBearerResolver } from './bearer.ts';
-import { makeProxyResolver, makeProxyVerifier } from './proxy.ts';
+import { makeProxyResolver, makeProxyVerifier, parseMaxTokenAgeSec } from './proxy.ts';
 import { generateToken } from './tokens.ts';
 
 const ISSUER = 'https://sso.example.com';
@@ -145,5 +145,15 @@ describe('AUTH_MODE=proxy', () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { id: string }).id).toBe('svc-1');
     await db.delete(apiTokens).where(eq(apiTokens.userId, 'svc-1'));
+  });
+});
+
+describe('parseMaxTokenAgeSec', () => {
+  it('keeps the default when unset and accepts a positive whole number', () => {
+    expect(parseMaxTokenAgeSec(undefined)).toBeUndefined();
+    expect(parseMaxTokenAgeSec('300')).toBe(300);
+  });
+  it.each(['0', '5m', '-1', '', '1.5', 'NaN', 'Infinity'])('rejects %j at startup', (raw) => {
+    expect(() => parseMaxTokenAgeSec(raw)).toThrow(/PROXY_AUTH_MAX_TOKEN_AGE_SEC/);
   });
 });

@@ -86,7 +86,7 @@ if (authMode === 'okta') {
     jwksUrl,
     issuer: proxyIssuer,
     audience,
-    maxTokenAgeSec: maxTokenAge ? Number(maxTokenAge) : undefined,
+    maxTokenAgeSec: parseMaxTokenAgeSec(maxTokenAge),
   });
   oktaAdapter = makeDisabledOktaAdapter();
 } else {

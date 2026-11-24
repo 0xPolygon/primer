@@ -60,6 +60,19 @@ function algorithmsFor(key: KeyObject): string[] {
   }
 }
 
+/**
+ * Parses PROXY_AUTH_MAX_TOKEN_AGE_SEC: unset keeps the default, anything set must be
+ * a positive whole number of seconds. A zero or non-number would make jose skip the
+ * age check, so it stops startup instead.
+ */
+export function parseMaxTokenAgeSec(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  if (!/^[1-9][0-9]*$/.test(raw.trim()) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error(`PROXY_AUTH_MAX_TOKEN_AGE_SEC must be a positive whole number of seconds; got "${raw}".`);
+  }
+  return Number(raw);
+}
+
 /** Primer user ids for proxy identities are `proxy:<sub>`. */
 export const PROXY_USER_PREFIX = 'proxy:';
 
