@@ -20,7 +20,7 @@ import { serverEditor } from '../live/editor.ts';
 import { originFor } from '../live/origin.ts';
 import { applyPlan, type PlannedEdit } from '../live/pipeline.ts';
 import { MAIN_TAB, tabsOf } from '../live/reach.ts';
-import { carryEdit, carryFor, fragmentLabels, readLabel, tabOfBlock } from './labels.ts';
+import { carryEdit, carryFor, carryLabels, fragmentLabels, readLabel, tabOfBlock } from './labels.ts';
 import { withLiveDocument } from '../live/instance.ts';
 import { fenceUntrusted } from '../lib/untrusted.ts';
 import { blockVersion, findBlock } from '../live/blocks.ts';
@@ -206,6 +206,17 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
     return invalid(`The draft has ${rendered.errors.length} error${rendered.errors.length === 1 ? '' : 's'}; the live widget is unchanged.`, rendered.errors);
   }
 
+  // Drawn before anything is written, so a drawing refused as too costly
+  // saves no draft and places no block. A new widget's block has no label
+  // fragments yet, so its labels are the draft's own.
+  const carried = existing ? await carryFor(existing, rendered.light.labels) : carryLabels({}, {}, rendered.light.labels);
+  const pngs = await drawn(Promise.all([
+    rasterise(withLabels(rendered.light.svg, carried.texts), 'light'),
+    rasterise(withLabels(rendered.dark.svg, carried.texts), 'dark'),
+  ]));
+  if (!pngs.ok) return pngs;
+  const [light, dark] = pngs.value;
+
   let blockId: string;
   if (existing) {
     blockId = existing.blockId;
@@ -227,17 +238,6 @@ export async function draftWidget(actor: AuthUser, documentId: string, req: Widg
     });
   }
 
-  const carried = await carryFor({ documentId, blockId, publishedSvgLight: existing?.publishedSvgLight ?? null }, rendered.light.labels);
-  const pngs = await drawn(Promise.all([
-    rasterise(withLabels(rendered.light.svg, carried.texts), 'light'),
-    rasterise(withLabels(rendered.dark.svg, carried.texts), 'dark'),
-  ]));
-  if (!pngs.ok) {
-    // Recorded as the draft's error, so it can't be published.
-    await db.update(widgets).set({ draftErrors: [TOO_COSTLY] }).where(eq(widgets.id, widgetId));
-    return pngs;
-  }
-  const [light, dark] = pngs.value;
   return {
     ok: true,
     value: {

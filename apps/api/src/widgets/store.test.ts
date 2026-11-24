@@ -90,7 +90,7 @@ describe('widget drafts and publishes', () => {
     expect(image.ok && 'svg' in image.value && image.value.svg).toContain('>Review</text>');
   });
 
-  it('a draft that takes too long to draw is refused, and cannot be published', async () => {
+  it('a draft that takes too long to draw is refused and saves nothing', async () => {
     const documentId = await createLiveDoc();
     await seedBlocks(documentId, [paragraph('intro', 'Intro')]);
     const { draft } = await draftAndPublish(documentId, flow('Review'));
@@ -105,10 +105,18 @@ describe('widget drafts and publishes', () => {
     } finally {
       RENDER_LIMITS.ms = ms;
     }
+    // Nothing was saved: the refused source is no draft, and a first draft places no block.
     const [row] = await db.select().from(widgets).where(eq(widgets.id, draft.widgetId));
-    expect(row!.draftErrors).not.toBeNull();
+    expect(row!.draftSource).toBeNull();
     const { hash } = await renderBoth(slow, [], widgetIdPrefix(draft.widgetId)) as { hash: string };
     expect((await publishWidget(owner, draft.widgetId, hash)).ok).toBe(false);
+    RENDER_LIMITS.ms = 300;
+    try {
+      expect(await draftWidget(owner, documentId, { source: slow, afterBlockId: 'intro' })).toMatchObject({ ok: false, status: 422 });
+    } finally {
+      RENDER_LIMITS.ms = ms;
+    }
+    expect(await db.select().from(widgets).where(eq(widgets.documentId, documentId))).toHaveLength(1);
   });
 
   it('publish with a stale previewHash is refused', async () => {
