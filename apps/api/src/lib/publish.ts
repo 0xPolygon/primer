@@ -374,6 +374,7 @@ async function publishLive(
           title: doc.title,
           description: doc.description,
           uploaderId: input.actor.id,
+          ...(input.actor.kind === 'agent' ? { visibility: 'private' as const } : {}),
           format,
           metadata,
           ...(input.visibility ? { visibility: input.visibility } : {}),
