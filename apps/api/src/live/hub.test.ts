@@ -361,11 +361,14 @@ describe('live hub', () => {
       awareness.meta.set(clientId, { clock: 1, lastUpdated: Date.now() });
     }
     awareness.emit('update', [{ added: fake, updated: [], removed: [] }, 'test']);
-    await sleep(500);
-    const published = (map: Map<number, unknown>) => [...map.keys()].filter((clientId) => fake.includes(clientId));
+    const published = (map: Map<number, unknown>) => [...map.keys()].filter((clientId) => fake.includes(clientId)).length;
     const server = hub.hocuspocus.documents.get(`doc:${id}`)!.awareness.getStates();
-    expect(published(server).length).toBeLessThan(MAX_AWARENESS_CLIENTS);
-    expect(published(watcher.provider.awareness!.getStates()).length).toBeLessThan(MAX_AWARENESS_CLIENTS);
+    const watched = watcher.provider.awareness!.getStates();
+    // The sender's own id counts toward the cap, so the rest of it is allowed.
+    await until(async () => published(watched) === MAX_AWARENESS_CLIENTS - 1);
+    await sleep(300);
+    expect(published(server)).toBe(MAX_AWARENESS_CLIENTS - 1);
+    expect(published(watched)).toBe(MAX_AWARENESS_CLIENTS - 1);
     expect(server.get(awareness.clientID)?.name).toBe('me');
   });
 
