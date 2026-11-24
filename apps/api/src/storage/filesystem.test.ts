@@ -72,3 +72,12 @@ describe('FilesystemStorage.delete', () => {
     await expect(storage.delete('v1/nope.html')).resolves.toBeUndefined();
   });
 });
+
+describe('FilesystemStorage.putIfAbsent', () => {
+  it('writes once and reports the existing key on the second try', async () => {
+    const storage = new FilesystemStorage(root);
+    expect(await storage.putIfAbsent('keys/k', new Uint8Array([1]))).toBe(true);
+    expect(await storage.putIfAbsent('keys/k', new Uint8Array([2]))).toBe(false);
+    expect(Array.from(new Uint8Array(await new Response(await storage.get('keys/k')).arrayBuffer()))).toEqual([1]);
+  });
+});

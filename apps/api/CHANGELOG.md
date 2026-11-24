@@ -1,5 +1,18 @@
 # @primer/api
 
+## 0.4.0
+
+### Patch Changes
+
+- [#135](https://github.com/0xPolygon/primer/pull/135) [`17c841c`](https://github.com/0xPolygon/primer/commit/17c841c66bcb55a326567b689e27bf67da228b30) Thanks [@taylanpince](https://github.com/taylanpince)! - Fix a remote code execution in Markdown uploads. gray-matter selected its parse
+  engine from the front-matter fence language and its built-in JavaScript engine
+  ran the block through `eval()`, so an uploaded `.md` beginning with `---js`
+  executed arbitrary code with the API process's privileges at upload time.
+  Markdown front-matter is now parsed with the JavaScript engine disabled; YAML
+  and JSON front-matter are unchanged.
+
+- [#133](https://github.com/0xPolygon/primer/pull/133) [`07ef829`](https://github.com/0xPolygon/primer/commit/07ef8296a33cb115bb78ede31cfb9a50f9843553) Thanks [@taylanpince](https://github.com/taylanpince)! - Security: clear the moderate and low npm audit advisories affecting the API service by raising the `hono` override floor to 4.13.16 (`mount()` middleware bypass, RegExpRouter skipping wildcard middleware, `csrf()` not checking `text/ping` requests, `validator('form')` skipping multipart bodies with extra parameters, `css` helper HTML injection) and the `@hono/node-server` floor to 2.1.6 (process crash on `ECONNRESET` during a WebSocket upgrade, backslash treated as a path separator behind a reverse proxy). Also removes the expired `body-parser` exemption from the 14-day release-age gate.
+
 ## 0.3.1
 
 ### Patch Changes
