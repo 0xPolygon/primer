@@ -40,3 +40,33 @@ Agents become their own identities, and every publish goes through one path.
 - **Page outbound policy.** The artifact CSP becomes `artifactCsp(policy)`;
   `standard` is unchanged, and `records` (for record-reading pages, later)
   allows no remote origin.
+- **Agents are held to the NOT_GRANTABLE boundary, scoped or not.** An agent
+  that authenticates without token scopes (an OAuth MCP client) is refused
+  the same routes a scoped agent token is: delete and restore, every
+  external-share route, folders, token and agent management, and widening a
+  document to org. Owning a document, by upload or fork, never grants those.
+
+## Upgrade notes: service tokens
+
+Migration `0017_agent_identities.sql` **irreversibly revokes every active
+`service-claude` token** (it sets `revoked_at` on them) and the admin-only
+`/api/service-tokens` routes and Settings section are removed. Rolling the
+app back does not restore the tokens. Before releasing:
+
+1. List the active tokens, so you know which integrations break:
+   `SELECT id, name, created_at, last_used_at FROM api_tokens WHERE user_id = 'service-claude' AND revoked_at IS NULL;`
+2. Decide an owner for each integration. A signed-in person (not a token,
+   not an admin-only role) creates the replacement: Settings → API tokens →
+   Agents → add an agent (named after the integration), then mint it a
+   token with the scopes it needs (`POST /api/agents`, then
+   `POST /api/agents/:agentId/tokens`; both session-only).
+3. Replace the revoked token in each integration's configuration (the
+   `PRIMER_API_TOKEN` of the MCP server or plugin, CI secrets, etc.) with the
+   new agent token. Agent tokens are always scoped: grant exactly what the
+   integration did (for example `documents:read`, `documents:write`,
+   `comments:write`). Scoped tokens cannot delete, externally share or widen
+   documents to org, which the old service tokens could.
+4. Documents the service account created stay attributed to `service-claude`
+   (now an agent acting via no one); they keep working but have no person
+   owner, so a person must be granted access through collaborators if they
+   need to manage them.
