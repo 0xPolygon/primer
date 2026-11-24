@@ -145,6 +145,9 @@ export function createRecordsCapability(opts: RecordsCapabilityOptions): Records
         answer({ ok: false, refusal: refusal('forbidden', "A page can't read or write personal records.", 'Use scope "shared".') });
         return;
       }
+      // Intended: a gesture authorizes a short burst of writes (the browser's
+      // activation window, ~5 s), not one. Consuming it would need host-side
+      // gesture tracking across the cross-origin frame.
       if (WRITE_VERBS.includes(msg.verb) && !opts.hasUserActivation?.()) {
         answer({
           ok: false,

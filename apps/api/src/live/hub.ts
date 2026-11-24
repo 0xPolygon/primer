@@ -44,12 +44,16 @@ export type Hub = {
  */
 export function createHub(deps: { resolver: UserResolver; appOrigin: string }): Hub {
   const hocuspocus = liveInstance();
+  // Set first thing in close(): a socket still authenticating then finishes its
+  // upgrade after the shutdown pass, so every late upgrade is refused.
+  let closed = false;
 
   const ws = crossws({
     serverOptions: { maxPayload: MAX_MESSAGE_BYTES },
     hooks: {
       upgrade: async (request) => {
         const auth = await resolveFromHeaders(deps.resolver, request.headers);
+        if (closed) throw new Response('shutting down', { status: 503 });
         if (!auth) throw new Response('unauthorized', { status: 401 });
         if (auth.authMethod !== 'bearer' && request.headers.get('origin') !== deps.appOrigin) {
           throw new Response('forbidden', { status: 403 });
@@ -157,7 +161,7 @@ export function createHub(deps: { resolver: UserResolver; appOrigin: string }): 
       // Not `new URL`: request targets like `//` or `http://[` make it throw, and a
       // throw out of this listener would take the process down.
       const path = (req.url ?? '/').split('?')[0];
-      if (path !== COLLAB_PATH) {
+      if (closed || path !== COLLAB_PATH) {
         socket.destroy();
         return;
       }
@@ -170,6 +174,7 @@ export function createHub(deps: { resolver: UserResolver; appOrigin: string }): 
     },
     recheck,
     close() {
+      closed = true;
       clearInterval(timer);
       stopFailures();
       stopRecheck();
