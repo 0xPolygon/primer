@@ -35,7 +35,7 @@ function placedWidgets(doc: Y.Doc): PlacedWidget[] {
         const widgetId = String(child.getAttribute('widgetId') ?? '');
         const hash = String(child.getAttribute('hash') ?? '');
         const textIds = String(child.getAttribute('textIds') ?? '').split(' ').filter(Boolean);
-        if (blockId && BLOCK_ID.test(blockId) && UUID.test(widgetId) && hash) out.push({ blockId, widgetId, hash, textIds, element: child });
+        if (blockId && BLOCK_ID.test(blockId) && UUID.test(widgetId)) out.push({ blockId, widgetId, hash, textIds, element: child });
       } else walk(child);
     }
   };
@@ -129,7 +129,8 @@ const THEME_CSS =
   'html[data-theme="dark"] .primer-widget-light{display:none}html[data-theme="dark"] .primer-widget-dark{display:block}';
 
 /** Whether a widget block of a checkpoint's frozen state differs from what
- *  is published for it now (a different hash, or no publish at all). */
+ *  is published for it now (a different hash, or no publish at all; a block that was not yet
+ *  published then counts too, restoring it would unpublish the widget). */
 export async function widgetsChangedSince(frozen: Y.Doc, documentId: string): Promise<boolean> {
   const placed = placedWidgets(frozen);
   if (placed.length === 0) return false;
@@ -137,7 +138,7 @@ export async function widgetsChangedSince(frozen: Y.Doc, documentId: string): Pr
     .select({ id: widgets.id, blockId: widgets.blockId, hash: widgets.publishedHash })
     .from(widgets)
     .where(and(inArray(widgets.id, placed.map((w) => w.widgetId)), eq(widgets.documentId, documentId)));
-  return placed.some((w) => rows.find((r) => r.id === w.widgetId && r.blockId === w.blockId)?.hash !== w.hash);
+  return placed.some((w) => (rows.find((r) => r.id === w.widgetId && r.blockId === w.blockId)?.hash ?? '') !== w.hash);
 }
 
 /**

@@ -20,14 +20,14 @@ const json = (body: unknown, status = 200) =>
 describe('records capability', () => {
   it('bridge ignores documentId and owner in args', async () => {
     const { calls, fetchImpl } = fakeFetch();
-    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl });
+    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl, hasUserActivation: () => true });
     const replies: MsgRecordsResult[] = [];
     cap.call(
       {
         type: 'records_call',
         callId: 'c1',
         verb: 'set',
-        args: { documentId: 'someone-elses-doc', ownerUserId: 'victim', owner: 'victim', userId: 'victim', collection: 'votes', scope: 'personal', recordId: 'r', data: { a: 1 } },
+        args: { documentId: 'someone-elses-doc', ownerUserId: 'victim', owner: 'victim', userId: 'victim', collection: 'votes', scope: 'shared', recordId: 'r', data: { a: 1 } },
       },
       (r) => replies.push(r),
     );
@@ -41,7 +41,7 @@ describe('records capability', () => {
       (r) => replies.push(r),
     );
     expect(calls.map((c) => c.url)).toEqual([`/api/documents/${DOC}/records/set`, `/api/documents/${DOC}/records/batch`]);
-    expect(JSON.parse(calls[0].init.body as string)).toEqual({ collection: 'votes', scope: 'personal', recordId: 'r', data: { a: 1 } });
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ collection: 'votes', scope: 'shared', recordId: 'r', data: { a: 1 } });
     expect(JSON.parse(calls[1].init.body as string)).toEqual({ ops: [{ verb: 'set', collection: 'c', scope: 'shared', recordId: 'r', data: {} }] });
     calls[0].resolve(json({ record: { recordId: 'r' } }));
     calls[1].resolve(json({ error: 'forbidden', refusal: { code: 'forbidden', message: 'no', fix: 'ask' } }, 403));
@@ -50,9 +50,48 @@ describe('records capability', () => {
     expect(replies[1]).toMatchObject({ callId: 'c2', ok: false, refusal: { code: 'forbidden' } });
   });
 
+  it('page code cannot read or write personal records', () => {
+    const { calls, fetchImpl } = fakeFetch();
+    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl, hasUserActivation: () => true });
+    const replies: MsgRecordsResult[] = [];
+    const personalBatch = { ops: [{ verb: 'set', collection: 'c', scope: 'shared', recordId: 'r', data: {} }, { verb: 'set', collection: 'c', scope: 'personal', recordId: 'r', data: {} }] };
+    cap.call({ type: 'records_call', callId: 'r1', verb: 'list', args: { collection: 'c', scope: 'personal' } }, (r) => replies.push(r));
+    cap.call({ type: 'records_call', callId: 'r2', verb: 'set', args: { collection: 'c', scope: 'personal', recordId: 'r', data: {} } }, (r) => replies.push(r));
+    cap.call({ type: 'records_call', callId: 'r3', verb: 'batch', args: personalBatch }, (r) => replies.push(r));
+    expect(calls).toEqual([]);
+    expect(replies.map((r) => r.ok)).toEqual([false, false, false]);
+    expect(replies[0]).toMatchObject({ refusal: { code: 'forbidden' } });
+    // Shared calls carry the marker the server uses to refuse personal scope too.
+    cap.call({ type: 'records_call', callId: 'r4', verb: 'list', args: { collection: 'c', scope: 'shared' } }, () => {});
+    expect((calls[0].init.headers as Record<string, string>)['x-primer-page-bridge']).toBe('1');
+  });
+
+  it('a write needs user activation; reads do not', () => {
+    const { calls, fetchImpl } = fakeFetch();
+    let active = false;
+    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl, hasUserActivation: () => active });
+    const replies: MsgRecordsResult[] = [];
+    const write = (callId: string, verb: 'set' | 'update' | 'delete' | 'batch' = 'set') =>
+      cap.call({ type: 'records_call', callId, verb, args: { collection: 'c', scope: 'shared', recordId: 'r', data: {}, ops: [] } }, (r) => replies.push(r));
+    for (const verb of ['set', 'update', 'delete', 'batch'] as const) write(`w-${verb}`, verb);
+    expect(calls).toEqual([]);
+    expect(replies.every((r) => !r.ok && r.refusal?.code === 'forbidden')).toBe(true);
+    cap.call({ type: 'records_call', callId: 'read', verb: 'list', args: { collection: 'c', scope: 'shared' } }, () => {});
+    expect(calls).toHaveLength(1);
+    active = true;
+    write('w-ok');
+    expect(calls).toHaveLength(2);
+    // A host that gives no activation signal refuses writes.
+    const bare = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl });
+    const bareReplies: MsgRecordsResult[] = [];
+    bare.call({ type: 'records_call', callId: 'b', verb: 'set', args: { collection: 'c', scope: 'shared', recordId: 'r', data: {} } }, (r) => bareReplies.push(r));
+    expect(bareReplies[0]).toMatchObject({ ok: false });
+    expect(calls).toHaveLength(2);
+  });
+
   it('answers bad_request for arguments JSON cannot carry', () => {
     const { calls, fetchImpl } = fakeFetch();
-    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl });
+    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl, hasUserActivation: () => true });
     const replies: MsgRecordsResult[] = [];
     const call = (callId: string, args: unknown) =>
       cap.call({ type: 'records_call', callId, verb: 'set', args: args as Record<string, unknown> }, (r) => replies.push(r));
@@ -64,7 +103,7 @@ describe('records capability', () => {
 
   it('calls beyond 8 in flight are refused; cancel aborts', async () => {
     const { calls, fetchImpl } = fakeFetch();
-    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl });
+    const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl, hasUserActivation: () => true });
     const replies: MsgRecordsResult[] = [];
     for (let i = 0; i <= MAX_RECORDS_IN_FLIGHT; i++) {
       cap.call({ type: 'records_call', callId: `c${i}`, verb: 'list', args: { collection: 'c', scope: 'shared' } }, (r) => replies.push(r));
@@ -88,7 +127,7 @@ describe('records capability', () => {
     vi.useFakeTimers();
     try {
       const { calls, fetchImpl } = fakeFetch();
-      const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl });
+      const cap = createRecordsCapability({ documentId: DOC, pageTarget: 'v1', fetchImpl, hasUserActivation: () => true });
       const replies: MsgRecordsResult[] = [];
       cap.call({ type: 'records_call', callId: 'slow', verb: 'get', args: { collection: 'c', scope: 'shared', recordId: 'r' } }, (r) => replies.push(r));
       vi.advanceTimersByTime(4_999);

@@ -393,6 +393,24 @@ describe('MCP tools respect visibility + collab', () => {
       expect(JSON.parse(res.content[0].text).code).toBe('forbidden');
     });
   });
+
+  it('primer_get_comments on a soft-deleted doc returns not_found', async () => {
+    await seedUser('tools-owner');
+    const { docId, versionId } = await seedDocOwnedBy('tools-owner');
+    await seedThreadWithComment(versionId, 'tools-owner', 'still here?');
+    const owner = { id: 'tools-owner', email: 'x', displayName: 'x' };
+    await withDeps(async (deps) => {
+      const handlers = buildMcpToolHandlers(deps);
+      const before = await handlers.primer_get_comments({ documentId: docId }, owner);
+      expect(before.isError).toBeFalsy();
+      await db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, docId));
+      for (const args of [{ documentId: docId }, { versionId }]) {
+        const res = await handlers.primer_get_comments(args, owner);
+        expect(res.isError).toBe(true);
+        expect(JSON.parse(res.content[0].text).code).toBe('not_found');
+      }
+    });
+  });
 });
 
 describe('MCP tools: responder role', () => {

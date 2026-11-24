@@ -28,15 +28,22 @@ import { blockVersion, findBlock } from '../live/blocks.ts';
 import { fragmentFor } from '../live/reach.ts';
 import { pmDocOf } from '../live/sources.ts';
 
+import { checkRateLimit } from '../lib/rateLimiter.ts';
 import { rasterise } from './raster.ts';
 import { renderBoth, widgetIdPrefix, type WidgetRow, type WidgetTheme } from './render.ts';
 import { labelsOf, withLabels } from './serialize.ts';
 import { collectionRows } from './records.ts';
 
-export type WidgetResult<T> = { ok: true; value: T } | { ok: false; status: 400 | 403 | 404 | 409 | 422; refusal: Refusal };
+export type WidgetResult<T> = { ok: true; value: T } | { ok: false; status: 400 | 403 | 404 | 409 | 422 | 429; refusal: Refusal };
 
 const MAX_SOURCE_BYTES = 1024 * 1024;
 const MAX_ROWS_BYTES = 1024 * 1024;
+
+/** Drafts and PNGs occupy the server's render workers, over REST and MCP alike. */
+function overRate(actor: AuthUser, kind: 'draft' | 'png', max: number): { ok: false; status: 429; refusal: Refusal } | null {
+  if (checkRateLimit(`widget-${kind}:${actor.id}`, max)) return null;
+  return { ok: false, status: 429, refusal: { code: 'bad_request', message: `Too many widget ${kind === 'draft' ? 'drafts' : 'images'} this minute.`, fix: 'Wait a minute and try again.' } };
+}
 
 const NOT_FOUND: Refusal = { code: 'not_found', message: 'No such widget or document.', fix: 'Check the id; you may not have access.' };
 
@@ -158,6 +165,8 @@ function checkInput(source: unknown, rows: unknown, collection: unknown): Widget
  * show the draft as people will see it once published, label edits carried.
  */
 export async function draftWidget(actor: AuthUser, documentId: string, req: WidgetDraftRequest): Promise<WidgetResult<WidgetDraftResponse>> {
+  const limited = overRate(actor, 'draft', 30);
+  if (limited) return limited;
   const access = await documentAccess(documentId, actor, 'edit');
   if (!access.ok) return access;
   let existing: WidgetRowRecord | null = null;
@@ -355,6 +364,8 @@ export async function getWidget(actor: AuthUser, widgetId: string): Promise<Widg
   const access = await documentAccess(row.documentId, actor, 'read');
   if (!access.ok) return access;
   const labels = await labelList(row, actor);
+  // A draft is the editors' work in progress; readers see only what is published.
+  const editor = (await documentAccess(row.documentId, actor, 'edit')).ok;
   return {
     ok: true,
     value: {
@@ -367,7 +378,7 @@ export async function getWidget(actor: AuthUser, widgetId: string): Promise<Widg
       publishedHash: row.publishedHash,
       labels,
       draft:
-        row.draftSource === null
+        row.draftSource === null || !editor
           ? null
           : { source: row.draftSource, rows: fencedRows(actor, row.draftRows, row.draftCollection), collection: row.draftCollection, errors: row.draftErrors as WidgetError[] | null },
       updatedAt: row.updatedAt.toISOString(),
@@ -387,6 +398,8 @@ export async function widgetImage(
   const access = await documentAccess(row.documentId, actor, 'read');
   if (!access.ok) return access;
   const published = theme === 'light' ? row.publishedSvgLight : row.publishedSvgDark;
+  const limited = format === 'png' ? overRate(actor, 'png', 120) : null;
+  if (limited) return limited;
   if (!published) {
     return { ok: false, status: 404, refusal: { code: 'not_found', message: 'The widget has not been published yet.', fix: 'Publish a draft first.' } };
   }

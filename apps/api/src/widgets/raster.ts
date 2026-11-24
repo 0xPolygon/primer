@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { renderAsync } from '@resvg/resvg-js';
-import { SVG_LIMITS, WIDGET_FONT } from './serialize.ts';
+import { createHash } from 'node:crypto';
+import { SVG_LIMITS, WIDGET_FONT, useInstances } from './serialize.ts';
 import { WIDGET_TOKENS, type WidgetTheme } from './render.ts';
 
 export const MAX_RASTER_PX = 2048;
@@ -80,8 +81,31 @@ export function woffToSfnt(woff: Buffer): Buffer {
  * most 2048 px on the long side. Only SVGs that passed `serializeSvg` (and so
  * its node and size bounds) come here.
  */
-export async function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
-  if (Buffer.byteLength(svg) > SVG_LIMITS.bytes) throw new Error('widget SVG over the size bound');
+export function rasterise(svg: string, theme: WidgetTheme): Promise<Buffer> {
+  if (Buffer.byteLength(svg) > SVG_LIMITS.bytes) return Promise.reject(new Error('widget SVG over the size bound'));
+  if (useInstances(svg) > SVG_LIMITS.uses) return Promise.reject(new Error('widget SVG expands to too many <use> instances'));
+  // Rendering holds a libuv worker for as long as it takes, so each distinct
+  // drawing renders once: concurrent and repeat requests share the result.
+  const key = createHash('sha256').update(theme).update('\0').update(svg).digest('hex');
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
+  const png = render(svg, theme);
+  cache.set(key, png);
+  if (cache.size > CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
+  png.catch(() => {
+    if (cache.get(key) === png) cache.delete(key);
+  });
+  return png;
+}
+
+const CACHE_ENTRIES = 64;
+const cache = new Map<string, Promise<Buffer>>();
+
+async function render(svg: string, theme: WidgetTheme): Promise<Buffer> {
   const [, , width, height] = /viewBox="([^"]+)"/.exec(svg)![1]!.trim().split(/[\s,]+/).map(Number) as number[];
   const long = Math.max(width!, height!);
   const fitTo = width! >= height!
