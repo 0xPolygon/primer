@@ -400,6 +400,12 @@ function toEdit(p: Prepared, ctx: EditContext): PlannedEdit {
             const removed = removeBlock(tr, from);
             if (removed) return removed;
             const slot = findBlock(tr.doc, `${EXISTING_PREFIX}${id}`)!;
+            // Suggestions and undo follow blocks in nested blocks only, not in layout (columns).
+            const $slot = tr.doc.resolve(slot.pos);
+            const nested = Array.from({ length: $slot.depth + 1 }, (_, d) => $slot.node(d).type.name);
+            if (!nested.every((name) => name === 'doc' || name === 'blockGroup' || name === 'blockContainer')) {
+              return invalid(`Block ${id} can only move in as a nested block, not into a column or other layout.`, 'Move it into the layout with a separate edit.');
+            }
             tr.replaceWith(slot.pos, slot.pos + slot.node.nodeSize, from.node);
             bctx.moved(id);
           }
@@ -507,7 +513,10 @@ function existingBlocks(doc: PmNode, at: NonNullable<Located>, p: Extract<Prepar
   for (const { id, block } of found) {
     if (!block) return gone({ ...p.at, blockId: id });
     if (block.node.type.name !== 'blockContainer') return invalid(`Block ${id} can't be moved into another block.`, 'Move in ordinary blocks only.');
-    if (inside(block, at.pos)) return invalid(`Block ${id} contains \`at\`; it can't move into a block added there.`, 'Pick an `at` outside the blocks you move in.');
+    // Next to it is fine (the new block goes there before the block moves in); in it is not.
+    if (at.pos === block.pos ? p.position === 'firstChild' : inside(block, at.pos)) {
+      return invalid(`Block ${id} contains \`at\`; it can't move into a block added there.`, 'Pick an `at` outside the blocks you move in.');
+    }
     const current = blockVersion(block.node);
     if (current !== p.expectVersions[id]) stale.push({ blockId: id, version: current });
   }

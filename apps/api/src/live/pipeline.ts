@@ -432,14 +432,20 @@ function blockDiff(before: PmNode, after: PmNode, moved: Set<string>) {
       });
     }
   }
+  const created: typeof inverses = [];
   for (const [id, now] of a) {
     if (b.has(id)) continue;
     const parent = now.place.parentId;
     if (parent !== null && a.has(parent) && !b.has(parent)) continue;
     touched.push({ node: now.node, parentId: now.place.parentId, depth: now.depth });
-    inverses.push({ blockId: id, prior: null, afterVersion: blockVersion(now.node), place: null });
+    // Checked without the blocks it was given that were there before (an
+    // add's `existing`): undo moves those back out before removing it.
+    const own = PmNode.fromJSON(now.node.type.schema, withoutBlocks(now.node.toJSON(), b));
+    created.push({ blockId: id, prior: null, afterVersion: blockVersion(own), place: null });
   }
-  return { inverses, touched };
+  // Undo replays newest first: the other blocks go back in reading order, so
+  // each finds its previous sibling already in place, and created blocks go last.
+  return { inverses: [...created, ...inverses.reverse()], touched };
 }
 
 /**

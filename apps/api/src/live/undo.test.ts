@@ -58,6 +58,21 @@ describe('undoRun', () => {
     expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta by person']);
   });
 
+  it('undo of an add that moved existing blocks in puts them back', async () => {
+    const { agent, id, runId } = await setup();
+    const v = await versions(id, agent);
+    await ops(id, agent, {
+      runId,
+      ops: [{ op: 'add', at: main('a'), position: 'after', blocks: [{ json: { type: 'paragraph', content: 'New', children: [{ existing: 'b' }, { existing: 'c' }] } }], expectVersions: { b: v.b, c: v.c } }],
+    });
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'New', 'Beta', 'Gamma', 'Delta']);
+
+    const result = await undo(runId);
+    expect(result.outcomes.every((o) => o.status === 'applied')).toBe(true);
+    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'Beta', 'Gamma', 'Delta']);
+    expect(Object.keys(await versions(id, agent))).toEqual(['a', 'b', 'c', 'd']);
+  });
+
   it('undo after a restart works', async () => {
     const { agent, id, runId } = await setup();
     const v = await versions(id, agent);
