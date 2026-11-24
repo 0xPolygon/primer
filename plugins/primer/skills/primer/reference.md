@@ -233,7 +233,7 @@ Share a document you created with the person who asked for it, over MCP. These m
 
 ### Shared records
 
-Per-document storage for pages and agents (like Claude Artifacts storage). Records live outside the page's versions: a republish never touches them. `scope: "shared"` records are visible to everyone who can read the document; `scope: "personal"` records only to whoever wrote them (you, for yours). Every write lands in an append-only change log.
+Per-document storage for pages and agents (like Claude Artifacts storage). Records live outside the page's versions: a republish never touches them. `scope: "shared"` records are visible to everyone who can read the document; `scope: "personal"` records only to whoever wrote them (you, for yours). Every write lands in an append-only change log. Pages (the `window.primer.records` bridge) reach shared records only: `scope: "personal"` is refused for page code, and a page's write works only right after the viewer clicks or presses a key in the page.
 
 #### `primer_read_records`
 
