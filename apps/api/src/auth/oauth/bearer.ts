@@ -70,8 +70,10 @@ export function makeOAuthBearerResolver(): UserResolver {
     if (!row) return null;
 
     c.set('authMethod', 'bearer');
-    // OAuth tokens carry no scopes yet, so `tokenScopes` stays unset and the
-    // scope checks in auth/scopes.ts don't apply to them.
+    // OAuth tokens carry no scopes, so `tokenScopes` stays unset and the
+    // route-scope table in auth/scopes.ts doesn't apply. The resulting agent is
+    // instead held to the NOT_GRANTABLE routes (delete, external sharing) and
+    // may only narrow visibility to private; its new documents start private.
     return ensureOAuthAgent(row.client_id, row.client_name, row.user_id);
   };
 }
