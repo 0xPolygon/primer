@@ -82,15 +82,15 @@ export function registerRecordRoutes(app: Hono<{ Variables: AppVariables }>): vo
     if ((since !== undefined && !/^\d{1,18}$/.test(since)) || (lim !== undefined && !/^\d{1,4}$/.test(lim))) {
       return c.json({ error: 'bad_request', message: 'since and limit must be non-negative integers' }, 400);
     }
-    const out = await listRecordChanges(c.get('user'), c.req.param('docId'), {
-      since: since === undefined ? undefined : Number(since),
-      limit: lim === undefined ? undefined : Number(lim),
-    });
-    // The feed carries the caller's own personal changes; a page sees shared ones only.
-    if (out.ok && c.req.header(PAGE_BRIDGE_HEADER)) {
-      return c.json({ ...out.value, changes: out.value.changes.filter((ch) => ch.scope !== 'personal') });
-    }
-    return respond(c, out);
+    // The feed carries the caller's own personal changes; a page gets shared ones only.
+    return respond(
+      c,
+      await listRecordChanges(c.get('user'), c.req.param('docId'), {
+        since: since === undefined ? undefined : Number(since),
+        limit: lim === undefined ? undefined : Number(lim),
+        sharedOnly: Boolean(c.req.header(PAGE_BRIDGE_HEADER)),
+      }),
+    );
   });
 
   // Owner only: delete one user's personal records on the document.
