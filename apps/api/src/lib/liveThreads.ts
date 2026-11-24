@@ -1,3 +1,4 @@
+import { track } from '../inflight.ts';
 import { and, eq, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
 import {
@@ -140,7 +141,7 @@ export async function createLiveThread(
   const [owner] = (await db.execute(sql`
     SELECT ${ownerPersonOf(sql`d.uploader_id`)} AS id FROM documents d WHERE d.id = ${documentId}
   `)) as unknown as { id: string }[];
-  void notifier
+  void track(notifier
     .notifyComment({
       doc: { id: documentId, title: doc.title },
       version: null,
@@ -151,7 +152,7 @@ export async function createLiveThread(
       uploaderUserId: owner?.id ?? doc.uploaderId,
       actorUserId: user.id,
     })
-    .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
+    .catch((err) => logger.error({ err, commentId }, 'notifier failed')));
 
   const dto = await loadThread(threadId);
   return { ok: true, value: { ...dto!, commentId } };

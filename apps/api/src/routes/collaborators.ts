@@ -1,3 +1,4 @@
+import { track } from '../inflight.ts';
 import type { Hono } from 'hono';
 import { and, eq, sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
@@ -234,9 +235,9 @@ export async function addCollaborator(
   }
 
   const addedUserId = target.id;
-  void notifier
+  void track(notifier
     .notifyCollaboratorAdded({ docId, docTitle: doc.title, addedUserId, addedByUserId: actor.id, role })
-    .catch((err) => logger.error({ err, docId, addedUserId }, 'notifier notifyCollaboratorAdded failed'));
+    .catch((err) => logger.error({ err, docId, addedUserId }, 'notifier notifyCollaboratorAdded failed')));
 
   return {
     ok: true,

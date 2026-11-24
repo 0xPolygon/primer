@@ -1,3 +1,4 @@
+import { track } from '../inflight.ts';
 import type { Hono, Context } from 'hono';
 import { sql } from 'drizzle-orm';
 import { v7 as uuidv7 } from 'uuid';
@@ -96,9 +97,9 @@ export function registerExternalShareRoutes(
     if (recipient) {
       const { code } = await issueOtp(recipient.recipientId);
       // Fire-and-forget so response latency doesn't reveal whether we sent.
-      void deps.notifier
+      void track(deps.notifier
         .notifyExternalOtp({ toEmail: email, code })
-        .catch((err) => logger.error({ err }, 'external OTP send failed'));
+        .catch((err) => logger.error({ err }, 'external OTP send failed')));
     }
     // Same body whether or not the email was on the allowlist.
     return c.json(GENERIC_OK);
@@ -187,14 +188,14 @@ export function registerExternalShareRoutes(
         RETURNING id
       `)) as unknown as Array<{ id: string }>;
       if (updated.length > 0) {
-        void deps.notifier
+        void track(deps.notifier
           .notifyExternalFirstView({
             sharerUserId: ctx.recipient.addedBy,
             viewerEmail: ctx.recipient.email,
             docId: ctx.document.id,
             docTitle: ctx.document.title,
           })
-          .catch((err) => logger.error({ err }, 'first-view notification failed'));
+          .catch((err) => logger.error({ err }, 'first-view notification failed')));
       }
     }
 

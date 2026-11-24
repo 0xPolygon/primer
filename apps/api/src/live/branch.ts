@@ -95,6 +95,9 @@ export async function proposeBranch(storage: Storage, actor: AuthUser, branchId:
   );
   const edits: PlannedEdit[] = [];
   for (const { target, branch } of fragments) {
+    // A refused block's own text (page text, widget labels) goes with it: a
+    // widget first published on the branch has labels the base never had.
+    if (target.blockId && owned.refused.has(target.blockId)) continue;
     const base = fragmentDoc(baseDoc.getXmlFragment(fragmentName(target)));
     if (!target.blockId && !baseTabs.has(target.tabId)) edits.push(newTabEdit(target.tabId));
     else if (target.embedId) {

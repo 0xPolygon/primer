@@ -69,6 +69,8 @@ export function onLiveLoad(handler: (documentId: string) => void): () => void {
 
 /** The largest awareness state (cursor, name, colour) a peer may publish. */
 export const MAX_AWARENESS_BYTES = 4096;
+/** The most client ids one connection may publish presence under (a browser tab uses one). */
+export const MAX_AWARENESS_CLIENTS = 8;
 
 /** The awareness client ids each connection has published under. */
 const presenceOwned = new WeakMap<Connection, Set<number>>();
@@ -135,7 +137,8 @@ export function liveInstance(): Hocuspocus {
     },
     // A peer may publish presence only under client ids it owns: the first
     // connection to publish an id owns it until that connection closes. States
-    // over the size limit are dropped from the update. Awareness is
+    // over the size limit, and ids past MAX_AWARENESS_CLIENTS per connection,
+    // are dropped from the update. Awareness is
     // client-writable; only the server sets agent states.
     async beforeHandleAwareness({ connection, context, document, documentName, states, removedClients }) {
       const user = (context as LiveContext | undefined)?.user;
@@ -151,7 +154,8 @@ export function liveInstance(): Hocuspocus {
           (other) => other !== connection && userOf(other) !== userOf(connection) && presenceOwned.get(other)?.has(clientId),
         );
       for (const [clientId, state] of states) {
-        if (heldByOthers(clientId) || Buffer.byteLength(JSON.stringify(state)) > MAX_AWARENESS_BYTES) states.delete(clientId);
+        const overCap = !own.has(clientId) && own.size >= MAX_AWARENESS_CLIENTS;
+        if (overCap || heldByOthers(clientId) || Buffer.byteLength(JSON.stringify(state)) > MAX_AWARENESS_BYTES) states.delete(clientId);
         else own.add(clientId);
       }
       for (const clientId of removedClients) if (!own.has(clientId)) removedClients.delete(clientId);

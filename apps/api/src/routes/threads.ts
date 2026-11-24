@@ -1,3 +1,4 @@
+import { track } from '../inflight.ts';
 import type { Hono } from 'hono';
 import { placeReopened } from '../lib/threadCarry.ts';
 import { eq, sql } from 'drizzle-orm';
@@ -288,7 +289,7 @@ export function registerThreadRoutes(
       return c.json({ error: 'not_latest_version', message: 'Cannot post to a non-latest version.' }, 409);
     }
 
-    void deps.notifier
+    void track(deps.notifier
       .notifyComment({
         doc: { id: latestRow.doc_id, title: latestRow.doc_title },
         version: { id: latestRow.version_id, versionNumber: latestRow.this_n },
@@ -299,7 +300,7 @@ export function registerThreadRoutes(
         uploaderUserId: latestRow.uploader_id,
         actorUserId: user.id,
       })
-      .catch((err) => logger.error({ err, commentId }, 'notifier failed'));
+      .catch((err) => logger.error({ err, commentId }, 'notifier failed')));
 
     const dto = await loadThread(threadId);
     if (!dto) return c.json({ error: 'internal' }, 500);
