@@ -398,7 +398,7 @@ describe('MCP tools respect visibility + collab', () => {
     await seedUser('tools-owner');
     const { docId, versionId } = await seedDocOwnedBy('tools-owner');
     await seedThreadWithComment(versionId, 'tools-owner', 'still here?');
-    const owner = { id: 'tools-owner', email: 'x', displayName: 'x' };
+    const owner = { id: 'tools-owner', email: 'x', displayName: 'x', kind: 'person' as const, viaUserId: null };
     await withDeps(async (deps) => {
       const handlers = buildMcpToolHandlers(deps);
       const before = await handlers.primer_get_comments({ documentId: docId }, owner);
