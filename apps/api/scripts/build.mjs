@@ -86,6 +86,13 @@ await copyFile(
   resolve(apiRoot, `dist/companion/mermaid-v${mermaidVersion}.js`),
 );
 
+// The widget raster script runs as a child process of its own (raster.ts).
+await mkdir(resolve(apiRoot, 'dist/widgets'), { recursive: true });
+await copyFile(
+  resolve(apiRoot, 'src/widgets/raster-child.mjs'),
+  resolve(apiRoot, 'dist/widgets/raster-child.mjs'),
+);
+
 // The authoring and widget skills, served as the MCP resources
 // primer://skills/authoring and primer://skills/widgets.
 await mkdir(resolve(apiRoot, 'dist/skills'), { recursive: true });
@@ -97,5 +104,5 @@ for (const name of ['authoring.md', 'widgets.md']) {
 }
 
 console.log(
-  `api build complete: dist/skills/authoring.md, dist/skills/widgets.md, dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
+  `api build complete: dist/skills/authoring.md, dist/skills/widgets.md, dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/widgets/raster-child.mjs, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
 );
