@@ -14,17 +14,18 @@ import type { ToolHandler, ToolName, ToolResult } from './tools.ts';
 
 const fence = (s: unknown): unknown => (typeof s === 'string' ? fenceUntrusted(s, 'content') : s);
 
-/** Block props that are the editor's own enums, not people's words. */
-const STRUCTURAL_PROPS = new Set(['textColor', 'backgroundColor', 'textAlignment']);
+/** Keys whose values are the editor's own structure (node types, ids, styling),
+ *  not people's words; every other string in block JSON is fenced. */
+const STRUCTURAL_KEYS = new Set(['type', 'id', 'styles', 'textColor', 'backgroundColor', 'textAlignment']);
 
-/** BlockNote inline content with every text run fenced; node types, styles
- *  and the rest of the shape stay, so clients still parse it. */
-function fenceInline(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(fenceInline);
+/** Block JSON (inline content, table rows and cells, chip and block props)
+ *  with every string of people's words fenced; the shape, numbers and the
+ *  structural keys stay, so clients still parse it. */
+function fenceBlockJson(v: unknown): unknown {
+  if (typeof v === 'string') return fence(v);
+  if (Array.isArray(v)) return v.map(fenceBlockJson);
   if (v !== null && typeof v === 'object') {
-    return Object.fromEntries(
-      Object.entries(v).map(([k, x]) => [k, k === 'text' && typeof x === 'string' ? fence(x) : k === 'content' ? fenceInline(x) : x]),
-    );
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, STRUCTURAL_KEYS.has(k) ? x : fenceBlockJson(x)]));
   }
   return v;
 }
@@ -51,12 +52,8 @@ const FENCERS: Partial<Record<ToolName, (out: Obj) => void>> = {
       if ('html' in b) b.html = fence(b.html);
       if (b.json && typeof b.json === 'object') {
         const j = b.json as Obj;
-        j.content = fenceInline(j.content);
-        if (j.props && typeof j.props === 'object') {
-          j.props = Object.fromEntries(
-            Object.entries(j.props as Obj).map(([k, x]) => [k, STRUCTURAL_PROPS.has(k) ? x : fence(x)]),
-          );
-        }
+        j.content = fenceBlockJson(j.content);
+        j.props = fenceBlockJson(j.props);
       }
     }
   },
