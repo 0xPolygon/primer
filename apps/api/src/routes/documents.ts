@@ -171,12 +171,13 @@ export function registerDocumentRoutes(
         );
       }
       updates.visibility = payload.visibility;
-      // A scoped token may narrow a doc to private (so a client can create
-      // then restrict it) but never widen one to org: no scope grants
-      // re-sharing (see auth/scopes.ts). canManage below still applies.
-      if (tokenScopes(c) !== null && payload.visibility !== 'private') {
+      // A scoped token or any agent (an OAuth client has no scopes) may narrow
+      // a doc to private (so a client can create then restrict it) but never
+      // widen one to org: no scope grants re-sharing (see auth/scopes.ts).
+      // canManage below still applies.
+      if ((tokenScopes(c) !== null || user.kind === 'agent') && payload.visibility !== 'private') {
         return c.json(
-          { error: 'insufficient_scope', message: 'API tokens with scopes can only make documents private.' },
+          { error: 'insufficient_scope', message: 'API tokens with scopes and agents can only make documents private.' },
           403,
         );
       }

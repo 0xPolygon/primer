@@ -561,7 +561,7 @@ function changeDTO(row: ChangeRow, actor: AuthUser): RecordChangeDTO {
 export async function listRecordChanges(
   actor: AuthUser,
   rawDocumentId: string,
-  args: { since?: number; limit?: number },
+  args: { since?: number; limit?: number; sharedOnly?: boolean },
 ): Promise<RecordsResult<RecordChangesResponse>> {
   const documentId = rawDocumentId.toLowerCase();
   const since = args.since ?? 0;
@@ -573,7 +573,7 @@ export async function listRecordChanges(
     SELECT ${CHANGE_COLUMNS}
       FROM doc_record_changes c JOIN users u ON u.id = c.actor_id
      WHERE c.document_id = ${documentId} AND c.id > ${since}
-       AND (c.scope = 'shared' OR c.owner_user_id = ${actor.id})
+       AND (c.scope = 'shared' OR (${!args.sharedOnly} AND c.owner_user_id = ${actor.id}))
      ORDER BY c.id ASC
      LIMIT ${limit + 1}
   `)) as unknown as ChangeRow[];
