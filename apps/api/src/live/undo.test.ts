@@ -63,9 +63,9 @@ describe('undoRun', () => {
     const v = await versions(id, agent);
     await ops(id, agent, {
       runId,
-      ops: [{ op: 'add', at: main('a'), position: 'after', blocks: [{ json: { type: 'paragraph', content: 'New', children: [{ existing: 'b' }, { existing: 'c' }] } }], expectVersions: { b: v.b, c: v.c } }],
+      ops: [{ op: 'add', at: main('a'), position: 'before', blocks: [{ json: { type: 'paragraph', content: 'New', children: [{ existing: 'a' }, { existing: 'b' }] } }], expectVersions: { a: v.a, b: v.b } }],
     });
-    expect(await markdownOf(id, agent)).toEqual(['Alpha', 'New', 'Beta', 'Gamma', 'Delta']);
+    expect(await markdownOf(id, agent)).toEqual(['New', 'Alpha', 'Beta', 'Gamma', 'Delta']);
 
     const result = await undo(runId);
     expect(result.outcomes.every((o) => o.status === 'applied')).toBe(true);

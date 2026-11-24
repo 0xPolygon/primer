@@ -116,16 +116,21 @@ function stillAt(doc: PmNode, blockId: string, after: BlockPlace): boolean {
 }
 
 /** Inserts `node` at its recorded place: after its previous sibling, first in
- *  its parent when it was the first child, before its next one, first in its
- *  parent, or first in the document. */
+ *  its parent (or the document) when it was first there, before its next one,
+ *  first in its parent, or first in the document. */
 export function insertAt(tr: Transform, node: PmNode, place: BlockPlace): Refusal | void {
   const prev = place.prevId ? findBlock(tr.doc, place.prevId) : null;
   if (prev) {
     tr.insert(prev.pos + prev.node.nodeSize, node);
     return;
   }
-  // A first child is first in its parent, wherever its old next sibling went since.
-  const first = place.prevId === null && place.parentId ? findBlock(tr.doc, place.parentId) : null;
+  // A first block is first in its parent (or the document), wherever its old
+  // next sibling went since.
+  if (place.prevId === null && place.parentId === null) {
+    tr.insert(1, node);
+    return;
+  }
+  const first = place.prevId === null ? findBlock(tr.doc, place.parentId!) : null;
   if (first) {
     insertFirstChild(tr, first, node);
     return;
