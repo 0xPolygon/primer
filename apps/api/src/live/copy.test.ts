@@ -351,6 +351,62 @@ describe('widgets in copies (C12)', () => {
     });
   });
 
+  it('an unpublished widget block (empty hash) copies to an unpublished row of the copy, and its branch merges back', async () => {
+    await withStorage(async (storage) => {
+      const doc = await createLiveDoc();
+      await seedBlocks(doc, [paragraph('intro', 'Intro')]);
+      const draft = await draftWidget(owner, doc, { source: CHART, rows: [{ id: 'w1', signups: 240 }], afterBlockId: 'intro' });
+      if (!draft.ok) throw new Error(draft.refusal.message);
+      const { widgetId, blockId } = draft.value;
+      expect(await widgetProps(doc)).toMatchObject({ widgetId, hash: '' });
+
+      for (const kind of ['fork', 'branch'] as const) {
+        const out = await copyDocument(storage, owner, doc, kind);
+        if (!out.ok) throw new Error(out.refusal.message);
+        const [row] = await widgetRows(out.documentId);
+        expect(row).toMatchObject({ blockId, publishedSource: null, publishedHash: null, publishedSvgLight: null });
+        expect(row!.id).not.toBe(widgetId);
+        expect(await widgetProps(out.documentId)).toMatchObject({ widgetId: row!.id, hash: '' });
+      }
+      expect(await widgetProps(doc)).toMatchObject({ widgetId, hash: '' });
+
+      // A branch that edits a paragraph beside the still-unpublished widget proposes only the paragraph.
+      const out = await copyDocument(storage, owner, doc, 'branch');
+      if (!out.ok) throw new Error(out.refusal.message);
+      const agent = await makeAgent();
+      const bv = await versions(out.documentId, agent);
+      await ops(out.documentId, agent, { ops: [{ op: 'update', target: main('intro'), block: 'Intro, edited', expectVersion: bv.intro }] });
+      const proposal = await propose(storage, out.documentId);
+      expect(proposal.outcomes.map((o) => [o.status, o.target.blockId])).toEqual([['suggested', 'intro']]);
+      const accepted = await decideChangeSet(out.documentId, owner, 'accept');
+      expect(accepted.ok && accepted.value.outcomes.map((o) => o.status)).toEqual(['applied']);
+      expect(await markdownOf(doc, agent)).toContain('Intro, edited');
+      expect(await widgetProps(doc)).toMatchObject({ widgetId, hash: '' });
+      expect((await widgetRows(doc)).map((r) => r.id)).toEqual([widgetId]);
+    });
+  });
+
+  it('a widget first published on the branch is refused and the parent block stays unpublished', async () => {
+    await withStorage(async (storage) => {
+      const doc = await createLiveDoc();
+      await seedBlocks(doc, [paragraph('intro', 'Intro')]);
+      const draft = await draftWidget(owner, doc, { source: CHART, rows: [{ id: 'w1', signups: 240 }], afterBlockId: 'intro' });
+      if (!draft.ok) throw new Error(draft.refusal.message);
+      const out = await copyDocument(storage, owner, doc, 'branch');
+      if (!out.ok) throw new Error(out.refusal.message);
+      const [row] = await widgetRows(out.documentId);
+      const redraft = await draftWidget(owner, out.documentId, { widgetId: row!.id, source: CHART, rows: [{ id: 'w1', signups: 240 }] });
+      if (!redraft.ok) throw new Error(redraft.refusal.message);
+      const published = await publishWidget(owner, row!.id, redraft.value.previewHash);
+      if (!published.ok) throw new Error(published.refusal.message);
+
+      const proposal = await propose(storage, out.documentId);
+      expect(proposal.outcomes.map((o) => [o.status, o.target.blockId])).toEqual([['conflict', draft.value.blockId]]);
+      expect(await openSuggestions(doc)).toEqual([]);
+      expect(await widgetProps(doc)).toMatchObject({ widgetId: draft.value.widgetId, hash: '' });
+    });
+  });
+
   it('only a widget row under the block that names it is copied', async () => {
     await withStorage(async (storage) => {
       const src = await withWidget();

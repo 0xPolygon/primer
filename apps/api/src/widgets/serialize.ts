@@ -7,14 +7,18 @@ import { isColourKeyword } from './validate.ts';
 export const SVG_LIMITS = { nodes: RUN_LIMITS.nodes, bytes: 512 * 1024, viewBox: 4096, uses: 2000 };
 
 /**
- * How many element instances the `<use>` references of a serialized SVG draw
- * when expanded (a `<use>` of an element that holds `<use>`s multiplies), or
- * Infinity for a cycle. A few KB of nested `<use>` can otherwise take a
- * renderer a minute. A `<use>` is attributed to every id'd element around it
- * and to the root, and each instance counts its whole subtree, so this over-counts a `<defs>` nothing references.
+ * How many element instances the references of a serialized SVG draw when
+ * expanded, or Infinity for a cycle. A reference is a `<use href="#id">` or a
+ * `url(#id)` in any attribute (fill, stroke, mask, clip-path, filter,
+ * marker-*): each clones or paints its target's subtree, and a target that
+ * holds references multiplies (`<use>` of `<use>`s, patterns filled with
+ * patterns). A few KB of either can otherwise take a renderer a minute. A
+ * reference is attributed to its element, every id'd element around it and the root,
+ * and each instance counts its whole subtree, so this over-counts a `<defs>`
+ * nothing references.
  */
 export function useInstances(svg: string): number {
-  const refs = new Map<string, string[]>(); // id (or '') -> ids its `<use>`s draw
+  const refs = new Map<string, string[]>(); // id (or '') -> ids its references draw
   const size = new Map<string, number>(); // id -> elements in its subtree, itself included
   const open: { tag: string; id: string | null }[] = [];
   const tag = /<(\/?)([A-Za-z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>/g;
@@ -26,9 +30,13 @@ export function useInstances(svg: string): number {
     const id = /\sid="([^"]*)"/.exec(attrs!)?.[1] ?? null;
     for (const o of open) if (o.id !== null) size.set(o.id, (size.get(o.id) ?? 1) + 1);
     if (id !== null && !size.has(id)) size.set(id, 1);
-    if (name === 'use') {
-      const target = /\shref="#([^"]*)"/.exec(attrs!)?.[1];
-      if (target !== undefined) for (const owner of ['', ...open.map((o) => o.id).filter((i): i is string => i !== null)]) refs.set(owner, [...(refs.get(owner) ?? []), target]);
+    const owners = ['', ...[...open.map((o) => o.id), id].filter((i): i is string => i !== null)];
+    for (const [, href, url] of attrs!.matchAll(/\shref="#([^"]*)"|url\(#([^)]*)\)/g)) {
+      for (const owner of owners) {
+        const list = refs.get(owner);
+        if (list) list.push((href ?? url)!);
+        else refs.set(owner, [(href ?? url)!]);
+      }
     }
     if (!selfClosing) open.push({ tag: name!, id });
   }
@@ -215,7 +223,7 @@ export function serializeSvg(tree: WidgetNode, ctx: SerializeContext): Serialize
   }
   if (errors.length > 0) return fail([...new Set(errors)]);
   if (Buffer.byteLength(svg) > SVG_LIMITS.bytes) return fail([`The SVG is larger than ${SVG_LIMITS.bytes / 1024} KB.`]);
-  if (useInstances(svg) > SVG_LIMITS.uses) return fail([`The <use> references expand to more than ${SVG_LIMITS.uses} elements (nested or circular <use>).`]);
+  if (useInstances(svg) > SVG_LIMITS.uses) return fail([`The references (<use> and url(#…)) expand to more than ${SVG_LIMITS.uses} elements (nested or circular references).`]);
   return { svg, labels, warnings: [...warnings] };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseWidget } from './parse.ts';
-import { rasterise } from './raster.ts';
+import { RENDER_LIMITS, rasterise, TooCostlyToDraw } from './raster.ts';
 import { renderWidget, WIDGET_TOKENS, type WidgetRow } from './render.ts';
 import { runWidget } from './run.ts';
 import { serializeSvg, withLabels } from './serialize.ts';
@@ -223,7 +223,7 @@ export default function render({ tokens }) {
 
     it('rasterise refuses it at once, without rendering', async () => {
       const started = Date.now();
-      await expect(rasterise(bomb, 'light')).rejects.toThrow(/too many <use>/);
+      await expect(rasterise(bomb, 'light')).rejects.toThrow(/too many instances/);
       expect(Date.now() - started).toBeLessThan(1000);
     });
 
@@ -238,14 +238,60 @@ export default function render({ tokens }) {
 
     it('counts what each instance clones, not just its nested <use>s', async () => {
       const wide = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><g id="g">${'<rect width="1" height="1"/>'.repeat(100)}</g></defs>${'<use href="#g"/>'.repeat(30)}</svg>`;
-      await expect(rasterise(wide, 'light')).rejects.toThrow(/too many <use>/);
+      await expect(rasterise(wide, 'light')).rejects.toThrow(/too many instances/);
     });
 
     it('a few <use>s still draw, and a self-reference is refused', async () => {
       const ok = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><rect id="a0" width="1" height="1"/></defs>${'<use href="#a0"/>'.repeat(20)}</svg>`;
       expect((await rasterise(ok, 'light')).subarray(1, 4).toString()).toBe('PNG');
       const loop = '<svg viewBox="0 0 100 100"><g id="x"><use href="#x"/></g><use href="#x"/></svg>';
-      await expect(rasterise(loop, 'light')).rejects.toThrow(/too many <use>/);
+      await expect(rasterise(loop, 'light')).rejects.toThrow(/too many instances/);
+    });
+
+    // Patterns of ten rects each filled with the pattern below, four deep: ~3 KB
+    // that took resvg 34 s at 2048 px while url(#…) counted nothing.
+    const patternLevel = (n: number) =>
+      `<pattern id="p${n}" patternUnits="userSpaceOnUse" width="1024" height="1024">${Array.from({ length: 10 }, (_, i) => `<rect x="${i}" width="1024" height="1024" fill="${n === 0 ? 'black' : `url(#p${n - 1})`}"/>`).join('')}</pattern>`;
+    const patterns = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><defs>${[0, 1, 2, 3].map(patternLevel).join('')}</defs><rect width="1024" height="1024" fill="url(#p3)"/></svg>`;
+
+    it('counts url(#…) references too: nested patterns are refused at once', async () => {
+      const started = Date.now();
+      await expect(rasterise(patterns, 'light')).rejects.toThrow(/too many instances/);
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it('nested patterns are refused at serialization', async () => {
+      const source = `export default function render({ tokens }) {
+  const level = (n) => <pattern id={'p' + n} patternUnits="userSpaceOnUse" width="1024" height="1024">{Array.from({ length: 10 }, (_, i) => <rect x={i} width="1024" height="1024" fill={n === 0 ? tokens.fg : 'url(#p' + (n - 1) + ')'} />)}</pattern>;
+  return <svg viewBox="0 0 1024 1024"><defs>{[0, 1, 2, 3].map(level)}</defs><rect width="1024" height="1024" fill="url(#p3)" /></svg>;
+}`;
+      const out = await renderWidget(source, [], 'light');
+      expect('errors' in out && out.errors.map((e) => e.message).join()).toMatch(/expand to more than/);
+    });
+  });
+
+  describe('render time limit', () => {
+    // Under every count bound, yet resvg spends ~16 s on it at 2048 px.
+    const slow = (opacity: number) =>
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048">${`<rect width="2048" height="2048" fill="#1f2328" fill-opacity="${opacity}"/>`.repeat(990)}</svg>`;
+
+    it('kills a render past the limit, two at a time, and the next drawing still renders', async () => {
+      const ms = RENDER_LIMITS.ms;
+      RENDER_LIMITS.ms = 500;
+      try {
+        const started = Date.now();
+        const refused = await Promise.allSettled([rasterise(slow(0.01), 'light'), rasterise(slow(0.02), 'light')]);
+        expect(refused.map((r) => r.status === 'rejected' && r.reason instanceof TooCostlyToDraw)).toEqual([true, true]);
+        expect(Date.now() - started).toBeLessThan(3000);
+        // A refusal is cached: asking again doesn't render again.
+        const again = Date.now();
+        await expect(rasterise(slow(0.01), 'light')).rejects.toThrow(/to draw/);
+        expect(Date.now() - again).toBeLessThan(100);
+      } finally {
+        RENDER_LIMITS.ms = ms;
+      }
+      const ok = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="50" height="50" fill="#1f2328"/></svg>`;
+      expect((await rasterise(ok, 'light')).subarray(1, 4).toString()).toBe('PNG');
     });
   });
 });

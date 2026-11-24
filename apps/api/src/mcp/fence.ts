@@ -1,5 +1,5 @@
 import type { AuthUser } from '../app.ts';
-import { fenceUntrusted } from '../lib/untrusted.ts';
+import { fenceUntrusted, hasFenceMarkup } from '../lib/untrusted.ts';
 import type { ToolHandler, ToolName, ToolResult } from './tools.ts';
 
 /**
@@ -8,8 +8,20 @@ import type { ToolHandler, ToolName, ToolResult } from './tools.ts';
  * agent, or a person's token an agent was handed), so every handler runs
  * with `viaMcp` set (fencing for the records, widgets, digests, decisions and
  * tasks the domain code already fences) and the text the tools return raw is
- * fenced here: document bodies and comment text. Fencing reduces accidental
- * instruction following; it is not an authorization control.
+ * fenced here: document bodies, comment text, and the short metadata (titles,
+ * descriptions, version notes). Fencing reduces accidental instruction
+ * following; it is not an authorization control.
+ *
+ * The text inside a fence is the exact original (nothing escaped), and
+ * document writes (create, add version, apply ops) refuse fence markup, so a
+ * read, edit, write round trip can't persist a fence.
+ *
+ * Left raw on purpose (decided 2026-11-24):
+ *  - live-page `source`: round-tripped as code (republished with its pids);
+ *  - event payloads (primer_get_events, primer_send_events): structured JSON
+ *    the caller wrote;
+ *  - the stdio plugin (apps/mcp): a person's own local tool on the person's
+ *    token, the same trust as their browser; only /mcp fences.
  */
 
 const fence = (s: unknown): unknown => (typeof s === 'string' ? fenceUntrusted(s, 'content') : s);
@@ -31,6 +43,32 @@ function fenceBlockJson(v: unknown): unknown {
 }
 
 type Obj = Record<string, unknown>;
+
+/** The short metadata a document carries, at any depth of a tool result. */
+const META_KEYS = new Set(['title', 'description', 'versionNote', 'documentTitle']);
+const META_TOOLS = new Set<ToolName>([
+  'primer_get_document',
+  'primer_list_versions',
+  'primer_list_documents',
+  'primer_find_document',
+  'primer_get_document_comments',
+  'primer_get_all_comments',
+]);
+
+function fenceMeta(v: unknown): void {
+  if (Array.isArray(v)) return v.forEach(fenceMeta);
+  if (v === null || typeof v !== 'object') return;
+  const o = v as Obj;
+  for (const k of Object.keys(o)) {
+    if (META_KEYS.has(k) && typeof o[k] === 'string') o[k] = fence(o[k]);
+    else fenceMeta(o[k]);
+  }
+}
+
+/** The tools that write document content: their arguments never carry fence markup. */
+const DOC_WRITES = new Set<ToolName>(['primer_create_document', 'primer_add_version', 'primer_apply_ops']);
+const FENCE_WRITE_REFUSAL =
+  'The content holds <untrusted-…> fence markup. Reads wrap text in an untrusted-content fence: strip the fence tags before writing text back, and write only the text itself.';
 
 /** A comment list: `body`, the quoted anchor text and rendered Markdown. */
 function comments(list: unknown): void {
@@ -71,12 +109,14 @@ const FENCERS: Partial<Record<ToolName, (out: Obj) => void>> = {
 
 function fenceResult(name: ToolName, result: ToolResult): ToolResult {
   const fencer = FENCERS[name];
-  if (!fencer || result.isError) return result;
+  const meta = META_TOOLS.has(name);
+  if ((!fencer && !meta) || result.isError) return result;
   return {
     ...result,
     content: result.content.map((part) => {
       const out = JSON.parse(part.text) as Obj;
-      fencer(out);
+      fencer?.(out);
+      if (meta) fenceMeta(out);
       return { ...part, text: JSON.stringify(out) };
     }),
   };
@@ -85,6 +125,9 @@ function fenceResult(name: ToolName, result: ToolResult): ToolResult {
 /** `handler` for tool `name`, run as an MCP caller with its result fenced. */
 export function fencedHandler(name: ToolName, handler: ToolHandler): ToolHandler {
   return async (args, user, scopes) => {
+    if (DOC_WRITES.has(name) && hasFenceMarkup(JSON.stringify(args))) {
+      return { isError: true, content: [{ type: 'text', text: JSON.stringify({ code: 'bad_request', message: FENCE_WRITE_REFUSAL }) }] };
+    }
     const caller: AuthUser = { ...user, viaMcp: true };
     return fenceResult(name, await handler(args, caller, scopes));
   };
