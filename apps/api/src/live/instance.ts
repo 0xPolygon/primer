@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { Hocuspocus } from '@hocuspocus/server';
+import { Hocuspocus, type Connection } from '@hocuspocus/server';
 import { attachPersistence, loadYDoc, persistedUpTo } from './persist.ts';
 import { liveAccess, type LiveContext } from './auth.ts';
 import { logger } from '../logger.ts';
@@ -24,6 +24,12 @@ export function onPersistenceFailure(handler: (documentId: string, doc: Y.Doc) =
   failureHandlers.add(handler);
   return () => failureHandlers.delete(handler);
 }
+
+/** The largest awareness state (cursor, name, colour) a peer may publish. */
+export const MAX_AWARENESS_BYTES = 4096;
+
+/** The awareness client ids each connection has published under. */
+const presenceOwned = new WeakMap<Connection, Set<number>>();
 
 let instance: Hocuspocus | null = null;
 
@@ -67,6 +73,25 @@ export function liveInstance(): Hocuspocus {
       // Detach only once the document is really gone: Hocuspocus keeps it
       // after beforeUnloadDocument when someone connected meanwhile.
       document.on('destroy', () => void detach());
+    },
+    // A peer may publish presence only under client ids it owns: the first
+    // connection to publish an id owns it until that connection closes. States
+    // over the size limit are dropped from the update.
+    async beforeHandleAwareness({ connection, document, states, removedClients }) {
+      if (!connection) return;
+      const own = presenceOwned.get(connection) ?? presenceOwned.set(connection, new Set()).get(connection)!;
+      // Another person's connection holds it; the same person's (a reconnect
+      // that beat the old socket's close) doesn't.
+      const userOf = (c: Connection) => (c.context as LiveContext | undefined)?.user?.id;
+      const heldByOthers = (clientId: number) =>
+        document.getConnections().some(
+          (other) => other !== connection && userOf(other) !== userOf(connection) && presenceOwned.get(other)?.has(clientId),
+        );
+      for (const [clientId, state] of states) {
+        if (heldByOthers(clientId) || Buffer.byteLength(JSON.stringify(state)) > MAX_AWARENESS_BYTES) states.delete(clientId);
+        else own.add(clientId);
+      }
+      for (const clientId of removedClients) if (!own.has(clientId)) removedClients.delete(clientId);
     },
     async beforeUnloadDocument({ document }) {
       await persistedUpTo(document).catch(() => undefined);

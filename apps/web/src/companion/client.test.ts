@@ -24,6 +24,11 @@ describe('isSafeExternalUrl', () => {
     expect(isSafeExternalUrl('relative')).toBe(false);
   });
 
+  it("rejects Primer's own origin", () => {
+    expect(isSafeExternalUrl('https://primer.example/api/versions/x/content', 'https://primer.example')).toBe(false);
+    expect(isSafeExternalUrl('https://example.com/', 'https://primer.example')).toBe(true);
+  });
+
   it('rejects malformed strings', () => {
     expect(isSafeExternalUrl('not a url')).toBe(false);
     expect(isSafeExternalUrl('')).toBe(false);

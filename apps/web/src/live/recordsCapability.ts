@@ -7,8 +7,10 @@
  *
  * - the document comes from the capability, never from the page: `args` are
  *   rebuilt from an allow-list, so a `documentId`, owner or user id in them is
- *   dropped (personal records are always the signed-in viewer's own, decided
- *   by the server from the session);
+ *   dropped. Pages reach shared records only: a `personal` scope is refused
+ *   here, and the server refuses it too (calls carry `x-primer-page-bridge`);
+ * - every write needs transient user activation in the page's frame (see
+ *   `hasUserActivation`);
  * - at most 8 calls in flight, 5 s each, 256 KB of arguments, 200 records a
  *   page; the page can cancel a call;
  * - `revoke()` (on unexpected navigation or unmount) fails every in-flight
@@ -42,7 +44,13 @@ export interface RecordsCapabilityOptions {
   /** Same-origin, cookie-authed fetch (inject `api` from lib/fetch.ts). */
   fetchImpl: (url: string, init: RequestInit) => Promise<Response>;
   timeoutMs?: number;
+  /** Is the viewer's real click or keypress in the page's frame live right now?
+   *  Every write needs it. Absent means no: writes are refused. */
+  hasUserActivation?: () => boolean;
 }
+
+/** Marks a call as a page's, so the server serves shared records only. */
+export const PAGE_BRIDGE_HEADER = 'x-primer-page-bridge';
 
 const QUERY_KEYS = ['collection', 'scope', 'recordId', 'data', 'expectVersion', 'where', 'orderBy', 'limit', 'cursor'] as const;
 const OP_KEYS = ['verb', 'collection', 'scope', 'recordId', 'data', 'expectVersion'] as const;
@@ -64,6 +72,13 @@ export function boundArgs(verb: MsgRecordsCall['verb'], rawArgs: unknown): Recor
   return pick(args, QUERY_KEYS);
 }
 
+const WRITE_VERBS: readonly MsgRecordsCall['verb'][] = ['set', 'update', 'delete', 'batch'];
+
+function wantsPersonal(args: Record<string, unknown>): boolean {
+  const ops = Array.isArray(args.ops) ? args.ops : [];
+  return args.scope === 'personal' || ops.some((op) => typeof op === 'object' && op !== null && (op as { scope?: unknown }).scope === 'personal');
+}
+
 function refusal(code: RefusalCode, message: string, fix: string): Refusal {
   return { code, message, fix };
 }
@@ -79,13 +94,13 @@ export function createRecordsCapability(opts: RecordsCapabilityOptions): Records
     if (verb === 'changesSince') {
       const since = Number.isInteger(args.changeId) && (args.changeId as number) >= 0 ? (args.changeId as number) : 0;
       const limit = Number.isInteger(args.limit) ? `&limit=${args.limit as number}` : '';
-      return fetchImpl(`${base}/changes?since=${since}${limit}`, { signal, credentials: 'same-origin' });
+      return fetchImpl(`${base}/changes?since=${since}${limit}`, { signal, credentials: 'same-origin', headers: { [PAGE_BRIDGE_HEADER]: '1' } });
     }
     return fetchImpl(`${base}/${verb}`, {
       method: 'POST',
       signal,
       credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', [PAGE_BRIDGE_HEADER]: '1' },
       body: JSON.stringify(args),
     });
   };
@@ -122,6 +137,18 @@ export function createRecordsCapability(opts: RecordsCapabilityOptions): Records
       }
       if (typeof args.limit === 'number' && args.limit > MAX_RECORDS_PAGE_SIZE) {
         answer({ ok: false, refusal: refusal('bad_request', `limit is at most ${MAX_RECORDS_PAGE_SIZE}.`, 'Page through with cursor.') });
+        return;
+      }
+
+      if (wantsPersonal(args)) {
+        answer({ ok: false, refusal: refusal('forbidden', "A page can't read or write personal records.", 'Use scope "shared".') });
+        return;
+      }
+      if (WRITE_VERBS.includes(msg.verb) && !opts.hasUserActivation?.()) {
+        answer({
+          ok: false,
+          refusal: refusal('forbidden', 'A page can write records only right after the viewer clicks or presses a key in it.', 'Call the write from a click or key handler.'),
+        });
         return;
       }
 
