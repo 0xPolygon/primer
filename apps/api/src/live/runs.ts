@@ -147,7 +147,8 @@ export async function listDocumentRuns(user: AuthUser, documentId: string): Prom
 }
 
 /** The calling agent's runs (active by default), oldest first, optionally
- *  for one document or status. What people wrote arrives fenced. */
+ *  for one document or status. What people wrote arrives fenced. Runs on
+ *  documents the agent can no longer read are left out. */
 export async function listAgentRuns(agent: AuthUser, opts: { documentId?: string; status?: string }): Promise<AgentRunDTO[]> {
   const rows = (await db.execute(sql`
     SELECT ${RUN_COLUMNS} FROM agent_runs
@@ -156,7 +157,11 @@ export async function listAgentRuns(agent: AuthUser, opts: { documentId?: string
        ${opts.status ? sql`AND status = ${opts.status}` : sql`AND status in ('queued', 'running')`}
      ORDER BY created_at LIMIT 100
   `)) as unknown as RunRow[];
-  return rows.map((row) => toDTOFor(agent, 'stranger', row));
+  const readable = new Map<string, boolean>();
+  for (const { documentId } of rows) {
+    if (!readable.has(documentId)) readable.set(documentId, (await readableLiveDoc(documentId, agent)) !== null);
+  }
+  return rows.filter((row) => readable.get(row.documentId)).map((row) => toDTOFor(agent, 'stranger', row));
 }
 
 type Transition = {
