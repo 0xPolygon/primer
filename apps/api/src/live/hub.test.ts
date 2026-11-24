@@ -349,4 +349,33 @@ describe('live hub', () => {
   });
 
   it.todo('proxy-auth headers authenticate (with #141, through makeProxyResolver)');
+
+  it('refuses a socket whose authentication is still pending when the hub closes', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const slow: UserResolver = async (c) => {
+      await gate;
+      return mockMultiResolver(c);
+    };
+    const late = createHub({ resolver: slow, appOrigin: APP_ORIGIN });
+    const lateServer = createServer();
+    lateServer.on('upgrade', late.handleUpgrade);
+    await new Promise<void>((resolve) => lateServer.listen(0, '127.0.0.1', resolve));
+    const lateUrl = `ws://127.0.0.1:${(lateServer.address() as AddressInfo).port}/collab`;
+    try {
+      const socket = new WebSocket(lateUrl, { headers: asPerson(OWNER) } as never);
+      const outcome = new Promise<'open' | 'refused'>((resolve) => {
+        socket.addEventListener('open', () => resolve('open'));
+        socket.addEventListener('error', () => resolve('refused'));
+        socket.addEventListener('close', () => resolve('refused'));
+      });
+      await sleep(100); // the upgrade is now waiting on the resolver
+      late.close();
+      release();
+      expect(await outcome).toBe('refused');
+    } finally {
+      release();
+      await new Promise<void>((resolve) => lateServer.close(() => resolve()));
+    }
+  });
 });
