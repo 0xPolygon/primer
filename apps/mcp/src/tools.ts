@@ -339,12 +339,14 @@ export function buildToolHandlers(deps: ToolDeps): Record<string, ToolHandler> {
         // model that governs the harness's own Write tool (PR #76 review).
         // The agent moves the file where it wants with its own gated tools —
         // that `mv` never spends context on the body.
+        let dir: string | undefined;
         try {
-          const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'primer-'));
+          dir = fs.mkdtempSync(path.join(os.tmpdir(), 'primer-'));
           const savedTo = path.join(dir, 'content.html');
-          fs.writeFileSync(savedTo, content, { encoding: 'utf8', flag: 'wx' });
+          fs.writeFileSync(savedTo, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
           return ok({ ...meta, savedTo });
         } catch (e) {
+          if (dir !== undefined) fs.rmSync(dir, { recursive: true, force: true });
           const message = e instanceof Error ? e.message : String(e);
           return err('bad_request', `Could not write content to temp dir: ${message}`);
         }

@@ -571,6 +571,10 @@ describe('primer_get_version_content', () => {
     expect(payload.sizeBytes).toBe(Buffer.byteLength('<h1>saved to disk</h1>', 'utf8'));
     expect(payload.content).toBeUndefined();
     expect(await fsp.readFile(savedTo, 'utf8')).toBe('<h1>saved to disk</h1>');
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(savedTo).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(nodePath.dirname(savedTo)).mode & 0o777).toBe(0o700);
+    }
     await fsp.rm(nodePath.dirname(savedTo), { recursive: true, force: true });
   });
 
