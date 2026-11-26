@@ -1,13 +1,4 @@
 /**
- * The seeded service account representing Claude itself (see the
- * seed_service_user migration). Its API tokens are minted from the
- * admin-gated section of /settings/tokens; actions performed with them are
- * attributed to this user. The id can never collide with an Okta sub, so
- * this account cannot log in interactively.
- */
-export const SERVICE_USER_ID = 'service-claude';
-
-/**
  * Parses the ADMIN_EMAILS env var (comma-separated) into a normalized
  * (trimmed, lowercased) list. Unset/empty means no admins — fail closed.
  */

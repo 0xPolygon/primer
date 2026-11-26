@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 import { createClient, isRedirectUriAllowed } from './clients.ts';
+import { sanitizeAgentName } from '../../lib/actors.ts';
 
 const ALLOWED_GRANT_TYPES = new Set(['authorization_code', 'refresh_token']);
 
@@ -13,7 +14,8 @@ export function registerOAuthRegistrationRoute(app: Hono): void {
       return c.json({ error: 'invalid_client_metadata', error_description: 'body must be JSON' }, 400);
     }
 
-    const clientName = typeof body.client_name === 'string' ? body.client_name.trim() : '';
+    // Shown in attribution as the client's agent name: sanitize it here.
+    const clientName = typeof body.client_name === 'string' ? sanitizeAgentName(body.client_name) : '';
     const redirectUris = Array.isArray(body.redirect_uris)
       ? body.redirect_uris.filter((s): s is string => typeof s === 'string')
       : [];

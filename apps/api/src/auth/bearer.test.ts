@@ -185,7 +185,7 @@ describe('composeResolvers', () => {
       async () => null,
       async (c) => {
         c.set('authMethod', 'mock');
-        return { id: 'second', email: 'a@b', displayName: 'second' };
+        return { id: 'second', email: 'a@b', displayName: 'second', kind: 'person' as const, viaUserId: null };
       }
     );
     const got = await makeReq().run(resolver);
@@ -196,7 +196,7 @@ describe('composeResolvers', () => {
   it('short-circuits — later resolvers never run when an earlier one wins', async () => {
     const winner: UserResolver = async (c) => {
       c.set('authMethod', 'bearer');
-      return { id: 'first', email: 'first@x', displayName: 'first' };
+      return { id: 'first', email: 'first@x', displayName: 'first', kind: 'person' as const, viaUserId: null };
     };
     const throwsIfReached: UserResolver = async () => {
       throw new Error('later resolver must not run');

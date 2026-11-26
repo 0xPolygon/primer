@@ -1,0 +1,1 @@
+ALTER TABLE "document_views" ADD COLUMN "last_doc_version" bigint;

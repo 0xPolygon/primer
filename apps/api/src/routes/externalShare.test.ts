@@ -14,8 +14,17 @@ import {
 } from '../db/schema.ts';
 import { generateShareToken } from '../external/tokens.ts';
 import { _resetRateLimiterForTests } from '../lib/rateLimiter.ts';
-import { ARTIFACT_CSP } from './versionContent.ts';
+import { artifactCsp } from '../lib/pagePolicy.ts';
 import { CSRF_HEADERS } from '../test/harness.ts';
+import { MOCK_USER } from '../auth/resolver.ts';
+import { publishDocument } from '../lib/publish.ts';
+import { readBlocks } from '../live/editor.ts';
+import { withLiveDoc } from '../live/live.testlib.ts';
+import { originFor } from '../live/origin.ts';
+import { applyPlan } from '../live/pipeline.ts';
+import { applyOps } from '../live/ops.ts';
+import { recordsApi } from '../records/store.ts';
+import { flushDataChanged } from '../records/changed.ts';
 
 class CaptureNotifier extends NoopNotifier {
   override readonly emailEnabled = true;
@@ -167,13 +176,13 @@ describe('external share public routes', () => {
 
       const content = await f.app.request(`/api/share/${f.shareToken}/content`, { headers: { cookie } });
       expect(content.status).toBe(200);
-      expect(content.headers.get('content-security-policy')).toBe(ARTIFACT_CSP);
+      expect(content.headers.get('content-security-policy')).toBe(artifactCsp('standard'));
       expect(content.headers.get('x-frame-options')).toBe('SAMEORIGIN');
       expect(content.headers.get('x-content-type-options')).toBe('nosniff');
       expect(content.headers.get('referrer-policy')).toBe('no-referrer');
       expect(content.headers.get('x-robots-tag')).toBe('noindex');
       expect(content.headers.get('cache-control')).toBe('private, no-store');
-      expect(await content.text()).toContain('<h1>External Deck</h1>');
+      expect(await content.text()).toContain('<h1 data-pid="p1">External Deck</h1>');
 
       const views = await db.select().from(externalViews).where(eq(externalViews.recipientId, f.recipientId));
       expect(views.length).toBe(1);
@@ -185,6 +194,126 @@ describe('external share public routes', () => {
       await f.app.request(`/api/share/${f.shareToken}/content`, { headers: { cookie } });
       expect((await db.select().from(externalViews).where(eq(externalViews.recipientId, f.recipientId))).length).toBe(2);
       expect(f.notifier.firstViews.length).toBe(1);
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it('share link of a live doc serves the published checkpoint, not live state', async () => {
+    const f = await fixture();
+    try {
+      const storage = new FilesystemStorage(f.root);
+      const published = await publishDocument(storage, {
+        actor: MOCK_USER,
+        title: 'Live plan',
+        filename: 'plan.md',
+        format: 'markdown',
+        content: new TextEncoder().encode('# Plan\n\nShip the editor first.\n'),
+      });
+      if (!published.ok) throw new Error('publish refused');
+      const checkpoint = await f.app.request(`/api/documents/${published.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const { versionId } = (await checkpoint.json()) as { versionId: string };
+
+      // The document moves on after the share was published.
+      const blockId = await withLiveDoc(published.documentId, (doc) => readBlocks(doc, 'main').find((b) => JSON.stringify(b.content).includes('Ship'))!.id);
+      await applyPlan(published.documentId, originFor(MOCK_USER), {
+        onConflict: 'refuse',
+        edits: [{
+          target: { tabId: 'main', blockId },
+          inverse: false,
+          build: (tr, at) => {
+            tr.replaceWith(at!.pos + 2, at!.pos + at!.node.firstChild!.nodeSize, tr.doc.type.schema.text('Secret draft change.'));
+          },
+        }],
+      });
+
+      const shareToken = generateShareToken();
+      const shareId = uuidv7();
+      await db.insert(externalShares).values({ id: shareId, documentId: published.documentId, shareToken, createdBy: 'mock-user-1', publishedVersionId: versionId });
+      await db.insert(externalRecipients).values({
+        id: uuidv7(), shareId, email: 'client@example.com', addedBy: 'mock-user-1',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      const cookie = await authenticate({ ...f, shareToken });
+      const content = await f.app.request(`/api/share/${shareToken}/content`, { headers: { cookie } });
+      expect(content.status).toBe(200);
+      const html = await content.text();
+      expect(html).toContain('Ship the editor first.');
+      expect(html).not.toContain('Secret draft change.');
+      expect(content.headers.get('content-security-policy')).toBe(artifactCsp('standard'));
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  });
+
+  it('external share reads the frozen snapshot', async () => {
+    const f = await fixture();
+    try {
+      const storage = new FilesystemStorage(f.root);
+      const share = async (documentId: string, versionId: string) => {
+        const shareToken = generateShareToken();
+        const shareId = uuidv7();
+        await db.insert(externalShares).values({ id: shareId, documentId, shareToken, createdBy: 'mock-user-1', publishedVersionId: versionId });
+        await db.insert(externalRecipients).values({
+          id: uuidv7(), shareId, email: 'client@example.com', addedBy: 'mock-user-1',
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        });
+        const cookie = await authenticate({ ...f, shareToken });
+        return f.app.request(`/api/share/${shareToken}/content`, { headers: { cookie } });
+      };
+
+      // A live document with a data table over `metrics`.
+      const doc = await publishDocument(storage, {
+        actor: MOCK_USER, title: 'Metrics', filename: 'm.md', format: 'markdown',
+        content: new TextEncoder().encode('# Metrics\n\nWeekly numbers.\n'),
+      });
+      if (!doc.ok) throw new Error('publish refused');
+      const intro = await withLiveDoc(doc.documentId, (d) => readBlocks(d, 'main').find((b) => JSON.stringify(b.content).includes('Weekly'))!.id);
+      const columns = JSON.stringify([{ key: 'week', label: 'Week', type: 'text' }, { key: 'signups', label: 'Signups', type: 'number' }]);
+      const added = await applyOps(doc.documentId, MOCK_USER, {
+        ops: [{ op: 'add', at: { tabId: 'main', blockId: intro }, position: 'after', blocks: [{ json: { type: 'dataTable', props: { collection: 'metrics', columns, scope: 'shared' } } }] }],
+      });
+      expect(added.ok).toBe(true);
+      const records = recordsApi(MOCK_USER, doc.documentId);
+      await records.set({ collection: 'metrics', scope: 'shared', recordId: 'w1', data: { week: 'W1', signups: 240 } });
+      await records.set({ collection: 'metrics', scope: 'shared', recordId: 'w2', data: { week: 'W2 <b>bold</b>', signups: 410 } });
+      await records.set({ collection: 'payroll', scope: 'shared', recordId: 'p1', data: { amount: 'unbound-in-markdown' } });
+      const checkpoint = await f.app.request(`/api/documents/${doc.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const { versionId } = (await checkpoint.json()) as { versionId: string };
+      // Live data moves on after publish.
+      await records.update({ collection: 'metrics', scope: 'shared', recordId: 'w2', data: { signups: 731905 } });
+
+      const table = await (await share(doc.documentId, versionId)).text();
+      expect(table).toContain('<th>Week</th><th>Signups</th>');
+      expect(table).toContain('<td>W1</td><td>240</td>');
+      expect(table).toContain('<td>W2 &lt;b&gt;bold&lt;/b&gt;</td><td>410</td>');
+      expect(table).not.toContain('<td>731905</td>');
+      expect(table).not.toContain('unbound-in-markdown');
+
+      // A record-reading page reads the same frozen records, under the records lockdown.
+      const page = await publishDocument(storage, {
+        actor: MOCK_USER, title: 'Board', filename: 'b.html', format: 'html',
+        content: new TextEncoder().encode('<!doctype html><html><head><meta name="primer-records" content="read"><meta name="primer-records-collections" content="votes primer.choice/c1"><title>Board</title></head><body><h1>Board</h1></body></html>'),
+      });
+      if (!page.ok) throw new Error('publish refused');
+      const pageRecords = recordsApi(MOCK_USER, page.documentId);
+      await pageRecords.set({ collection: 'votes', scope: 'shared', recordId: 'a', data: { note: '</script><script>alert(1)</script>' } });
+      await pageRecords.set({ collection: 'mine', scope: 'personal', recordId: 'p', data: { secret: 'personal-only' } });
+      await recordsApi(MOCK_USER, page.documentId, { reserved: true }).set({ collection: 'primer.choice/c1', scope: 'shared', recordId: 'mock-user-1', data: { optionId: 'o1' } });
+      await pageRecords.set({ collection: 'salaries', scope: 'shared', recordId: 's', data: { amount: 'unbound-collection' } });
+      const pageCheckpoint = await f.app.request(`/api/documents/${page.documentId}/checkpoints`, { method: 'POST', headers: CSRF_HEADERS });
+      const pageVersion = ((await pageCheckpoint.json()) as { versionId: string }).versionId;
+      await pageRecords.set({ collection: 'votes', scope: 'shared', recordId: 'b', data: { note: 'after publish' } });
+
+      const res = await share(page.documentId, pageVersion);
+      expect(res.headers.get('content-security-policy')).toBe(artifactCsp('records'));
+      const html = await res.text();
+      const frozen = /<script type="application\/json" id="primer-records-frozen">(.*?)<\/script>/s.exec(html);
+      expect(frozen).not.toBeNull();
+      // Only the collection the page declares, each record only its id and data.
+      expect(JSON.parse(frozen![1]!)).toEqual({ collections: { votes: [{ recordId: 'a', data: { note: '</script><script>alert(1)</script>' } }] } });
+      expect(html).not.toContain('unbound-collection');
+      expect(html).not.toContain('writtenBy');
+      expect(html).not.toContain('mock-user-1'); // nor a vote, keyed by the voter's id
+      expect(html).not.toContain('after publish');
+      expect(html).not.toContain('personal-only');
+      await flushDataChanged();
     } finally { await rm(f.root, { recursive: true, force: true }); }
   });
 

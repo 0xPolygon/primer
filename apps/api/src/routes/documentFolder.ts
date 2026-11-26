@@ -1,16 +1,15 @@
 import type { Hono } from 'hono';
 import { and, eq } from 'drizzle-orm';
-import type { AppVariables } from '../app.ts';
+import type { AppVariables, AuthUser } from '../app.ts';
 import { documents, folders, documentFolders } from '../db/schema.ts';
 import { db } from '../db/client.ts';
 import {
   canRead,
-  effectiveRole,
-  loadCollaboratorRole,
+  loadEffectiveRole,
   type Visibility,
 } from '../lib/permissions.ts';
 
-async function canReadDoc(docId: string, userId: string): Promise<boolean> {
+async function canReadDoc(docId: string, actor: AuthUser): Promise<boolean> {
   const [doc] = await db
     .select({
       uploaderId: documents.uploaderId,
@@ -21,8 +20,7 @@ async function canReadDoc(docId: string, userId: string): Promise<boolean> {
     .where(eq(documents.id, docId));
   if (!doc || doc.deletedAt !== null) return false;
   const visibility = doc.visibility as Visibility;
-  const collabRole = await loadCollaboratorRole(docId, userId);
-  const eff = effectiveRole({ uploaderId: doc.uploaderId, visibility }, userId, collabRole);
+  const eff = await loadEffectiveRole({ id: docId, uploaderId: doc.uploaderId, visibility }, actor);
   return canRead(visibility, eff);
 }
 
@@ -42,7 +40,7 @@ export function registerDocumentFolderRoutes(app: Hono<{ Variables: AppVariables
     if (body === null || (body.folderId !== null && typeof body.folderId !== 'string')) {
       return c.json({ error: 'invalid_body' }, 400);
     }
-    if (!(await canReadDoc(docId, userId))) {
+    if (!(await canReadDoc(docId, c.get('user')))) {
       return c.json({ error: 'not_found' }, 404);
     }
     if (body.folderId === null) {

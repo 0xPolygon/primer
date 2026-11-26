@@ -24,9 +24,10 @@ const external = [
   ...Object.keys(pkg.dependencies ?? {}),
   // Sub-paths of declared deps also count as external. Node will resolve them.
 ];
-// @polygonlabs/primer-api-types is a workspace package whose entry points are
-// .ts files — it must be bundled, not external.
-const externalFiltered = external.filter((d) => d !== '@polygonlabs/primer-api-types');
+// Workspace packages whose entry points are .ts/.tsx source
+// (@polygonlabs/primer-api-types, @primer/blocks) must be bundled, not external.
+const bundledWorkspace = new Set(['@polygonlabs/primer-api-types', '@primer/blocks']);
+const externalFiltered = external.filter((d) => !bundledWorkspace.has(d));
 
 const common = {
   bundle: true,
@@ -37,6 +38,8 @@ const common = {
   // node:fs etc. are auto-external on platform: 'node'.
   sourcemap: true,
   logLevel: 'info',
+  // @primer/blocks renders its custom blocks with React (automatic runtime).
+  jsx: 'automatic',
   // Each entry point keeps its file extension via outExtension; default is fine.
 };
 
@@ -83,6 +86,23 @@ await copyFile(
   resolve(apiRoot, `dist/companion/mermaid-v${mermaidVersion}.js`),
 );
 
+// The widget raster script runs as a child process of its own (raster.ts).
+await mkdir(resolve(apiRoot, 'dist/widgets'), { recursive: true });
+await copyFile(
+  resolve(apiRoot, 'src/widgets/raster-child.mjs'),
+  resolve(apiRoot, 'dist/widgets/raster-child.mjs'),
+);
+
+// The authoring and widget skills, served as the MCP resources
+// primer://skills/authoring and primer://skills/widgets.
+await mkdir(resolve(apiRoot, 'dist/skills'), { recursive: true });
+for (const name of ['authoring.md', 'widgets.md']) {
+  await copyFile(
+    resolve(apiRoot, `../../plugins/primer/skills/primer/${name}`),
+    resolve(apiRoot, `dist/skills/${name}`),
+  );
+}
+
 console.log(
-  `api build complete: dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
+  `api build complete: dist/skills/authoring.md, dist/skills/widgets.md, dist/index.js, dist/db/migrate.js, dist/jobs/purge-cli.js, dist/widgets/raster-child.mjs, dist/companion/v1.js, dist/companion/mermaid-v${mermaidVersion}.js`,
 );

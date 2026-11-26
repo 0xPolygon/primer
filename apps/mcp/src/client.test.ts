@@ -443,22 +443,52 @@ describe('PrimerClient.getEvents / sendEvents (issue #78)', () => {
   });
 
   it('lookupUser GETs /api/users/lookup?email=…', async () => {
-    const mockFetch = vi.fn(async () => jsonResponse({ id: 'okta-sub-1' }, 200));
+    const mockFetch = vi.fn(async () => jsonResponse({ id: 'okta-sub-1', email: 'reviewer@polygon.technology', displayName: 'Reviewer' }, 200));
     const client = makeClient(mockFetch as unknown as typeof fetch);
     const result = await client.lookupUser('reviewer@polygon.technology');
-    expect(result).toEqual({ id: 'okta-sub-1' });
+    expect(result).toEqual({ id: 'okta-sub-1', email: 'reviewer@polygon.technology', displayName: 'Reviewer' });
     const [url] = firstCall(mockFetch);
     expect(url).toBe(
       'http://localhost:3000/api/users/lookup?email=reviewer%40polygon.technology',
     );
   });
 
-  it('addCollaborator POSTs the userId and role as JSON', async () => {
-    const mockFetch = vi.fn(async () => jsonResponse({}, 201));
+  it('addCollaborator POSTs the userId and role as JSON and returns the row', async () => {
+    const row = { userId: 'okta-sub-1', displayName: 'R', role: 'responder', grantedBy: 'me', createdAt: 't' };
+    const mockFetch = vi.fn(async () => jsonResponse(row, 201));
     const client = makeClient(mockFetch as unknown as typeof fetch);
-    await client.addCollaborator('doc-1', 'okta-sub-1', 'responder');
+    const result = await client.addCollaborator('doc-1', 'okta-sub-1', 'responder');
+    expect(result).toEqual(row);
     const [url, init] = firstCall(mockFetch);
     expect(url).toBe('http://localhost:3000/api/documents/doc-1/collaborators');
     expect(JSON.parse(init.body as string)).toEqual({ userId: 'okta-sub-1', role: 'responder' });
+  });
+
+  it('listCollaborators GETs the collaborators of a document', async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ collaborators: [] }, 200));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+    expect(await client.listCollaborators('doc-1')).toEqual({ collaborators: [] });
+    const [url] = firstCall(mockFetch);
+    expect(url).toBe('http://localhost:3000/api/documents/doc-1/collaborators');
+  });
+});
+
+describe('PrimerClient.records', () => {
+  it('POSTs the verb and keeps a refusal code the tools branch on', async () => {
+    const refusal = { code: 'record_conflict', message: 'Record "r" is at version 2, not 1.', fix: 'Read the record again.' };
+    const mockFetch = vi.fn(async () => jsonResponse({ error: 'record_conflict', refusal }, 409));
+    const client = makeClient(mockFetch as unknown as typeof fetch);
+
+    const err = await client
+      .records('d1', 'set', { collection: 'c', scope: 'shared', recordId: 'r', data: {}, expectVersion: 1 })
+      .catch((e: unknown) => e);
+
+    const [url, init] = firstCall(mockFetch);
+    expect(url).toBe('http://localhost:3000/api/documents/d1/records/set');
+    expect(init.method).toBe('POST');
+    expect(err).toBeInstanceOf(PrimerApiError);
+    expect((err as PrimerApiError).code).toBe('record_conflict');
+    expect((err as PrimerApiError).message).toContain('Record "r" is at version 2');
+    expect((err as PrimerApiError).refusal).toEqual({ code: 'record_conflict', fix: 'Read the record again.' });
   });
 });

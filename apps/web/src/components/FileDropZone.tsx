@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 
 interface Props {
@@ -22,10 +23,11 @@ function validate(file: File, maxBytes: number): string | null {
   const ok =
     lowerName.endsWith('.html') ||
     lowerName.endsWith('.md') ||
-    lowerName.endsWith('.markdown');
-  if (!ok) return 'Only .html, .md, or .markdown files are accepted.';
+    lowerName.endsWith('.markdown') ||
+    lowerName.endsWith('.txt');
+  if (!ok) return t('fileDropZone.onlyFileTypes');
   if (file.size > maxBytes) {
-    return `This file is ${formatSize(file.size)} — limit is ${formatSize(maxBytes)}.`;
+    return t('fileDropZone.fileTooLarge', { size: formatSize(file.size), limit: formatSize(maxBytes) });
   }
   return null;
 }
@@ -108,9 +110,9 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
               <path d="M12 5v14M5 12l7-7 7 7" />
             </svg>
             <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
-              {isDragging ? 'Drop to attach' : 'Drop an HTML or Markdown file here, or click to browse'}
+              {isDragging ? t('fileDropZone.dropToAttach') : t('fileDropZone.dropPrompt')}
             </p>
-            <p className="mt-1 text-xs text-neutral-500">.html / .md files up to {formatSize(maxBytes)}</p>
+            <p className="mt-1 text-xs text-neutral-500">{t('fileDropZone.fileTypesHint', { size: formatSize(maxBytes) })}</p>
           </>
         ) : (
           <div className="flex w-full items-center gap-3 px-4">
@@ -130,14 +132,14 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
               }}
               className="text-xs font-medium text-neutral-600 dark:text-neutral-400 underline hover:text-neutral-900 dark:hover:text-neutral-100"
             >
-              Replace
+              {t('fileDropZone.replace')}
             </button>
           </div>
         )}
         <input
           ref={inputRef}
           type="file"
-          accept=".html,text/html,.md,.markdown,text/markdown,text/x-markdown"
+          accept=".html,text/html,.md,.markdown,text/markdown,text/x-markdown,.txt,text/plain"
           className="hidden"
           onChange={(e) => handlePick(e.target.files?.[0] ?? null)}
         />
@@ -148,7 +150,7 @@ export function FileDropZone({ file, onChange, maxBytes = TEN_MIB, disabled = fa
         </p>
       )}
       <div aria-live="polite" className="sr-only">
-        {isDragging ? 'Drop to attach the file.' : ''}
+        {isDragging ? t('fileDropZone.dropToAttachFile') : ''}
       </div>
     </div>
   );

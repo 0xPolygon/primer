@@ -24,22 +24,58 @@ export interface ScopedRoute {
 export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'GET', path: '/api/me', scope: null },
   { method: 'POST', path: '/mcp', scope: null },
+  // 405 for every token (mcp/routes.ts), so an MCP client opens no event stream.
+  { method: 'GET', path: '/mcp', scope: null },
+  { method: 'DELETE', path: '/mcp', scope: null },
 
   { method: 'GET', path: '/api/library', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:docId/versions', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/content', scope: 'documents:read' },
   { method: 'GET', path: '/api/versions/:versionId/threads', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/threads', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/events', scope: 'documents:read' },
   { method: 'GET', path: '/api/documents/:documentId/events/stream', scope: 'documents:read' },
+  { method: 'GET', path: '/api/events/stream', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/live', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/agents', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/runs', scope: 'documents:read' },
+  { method: 'GET', path: '/api/runs', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/suggestions', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/export', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/print', scope: 'documents:read' },
+  { method: 'GET', path: '/api/versions/:versionId/ydoc', scope: 'documents:read' },
+  { method: 'GET', path: '/api/files/:fileId', scope: 'documents:read' },
+  { method: 'GET', path: '/api/widgets/:widgetId', scope: 'documents:read' },
+  { method: 'GET', path: '/api/widgets/:widgetId/image', scope: 'documents:read' },
 
   { method: 'POST', path: '/api/upload', scope: 'documents:write' },
+  { method: 'POST', path: '/api/convert/markdown', scope: 'documents:write' },
   { method: 'POST', path: '/api/documents/:docId/versions', scope: 'documents:write' },
   // Title/description, and visibility only towards private: a scoped token
   // asking for `visibility: 'org'` is refused in the handler
   // (routes/documents.ts).
   { method: 'PATCH', path: '/api/documents/:docId', scope: 'documents:write' },
   { method: 'PATCH', path: '/api/versions/:versionId', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/ops', scope: 'documents:write' },
+  // Agents work their runs with documents:write (the run must be theirs).
+  { method: 'POST', path: '/api/runs/:runId/claim', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/status', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/finish', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/cancel', scope: 'documents:write' },
+  { method: 'POST', path: '/api/runs/:runId/undo', scope: 'documents:write' },
+  // An agent withdraws its own suggestions; deciding them is for people.
+  { method: 'POST', path: '/api/suggestions/:id/withdraw', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/checkpoints', scope: 'documents:write' },
+  { method: 'POST', path: '/api/versions/:versionId/restore', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/files', scope: 'documents:write' },
+  // Copies owned by the caller: a private branch, a fork or remix (also
+  // "New from template"); and a branch proposed back as suggestions.
+  { method: 'POST', path: '/api/documents/:docId/branch', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/fork', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/propose', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/widgets/draft', scope: 'documents:write' },
+  { method: 'POST', path: '/api/widgets/:widgetId/publish', scope: 'documents:write' },
 
   { method: 'POST', path: '/api/versions/:versionId/threads', scope: 'comments:write' },
   { method: 'POST', path: '/api/threads/:threadId/comments', scope: 'comments:write' },
@@ -48,6 +84,14 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'PATCH', path: '/api/comments/:commentId', scope: 'comments:write' },
   { method: 'DELETE', path: '/api/comments/:commentId', scope: 'comments:write' },
   { method: 'POST', path: '/api/comments/:commentId/restore', scope: 'comments:write' },
+  { method: 'POST', path: '/api/documents/:docId/threads', scope: 'comments:write' },
+  { method: 'POST', path: '/api/threads/:threadId/reanchor', scope: 'comments:write' },
+  { method: 'POST', path: '/api/comments/:commentId/reactions/:emoji', scope: 'comments:write' },
+  { method: 'DELETE', path: '/api/comments/:commentId/reactions/:emoji', scope: 'comments:write' },
+
+  // Asking an agent is like commenting.
+  { method: 'POST', path: '/api/documents/:docId/runs', scope: 'comments:write' },
+  { method: 'POST', path: '/api/runs/:runId/retry', scope: 'comments:write' },
 
   { method: 'POST', path: '/api/documents/:documentId/events', scope: 'events:write' },
 
@@ -55,6 +99,44 @@ export const ROUTE_SCOPES: readonly ScopedRoute[] = [
   { method: 'POST', path: '/api/documents/:docId/collaborators', scope: 'collaborators:manage' },
   { method: 'PATCH', path: '/api/documents/:docId/collaborators/:userId', scope: 'collaborators:manage' },
   { method: 'DELETE', path: '/api/documents/:docId/collaborators/:userId', scope: 'collaborators:manage' },
+
+  { method: 'POST', path: '/api/documents/:docId/records/get', scope: 'records:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/list', scope: 'records:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/query', scope: 'records:read' },
+  { method: 'GET', path: '/api/documents/:docId/records/changes', scope: 'records:read' },
+  { method: 'GET', path: '/api/versions/:versionId/page', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/pages/:blockId', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/pages/:blockId/content', scope: 'documents:read' },
+  { method: 'POST', path: '/api/documents/:docId/records/set', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/update', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/delete', scope: 'records:write' },
+  { method: 'POST', path: '/api/documents/:docId/records/batch', scope: 'records:write' },
+  { method: 'POST', path: '/api/record-changes/:changeId/revert', scope: 'records:write' },
+  // Destroys other people's data: never implied by records:write.
+  { method: 'POST', path: '/api/documents/:docId/records/purge-personal', scope: 'records:manage' },
+
+  { method: 'GET', path: '/api/documents/:docId/decisions', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/choices/:blockId/votes', scope: 'documents:read' },
+  { method: 'POST', path: '/api/documents/:docId/choices', scope: 'documents:write' },
+  { method: 'POST', path: '/api/documents/:docId/choices/:blockId/propose', scope: 'documents:write' },
+  // A decision: people with edit rights only (checked in live/choices.ts).
+  { method: 'POST', path: '/api/documents/:docId/choices/:blockId/pick', scope: 'documents:write' },
+  { method: 'DELETE', path: '/api/documents/:docId/choices/:blockId/decision', scope: 'documents:write' },
+  // Votes are shared records.
+  { method: 'POST', path: '/api/documents/:docId/choices/:blockId/vote', scope: 'records:write' },
+  // What an embed block shows this viewer (a link card, or a document they can read).
+  { method: 'GET', path: '/api/documents/:docId/embeds/:blockId', scope: 'documents:read' },
+  { method: 'GET', path: '/api/tasks', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/catchup', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/citations', scope: 'documents:read' },
+  { method: 'POST', path: '/api/documents/from-conversation', scope: 'documents:write' },
+  { method: 'POST', path: '/api/threads/:threadId/promote', scope: 'documents:write' },
+  { method: 'GET', path: '/api/me/digest', scope: 'documents:read' },
+  { method: 'POST', path: '/api/me/digest/email', scope: 'documents:write' },
+  { method: 'GET', path: '/api/documents/:docId/tasks', scope: 'documents:read' },
+  { method: 'GET', path: '/api/documents/:docId/assignees', scope: 'documents:read' },
+  { method: 'POST', path: '/api/documents/:docId/tasks', scope: 'documents:write' },
+  { method: 'PATCH', path: '/api/documents/:docId/tasks/:blockId', scope: 'documents:write' },
 
   { method: 'GET', path: '/api/users/lookup', scope: 'users:read' },
   { method: 'GET', path: '/api/users', scope: 'users:read' },
@@ -83,14 +165,20 @@ export const NOT_GRANTABLE: readonly { method: Method; path: string; reason: str
   { method: 'GET', path: '/api/tokens', reason: 'token management' },
   { method: 'POST', path: '/api/tokens', reason: 'token management (session-only)' },
   { method: 'DELETE', path: '/api/tokens/:id', reason: 'token management' },
-  { method: 'GET', path: '/api/service-tokens', reason: 'token management (session-only)' },
-  { method: 'POST', path: '/api/service-tokens', reason: 'token management (session-only)' },
-  { method: 'DELETE', path: '/api/service-tokens/:id', reason: 'token management (session-only)' },
+  { method: 'GET', path: '/api/agents', reason: 'agent management (session-only)' },
+  { method: 'POST', path: '/api/agents', reason: 'agent management (session-only)' },
+  { method: 'POST', path: '/api/agents/:agentId/tokens', reason: 'token management (session-only)' },
+  { method: 'DELETE', path: '/api/agents/:agentId/tokens/:tokenId', reason: 'token management (session-only)' },
   { method: 'GET', path: '/api/device/pending', reason: 'device login is for humans' },
   { method: 'POST', path: '/api/device/approve', reason: 'device login (session-only)' },
   { method: 'POST', path: '/api/device/deny', reason: 'device login (session-only)' },
   { method: 'GET', path: '/api/admin/stats', reason: 'admin (session-only)' },
   { method: 'POST', path: '/auth/logout', reason: 'browser session' },
+  { method: 'POST', path: '/api/runs/:runId/approve', reason: 'a person approves an agent\'s plan; agents never do' },
+  { method: 'POST', path: '/api/suggestions/:id/accept', reason: 'a person decides a suggestion; agents never do' },
+  { method: 'POST', path: '/api/suggestions/:id/reject', reason: 'a person decides a suggestion; agents never do' },
+  { method: 'POST', path: '/api/change-sets/:id/accept', reason: 'a person decides a change set; agents never do' },
+  { method: 'POST', path: '/api/change-sets/:id/reject', reason: 'a person decides a change set; agents never do' },
 ];
 
 function compile(path: string): RegExp {
@@ -102,6 +190,13 @@ function compile(path: string): RegExp {
 }
 
 const COMPILED = ROUTE_SCOPES.map((r) => ({ ...r, re: compile(r.path) }));
+const COMPILED_NOT_GRANTABLE = NOT_GRANTABLE.map((r) => ({ ...r, re: compile(r.path) }));
+
+/** True when a request targets a NOT_GRANTABLE route (HEAD matched as GET). */
+function isNotGrantable(method: string, path: string): boolean {
+  const m = method === 'HEAD' ? 'GET' : method;
+  return COMPILED_NOT_GRANTABLE.some((r) => r.method === m && r.re.test(path));
+}
 
 /**
  * Looks up the scoped-route entry for a request. HEAD is matched as GET,
@@ -143,13 +238,25 @@ export function tokenScopes(c: Context<{ Variables: AppVariables }>): readonly A
 
 /**
  * Enforces token scopes. Requests without scopes (browser sessions, mock
- * auth, unrestricted tokens, public paths) pass through untouched. A scoped
- * token may only call routes in ROUTE_SCOPES whose scope it holds; everything
- * else is 403 `insufficient_scope` — default deny.
+ * auth, unrestricted tokens, public paths) pass through untouched, except
+ * that an agent without scopes (an OAuth client) is refused the
+ * NOT_GRANTABLE routes: the same boundary a scoped agent token gets, so
+ * owning a document (an upload, a fork) never lets an agent delete or
+ * externally share it. A scoped token may only call routes in ROUTE_SCOPES
+ * whose scope it holds; everything else is 403 `insufficient_scope` —
+ * default deny.
  */
 export const scopeMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const scopes = tokenScopes(c);
-  if (scopes === null) return next();
+  if (scopes === null) {
+    if (c.get('user')?.kind === 'agent' && isNotGrantable(c.req.method, c.req.path)) {
+      return c.json(
+        { error: 'forbidden', message: 'Agents cannot call this endpoint.' },
+        403,
+      );
+    }
+    return next();
+  }
 
   const route = findScopedRoute(c.req.method, c.req.path);
   if (route && (route.scope === null || scopes.includes(route.scope))) return next();

@@ -1,6 +1,8 @@
 import { sql, eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
-import { documents, versions } from '../db/schema.ts';
+import { docFiles, documents, versions } from '../db/schema.ts';
+import { bundleStorageKeys } from '../live/bundle.ts';
+import { sourceKeyOf } from '../page/publish.ts';
 import { logger } from '../logger.ts';
 import type { Storage } from '../storage/types.ts';
 
@@ -31,21 +33,34 @@ export async function purgeExpiredDocuments(deps: { storage: Storage }): Promise
 
   for (const { id: docId } of candidates) {
     const versionRows = await db
-      .select({ id: versions.id, storageKey: versions.storageKey })
+      .select({ id: versions.id, storageKey: versions.storageKey, originalKey: versions.originalKey, bundleKey: versions.bundleKey, sourceFormat: versions.sourceFormat })
       .from(versions)
       .where(eq(versions.documentId, docId));
+    // A checkpoint's bundle holds its storage key (static.html) among its files.
+    const versionKeys: string[] = [];
+    for (const v of versionRows) {
+      versionKeys.push(
+        ...(v.bundleKey ? await bundleStorageKeys(deps.storage, v.bundleKey) : [v.storageKey]),
+        ...(v.originalKey ? [v.originalKey] : []),
+        // A live page's stamped source, published (or copied) with its checkpoint;
+        // deleting a key that was never written is a no-op.
+        ...(v.bundleKey ? [sourceKeyOf(docId, v.id)] : []),
+      );
+    }
+    const fileRows = await db.select({ storageKey: docFiles.storageKey }).from(docFiles).where(eq(docFiles.documentId, docId));
+    const keys = [...versionKeys, ...fileRows.map((f) => f.storageKey)];
 
     // Delete storage files first.
-    for (const v of versionRows) {
+    for (const key of keys) {
       try {
-        await deps.storage.delete(v.storageKey);
-        report.purgedStorageKeys.push(v.storageKey);
+        await deps.storage.delete(key);
+        report.purgedStorageKeys.push(key);
       } catch (err) {
         report.failedStorageKeys.push({
-          key: v.storageKey,
+          key,
           error: (err as Error).message,
         });
-        logger.warn({ docId, storageKey: v.storageKey, err }, 'purge: storage delete failed');
+        logger.warn({ docId, storageKey: key, err }, 'purge: storage delete failed');
       }
     }
 

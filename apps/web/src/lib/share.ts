@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { CollaboratorRole } from '@polygonlabs/primer-api-types';
 
 export function formatSharedWith(
@@ -8,11 +9,11 @@ export function formatSharedWith(
   if (!inList) return null;
   const others = collabs.filter((c) => c.userId !== meId).map((c) => c.displayName);
   if (others.length === 0) return null;
-  if (others.length === 1) return `Shared with ${others[0]}`;
-  if (others.length === 2) return `Shared with ${others[0]} and ${others[1]}`;
+  if (others.length === 1) return t('libShare.sharedWithOne', { name: others[0] });
+  if (others.length === 2) return t('libShare.sharedWithTwo', { first: others[0], second: others[1] });
   const extra = others.length - 2;
-  const noun = extra === 1 ? 'other' : 'others';
-  return `Shared with ${others[0]}, ${others[1]} and ${extra} ${noun}`;
+  const key = extra === 1 ? 'libShare.sharedWithMoreOne' : 'libShare.sharedWithMoreMany';
+  return t(key, { first: others[0], second: others[1], extra });
 }
 
 export interface RoleOption {
@@ -27,22 +28,22 @@ export function roleOptions(visibility: 'org' | 'private'): RoleOption[] {
   return [
     {
       value: 'commenter',
-      label: 'Commenter',
+      label: t('libShare.commenter'),
       disabled: commenterDisabled,
       ...(commenterDisabled
         ? {
             tooltip:
-              'Commenter is only meaningful under private visibility — everyone in the org can already read and comment on public docs.',
+              t('libShare.commenterTooltip'),
           }
         : {}),
     },
     {
       value: 'responder',
-      label: 'Responder',
+      label: t('libShare.responder'),
       disabled: false,
       tooltip:
-        "Can read, comment and respond through the document's interactive features. Cannot publish versions or rename.",
+        t('libShare.responderTooltip'),
     },
-    { value: 'editor', label: 'Editor', disabled: false },
+    { value: 'editor', label: t('libShare.editor'), disabled: false },
   ];
 }

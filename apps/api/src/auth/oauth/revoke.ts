@@ -1,6 +1,7 @@
 import type { Context, Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/client.ts';
+import { recheckAccess } from '../revocation.ts';
 import { ACCESS_TOKEN_PREFIX, REFRESH_TOKEN_PREFIX, hashHex } from './tokens.ts';
 
 async function readForm(c: Context): Promise<URLSearchParams> {
@@ -27,6 +28,7 @@ export function registerOAuthRevocationRoute(app: Hono): void {
       `);
     } else if (token.startsWith(ACCESS_TOKEN_PREFIX)) {
       await db.execute(sql`DELETE FROM oauth_access_tokens WHERE token_hash = ${tokenHash}`);
+      await recheckAccess({ credentialHash: tokenHash });
     }
     // Unknown tokens: 200 per RFC 7009.
     return c.body(null, 200);

@@ -17,14 +17,19 @@
 //
 // ORDERING CONTRACT (consumers, read this): the ordering key is the
 // server-assigned `id`, a positive integer. List and stream deliver
-// ascending id. `createdAt` is display-only and carries NO ordering
-// guarantee. Assignment order is NOT commit order — sequences guarantee
-// uniqueness and draw order only, so a row with a lower id can commit after
-// a higher id is already visible (two writers submitting at once is exactly
-// this case). `?since=<id>` is therefore a FETCH OPTIMIZATION, NEVER a
-// correctness boundary: dedupe by row id and either re-read with an overlap
-// window or fetch the full filtered set, so a late-committing lower id is
-// applied on a later poll rather than silently skipped.
+// ascending id. Ids follow COMMIT order: every event write takes one
+// transaction-scoped lock before drawing ids (lib/events.ts), so a row never
+// becomes visible after a higher id. `?since=<id>` and Last-Event-ID are
+// therefore complete resume points — nothing committed later can land below
+// them. `createdAt` is display-only and carries NO ordering guarantee.
+//
+// RESERVED NAMESPACE: `primer` (and `primer/*`) holds Primer's own
+// lifecycle events — comment created, thread resolved/updated, version
+// published, agent runs. The server writes them in the same transaction
+// as the change, with audience `readers` (everyone who can read the
+// document); no client can write them, and the page never relays them into
+// the artifact, so they stay system notifications and never become artifact
+// data. See PrimerEventPayloads in api-types.
 //
 // PAYLOADS ARE ALWAYS UNTRUSTED: `payload` is opaque data Primer never
 // interprets. Consuming code must treat payloads as data to parse and
@@ -36,10 +41,14 @@
 // current surface, not an eternal invariant) and retained forever: the
 // stream is the durable record. Keeping replay cheap is the consumers' job
 // (embed derived state in published versions; replay only the newer tail).
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { bodyLimit } from 'hono/body-limit';
+import { createHash } from 'node:crypto';
 import type { AppVariables } from '../app.ts';
+import type { UserResolver } from '../auth/resolver.ts';
+import { stillResolves, watchAccess, type AccessKey } from '../auth/revocation.ts';
+import { libraryOwnerId } from '../lib/permissions.ts';
 import {
   type EventRowDTO,
   type EventsListResponse,
@@ -51,19 +60,21 @@ import {
   DEFAULT_EVENTS_PAGE_SIZE,
   MAX_EVENTS_PAGE_SIZE,
   decodePageToken,
-  eventMatchesFilters,
   findForeignVersionIds,
   gateEventAccess as gate,
-  identityMayReadEvent,
   insertEventBatch,
+  latestEventId,
   listEvents,
+  listOwnedEvents,
   parseSince,
-  publishDocEvents,
-  subscribeDocEvents,
+  subscribeDocWakes,
+  subscribeOwnerWakes,
   validateEventBatch,
   validateEventFilters,
   validateVersionFilter,
+  type EventFilters,
   type EventReadIdentity,
+  type ListEventsPage,
 } from '../lib/events.ts';
 
 // Coarse request-body cap so an authenticated collaborator cannot make the
@@ -75,7 +86,19 @@ import {
 // rejected before it is fully read.
 const MAX_EVENTS_BODY_BYTES = MAX_EVENTS_PER_BATCH * (MAX_EVENT_PAYLOAD_BYTES + 4 * 1024);
 
-export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): void {
+export function registerEventRoutes(
+  app: Hono<{ Variables: AppVariables }>,
+  deps: { resolver: UserResolver },
+): void {
+  // Open streams re-resolve their credentials on every recheck, so a revoked
+  // token, expired session or logout stops them.
+  const stillSignedIn = (c: Context<{ Variables: AppVariables }>) =>
+    stillResolves(deps.resolver, c.req.raw.headers, {
+      userId: c.get('user').id,
+      authMethod: c.get('authMethod') ?? 'cookie',
+      credentialHash: accessKey(c).credentialHash,
+    });
+
   // ── Write: atomic batch ────────────────────────────────────────────
   // Body is uniformly { events: [event…] } — a single send is a batch of
   // one. Each event carries its own namespace/type/payload/audience
@@ -96,7 +119,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   }), async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
     // Tighter write principal (issue #78 security requirement 2): reading is
     // not enough — only the owner, editors and responders may write. A
@@ -124,9 +147,6 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     }
 
     const rows = await insertEventBatch(documentId, user.id, validated.events);
-    // After commit — the rows are visible, so a listener that re-reads sees
-    // at least what it is being pushed (at-least-once, duplicates legal).
-    publishDocEvents(documentId, rows);
     const body: SendEventsResponse = { events: rows };
     return c.json(body, 201);
   });
@@ -143,7 +163,7 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
   app.get('/api/documents/:documentId/events', async (c) => {
     const documentId = c.req.param('documentId');
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
 
     const sinceParsed = parseSince(c.req.query('since'));
@@ -195,230 +215,248 @@ export function registerEventRoutes(app: Hono<{ Variables: AppVariables }>): voi
     return c.json(body, 200);
   });
 
-  // ── Read: SSE stream ───────────────────────────────────────────────
+  // ── Read: SSE stream (one document) ────────────────────────────────
   // One SSE event per row, ascending id, same filters (?namespace / ?type —
   // exact or trailing-/* subtree) and the same per-audience read scope as
   // the list. Every event carries `id:` equal to the row id, so
   // EventSource's native reconnect resumes via Last-Event-ID; ?since is the
-  // explicit form of the same resume hint. Periodic keepalive comments stop
-  // idle proxies from killing the stream. Delivery is at-least-once:
-  // duplicates and overlaps are legal by design — consumers dedupe by id per
-  // the ordering contract at the top of this file.
+  // explicit form of the same resume point. Without either, the stream
+  // starts after the latest committed row. Access is re-checked before every
+  // read and on the keepalive tick, so a reader who loses access stops
+  // receiving rows and the stream closes.
   app.get('/api/documents/:documentId/events/stream', async (c) => {
-    const documentId = c.req.param('documentId');
+    // Lowercase, as Postgres reports the id in commit wake-ups: an uppercase URL
+    // would replay history but never wake.
+    const documentId = c.req.param('documentId').toLowerCase();
     const user = c.get('user');
-    const g = await gate(documentId, user.id);
+    const g = await gate(documentId, user);
     if (g.status === 'not_found') return c.json({ error: 'not_found' }, 404);
+    const parsed = parseStreamParams(c);
+    if (!parsed.ok) return c.json({ error: 'bad_request', message: parsed.message }, 400);
+    const { filters } = parsed;
 
-    const sinceParsed = parseSince(c.req.query('since'));
-    if (!sinceParsed.ok) {
-      return c.json({ error: 'bad_request', message: 'since must be a non-negative integer id' }, 400);
+    const reader = (identity: EventReadIdentity) => (afterId: number) =>
+      listEvents({ documentId, identity, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
+    // The connect-time check serves the first read (the resume backlog);
+    // every later read runs a fresh check of its own, so each read is judged
+    // only by the answer to the check it started, never by an older one
+    // finishing late.
+    const subscribe = (wake: () => void) => subscribeDocWakes(documentId, wake);
+    return runEventStream(c, parsed.resumeFrom, subscribe, reader(g.identity), async () => {
+      if (!(await stillSignedIn(c))) return null;
+      const fresh = await gate(documentId, user);
+      return fresh.status === 'not_found' ? null : reader(fresh.identity);
+    }, { ...accessKey(c), documentId });
+  });
+
+  // ── Read: SSE stream (every document the caller owns) ──────────────
+  // `?scope=me` is the only scope. Same frames, filters and resume rules as
+  // the per-document stream; rows carry their documentId. Ownership is part
+  // of every read, so a deleted document's rows stop at once.
+  app.get('/api/events/stream', async (c) => {
+    const user = c.get('user');
+    if (c.req.query('scope') !== 'me') {
+      return c.json({ error: 'bad_request', message: 'scope must be "me"' }, 400);
     }
-    const filterParsed = validateEventFilters({
-      namespace: c.req.query('namespace'),
-      type: c.req.query('type'),
+    const parsed = parseStreamParams(c);
+    if (!parsed.ok) return c.json({ error: 'bad_request', message: parsed.message }, 400);
+    const { filters } = parsed;
+    // An agent follows its person's owner stream (lib/permissions.ts).
+    const ownerId = libraryOwnerId(user);
+    const reader = (afterId: number) =>
+      listOwnedEvents({ userId: ownerId, readerId: user.id, filters, afterId, limit: DEFAULT_EVENTS_PAGE_SIZE });
+    const subscribe = (wake: () => void) => subscribeOwnerWakes(ownerId, wake);
+    return runEventStream(
+      c,
+      parsed.resumeFrom,
+      subscribe,
+      reader,
+      async () => ((await stillSignedIn(c)) ? reader : null),
+      accessKey(c),
+    );
+  });
+}
+
+type StreamParams =
+  | { ok: true; filters: EventFilters; resumeFrom: number | null }
+  | { ok: false; message: string };
+
+function parseStreamParams(c: Context<{ Variables: AppVariables }>): StreamParams {
+  const sinceParsed = parseSince(c.req.query('since'));
+  if (!sinceParsed.ok) return { ok: false, message: 'since must be a non-negative integer id' };
+  const filterParsed = validateEventFilters({
+    namespace: c.req.query('namespace'),
+    type: c.req.query('type'),
+  });
+  if (!filterParsed.ok) return { ok: false, message: filterParsed.message };
+  // Last-Event-ID (EventSource reconnect) and ?since are both resume points;
+  // take the highest. A malformed Last-Event-ID is ignored rather than
+  // rejected — the browser sets it, not the caller.
+  let resumeFrom = sinceParsed.since;
+  const lastEventId = c.req.header('Last-Event-ID');
+  if (lastEventId !== undefined && /^\d{1,18}$/.test(lastEventId)) {
+    const n = Number(lastEventId);
+    resumeFrom = resumeFrom === null ? n : Math.max(resumeFrom, n);
+  }
+  return { ok: true, filters: filterParsed.filters, resumeFrom };
+}
+
+/** What a stream is found by when access changes (auth/revocation.ts). */
+function accessKey(c: Context<{ Variables: AppVariables }>): AccessKey {
+  const bearer = c.get('authMethod') === 'bearer' ? c.req.header('authorization') : undefined;
+  const key: AccessKey = { userId: c.get('user').id };
+  if (bearer?.startsWith('Bearer ')) {
+    key.credentialHash = createHash('sha256').update(bearer.slice('Bearer '.length).trim(), 'utf8').digest('hex');
+  }
+  return key;
+}
+
+type PageReader = (afterId: number) => Promise<ListEventsPage>;
+/** Opens a reader for one pass: re-checks access and returns a page reader,
+ *  or null when the caller may no longer read (the stream then closes). */
+type OpenReader = () => Promise<PageReader | null>;
+
+/** The shared SSE loop. It keeps one cursor — the last id sent — and on every
+ *  wake-up (a committed event write in the stream's scope) reads `id > cursor` to exhaustion.
+ *  Because ids follow commit order, that read is complete: a row can never
+ *  be skipped by arriving below the cursor, so the cursor, the SSE `id:` and
+ *  the client's Last-Event-ID are all safe resume points. Wake-ups that land
+ *  during a pass coalesce into one more pass. */
+function runEventStream(
+  c: Context<{ Variables: AppVariables }>,
+  resumeFrom: number | null,
+  subscribe: (wake: () => void) => () => void,
+  firstReader: PageReader,
+  open: OpenReader,
+  key: AccessKey,
+): Response | Promise<Response> {
+  const keepaliveMs = Number(process.env.EVENTS_SSE_KEEPALIVE_MS ?? 25_000);
+  return streamSSE(c, async (stream) => {
+    let closed = false;
+    let releaseHold: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseHold = resolve;
     });
-    if (!filterParsed.ok) {
-      return c.json({ error: 'bad_request', message: filterParsed.message }, 400);
-    }
+    let keepalive: ReturnType<typeof setInterval> | undefined;
+    let unsubscribe: () => void = () => {};
+    let unwatch: () => void = () => {};
 
-    // Last-Event-ID (EventSource reconnect) and ?since are both resume
-    // hints; take the highest. A malformed Last-Event-ID is ignored rather
-    // than rejected — the browser sets it, not the caller.
-    let resumeFrom: number | null = sinceParsed.since;
-    const lastEventId = c.req.header('Last-Event-ID');
-    if (lastEventId !== undefined && /^\d{1,18}$/.test(lastEventId)) {
-      const n = Number(lastEventId);
-      resumeFrom = resumeFrom === null ? n : Math.max(resumeFrom, n);
-    }
+    // Ends this connection from the server side. Never throws: it runs on
+    // error paths inside detached chains, where an escaping rejection would
+    // be unhandled — and an unhandled rejection exits the process.
+    const shutdown = async (): Promise<void> => {
+      if (closed) return;
+      closed = true;
+      clearInterval(keepalive);
+      unsubscribe();
+      unwatch();
+      releaseHold();
+      try {
+        await stream.close();
+      } catch {
+        // The client is already gone; nothing left to close.
+      }
+    };
 
-    // The connect-time identity serves only the resume backlog. Live rows are
-    // judged by the identity a fresh re-check returns for their own batch
-    // (see `recheck` and `drain` below), never by a shared mutable value a
-    // slower, older check could overwrite.
-    const connectIdentity = g.identity;
-    const filters = filterParsed.filters;
-    const keepaliveMs = Number(process.env.EVENTS_SSE_KEEPALIVE_MS ?? 25_000);
-
-    return streamSSE(c, async (stream) => {
-      let closed = false;
-      let releaseHold: () => void = () => {};
-      const held = new Promise<void>((resolve) => {
-        releaseHold = resolve;
-      });
-      // Ids already written to THIS connection. A set (rather than a
-      // highest-id watermark) so a LIVE row whose id is lower than one
-      // already sent — a late-committing concurrent writer, exactly the
-      // case the ordering contract warns about — is still delivered rather
-      // than silently dropped until the consumer's next overlap re-fetch.
-      // Out-of-order delivery is harmless: consumers interpret rows by id,
-      // never by arrival order, and duplicates are legal (EventSource's
-      // Last-Event-ID may regress past such a row; the reconnect replay
-      // that causes just re-delivers rows the consumer dedupes).
-      const sent = new Set<number>();
-
-      let keepalive: ReturnType<typeof setInterval> | undefined;
-      let unsubscribe: () => void = () => {};
-
-      // Ends this connection from the server side: stop the keepalive, drop
-      // the subscription, release the hold below, and close the response so
-      // the client sees the stream end. Never throws: it runs on error paths
-      // inside detached chains, where an escaping rejection would be
-      // unhandled — and an unhandled rejection exits the process.
-      const shutdown = async (): Promise<void> => {
-        if (closed) return;
-        closed = true;
-        clearInterval(keepalive);
-        unsubscribe();
-        releaseHold();
-        try {
-          await stream.close();
-        } catch {
-          // The client is already gone; nothing left to close.
-        }
-      };
-
-      // Re-runs the same access gate the connection passed at connect time.
-      // A stream lives as long as its connection, and keepalives hold that
-      // open indefinitely, so a reader whose access was taken away (removed
-      // collaborator, deleted document, a private doc they can no longer
-      // read) would otherwise keep receiving rows. On failure the stream is
-      // closed; on success the fresh identity replaces the old one, so an org
-      // reader who lost their collaborator row stops receiving rows that only
-      // collaborators may read. Fails CLOSED: if the check itself errors (a
-      // database failover, say), the stream is shut down rather than left
-      // open, and nothing is re-thrown. Returns the fresh identity rather than
-      // storing it: checks can finish out of order, so each caller uses only
-      // the answer to the check it started.
-      const recheck = async (): Promise<EventReadIdentity | null> => {
-        let fresh: Awaited<ReturnType<typeof gate>>;
-        try {
-          fresh = await gate(documentId, user.id);
-        } catch {
-          await shutdown();
-          return null;
-        }
-        if (fresh.status === 'not_found') {
-          await shutdown();
-          return null;
-        }
-        return fresh.identity;
-      };
-
-      const sendRow = async (row: EventRowDTO, identity: EventReadIdentity): Promise<void> => {
-        if (closed) return;
-        if (!eventMatchesFilters(row, filters)) return;
-        if (!identityMayReadEvent(row, identity)) return;
-        if (sent.has(row.id)) return;
-        sent.add(row.id);
-        await stream.writeSSE({ id: String(row.id), data: JSON.stringify(row) });
-      };
-
-      // Live rows go through one queue per connection, drained by a single
-      // loop. Each pass takes every row queued so far, runs ONE fresh access
-      // check — started after all of those rows arrived, so a check can never
-      // vouch for a row published after a removal — and then sends them in
-      // publish order. A burst of N rows therefore costs at most two checks
-      // per open stream rather than N (a writer controls the burst size), and
-      // rows are never reordered by checks finishing out of order. The batch
-      // is judged by the identity its own check returned, so a slower check
-      // that started earlier (the keepalive's, say) can never re-grant
-      // access part-way through a batch.
-      const liveQueue: EventRowDTO[] = [];
-      let draining = false;
-      const drain = async (): Promise<void> => {
-        if (draining) return;
-        draining = true;
-        try {
-          while (!closed && liveQueue.length > 0) {
-            const batch = liveQueue.splice(0);
-            const batchIdentity = await recheck();
-            if (batchIdentity === null) return;
-            for (const row of batch) await sendRow(row, batchIdentity);
+    let cursor = 0;
+    let started = false;
+    let pumping = false;
+    let again = false;
+    let nextReader: PageReader | null = firstReader;
+    const pump = async (): Promise<void> => {
+      if (pumping) {
+        again = true;
+        return;
+      }
+      pumping = true;
+      try {
+        do {
+          again = false;
+          const read = nextReader ?? (await open());
+          nextReader = null;
+          if (read === null) {
+            await shutdown();
+            return;
           }
-        } catch {
-          await shutdown();
-        } finally {
-          draining = false;
-        }
-      };
-      // The drain starts on a microtask: a POST publishes all its rows in one
-      // synchronous loop, so the whole POST lands in one batch and costs one
-      // check per open stream.
-      const enqueueLive = (row: EventRowDTO): void => {
-        if (closed) return;
-        liveQueue.push(row);
-        queueMicrotask(() => {
-          void drain();
-        });
-      };
+          for (;;) {
+            if (closed) return;
+            const page = await read(cursor);
+            for (const row of page.rows) {
+              if (closed) return;
+              await stream.writeSSE({ id: String(row.id), data: JSON.stringify(row) });
+              cursor = row.id;
+            }
+            if (page.nextPageToken === null) break;
+          }
+        } while (again && !closed);
+      } catch {
+        await shutdown();
+      } finally {
+        pumping = false;
+      }
+    };
 
-      // Live rows may arrive while the backlog query runs; hold them and
-      // queue them after the backlog (sendRow's id guard dedupes the overlap).
-      let backlogDone = false;
-      const pending: EventRowDTO[] = [];
-      unsubscribe = subscribeDocEvents(documentId, (row) => {
-        if (!backlogDone) {
-          pending.push(row);
+    stream.onAbort(() => {
+      closed = true;
+      clearInterval(keepalive);
+      unsubscribe();
+      unwatch();
+      releaseHold();
+    });
+
+    // Subscribe before fixing the start point so no commit falls between.
+    // A wake before the start point is fixed is covered by the first pass.
+    unsubscribe = subscribe(() => {
+      if (!closed && started) void pump();
+    });
+    try {
+      cursor = resumeFrom ?? (await latestEventId());
+    } catch {
+      await shutdown();
+      return;
+    }
+    // The client may have gone while the cursor was read (onAbort already ran);
+    // past here an interval would be installed that nothing clears.
+    if (closed) return;
+    started = true;
+
+    // The tick doubles as the access re-check, so a stream whose reader
+    // lost access is closed even when nothing is being written. It skips
+    // while a pass is running (that pass checks) and never overlaps itself.
+    let tickChecking = false;
+    const tick = async (): Promise<void> => {
+      if (closed || pumping || tickChecking) return;
+      tickChecking = true;
+      try {
+        if ((await open()) === null) {
+          await shutdown();
           return;
         }
-        enqueueLive(row);
-      });
-
-      // The tick doubles as the access re-check, so a stream whose reader
-      // lost access is closed even when no rows are being written (none can
-      // be, for a deleted document). It skips while a drain pass is already
-      // checking, and never overlaps itself.
-      let tickChecking = false;
-      const tick = async (): Promise<void> => {
-        if (closed || draining || tickChecking) return;
-        tickChecking = true;
-        try {
-          // The tick only needs ok / not-ok: it never hands its answer to
-          // row delivery.
-          if ((await recheck()) === null) return;
-          // SSE comment line — invisible to EventSource, resets idle timers.
-          if (!closed) await stream.write(`: keepalive\n\n`);
-        } catch {
-          await shutdown();
-        } finally {
-          tickChecking = false;
-        }
-      };
-      keepalive = setInterval(() => {
-        void tick();
-      }, keepaliveMs);
-
-      stream.onAbort(() => {
-        closed = true;
-        clearInterval(keepalive);
-        unsubscribe();
-        releaseHold();
-      });
-
-      // Backlog replay when resuming (Last-Event-ID / ?since). Paginate to
-      // exhaustion so a long-offline resume still catches up completely.
-      if (resumeFrom !== null) {
-        let afterId: number | null = resumeFrom;
-        for (;;) {
-          const page = await listEvents({
-            documentId,
-            identity: connectIdentity,
-            filters,
-            afterId,
-            limit: DEFAULT_EVENTS_PAGE_SIZE,
-          });
-          for (const row of page.rows) await sendRow(row, connectIdentity);
-          if (page.nextPageToken === null) break;
-          afterId = page.rows[page.rows.length - 1].id;
-        }
+        // SSE comment line — invisible to EventSource, resets idle timers.
+        if (!closed) await stream.write(`: keepalive\n\n`);
+      } catch {
+        await shutdown();
+      } finally {
+        tickChecking = false;
       }
-      backlogDone = true;
-      for (const row of pending.splice(0)) enqueueLive(row);
+    };
+    keepalive = setInterval(() => {
+      void tick();
+    }, keepaliveMs);
 
-      // Hold the stream open until the client goes away or a re-check
-      // closes it.
-      await held;
+    // A credential or access change rechecks now, independent of the tick
+    // and of a pass in flight (which stops writing once the stream closes).
+    unwatch = watchAccess(key, () => {
+      if (closed) return;
+      void open().then(
+        (read) => (read === null ? shutdown() : undefined),
+        () => shutdown(),
+      );
     });
+
+    // Catch up from the resume point (a no-op read when starting live).
+    await pump();
+    // Hold the stream open until the client goes away or a re-check closes it.
+    await held;
   });
 }

@@ -3,14 +3,14 @@
  * thread or reply posts to.
  *
  * /d/:docId has no version in the URL, so it means "the latest version as of
- * when I opened this". The version list now refreshes while the page is open
- * (see versionsPolling.ts), and resolving "latest" on every refresh would
+ * when I opened this". The version list refreshes while the page is open
+ * (a version.published event), and resolving "latest" on every refresh would
  * swap the iframe, the threads and the post target out from under a reader
  * mid-comment: a comment anchored on v4's text would be filed on v5. So the
  * page latches the version it resolved on first load and keeps it for that
  * navigation; only a new navigation (a new router location key — the
- * switcher, the "switch to latest" buttons, a link) re-resolves it. A newer
- * version that appears meanwhile only updates the switcher and the notice.
+ * switcher, the "switch to latest" buttons, a link, or followNewVersion
+ * below) re-resolves it.
  *
  * Pure so the policy is unit-testable without rendering the page.
  */
@@ -67,13 +67,33 @@ export function resolveViewedVersion<V extends NumberedVersion>(params: {
  *  and throw the draft away. The submit then hits the server's
  *  not_latest_version guard and the composer shows the error inline. New
  *  composers still can't open on a non-latest version, because the page
- *  only sets a pending anchor while the viewed version is latest. */
+ *  only sets a pending anchor while the viewed version is latest.
+ *
+ *  It IS gated on the anchor belonging to the viewed version: an anchor
+ *  captured on another version never shows (the page clears it one commit
+ *  after a version switch; this covers that commit). */
 export function composerPendingFrom<A>(params: {
-  pendingSelection: { anchor: A } | null;
-  pendingPick: { anchor: A } | null;
+  pendingSelection: { anchor: A; versionId: string } | null;
+  pendingPick: { anchor: A; versionId: string } | null;
+  viewedVersionId: string;
 }): { anchor: A; origin: 'selection' | 'pick' } | null {
-  const { pendingSelection, pendingPick } = params;
-  if (pendingSelection) return { anchor: pendingSelection.anchor, origin: 'selection' };
-  if (pendingPick) return { anchor: pendingPick.anchor, origin: 'pick' };
+  const { pendingSelection, pendingPick, viewedVersionId } = params;
+  if (pendingSelection) {
+    return pendingSelection.versionId === viewedVersionId ? { anchor: pendingSelection.anchor, origin: 'selection' } : null;
+  }
+  if (pendingPick) {
+    return pendingPick.versionId === viewedVersionId ? { anchor: pendingPick.anchor, origin: 'pick' } : null;
+  }
   return null;
+}
+
+/** Whether a newly published version should replace the view in place.
+ *  Only on /d/:docId (a URL naming a version is a deliberate pin), and only
+ *  while the reader has no unsent comment, reply or edit: a draft keeps the
+ *  page on its version and the "newer version" notice shows instead. */
+export function followNewVersion(params: {
+  requestedNumber: number | undefined;
+  hasUnsentDraft: boolean;
+}): boolean {
+  return params.requestedNumber === undefined && !params.hasUnsentDraft;
 }

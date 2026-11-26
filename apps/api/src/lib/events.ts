@@ -15,11 +15,15 @@
 // the owner sets through the collaborators API (`routes/collaborators.ts`);
 // Primer never reads a role, grant or permission out of a payload, so no page
 // can widen its own or anyone's access by submitting one.
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
+import type { AuthUser } from '../app.ts';
 import { db } from '../db/client.ts';
+import { actorNameOf } from './actors.ts';
 import {
   EVENT_NAMESPACE_RE,
+  EVENT_TYPE_FILTER_RE,
   EVENT_TYPE_RE,
+  PRIMER_EVENT_NAMESPACE,
   MAX_EVENT_NAMESPACE_LENGTH,
   MAX_EVENT_TYPE_LENGTH,
   MAX_EVENT_PAYLOAD_BYTES,
@@ -27,11 +31,14 @@ import {
   isEventAudience,
   type EventAudience,
   type EventRowDTO,
+  type PrimerEventPayloads,
+  type PrimerEventType,
+  type StoredEventAudience,
 } from '@polygonlabs/primer-api-types';
 import {
   canRead,
-  effectiveRole,
-  loadCollaboratorRole,
+  isSelfOrAgentOf,
+  loadEffectiveRole,
   type EffectiveRole,
   type Visibility,
 } from './permissions.ts';
@@ -63,26 +70,8 @@ export interface EventReadIdentity {
   userId: string;
   isOwner: boolean;
   isCollaborator: boolean;
-}
-
-/** Per-row read scope (issue #78, Audience table):
- *  - author:        the row's author + the document owner
- *  - collaborators: all authenticated document collaborators (owner included)
- *  - artifact:      same READERS as collaborators; additionally relayed into
- *                   the sandboxed artifact by the parent page (the relay —
- *                   not this function — is the injection boundary).
- *
- *  Commenters keep READ access to `collaborators`- and `artifact`-audience
- *  events (a deliberate requirement): consumers render the page from this
- *  data. Commenters lose event write only — see `canWriteEvents`. */
-export function identityMayReadEvent(
-  row: { audience: EventAudience; authorId: string },
-  identity: EventReadIdentity,
-): boolean {
-  if (row.audience === 'author') {
-    return identity.isOwner || row.authorId === identity.userId;
-  }
-  return identity.isOwner || identity.isCollaborator;
+  /** Agents are never handed their own `data.changed` (see notOwnDataChanged). */
+  isAgent: boolean;
 }
 
 // ───────────────────────── Access gate ─────────────────────────
@@ -123,23 +112,27 @@ export type EventAccessGate =
 /** Read gate: not_found (per existing route conventions) when the document
  *  doesn't exist, is deleted, or the caller can't see it at all. Returns the
  *  caller's read identity for per-row audience scoping. */
-export async function gateEventAccess(documentId: string, userId: string): Promise<EventAccessGate> {
+export async function gateEventAccess(documentId: string, actor: AuthUser): Promise<EventAccessGate> {
   const doc = await loadEventDocContext(documentId);
   if (!doc) return { status: 'not_found' };
-  const collabRole = await loadCollaboratorRole(documentId, userId);
-  const eff = effectiveRole(
-    { uploaderId: doc.uploaderId, visibility: doc.visibility },
-    userId,
-    collabRole,
-  );
+  const eff = await loadEffectiveRole(doc, actor);
   if (!canRead(doc.visibility, eff)) return { status: 'not_found' };
+  // An agent reads its person's documents as the owner does (every audience),
+  // though it acts there with at most editor rights.
+  const readsAsOwner =
+    eff === 'owner' ||
+    (actor.kind === 'agent' &&
+      actor.viaUserId !== null &&
+      (await loadEffectiveRole(doc, { id: actor.viaUserId, email: '', displayName: '', kind: 'person', viaUserId: null })) ===
+        'owner');
   return {
     status: 'ok',
     doc,
     identity: {
-      userId,
-      isOwner: eff === 'owner',
-      isCollaborator: collabRole !== null,
+      userId: actor.id,
+      isOwner: readsAsOwner,
+      isCollaborator: eff !== 'owner' && eff !== 'stranger',
+      isAgent: actor.kind === 'agent',
     },
     mayWrite: canWriteEvents(eff),
   };
@@ -160,6 +153,12 @@ export async function validateVersionFilter(
 }
 
 // ───────────────────────── Batch validation ─────────────────────────
+
+/** `primer` and everything beneath it belong to Primer's lifecycle events;
+ *  no client (page, REST or MCP) may write there. */
+function isReservedNamespace(namespace: string): boolean {
+  return namespace === PRIMER_EVENT_NAMESPACE || namespace.startsWith(`${PRIMER_EVENT_NAMESPACE}/`);
+}
 
 export interface ValidatedEvent {
   namespace: string;
@@ -210,6 +209,12 @@ export function validateEventBatch(raw: unknown): BatchValidation {
       return {
         ok: false,
         message: `events[${i}].namespace must be /-separated lowercase kebab segments (e.g. "example", "example/telemetry")`,
+      };
+    }
+    if (isReservedNamespace(e.namespace)) {
+      return {
+        ok: false,
+        message: `events[${i}].namespace "${PRIMER_EVENT_NAMESPACE}" is reserved for Primer's own events`,
       };
     }
     if (
@@ -284,7 +289,7 @@ interface EventDbRow {
   documentId: string;
   versionId: string | null;
   authorId: string;
-  audience: EventAudience;
+  audience: StoredEventAudience;
   namespace: string;
   type: string;
   payload: unknown;
@@ -314,29 +319,147 @@ const SELECT_COLUMNS = sql`
   created_at AS "createdAt"
 `;
 
-/** Inserts a validated batch in ONE transaction, in array order. Sequential
- *  inserts inside the transaction guarantee strictly increasing (not
- *  necessarily contiguous) ids in array order, and commit makes all rows
- *  visible together — the atomicity that lets a consumer split an oversized
- *  logical write across several events without losing all-or-nothing. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+interface EventInsert {
+  documentId: string;
+  versionId: string | null;
+  authorId: string;
+  audience: StoredEventAudience;
+  namespace: string;
+  type: string;
+  payloadJson: string;
+}
+
+// Every event write takes this transaction-scoped lock right before it draws
+// ids, and holds it until commit. Postgres releases it only after the commit
+// is visible, so the next writer draws higher ids strictly after this one is
+// readable: ids follow commit order and `id > N` never skips a row that
+// commits later. The lock serializes only the tail of each writing
+// transaction (the event inserts and the commit), which is why callers write
+// events last.
+export const EVENT_ORDER_LOCK_KEY = 7_201_948_211;
+
+/** Documents written to, with their owners: who to wake after commit. */
+type Touched = { documentId: string; ownerId: string }[];
+
+async function insertEventsLocked(
+  tx: Tx,
+  rows: EventInsert[],
+): Promise<{ rows: EventRowDTO[]; touched: Touched }> {
+  // Read before taking the lock, so the lock still covers only the inserts.
+  const docIds = [...new Set(rows.map((r) => r.documentId))];
+  // A document's owner stream is its uploader's and, when the uploader is an
+  // agent, its person's (a person owns what their agents create).
+  const touched = (await tx.execute(sql`
+    SELECT d.id AS "documentId", o.owner AS "ownerId"
+    FROM documents d
+    JOIN users u ON u.id = d.uploader_id
+    CROSS JOIN LATERAL (VALUES (d.uploader_id), (u.via_user_id)) AS o(owner)
+    WHERE d.id IN (${sql.join(docIds.map((id) => sql`${id}::uuid`), sql`, `)})
+      AND o.owner IS NOT NULL
+  `)) as unknown as Touched;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${EVENT_ORDER_LOCK_KEY})`);
+  const out: EventRowDTO[] = [];
+  for (const r of rows) {
+    const [row] = (await tx.execute(sql`
+      INSERT INTO events (document_id, version_id, author_id, audience, namespace, type, payload)
+      VALUES (${r.documentId}, ${r.versionId}, ${r.authorId}, ${r.audience},
+              ${r.namespace}, ${r.type}, ${r.payloadJson}::jsonb)
+      RETURNING ${SELECT_COLUMNS}
+    `)) as unknown as EventDbRow[];
+    out.push(rowToDTO(row));
+  }
+  return { rows: out, touched: [...touched] };
+}
+
+/** Inserts a validated batch in ONE transaction, in array order: strictly
+ *  increasing ids, all visible together at commit — the atomicity that lets
+ *  a consumer split an oversized logical write across several events without
+ *  losing all-or-nothing. Wakes open streams after commit. */
 export async function insertEventBatch(
   documentId: string,
   authorId: string,
   batch: ValidatedEvent[],
 ): Promise<EventRowDTO[]> {
-  return db.transaction(async (tx) => {
-    const rows: EventRowDTO[] = [];
-    for (const ev of batch) {
-      const [row] = (await tx.execute(sql`
-        INSERT INTO events (document_id, version_id, author_id, audience, namespace, type, payload)
-        VALUES (${documentId}, ${ev.versionId}, ${authorId}, ${ev.audience},
-                ${ev.namespace}, ${ev.type}, ${ev.payloadJson}::jsonb)
-        RETURNING ${SELECT_COLUMNS}
-      `)) as unknown as EventDbRow[];
-      rows.push(rowToDTO(row));
+  const { rows, touched } = await db.transaction((tx) =>
+    insertEventsLocked(
+      tx,
+      batch.map((ev) => ({
+        documentId,
+        versionId: ev.versionId,
+        authorId,
+        audience: ev.audience,
+        namespace: ev.namespace,
+        type: ev.type,
+        payloadJson: ev.payloadJson,
+      })),
+    ),
+  );
+  notifyEventsCommitted(touched);
+  return rows;
+}
+
+// ───────────────────────── Lifecycle events ─────────────────────────
+// Primer's own events (namespace `primer`, audience `readers`): written in the
+// same transaction as the change they describe, so a reader never sees the
+// change without its event or the event without the change.
+
+export interface LifecycleEvent<T extends PrimerEventType = PrimerEventType> {
+  documentId: string;
+  /** Provenance column (the version the event concerns), when there is one. */
+  versionId?: string;
+  /** Who caused it — the row's authorId. */
+  actorId: string;
+  type: T;
+  payload: PrimerEventPayloads[T];
+}
+
+export type EmitLifecycle = <T extends PrimerEventType>(event: LifecycleEvent<T>) => void;
+
+/** Runs `fn` in a transaction and writes the lifecycle events it emits at the
+ *  end of that same transaction (after everything `fn` wrote, so the
+ *  ordering lock is held only for the tail). Open streams are woken after
+ *  commit. Every lifecycle write goes through here. */
+export async function transactionWithEvents<T>(
+  fn: (tx: Tx, emit: EmitLifecycle) => Promise<T>,
+): Promise<T> {
+  let touched: Touched = [];
+  let emitted: LifecycleEvent[] = [];
+  const result = await db.transaction(async (tx) => {
+    emitted = [];
+    touched = [];
+    const value = await fn(tx, (event) => {
+      emitted.push(event as LifecycleEvent);
+    });
+    if (emitted.length > 0) {
+      ({ touched } = await insertEventsLocked(
+        tx,
+        emitted.map((e) => ({
+          documentId: e.documentId,
+          versionId: e.versionId ?? null,
+          authorId: e.actorId,
+          audience: 'readers',
+          namespace: PRIMER_EVENT_NAMESPACE,
+          type: e.type,
+          payloadJson: JSON.stringify(e.payload),
+        })),
+      ));
     }
-    return rows;
+    return value;
   });
+  notifyEventsCommitted(touched);
+  for (const handler of lifecycleHandlers) for (const event of emitted) handler(event);
+  return result;
+}
+
+const lifecycleHandlers = new Set<(event: LifecycleEvent) => void>();
+
+/** Runs after each lifecycle event commits (the live server relays some to
+ *  a document's open editors: live/instance.ts). */
+export function onLifecycleCommitted(handler: (event: LifecycleEvent) => void): () => void {
+  lifecycleHandlers.add(handler);
+  return () => lifecycleHandlers.delete(handler);
 }
 
 // ───────────────────────── Filters ─────────────────────────
@@ -367,7 +490,7 @@ export function validateEventFilters(query: {
     filters.namespace = query.namespace;
   }
   if (query.type !== undefined) {
-    if (query.type.length === 0 || query.type.length > MAX_EVENT_TYPE_LENGTH || !EVENT_TYPE_RE.test(query.type)) {
+    if (query.type.length === 0 || query.type.length > MAX_EVENT_TYPE_LENGTH || !EVENT_TYPE_FILTER_RE.test(query.type)) {
       return { ok: false, message: 'type must be a single lowercase kebab name' };
     }
     filters.type = query.type;
@@ -375,32 +498,11 @@ export function validateEventFilters(query: {
   return { ok: true, filters };
 }
 
-/** In-memory mirror of the SQL filter — used by the SSE fanout so live rows
- *  and backlog rows pass the same test. */
-export function eventMatchesFilters(
-  row: { namespace: string; type: string },
-  filters: EventFilters,
-): boolean {
-  if (filters.namespace !== undefined) {
-    if (filters.namespace.endsWith('/*')) {
-      const prefix = filters.namespace.slice(0, -2);
-      if (row.namespace !== prefix && !row.namespace.startsWith(`${prefix}/`)) return false;
-    } else if (row.namespace !== filters.namespace) {
-      return false;
-    }
-  }
-  if (filters.type !== undefined && row.type !== filters.type) return false;
-  return true;
-}
-
 // ───────────────────────── since / page tokens ─────────────────────────
 
-/** `since` is a fetch optimization, never a correctness boundary: ids are
- *  assigned before commit, so a row with a lower id can become visible after
- *  a higher id was already read (two writers committing out of assignment
- *  order). Consumers dedupe by id and either re-read with an overlap window
- *  or fetch the full filtered set — a late-committing lower id is picked up
- *  on a later poll, never silently skipped. */
+/** `since` is a complete resume point: ids follow commit order (see
+ *  EVENT_ORDER_LOCK_KEY), so every row committed after a read of `id > N`
+ *  has an id above everything that read returned. */
 export function parseSince(raw: string | undefined): { ok: true; since: number | null } | { ok: false } {
   if (raw === undefined) return { ok: true, since: null };
   if (!/^\d{1,18}$/.test(raw)) return { ok: false };
@@ -446,14 +548,16 @@ export interface ListEventsPage {
   nextPageToken: string | null;
 }
 
-/** One bounded page of ascending-id rows the caller's identity may read,
- *  plus an opaque next-page token when more remain. */
-export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> {
-  const { documentId, identity, filters, afterId, versionId, limit } = args;
+/** An agent is never handed the `data.changed` events it authored: its own
+ *  record writes must not wake it (records/changed.ts). A person keeps them,
+ *  so a second tab of the same person still refreshes. */
+function notOwnDataChanged(authorColumn: SQL, readerId: string, readerIsAgent: boolean): SQL {
+  if (!readerIsAgent) return sql`TRUE`;
+  return sql`NOT (namespace = ${PRIMER_EVENT_NAMESPACE} AND type = 'data.changed' AND ${authorColumn} = ${readerId})`;
+}
 
-  const conditions = [sql`document_id = ${documentId}`];
-  if (afterId !== null) conditions.push(sql`id > ${afterId}`);
-  if (versionId !== undefined) conditions.push(sql`version_id = ${versionId}`);
+function filterConditions(filters: EventFilters) {
+  const conditions = [];
   if (filters.namespace !== undefined) {
     if (filters.namespace.endsWith('/*')) {
       // Subtree form. The namespace regex admits only [a-z0-9-/], so the
@@ -465,14 +569,36 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
     }
   }
   if (filters.type !== undefined) conditions.push(sql`type = ${filters.type}`);
+  return conditions;
+}
+
+/** One bounded page of ascending-id rows the caller's identity may read,
+ *  plus an opaque next-page token when more remain. */
+export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> {
+  const { documentId, identity, filters, afterId, versionId, limit } = args;
+
+  const conditions = [sql`document_id = ${documentId}`, ...filterConditions(filters)];
+  if (afterId !== null) conditions.push(sql`id > ${afterId}`);
+  if (versionId !== undefined) conditions.push(sql`version_id = ${versionId}`);
 
   // Audience scope: exactly the rows this identity may read (issue #78
-  // security requirement 4). Mirrors identityMayReadEvent above.
+  // security requirement 4):
+  //  - readers:       everyone who passed the read gate (Primer's own rows)
+  //  - author:        the row's author + the document owner
+  //  - collaborators: all document collaborators (owner included)
+  //  - artifact:      same readers as collaborators; additionally relayed
+  //                   into the sandboxed artifact by the parent page (the
+  //                   relay is the injection boundary).
+  // Commenters keep READ access to collaborators- and artifact-audience rows
+  // (consumers render the page from them); they lose event write only.
   const tierReadable = identity.isOwner || identity.isCollaborator;
   conditions.push(sql`(
-    (audience = 'author' AND (author_id = ${identity.userId} OR ${identity.isOwner}))
+    audience = 'readers'
+    OR (audience = 'author' AND (author_id = ${identity.userId} OR ${identity.isOwner}))
     OR (audience IN ('collaborators', 'artifact') AND ${tierReadable})
   )`);
+
+  conditions.push(notOwnDataChanged(sql`author_id`, identity.userId, identity.isAgent));
 
   const where = sql.join(conditions, sql` AND `);
   // Fetch one extra row to learn whether another page exists.
@@ -492,36 +618,98 @@ export async function listEvents(args: ListEventsArgs): Promise<ListEventsPage> 
   };
 }
 
-// ───────────────────────── SSE fanout ─────────────────────────
-// In-process fanout for the stream endpoint. Fine for the current
-// single-node deployment; swap for Postgres LISTEN/NOTIFY if the API ever
-// scales out horizontally.
-
-export type DocEventListener = (row: EventRowDTO) => void;
-
-const listenersByDoc = new Map<string, Set<DocEventListener>>();
-
-export function subscribeDocEvents(documentId: string, listener: DocEventListener): () => void {
-  let set = listenersByDoc.get(documentId);
-  if (!set) {
-    set = new Set();
-    listenersByDoc.set(documentId, set);
-  }
-  set.add(listener);
-  return () => {
-    const current = listenersByDoc.get(documentId);
-    if (!current) return;
-    current.delete(listener);
-    if (current.size === 0) listenersByDoc.delete(documentId);
+/** One bounded page of ascending-id rows across every live document
+ *  `userId` owns, their agents' uploads included (owners read every audience
+ *  on their own documents). An agent passes its person (libraryOwnerId). The
+ *  ownership join runs on every read, so a deleted document drops out at
+ *  once. Backs `GET /api/events/stream?scope=me`. */
+export async function listOwnedEvents(args: {
+  userId: string;
+  /** Who reads (the agent itself, not its person): never handed its own
+   *  `data.changed`. Only agents follow this stream. */
+  readerId: string;
+  filters: EventFilters;
+  afterId: number;
+  limit: number;
+}): Promise<ListEventsPage> {
+  const { userId, readerId, filters, afterId, limit } = args;
+  const conditions = [
+    sql`e.id > ${afterId}`,
+    notOwnDataChanged(sql`e.author_id`, readerId, true),
+    isSelfOrAgentOf(sql`d.uploader_id`, userId),
+    sql`d.deleted_at IS NULL`,
+    ...filterConditions(filters),
+  ];
+  const rows = (await db.execute(sql`
+    SELECT e.id, e.document_id AS "documentId", e.version_id AS "versionId",
+           e.author_id AS "authorId", e.audience, e.namespace, e.type, e.payload,
+           e.created_at AS "createdAt"
+    FROM events e
+    JOIN documents d ON d.id = e.document_id
+    WHERE ${sql.join(conditions, sql` AND `)}
+    ORDER BY e.id ASC
+    LIMIT ${limit + 1}
+  `)) as unknown as EventDbRow[];
+  const page = rows.slice(0, limit).map(rowToDTO);
+  return {
+    rows: page,
+    nextPageToken: rows.length > limit && page.length > 0 ? encodePageToken(page[page.length - 1].id) : null,
   };
 }
 
-/** Called after a batch commits — rows are already visible, so every
- *  listener that re-reads sees at least what it is being pushed. */
-export function publishDocEvents(documentId: string, rows: EventRowDTO[]): void {
-  const set = listenersByDoc.get(documentId);
-  if (!set) return;
-  for (const listener of set) {
-    for (const row of rows) listener(row);
+/** The highest committed id: a stream opened without a resume point starts
+ *  after it. Anything committed later has a higher id. */
+export async function latestEventId(): Promise<number> {
+  const [row] = (await db.execute(sql`SELECT COALESCE(MAX(id), 0) AS id FROM events`)) as unknown as {
+    id: number | string;
+  }[];
+  return Number(row?.id ?? 0);
+}
+
+// ───────────────────────── Stream wake-ups ─────────────────────────
+// In-process wake-up for the stream endpoints. A wake carries no rows: each
+// open stream re-reads `id > <last id it sent>` from the database, and since
+// ids follow commit order that read is complete — a reader can never be
+// handed a higher id before a lower one is visible. Fine for the current
+// single-node deployment; swap for Postgres LISTEN/NOTIFY if the API ever
+// scales out horizontally. Wakes are targeted: a commit wakes only the
+// streams of the documents it wrote to and the owner-scoped streams of
+// those documents' owners, so one busy document never makes every open
+// stream re-query.
+
+type Wake = () => void;
+const wakesByDoc = new Map<string, Set<Wake>>();
+const wakesByOwner = new Map<string, Set<Wake>>();
+
+function addTo(map: Map<string, Set<Wake>>, key: string, wake: Wake): () => void {
+  let set = map.get(key);
+  if (!set) {
+    set = new Set();
+    map.set(key, set);
+  }
+  set.add(wake);
+  return () => {
+    const current = map.get(key);
+    if (!current) return;
+    current.delete(wake);
+    if (current.size === 0) map.delete(key);
+  };
+}
+
+/** Wake on commits that write to `documentId`. */
+export function subscribeDocWakes(documentId: string, wake: Wake): () => void {
+  return addTo(wakesByDoc, documentId, wake);
+}
+
+/** Wake on commits that write to any document `ownerId` owns. */
+export function subscribeOwnerWakes(ownerId: string, wake: Wake): () => void {
+  return addTo(wakesByOwner, ownerId, wake);
+}
+
+/** Called after a transaction that wrote events commits. */
+export function notifyEventsCommitted(touched: Touched): void {
+  for (const { documentId, ownerId } of touched) {
+    for (const wake of wakesByDoc.get(documentId) ?? []) wake();
+    for (const wake of wakesByOwner.get(ownerId) ?? []) wake();
   }
 }

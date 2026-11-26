@@ -15,11 +15,14 @@ function comment(over: Partial<CommentDTO> = {}): CommentDTO {
     threadId: 't-1',
     authorId: 'u1',
     authorDisplayName: 'Taylan Pince',
+    authorKind: 'person',
+    authorVia: null,
     body: 'looks good',
     createdAt: '2026-05-20T10:00:00.000Z',
     updatedAt: null,
     deletedAt: null,
     mentions: [],
+    reactions: [],
     ...over,
   };
 }
@@ -28,7 +31,10 @@ function thread(over: Partial<ThreadDTO> = {}): ThreadDTO {
   return {
     id: 't-' + Math.random().toString(36).slice(2, 8),
     versionId: 'v-1',
+    versionNumber: 1,
     anchor: { type: 'text-range', selectorText: 'hello world', prefix: 'say ', suffix: ' loud', containerPath: 'body > p' },
+    contextChanged: false,
+    orphaned: false,
     resolvedAt: null,
     resolvedBy: null,
     resolvedByDisplayName: null,

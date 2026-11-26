@@ -1,0 +1,12 @@
+/* Widget blocks (WidgetView.tsx): the SVG fills the column, its labels and
+   marks show they can be clicked, and parts with open threads are marked. */
+.primer-widget { width: 100%; margin: 4px 0; user-select: none; }
+.primer-widget-svg svg { display: block; width: 100%; height: auto; }
+.primer-widget-svg [data-text-id] { cursor: text; }
+.primer-widget-svg [data-text-id]:hover { text-decoration: underline dotted; }
+.primer-widget-svg [data-row][data-col], .primer-widget-svg [data-anchor] { cursor: pointer; }
+.primer-widget-svg .primer-widget-commented { filter: drop-shadow(0 0 2px #f59e0b) drop-shadow(0 0 1px #f59e0b); }
+.primer-widget-empty { padding: 24px; border: 1px dashed #a3a3a3; border-radius: 8px; color: #737373; font-size: 13px; text-align: center; }
+.primer-widget-threads { margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.primer-widget-threads li { display: flex; gap: 8px; padding: 2px 0; }
+.primer-widget-thread-anchor { font-weight: 600; color: #b45309; }

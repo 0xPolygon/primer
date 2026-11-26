@@ -1,3 +1,4 @@
+import { t } from '../i18n/index.ts';
 import {
   createContext,
   useContext,
@@ -158,7 +159,7 @@ export function BottomSheet({
         }}
         role="dialog"
         aria-modal={snap === 'expanded'}
-        aria-label="Comments"
+        aria-label={t('bottomSheet.comments')}
       >
         <button
           type="button"
@@ -169,7 +170,7 @@ export function BottomSheet({
           onPointerCancel={onPointerCancel}
           style={{ touchAction: 'none', height: `${HANDLE_PX}px` }}
           className="flex shrink-0 items-center justify-center gap-3 border-b border-neutral-200 px-3 text-xs text-neutral-700 dark:border-neutral-800 dark:text-neutral-300"
-          aria-label="Drag to resize comments panel"
+          aria-label={t('bottomSheet.dragToResize')}
         >
           <span
             aria-hidden

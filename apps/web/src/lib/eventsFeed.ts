@@ -11,15 +11,15 @@
  *
  *  - every stream event carries an SSE `id:` equal to the row id, so
  *    EventSource's native reconnect resumes via Last-Event-ID;
- *  - on reconnect-after-error and on page-visibility regain — or any doubt
- *    — we re-hydrate the FULL visible list (the "fetch the full filtered
- *    set" arm of the ordering contract) and re-relay anything missed. A
- *    fixed overlap window would silently skip a row that committed more
- *    than the window below the frontier while we were disconnected; the
- *    contract says never silently skipped, unconditionally, so the refresh
- *    is unconditional too. The seen-set makes re-hydrates cheap to relay
- *    (only unseen rows dispatch) and the pagination keeps them a handful of
- *    sequential reads even at hundreds of events;
+ *  - the stream always opens with an explicit `?since=<highest id seen>`,
+ *    `since=0` when the hydrate found nothing or failed. Without it the
+ *    server starts at its latest id when the connection is set up, and a
+ *    row committed between our hydrate and that moment would never arrive;
+ *  - on every successful open (the first one and each reconnect) and on
+ *    page-visibility regain — or any doubt — we re-read everything after
+ *    the highest id seen, re-relay anything missed and tell the page to
+ *    resync. Ids follow commit order, so that read is complete: no row can
+ *    commit below an id already seen;
  *  - duplicates and overlaps are legal by design (this module suppresses
  *    them by id as a courtesy; artifact code must dedupe by id anyway).
  *
@@ -30,13 +30,16 @@
  * DI-friendly by construction (fetch, EventSource, and timers injected) so
  * the whole engine is testable without a browser.
  */
-import type { EventRowDTO, EventsListResponse } from '@polygonlabs/primer-api-types';
+import { PRIMER_EVENT_NAMESPACE, type EventRowDTO, type EventsListResponse } from '@polygonlabs/primer-api-types';
 
 /** Minimal slice of EventSource this engine needs. */
 export interface EventSourceLike {
   onmessage: ((ev: { data: string; lastEventId?: string }) => void) | null;
   onopen: ((ev: unknown) => void) | null;
   onerror: ((ev: unknown) => void) | null;
+  /** EventSource's readyState: 2 (CLOSED) after an error means it gave up
+   *  (a non-200 reply, e.g. a 502 during a rollout) and will not reconnect. */
+  readonly readyState?: number;
   close(): void;
 }
 
@@ -44,6 +47,13 @@ export interface EventsFeedOptions {
   documentId: string;
   /** Receives coalesced batches of `artifact`-audience rows, ascending id. */
   onBatch: (rows: EventRowDTO[]) => void;
+  /** Receives Primer's own lifecycle rows (namespace `primer`: comments,
+   *  threads, versions, runs) as the stream delivers them. They
+   *  are page notifications and are never relayed into the artifact. */
+  onDocChange?: (row: EventRowDTO) => void;
+  /** Called after every re-hydrate (each stream open, visibility regain):
+   *  anything the page shows may have changed before the stream was up. */
+  onResync?: () => void;
   /** Same-origin fetch (cookie-authed); inject `api` from lib/fetch.ts. */
   fetchImpl: (url: string) => Promise<Response>;
   /** EventSource factory; inject `(url) => new EventSource(url)`. */
@@ -58,11 +68,14 @@ export interface EventsFeed {
   /** Hydrates the list (one relay batch), then subscribes to the stream. */
   start(): Promise<void>;
   stop(): void;
-  /** Call on page-visibility regain (or any doubt): full re-hydrate. */
+  /** Call on page-visibility regain (or any doubt): full re-hydrate. Not limited
+   *  to ids above the highest seen: rows that became readable after an access
+   *  change sit below it. The seen-set drops what was already relayed. */
   refresh(): Promise<void>;
 }
 
 const DEFAULT_COALESCE_MS = 25;
+const MAX_RECONNECT_MS = 30_000;
 
 /** Browser glue: adapts a real EventSource to the injectable interface
  *  (the native handler-property types don't structurally match the minimal
@@ -73,6 +86,9 @@ export function browserEventSourceFactory(url: string): EventSourceLike {
     onmessage: null,
     onopen: null,
     onerror: null,
+    get readyState() {
+      return es.readyState;
+    },
     close: () => es.close(),
   };
   es.onmessage = (ev) => like.onmessage?.({ data: String(ev.data), lastEventId: ev.lastEventId });
@@ -85,6 +101,8 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
   const {
     documentId,
     onBatch,
+    onDocChange,
+    onResync,
     fetchImpl,
     eventSourceFactory,
     coalesceMs = DEFAULT_COALESCE_MS,
@@ -97,12 +115,11 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
   /** Ids already relayed — the courtesy dedupe. */
   const seen = new Set<number>();
   let highestSeen = 0;
-  /** True once the initial hydrate ran; later `onopen`s trigger re-fetches. */
-  let hydrated = false;
-  let sawError = false;
 
   let pending: EventRowDTO[] = [];
   let flushHandle: unknown = null;
+  let reconnectHandle: unknown = null;
+  let reconnectAttempts = 0;
 
   function relay(rows: EventRowDTO[]): void {
     const fresh = rows
@@ -152,27 +169,27 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
     relay(rows); // one batch — a (re-)fetch arrives as a single dispatch
   }
 
-  async function refresh(): Promise<void> {
+  async function resync(full: boolean): Promise<void> {
     if (stopped) return;
-    // FULL re-hydrate — no since, no window. While disconnected (or
-    // suspended without a recorded error), a late-committing row can land
-    // arbitrarily far below the highest id we've seen; any bounded overlap
-    // window would silently skip it, and the ordering contract forbids
-    // that unconditionally. The seen-set dedupe means only genuinely
-    // missed rows produce a dispatch.
+    // A reconnect reads everything after the highest id seen: ids follow
+    // commit order, so nothing missed while disconnected can sit below it.
+    // A visibility regain reads it all (see `refresh`).
     try {
-      await hydrate(null);
+      await hydrate(full ? null : highestSeen);
     } catch {
       // Best-effort: the stream (or the next refresh) will catch us up.
     }
+    if (!stopped) onResync?.();
   }
+
+  const refresh = () => resync(true);
 
   function subscribe(): void {
     if (stopped) return;
-    const params = new URLSearchParams();
-    if (highestSeen > 0) params.set('since', String(highestSeen));
-    const qs = params.size > 0 ? `?${params.toString()}` : '';
-    source = eventSourceFactory(`/api/documents/${documentId}/events/stream${qs}`);
+    // Always explicit, 0 included: with no `since` the server starts from
+    // its latest id at connection time and skips anything committed since
+    // our hydrate.
+    source = eventSourceFactory(`/api/documents/${documentId}/events/stream?since=${highestSeen}`);
     source.onmessage = (ev) => {
       let row: EventRowDTO;
       try {
@@ -181,19 +198,30 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
         return;
       }
       if (typeof row?.id !== 'number') return;
+      if (row.namespace === PRIMER_EVENT_NAMESPACE) onDocChange?.(row);
       pending.push(row);
       scheduleFlush();
     };
-    source.onerror = () => {
-      // EventSource reconnects on its own (with Last-Event-ID). We just
-      // remember to re-hydrate in full once it comes back.
-      sawError = true;
-    };
+    // EventSource reconnects on its own (with Last-Event-ID). Every open,
+    // the first included, re-reads and resyncs: the page's own queries (and
+    // a failed initial hydrate) predate the stream.
     source.onopen = () => {
-      if (hydrated && sawError) {
-        sawError = false;
-        void refresh();
-      }
+      reconnectAttempts = 0;
+      void resync(false);
+    };
+    // A native EventSource retries a dropped connection but gives up on a
+    // non-200 reply; recreate it then, from the highest id seen, with backoff.
+    source.onerror = () => {
+      const failed = source;
+      if (stopped || failed === null || failed.readyState !== 2) return;
+      failed.close();
+      source = null;
+      if (reconnectHandle !== null) return;
+      const delay = Math.min(MAX_RECONNECT_MS, 1000 * 2 ** reconnectAttempts++);
+      reconnectHandle = setTimeoutImpl(() => {
+        reconnectHandle = null;
+        subscribe();
+      }, delay);
     };
   }
 
@@ -202,11 +230,10 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
       try {
         await hydrate(null);
       } catch {
-        // Initial hydrate failed (transient network?) — the stream +
-        // visibility refreshes still converge; artifact state is a fold, so
-        // late delivery is correctness-preserving.
+        // Initial hydrate failed (transient network?) — the stream opens
+        // with since=0 and its first open re-hydrates; artifact state is a
+        // fold, so late delivery is correctness-preserving.
       }
-      hydrated = true;
       subscribe();
     },
     stop(): void {
@@ -216,6 +243,10 @@ export function createEventsFeed(opts: EventsFeedOptions): EventsFeed {
         flushHandle = null;
       }
       pending = [];
+      if (reconnectHandle !== null) {
+        clearTimeoutImpl(reconnectHandle);
+        reconnectHandle = null;
+      }
       source?.close();
       source = null;
     },

@@ -9,14 +9,15 @@ import { Histogram } from '../components/admin/Histogram.tsx';
 import { StackedBar } from '../components/admin/StackedBar.tsx';
 import { Sparkline } from '../components/admin/Sparkline.tsx';
 import { formatBytes } from '../components/admin/chartGeom.ts';
+import { t } from '../i18n/index.ts';
 
 const METRICS: { key: 'users' | 'documents' | 'versions' | 'threads' | 'comments' | 'documentViews'; label: string }[] = [
-  { key: 'users',         label: 'Users' },
-  { key: 'documents',     label: 'Documents' },
-  { key: 'versions',      label: 'Versions' },
-  { key: 'threads',       label: 'Threads' },
-  { key: 'comments',      label: 'Comments' },
-  { key: 'documentViews', label: 'Document views' },
+  { key: 'users',         label: t('admin.metricUsers') },
+  { key: 'documents',     label: t('admin.metricDocuments') },
+  { key: 'versions',      label: t('admin.metricVersions') },
+  { key: 'threads',       label: t('admin.metricThreads') },
+  { key: 'comments',      label: t('admin.metricComments') },
+  { key: 'documentViews', label: t('admin.metricDocumentViews') },
 ];
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -44,21 +45,21 @@ export function AdminPage() {
     <DesktopOnly>
       <div className="mx-auto max-w-[1100px] space-y-6">
         <header className="border-b border-neutral-200 pb-3 dark:border-neutral-800">
-          <h1 className="text-2xl font-semibold">Admin</h1>
+          <h1 className="text-2xl font-semibold">{t('admin.title')}</h1>
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            Primer usage over the last 30 days. Read-only.
+            {t('admin.subtitle')}
           </p>
         </header>
 
         {q.error && (
           <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
-            Couldn't load stats — {(q.error as Error).message}.{' '}
+            {t('admin.loadFailed', { message: (q.error as Error).message })}{' '}
             <button
               type="button"
               onClick={() => q.refetch()}
               className="underline hover:no-underline"
             >
-              Retry
+              {t('admin.retry')}
             </button>
           </div>
         )}
@@ -74,29 +75,29 @@ export function AdminPage() {
 
         {q.data && (
           <>
-            <Section title="Adoption">
+            <Section title={t('admin.sectionAdoption')}>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <Card title="Content created per day">
+                <Card title={t('admin.cardContentCreatedPerDay')}>
                   <AreaChart data={q.data.adoption.createdPerDay} />
                 </Card>
-                <Card title="Daily active users">
+                <Card title={t('admin.cardDailyActiveUsers')}>
                   <LineChart
                     data={q.data.adoption.activeUsersPerDay}
-                    ariaLabel="Daily active users"
+                    ariaLabel={t('admin.dailyActiveUsersAria')}
                   />
                 </Card>
-                <Card title="Cumulative users">
+                <Card title={t('admin.cardCumulativeUsers')}>
                   <LineChart
                     data={q.data.adoption.cumulativeUsers}
-                    ariaLabel="Cumulative users"
+                    ariaLabel={t('admin.cumulativeUsersAria')}
                   />
                 </Card>
               </div>
             </Section>
 
-            <Section title="Engagement">
+            <Section title={t('admin.sectionEngagement')}>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <Card title="Top 10 documents by viewers">
+                <Card title={t('admin.cardTopDocuments')}>
                   <BarList
                     items={q.data.engagement.topDocumentsByViewers.map((d, i) => ({
                       key: String(i),
@@ -105,7 +106,7 @@ export function AdminPage() {
                     }))}
                   />
                 </Card>
-                <Card title="Top 10 commenters (last 30d)">
+                <Card title={t('admin.cardTopCommenters')}>
                   <BarList
                     items={q.data.engagement.topCommenters.map((c, i) => ({
                       key: String(i),
@@ -115,27 +116,27 @@ export function AdminPage() {
                   />
                 </Card>
                 <div className="md:col-span-2">
-                  <Card title="Distribution: viewers per document">
+                  <Card title={t('admin.cardViewersDistribution')}>
                     <Histogram buckets={q.data.engagement.viewersPerDocHistogram} />
                   </Card>
                 </div>
               </div>
             </Section>
 
-            <Section title="Operational">
+            <Section title={t('admin.sectionOperational')}>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <Card title="Storage used (cumulative)">
+                <Card title={t('admin.cardStorageUsed')}>
                   <LineChart
                     data={q.data.operational.storageBytesPerDay}
-                    ariaLabel="Storage used"
+                    ariaLabel={t('admin.storageUsedAria')}
                     formatY={formatBytes}
                   />
                 </Card>
-                <Card title="Threads opened vs resolved">
+                <Card title={t('admin.cardThreadsOpenedVsResolved')}>
                   <StackedBar data={q.data.operational.threadsOpenedVsResolved} />
                 </Card>
                 <div className="md:col-span-2">
-                  <Card title="Open threads aging > 14 days">
+                  <Card title={t('admin.cardOpenThreadsAging')}>
                     <div className="flex items-center gap-4">
                       <div className="text-4xl font-semibold tabular-nums text-neutral-900 dark:text-neutral-100">
                         {q.data.operational.openThreadsAgingOver14d.count.toLocaleString()}

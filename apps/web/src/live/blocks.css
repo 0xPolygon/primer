@@ -1,0 +1,318 @@
+/* Primer's own blocks in the live editor: choices and tasks. */
+.primer-choice {
+  border: 1px solid var(--primer-block-border, #d4d4d8);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 4px 0;
+  background: var(--primer-block-bg, transparent);
+}
+.primer-choice[data-decided='true'] {
+  border-color: #16a34a;
+}
+.primer-choice-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.primer-choice-badge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6366f1;
+}
+.primer-choice[data-decided='true'] .primer-choice-badge {
+  color: #16a34a;
+}
+.primer-choice-question {
+  flex: 1;
+  font-weight: 600;
+  font-size: 15px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+}
+.primer-choice-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.primer-choice-option[data-chosen='true'] {
+  background: rgba(22, 163, 74, 0.12);
+}
+.primer-choice-option-body {
+  flex: 1;
+  min-width: 0;
+}
+.primer-choice-vote-button {
+  min-width: 44px;
+  font-size: 12px;
+  border: 1px solid #d4d4d8;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-top: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.primer-choice-vote-button[aria-pressed='true'] {
+  border-color: #6366f1;
+  color: #6366f1;
+}
+.primer-choice-vote-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.primer-choice-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+.primer-choice-foot button {
+  font-size: 12px;
+  border: 1px solid #d4d4d8;
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.primer-choice-pick {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+.primer-choice-pick label {
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+.primer-choice-pick textarea,
+.primer-choice-pick select {
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid #d4d4d8;
+  border-radius: 4px;
+  padding: 4px;
+  background: transparent;
+  color: inherit;
+}
+.primer-choice-pick-actions {
+  display: flex;
+  gap: 6px;
+}
+.primer-choice-meta,
+.primer-register-meta {
+  color: #71717a;
+  font-size: 12px;
+}
+.primer-choice-proposal {
+  color: #71717a;
+}
+.primer-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.primer-task-title {
+  flex: 1;
+  min-width: 0;
+}
+.primer-task[data-status='done'] .primer-task-title {
+  text-decoration: line-through;
+  color: #71717a;
+}
+.primer-task-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #71717a;
+}
+.primer-task-meta select,
+.primer-task-meta input {
+  font-size: 12px;
+  border: 1px solid #d4d4d8;
+  border-radius: 4px;
+  padding: 1px 4px;
+  background: transparent;
+  color: inherit;
+}
+.primer-task-progress {
+  font-style: italic;
+  color: #6366f1;
+}
+.primer-register {
+  padding: 12px;
+  font-size: 13px;
+}
+.primer-register-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.primer-register ol {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  padding: 0;
+}
+.primer-register li[data-status] {
+  border-left: 3px solid #a1a1aa;
+  padding-left: 8px;
+}
+.primer-register li[data-status='decided'] {
+  border-left-color: #16a34a;
+}
+.primer-register-question {
+  font-weight: 600;
+}
+.primer-register ul {
+  padding-left: 16px;
+  list-style: disc;
+}
+
+/* The page-text overlay sits exactly over the element it edits. */
+.primer-overlay .bn-editor {
+  padding-inline: 8px;
+  padding-block: 4px;
+}
+
+/* Callouts, columns and embeds. Tints are translucent so they read in light and dark. */
+.primer-callout {
+  --callout: #6366f1;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin: 2px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--callout);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--callout) 12%, transparent);
+}
+.primer-callout[data-primer-callout='warning'] { --callout: #d97706; }
+.primer-callout[data-primer-callout='success'] { --callout: #16a34a; }
+.primer-callout[data-primer-callout='note'] { --callout: #71717a; }
+.primer-callout-icon select,
+.primer-callout-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--callout);
+  background: transparent;
+  border: none;
+  white-space: nowrap;
+}
+.primer-callout-body {
+  flex: 1;
+  min-width: 0;
+}
+.primer-columns {
+  width: 100%;
+}
+.primer-columns-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.primer-column {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.primer-columns-add {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #71717a;
+  background: transparent;
+  border: 1px dashed #d4d4d8;
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.primer-embed {
+  width: 100%;
+  margin: 2px 0;
+}
+.primer-embed-card {
+  display: flex;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid var(--primer-block-border, #d4d4d8);
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+.primer-embed-card:hover {
+  background: rgba(99, 102, 241, 0.06);
+}
+.primer-embed-image {
+  width: 120px;
+  flex: none;
+  object-fit: cover;
+}
+.primer-embed-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 12px;
+}
+.primer-embed-title {
+  font-weight: 600;
+}
+.primer-embed-description {
+  font-size: 13px;
+  color: #71717a;
+  overflow-wrap: anywhere;
+}
+.primer-embed-site {
+  font-size: 11px;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.primer-embed-note {
+  font-size: 12px;
+  color: #71717a;
+}
+.primer-embed-change {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #71717a;
+  background: transparent;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.primer-embed-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.primer-embed-form input {
+  flex: 1;
+  border: 1px solid #d4d4d8;
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  color: inherit;
+}
+.primer-embed-form button {
+  border: 1px solid #d4d4d8;
+  border-radius: 4px;
+  padding: 4px 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+@media (max-width: 640px) {
+  .primer-columns-row { flex-direction: column; }
+}

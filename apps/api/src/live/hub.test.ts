@@ -1,0 +1,409 @@
+// Live sync end to end: a real Hocuspocus provider over a real WebSocket to
+// the hub on an in-test HTTP server, authenticated by Primer's resolvers.
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as Y from 'yjs';
+import { sql } from 'drizzle-orm';
+import { v7 as uuidv7 } from 'uuid';
+import { HocuspocusProvider } from '@hocuspocus/provider';
+import { db } from '../db/client.ts';
+import { apiTokens, documentCollaborators, users } from '../db/schema.ts';
+import { createApp } from '../app.ts';
+import { makeBearerResolver, composeResolvers } from '../auth/bearer.ts';
+import { makeOktaResolver, mockMultiResolver, type UserResolver } from '../auth/resolver.ts';
+import { createSession } from '../auth/session.ts';
+import { generateToken } from '../auth/tokens.ts';
+import { FilesystemStorage } from '../storage/filesystem.ts';
+import { NoopNotifier } from '../notifications/notifier.ts';
+import { asUser } from '../test/harness.ts';
+import { createHub, CLOSE_FORBIDDEN, CLOSE_SAVE_FAILED, MAX_MESSAGE_BYTES, type Hub } from './hub.ts';
+import { MAX_AWARENESS_BYTES, MAX_AWARENESS_CLIENTS } from './instance.ts';
+import { loadYDoc } from './persist.ts';
+import { createLiveDoc } from './live.testlib.ts';
+
+const APP_ORIGIN = 'http://app.test';
+const OWNER = 'mock-user-1';
+const OTHER = 'collab-user';
+
+// Bearer tokens, real sessions, and the test persona header (only when sent,
+// so a logged-out session doesn't fall back to a default persona).
+const resolver: UserResolver = composeResolvers(
+  makeBearerResolver(),
+  makeOktaResolver({ cookieName: 'primer_sid' }),
+  async (c) => (c.req.header('x-mock-user-id') ? mockMultiResolver(c) : null),
+);
+
+let server: Server;
+let hub: Hub;
+let url: string;
+const open: HocuspocusProvider[] = [];
+
+beforeAll(async () => {
+  hub = createHub({ resolver, appOrigin: APP_ORIGIN });
+  server = createServer();
+  server.on('upgrade', hub.handleUpgrade);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}/collab`;
+});
+
+afterEach(() => {
+  for (const provider of open.splice(0)) provider.destroy();
+});
+
+afterAll(async () => {
+  hub.close();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const asPerson = (userId: string, origin = APP_ORIGIN) => ({ 'x-mock-user-id': userId, origin });
+
+type Client = { provider: HocuspocusProvider; doc: Y.Doc; outcome: 'synced' | 'denied'; closed: Promise<number> };
+
+/** Opens a provider with these upgrade headers; resolves once it synced or was denied. */
+async function connect(documentId: string, headers: Record<string, string>, clientId?: number): Promise<Client> {
+  class HeaderWebSocket extends WebSocket {
+    constructor(target: string | URL) {
+      super(target, { headers } as never);
+    }
+  }
+  const doc = new Y.Doc();
+  if (clientId !== undefined) doc.clientID = clientId;
+  let onClosed!: (code: number) => void;
+  const closed = new Promise<number>((resolve) => (onClosed = resolve));
+  const provider = new HocuspocusProvider({
+    url,
+    name: `doc:${documentId}`,
+    document: doc,
+    WebSocketPolyfill: HeaderWebSocket,
+    maxAttempts: 1,
+  } as ConstructorParameters<typeof HocuspocusProvider>[0]);
+  open.push(provider);
+  provider.on('close', ({ event }: { event: { code: number } }) => onClosed(event.code));
+  const outcome = await new Promise<'synced' | 'denied'>((resolve) => {
+    provider.on('synced', () => resolve('synced'));
+    provider.on('authenticationFailed', () => resolve('denied'));
+  });
+  return { provider, doc, outcome, closed };
+}
+
+/** Rows stored for this document by `actorId`. */
+async function storedBy(documentId: string, actorId: string): Promise<number> {
+  const [row] = (await db.execute(sql`
+    SELECT count(*)::int AS n FROM doc_updates WHERE document_id = ${documentId} AND actor_id = ${actorId}
+  `)) as unknown as { n: number }[];
+  return row!.n;
+}
+
+async function until(check: () => Promise<boolean>, ms = 3000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error('timed out');
+    await sleep(20);
+  }
+}
+
+/** Whether the upgrade is accepted, using a bare WebSocket. */
+function upgradeAccepted(headers: Record<string, string>): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new WebSocket(url, { headers } as never);
+    socket.onopen = () => {
+      socket.close();
+      resolve(true);
+    };
+    socket.onerror = () => resolve(false);
+  });
+}
+
+async function makeApp() {
+  return createApp({
+    storage: new FilesystemStorage(await mkdtemp(join(tmpdir(), 'primer-hub-'))),
+    notifier: new NoopNotifier(),
+    userResolver: resolver,
+  });
+}
+
+async function addCollaborator(documentId: string, userId: string, role: 'commenter' | 'editor') {
+  await db.insert(users).values({ id: userId, email: `${userId}@example.com`, displayName: userId }).onConflictDoNothing();
+  await db.insert(documentCollaborators).values({ id: uuidv7(), documentId, userId, role, grantedBy: OWNER });
+}
+
+describe('live hub', () => {
+  it('editor syncs and the update persists', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const client = await connect(id, asPerson(OWNER));
+    expect(client.outcome).toBe('synced');
+
+    client.doc.getMap('meta').set('title', 'Hello');
+    await until(async () => (await storedBy(id, OWNER)) > 0);
+
+    const { doc } = await loadYDoc(id);
+    expect(doc.getMap('meta').get('title')).toBe('Hello');
+  });
+
+  it('commenter connection is read-only', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    await addCollaborator(id, OTHER, 'commenter');
+    const client = await connect(id, asPerson(OTHER));
+    expect(client.outcome).toBe('synced');
+
+    client.doc.getMap('meta').set('title', 'Not mine to change');
+    await sleep(300);
+
+    expect(await storedBy(id, OTHER)).toBe(0);
+    expect((await loadYDoc(id)).doc.getMap('meta').get('title')).toBeUndefined();
+  });
+
+  it('rejects cookie auth from a foreign Origin', async () => {
+    expect(await upgradeAccepted(asPerson(OWNER, 'https://evil.example'))).toBe(false);
+    expect(await upgradeAccepted({ 'x-mock-user-id': OWNER })).toBe(false);
+    expect(await upgradeAccepted(asPerson(OWNER))).toBe(true);
+  });
+
+  it('refuses a malformed upgrade target without throwing', () => {
+    for (const target of ['//', 'http://[', 'http://a:99999/', '/collab/../x']) {
+      let destroyed = false;
+      const socket = { destroy: () => void (destroyed = true) };
+      expect(() => hub.handleUpgrade({ url: target } as never, socket as never, Buffer.alloc(0))).not.toThrow();
+      expect(destroyed).toBe(true);
+    }
+  });
+
+  it('bearer connections are read-only', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const { token, tokenHash, tokenPrefix } = generateToken();
+    await db.insert(apiTokens).values({ id: uuidv7(), userId: OWNER, name: 'test', tokenHash, tokenPrefix });
+
+    // No Origin needed: a bearer token is not a browser credential.
+    const client = await connect(id, { authorization: `Bearer ${token}` });
+    expect(client.outcome).toBe('synced');
+
+    client.doc.getMap('meta').set('title', 'Through the socket');
+    await sleep(300);
+    expect(await storedBy(id, OWNER)).toBe(0);
+  });
+
+  it('closes connections when access is revoked', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    await addCollaborator(id, OTHER, 'editor');
+    const client = await connect(id, asPerson(OTHER));
+    expect(client.outcome).toBe('synced');
+    client.doc.getMap('meta').set('before', 1);
+    await until(async () => (await storedBy(id, OTHER)) === 1);
+
+    const app = await makeApp();
+    const res = await app.request(`/api/documents/${id}/collaborators/${OTHER}`, { method: 'DELETE', headers: asUser(OWNER) });
+    expect(res.status).toBeLessThan(300);
+
+    expect(await client.closed).toBe(CLOSE_FORBIDDEN);
+    client.doc.getMap('meta').set('after', 1);
+    await sleep(300);
+    expect(await storedBy(id, OTHER)).toBe(1);
+  });
+
+  it('save failure closes with save_failed', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const client = await connect(id, asPerson(OWNER));
+    expect(client.outcome).toBe('synced');
+
+    await db.execute(sql`
+      CREATE FUNCTION primer_test_refuse_update() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'simulated storage failure'; END $$ LANGUAGE plpgsql
+    `);
+    await db.execute(sql`
+      CREATE TRIGGER primer_test_refuse_update BEFORE INSERT ON doc_updates
+      FOR EACH ROW EXECUTE FUNCTION primer_test_refuse_update()
+    `);
+    try {
+      client.doc.getMap('meta').set('title', 'Lost?');
+      expect(await client.closed).toBe(CLOSE_SAVE_FAILED);
+      client.provider.destroy();
+    } finally {
+      await db.execute(sql`DROP TRIGGER primer_test_refuse_update ON doc_updates`);
+      await db.execute(sql`DROP FUNCTION primer_test_refuse_update()`);
+    }
+  });
+
+  it('refuses strangers and legacy documents per document', async () => {
+    const privateDoc = await createLiveDoc({ uploaderId: OWNER, visibility: 'private' });
+    await db.insert(users).values({ id: OTHER, email: 'o@example.com', displayName: OTHER }).onConflictDoNothing();
+    expect((await connect(privateDoc, asPerson(OTHER))).outcome).toBe('denied');
+
+    const legacyDoc = await createLiveDoc({ uploaderId: OWNER });
+    await db.execute(sql`UPDATE documents SET format = NULL WHERE id = ${legacyDoc}`);
+    expect((await connect(legacyDoc, asPerson(OWNER))).outcome).toBe('denied');
+  });
+
+  it('revoking a token closes its open connection immediately', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const tokenId = uuidv7();
+    const { token, tokenHash, tokenPrefix } = generateToken();
+    await db.insert(apiTokens).values({ id: tokenId, userId: OWNER, name: 'test', tokenHash, tokenPrefix });
+    const client = await connect(id, { authorization: `Bearer ${token}` });
+    const browser = await connect(id, asPerson(OWNER));
+    expect(client.outcome).toBe('synced');
+
+    const res = await (await makeApp()).request(`/api/tokens/${tokenId}`, { method: 'DELETE', headers: asUser(OWNER) });
+    expect(res.status).toBe(200);
+
+    expect(await client.closed).toBe(CLOSE_FORBIDDEN);
+    // The same person's other connection is unaffected.
+    browser.doc.getMap('meta').set('still', 'here');
+    await until(async () => (await storedBy(id, OWNER)) > 0);
+  });
+
+  it("logging out closes that session's connection", async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const { id: sid } = await createSession({ userId: OWNER, userAgent: 'test' });
+    const cookie = `primer_sid=${sid}`;
+    const client = await connect(id, { cookie, origin: APP_ORIGIN });
+    expect(client.outcome).toBe('synced');
+
+    const res = await (await makeApp()).request('/auth/logout', { method: 'POST', headers: { cookie, 'x-primer-csrf': '1' } });
+    expect(res.status).toBe(204);
+
+    expect(await client.closed).toBe(CLOSE_FORBIDDEN);
+  });
+
+  it('closes a socket that sends a message over the size limit', async () => {
+    const socket = new WebSocket(url, { headers: asPerson(OWNER) } as never);
+    socket.binaryType = 'arraybuffer';
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => resolve();
+      socket.onerror = () => reject(new Error('upgrade failed'));
+    });
+    const code = new Promise<number>((resolve) => (socket.onclose = (e) => resolve(e.code)));
+    socket.send(new Uint8Array(MAX_MESSAGE_BYTES + 1));
+    expect(await code).toBe(1009);
+  });
+
+  describe('presence', () => {
+    const states = (id: string) => (hub.hocuspocus.documents.get(`doc:${id}`)!.awareness.getStates());
+
+    it("a peer can't overwrite or remove another peer's presence", async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      await addCollaborator(id, OTHER, 'editor');
+      const victim = await connect(id, asPerson(OWNER));
+      const attacker = await connect(id, asPerson(OTHER));
+      const victimId = victim.provider.awareness!.clientID;
+      victim.provider.awareness!.setLocalState({ name: 'victim' });
+      await until(async () => states(id).get(victimId)?.name === 'victim');
+
+      // Forge the victim's client id with a higher clock than the server holds.
+      const forged = attacker.provider.awareness!;
+      forged.clientID = victimId;
+      for (let i = 0; i < 20; i++) forged.setLocalState({ name: `evil${i}` });
+      forged.setLocalState(null);
+      attacker.provider.awareness!.setLocalState({ name: 'attacker' });
+      await sleep(300);
+      expect(states(id).get(victimId)?.name).toBe('victim');
+    });
+
+    it('a reconnecting peer keeps publishing under its own client id', async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      const stays = await connect(id, asPerson(OWNER));
+      const first = await connect(id, asPerson(OWNER));
+      const clientId = first.provider.awareness!.clientID;
+      first.provider.awareness!.setLocalState({ name: 'one' });
+      await until(async () => states(id).get(clientId)?.name === 'one');
+      first.provider.destroy();
+      await until(async () => !states(id).has(clientId));
+
+      // A new provider's clock restarts; a real reconnect keeps counting.
+      const again = await connect(id, asPerson(OWNER), clientId);
+      for (let i = 0; i < 10; i++) again.provider.awareness!.setLocalState({ name: 'tmp' });
+      again.provider.awareness!.setLocalState({ name: 'two' });
+      await until(async () => states(id).get(clientId)?.name === 'two');
+      again.provider.awareness!.setLocalState({ name: 'three' });
+      await until(async () => states(id).get(clientId)?.name === 'three');
+      expect(stays.provider.awareness!.getStates().get(clientId)?.name).toBe('three');
+    });
+
+    it('a reconnect that beats the old socket closing keeps its presence', async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      const old = await connect(id, asPerson(OWNER));
+      const clientId = old.provider.awareness!.clientID;
+      old.provider.awareness!.setLocalState({ name: 'one' });
+      await until(async () => states(id).get(clientId)?.name === 'one');
+
+      const again = await connect(id, asPerson(OWNER), clientId); // the old socket is still open
+      for (let i = 0; i < 10; i++) again.provider.awareness!.setLocalState({ name: 'tmp' });
+      again.provider.awareness!.setLocalState({ name: 'two' });
+      await until(async () => states(id).get(clientId)?.name === 'two');
+    });
+
+    it('drops an oversized awareness state but keeps normal ones', async () => {
+      const id = await createLiveDoc({ uploaderId: OWNER });
+      const client = await connect(id, asPerson(OWNER));
+      const awareness = client.provider.awareness!;
+      awareness.setLocalState({ blob: 'é'.repeat(MAX_AWARENESS_BYTES / 2) });
+      await sleep(300);
+      expect(states(id).has(awareness.clientID)).toBe(false);
+      awareness.setLocalState({ name: 'ok' });
+      await until(async () => states(id).get(awareness.clientID)?.name === 'ok');
+    });
+  });
+
+  it('refuses presence client ids beyond the per-connection cap and does not broadcast them', async () => {
+    const id = await createLiveDoc({ uploaderId: OWNER });
+    const watcher = await connect(id, asPerson(OWNER));
+    const sender = await connect(id, asPerson(OWNER));
+    const awareness = sender.provider.awareness!;
+    awareness.setLocalState({ name: 'me' });
+    // One message of many small states, each under its own client id.
+    const fake = Array.from({ length: 200 }, (_, i) => 1_000_000 + i);
+    for (const clientId of fake) {
+      awareness.states.set(clientId, { name: `fake${clientId}` });
+      awareness.meta.set(clientId, { clock: 1, lastUpdated: Date.now() });
+    }
+    awareness.emit('update', [{ added: fake, updated: [], removed: [] }, 'test']);
+    const published = (map: Map<number, unknown>) => [...map.keys()].filter((clientId) => fake.includes(clientId)).length;
+    const server = hub.hocuspocus.documents.get(`doc:${id}`)!.awareness.getStates();
+    const watched = watcher.provider.awareness!.getStates();
+    // The sender's own id counts toward the cap, so the rest of it is allowed.
+    await until(async () => published(watched) === MAX_AWARENESS_CLIENTS - 1);
+    await sleep(300);
+    expect(published(server)).toBe(MAX_AWARENESS_CLIENTS - 1);
+    expect(published(watched)).toBe(MAX_AWARENESS_CLIENTS - 1);
+    expect(server.get(awareness.clientID)?.name).toBe('me');
+  });
+
+  it.todo('proxy-auth headers authenticate (with #141, through makeProxyResolver)');
+
+  it('refuses a socket whose authentication is still pending when the hub closes', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const resolving = new Promise<void>((resolve) => (reached = resolve));
+    const slow: UserResolver = async (c) => {
+      reached();
+      await gate;
+      return mockMultiResolver(c);
+    };
+    const late = createHub({ resolver: slow, appOrigin: APP_ORIGIN });
+    const lateServer = createServer();
+    lateServer.on('upgrade', late.handleUpgrade);
+    await new Promise<void>((resolve) => lateServer.listen(0, '127.0.0.1', resolve));
+    const lateUrl = `ws://127.0.0.1:${(lateServer.address() as AddressInfo).port}/collab`;
+    const socket = new WebSocket(lateUrl, { headers: asPerson(OWNER) } as never);
+    try {
+      const outcome = new Promise<'open' | 'refused'>((resolve) => {
+        socket.addEventListener('open', () => resolve('open'));
+        socket.addEventListener('error', () => resolve('refused'));
+        socket.addEventListener('close', () => resolve('refused'));
+      });
+      await resolving; // the upgrade is now waiting on the resolver
+      late.close();
+      release();
+      expect(await outcome).toBe('refused');
+    } finally {
+      release();
+      socket.close();
+      await new Promise<void>((resolve) => lateServer.close(() => resolve()));
+    }
+  });
+});

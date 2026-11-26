@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useExternalShareViews } from '../queries/externalShare.ts';
 import { relativeTime } from '../lib/relativeTime.ts';
+import { t } from '../i18n';
 
 interface Props {
   open: boolean;
@@ -44,11 +45,11 @@ export function ViewActivityModal({ open, docId, onClose }: Props) {
       >
         <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
           <h2 id="view-activity-title" className="text-base font-semibold">
-            External view activity
+            {t('viewActivityModal.title')}
           </h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t('viewActivityModal.close')}
             onClick={onClose}
             className="rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:hover:bg-neutral-800"
           >
@@ -57,10 +58,10 @@ export function ViewActivityModal({ open, docId, onClose }: Props) {
         </header>
 
         <div className="max-h-80 overflow-y-auto px-4 py-3">
-          {views.isLoading && <p className="text-sm text-neutral-500">Loading activity…</p>}
-          {views.isError && <p className="text-sm text-red-600">Couldn't load activity.</p>}
+          {views.isLoading && <p className="text-sm text-neutral-500">{t('viewActivityModal.loading')}</p>}
+          {views.isError && <p className="text-sm text-red-600">{t('viewActivityModal.loadFailed')}</p>}
           {views.data && views.data.views.length === 0 && (
-            <p className="text-sm text-neutral-500">No views yet.</p>
+            <p className="text-sm text-neutral-500">{t('viewActivityModal.noViews')}</p>
           )}
           {views.data && views.data.views.length > 0 && (
             <ul className="divide-y divide-neutral-100 dark:divide-neutral-800">
@@ -72,7 +73,7 @@ export function ViewActivityModal({ open, docId, onClose }: Props) {
                 >
                   <span className="truncate">{v.email}</span>
                   <span className="shrink-0 text-neutral-400">
-                    v{v.versionNumber} · {relativeTime(v.viewedAt)}
+                    {t('viewActivityModal.versionAndTime', { number: v.versionNumber, time: relativeTime(v.viewedAt) })}
                   </span>
                 </li>
               ))}
@@ -82,7 +83,7 @@ export function ViewActivityModal({ open, docId, onClose }: Props) {
 
         {views.data && views.data.total > views.data.views.length && (
           <footer className="border-t border-neutral-200 px-4 py-2 text-[11px] text-neutral-400 dark:border-neutral-800">
-            Showing latest {views.data.views.length} of {views.data.total} views
+            {t('viewActivityModal.showingLatest', { shown: views.data.views.length, total: views.data.total })}
           </footer>
         )}
       </div>

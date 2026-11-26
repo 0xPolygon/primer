@@ -13,7 +13,9 @@ export function registerMeRoute(
       id: u.id,
       email: u.email,
       displayName: u.displayName,
-      isAdmin: isAdmin(u, opts.adminEmails),
+      isAdmin: u.kind === 'person' && isAdmin(u, opts.adminEmails),
+      kind: u.kind,
+      viaUserId: u.viaUserId,
     };
     return c.json(body, 200);
   });

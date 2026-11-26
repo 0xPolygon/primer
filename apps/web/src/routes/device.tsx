@@ -7,6 +7,7 @@ import {
   useDenyDevice,
   useDevicePending,
 } from '../queries/device.ts';
+import { t } from '../i18n/index.ts';
 
 // Per spec D13 (phishing mitigation): we intentionally do NOT read `?code=`
 // from the URL — even though the verification_uri_complete the API issues
@@ -29,14 +30,14 @@ function relativeTimeFrom(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return iso;
   const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (seconds < 5) return 'just now';
-  if (seconds < 60) return `${seconds} seconds ago`;
+  if (seconds < 5) return t('device.justNow');
+  if (seconds < 60) return t('device.secondsAgo', { count: seconds });
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+  if (minutes < 60) return t(minutes === 1 ? 'device.minuteAgo' : 'device.minutesAgo', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  if (hours < 24) return t(hours === 1 ? 'device.hourAgo' : 'device.hoursAgo', { count: hours });
   const days = Math.floor(hours / 24);
-  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+  return t(days === 1 ? 'device.dayAgo' : 'device.daysAgo', { count: days });
 }
 
 /** Normalise input: uppercase and auto-insert a dash after 4 chars (UX nicety). */
@@ -55,7 +56,7 @@ export function DevicePage() {
 
   return (
     <div className="mx-auto max-w-md space-y-5">
-      <h1 className="text-2xl font-semibold">Programmatic access</h1>
+      <h1 className="text-2xl font-semibold">{t('device.title')}</h1>
       {step.kind === 'input' && (
         <InputStep
           onSubmit={(userCode) => setStep({ kind: 'confirm', userCode })}
@@ -89,7 +90,7 @@ function InputStep({ onSubmit }: { onSubmit: (userCode: string) => void }) {
   return (
     <form onSubmit={onFormSubmit} className="space-y-4">
       <label className="block">
-        <span className="mb-1 block text-sm font-medium">Verification code</span>
+        <span className="mb-1 block text-sm font-medium">{t('device.verificationCode')}</span>
         <input
           type="text"
           inputMode="text"
@@ -103,7 +104,7 @@ function InputStep({ onSubmit }: { onSubmit: (userCode: string) => void }) {
           className="block w-full rounded-md border border-neutral-300 px-3 py-2 font-mono text-lg tracking-widest dark:border-neutral-700"
         />
         <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">
-          Enter the code from your terminal.
+          {t('device.enterCode')}
         </span>
       </label>
       <div className="flex justify-end">
@@ -112,7 +113,7 @@ function InputStep({ onSubmit }: { onSubmit: (userCode: string) => void }) {
           disabled={!canSubmit}
           className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
         >
-          Continue
+          {t('device.continue')}
         </button>
       </div>
     </form>
@@ -133,7 +134,7 @@ function ConfirmStep({ userCode, onBack, onApproved, onDenied }: ConfirmStepProp
   const deny = useDenyDevice();
 
   if (pending.isLoading) {
-    return <div className="text-sm text-neutral-500">Loading request…</div>;
+    return <div className="text-sm text-neutral-500">{t('device.loadingRequest')}</div>;
   }
 
   if (pending.error) {
@@ -142,8 +143,8 @@ function ConfirmStep({ userCode, onBack, onApproved, onDenied }: ConfirmStepProp
     if (status === 404) {
       return (
         <ErrorPanel
-          title="Unknown code."
-          message="Check that you typed it correctly."
+          title={t('device.unknownCode')}
+          message={t('device.unknownCodeHint')}
           onBack={onBack}
         />
       );
@@ -151,15 +152,15 @@ function ConfirmStep({ userCode, onBack, onApproved, onDenied }: ConfirmStepProp
     if (status === 410) {
       return (
         <ErrorPanel
-          title="This request has expired."
-          message="Start a new login from your terminal."
+          title={t('device.expired')}
+          message={t('device.expiredHint')}
           onBack={onBack}
         />
       );
     }
     return (
       <ErrorPanel
-        title="Couldn't load request."
+        title={t('device.loadFailed')}
         message={(err as Error).message}
         onBack={onBack}
       />
@@ -169,7 +170,7 @@ function ConfirmStep({ userCode, onBack, onApproved, onDenied }: ConfirmStepProp
   if (!pending.data) return null;
 
   const data = pending.data;
-  const ip = data.requesterIp ?? 'unknown';
+  const ip = data.requesterIp ?? t('device.unknownIp');
   const busy = approve.isPending || deny.isPending;
 
   async function onApprove() {
@@ -193,30 +194,30 @@ function ConfirmStep({ userCode, onBack, onApproved, onDenied }: ConfirmStepProp
   return (
     <div className="space-y-5">
       <p className="text-sm">
-        Approve programmatic access for{' '}
+        {t('device.approveFor')}{' '}
         <strong className="font-semibold">{me.data?.email ?? '…'}</strong>?
       </p>
 
       <div className="rounded border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-neutral-600 dark:text-neutral-400">
-          Request details
+          {t('device.requestDetails')}
         </div>
         <dl className="space-y-2 text-sm">
           <div>
-            <dt className="text-neutral-500 dark:text-neutral-400">Client label</dt>
+            <dt className="text-neutral-500 dark:text-neutral-400">{t('device.clientLabel')}</dt>
             <dd className="font-mono text-neutral-800 dark:text-neutral-200">
-              {data.clientLabel ?? <span className="italic text-neutral-500">(none)</span>}
+              {data.clientLabel ?? <span className="italic text-neutral-500">{t('device.none')}</span>}
             </dd>
             <dd className="text-xs italic text-neutral-500 dark:text-neutral-400">
-              Claimed by the requesting tool — not verified
+              {t('device.claimedNotVerified')}
             </dd>
           </div>
           <div>
-            <dt className="text-neutral-500 dark:text-neutral-400">Requester IP</dt>
+            <dt className="text-neutral-500 dark:text-neutral-400">{t('device.requesterIp')}</dt>
             <dd className="font-mono text-neutral-800 dark:text-neutral-200">{ip}</dd>
           </div>
           <div>
-            <dt className="text-neutral-500 dark:text-neutral-400">Started</dt>
+            <dt className="text-neutral-500 dark:text-neutral-400">{t('device.started')}</dt>
             <dd className="text-neutral-800 dark:text-neutral-200">
               {relativeTimeFrom(data.createdAt)}
             </dd>
@@ -237,7 +238,7 @@ function ConfirmStep({ userCode, onBack, onApproved, onDenied }: ConfirmStepProp
           disabled={busy}
           className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
         >
-          {deny.isPending ? 'Denying…' : 'Deny'}
+          {deny.isPending ? t('device.denying') : t('device.deny')}
         </button>
         <button
           type="button"
@@ -245,7 +246,7 @@ function ConfirmStep({ userCode, onBack, onApproved, onDenied }: ConfirmStepProp
           disabled={busy}
           className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
         >
-          {approve.isPending ? 'Approving…' : 'Approve'}
+          {approve.isPending ? t('device.approving') : t('device.approve')}
         </button>
       </div>
     </div>
@@ -272,7 +273,7 @@ function ErrorPanel({
         onClick={onBack}
         className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800"
       >
-        Back
+        {t('device.back')}
       </button>
     </div>
   );
@@ -282,16 +283,16 @@ function ResultStep({ outcome }: { outcome: 'approved' | 'denied' }) {
   if (outcome === 'approved') {
     return (
       <div className="rounded border border-neutral-200 bg-neutral-50 px-4 py-4 text-sm dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="font-medium text-neutral-900 dark:text-neutral-100">Access granted.</div>
+        <div className="font-medium text-neutral-900 dark:text-neutral-100">{t('device.accessGranted')}</div>
         <div className="mt-1 text-neutral-600 dark:text-neutral-400">
-          You can return to your terminal.
+          {t('device.returnToTerminal')}
         </div>
       </div>
     );
   }
   return (
     <div className="rounded border border-neutral-200 bg-neutral-50 px-4 py-4 text-sm dark:border-neutral-800 dark:bg-neutral-900">
-      <div className="font-medium text-neutral-900 dark:text-neutral-100">Access denied.</div>
+      <div className="font-medium text-neutral-900 dark:text-neutral-100">{t('device.accessDenied')}</div>
     </div>
   );
 }

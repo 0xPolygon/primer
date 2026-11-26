@@ -20,6 +20,8 @@ class NullNotifier implements Notifier {
   async notifyCollaboratorAdded() {}
   async notifyExternalOtp() {}
   async notifyExternalFirstView() {}
+  async notifyDocumentMention() {}
+  async notifyDigest() {}
 }
 
 async function withApp<T>(fn: (app: ReturnType<typeof createApp>) => Promise<T>): Promise<T> {

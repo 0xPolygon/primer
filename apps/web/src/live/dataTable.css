@@ -1,0 +1,30 @@
+/* Data-table blocks (DataTableView.tsx): a compact grid over a records
+   collection; editable cells show it, rows with open threads are marked. */
+.primer-data-table { width: 100%; margin: 4px 0; font-size: 13px; }
+.primer-data-table-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; color: #737373; }
+.primer-data-table-name { font-family: ui-monospace, monospace; }
+.primer-data-table-badge { padding: 0 6px; border: 1px solid #d4d4d4; border-radius: 4px; font-size: 11px; }
+.primer-data-table-columns, .primer-data-table-add { font-size: 12px; color: #0369a1; }
+.primer-data-table-scroll { overflow-x: auto; }
+.primer-data-table table { border-collapse: collapse; width: 100%; }
+.primer-data-table th, .primer-data-table td { border: 1px solid #e5e5e5; padding: 4px 8px; text-align: left; vertical-align: top; }
+.primer-data-table th { background: #fafafa; font-weight: 600; }
+.primer-data-table-editable { cursor: text; }
+.primer-data-table-editable:hover { background: #f0f9ff; }
+.primer-data-table td input, .primer-data-table td select { width: 100%; border: 0; outline: 2px solid #0284c7; background: transparent; font: inherit; }
+.primer-data-table-actions { width: 1%; white-space: nowrap; }
+.primer-data-table-actions button { margin: 0 2px; color: #737373; }
+.primer-data-table-commented td:first-child { box-shadow: inset 3px 0 #f59e0b; }
+.primer-data-table-empty { color: #737373; text-align: center; padding: 12px; }
+.primer-data-table-setup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 1px dashed #a3a3a3; border-radius: 8px; }
+.primer-data-table-setup input, .primer-data-table-column-editor input, .primer-data-table-column-editor select { margin-left: 6px; padding: 2px 6px; border: 1px solid #d4d4d4; border-radius: 4px; background: transparent; }
+.primer-data-table-column-editor { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px; border: 1px solid #d4d4d4; border-radius: 6px; }
+.primer-data-table-column-editor ul { width: 100%; margin: 0; padding: 0; list-style: none; }
+.primer-data-table-threads { margin: 6px 0 0; padding: 0; list-style: none; }
+.primer-data-table-threads li { display: flex; gap: 8px; padding: 2px 0; }
+.primer-data-table-thread-row { font-weight: 600; color: #b45309; font-family: ui-monospace, monospace; }
+.primer-data-table-composer { margin-top: 6px; padding: 8px; border: 1px solid #d4d4d4; border-radius: 6px; }
+.primer-data-table-composer textarea { width: 100%; padding: 4px; border: 1px solid #d4d4d4; border-radius: 4px; background: transparent; }
+.dark .primer-data-table th { background: #171717; }
+.dark .primer-data-table th, .dark .primer-data-table td { border-color: #404040; }
+.dark .primer-data-table-editable:hover { background: #082f49; }

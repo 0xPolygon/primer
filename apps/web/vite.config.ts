@@ -10,6 +10,7 @@ export default defineConfig({
       '/api': 'http://localhost:3000',
       '/companion': 'http://localhost:3000',
       '/auth': 'http://localhost:3000',
+      '/collab': { target: 'ws://localhost:3000', ws: true },
     },
   },
 });

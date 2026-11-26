@@ -478,3 +478,25 @@ describe('parseInboundMessage — submit_events (issue #78)', () => {
     ).toBeNull();
   });
 });
+
+describe('page text messages', () => {
+  it('protocol parses page_elements and rejects malformed rects', () => {
+    const ok = {
+      type: 'page_elements',
+      elements: [{ pid: 'p1', text: 'Roadmap', rect: { x: 1, y: 2, width: 3, height: 4 } }],
+      embeds: [{ embedId: 'scores', rect: { x: 0, y: 10, width: 100, height: 40 } }],
+    };
+    expect(parseInboundMessage(ok)).toEqual(ok);
+    // A malformed element is dropped (read-only), not the whole report.
+    expect(parseInboundMessage({ ...ok, elements: [{ pid: 'p1', text: 'x', rect: { x: 1, y: 2, width: 'wide', height: 4 } }] })).toEqual({ ...ok, elements: [] });
+    expect(parseInboundMessage({ ...ok, elements: [...ok.elements, { pid: 'p 1', text: 'x', rect: { x: 1, y: 2, width: 3, height: 4 } }] })).toEqual(ok);
+    expect(parseInboundMessage({ type: 'page_rects', rects: { p1: { x: 0, y: 0, width: 1, height: 1 } }, embedRects: {} })).toEqual({
+      type: 'page_rects',
+      rects: { p1: { x: 0, y: 0, width: 1, height: 1 } },
+      embedRects: {},
+    });
+    expect(parseInboundMessage({ type: 'page_rects', rects: { p1: { x: Infinity, y: 0, width: 1, height: 1 } }, embedRects: {} })).toBeNull();
+    expect(parseInboundMessage({ type: 'pid_clicked', pid: 'p1' })).toEqual({ type: 'pid_clicked', pid: 'p1' });
+    expect(parseInboundMessage({ type: 'embed_clicked', embedId: '<x>' })).toBeNull();
+  });
+});

@@ -1,10 +1,13 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { Navigate, Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,6 +22,9 @@ import type {
   EventRowDTO,
   TextRangeAnchor,
   ElementPathAnchor,
+  ThreadAnchor,
+  ViewerRole,
+  VersionsListResponse,
 } from '@polygonlabs/primer-api-types';
 import { useDocument, useDeleteDocument, useEditDocument } from '../queries/documents.ts';
 import { useMe } from '../queries/me.ts';
@@ -42,6 +48,8 @@ import {
   type VersionLatch,
 } from '../lib/viewedVersion.ts';
 import { useTheme } from '../lib/useTheme.ts';
+import { createDraftTracker, DraftReporterContext } from '../lib/drafts.ts';
+import { createVersionFollower, type FollowState } from '../lib/versionFollow.ts';
 import {
   commentsFilename,
   formatThreadsAsMarkdown,
@@ -72,6 +80,26 @@ import {
 } from '../lib/eventsGrant.ts';
 import { EventsGrantPrompt } from '../components/EventsGrantPrompt.tsx';
 import { api } from '../lib/fetch.ts';
+import { ApiError } from '../lib/apiError.ts';
+import type { CatchUpSince, CheckpointResponse } from '@polygonlabs/primer-api-types';
+import type { LiveEditorProps } from '../live/LiveEditor.tsx';
+
+// BlockNote and its blocks load only when a live document opens.
+const LiveEditor = lazy(() => import('../live/LiveEditor.tsx'));
+
+/**
+ * What the document area shows: a live document's editor, or (legacy
+ * documents, and checkpoints of live ones) the rendered version in its
+ * sandboxed frame.
+ */
+export function DocumentSurface({ live, frame, ...editor }: LiveEditorProps & { live: boolean; frame: () => ReactNode }) {
+  if (!live) return <>{frame()}</>;
+  return (
+    <Suspense fallback={<div className="p-4 text-sm text-neutral-500">{t('document.loadingEditor')}</div>}>
+      <LiveEditor {...editor} />
+    </Suspense>
+  );
+}
 
 // First-submission grants (issue #78, security requirement 6): per
 // (viewer, document, artifact content version), fronted by an in-memory map
@@ -91,15 +119,20 @@ interface PendingGrant {
 }
 import { DocDetailFolderControl } from '../components/DocDetailFolderControl.tsx';
 import { relativeTime } from '../lib/relativeTime.ts';
+import { t } from '../i18n';
 
+// A pending anchor belongs to the version it was captured on: the new
+// thread posts there, never to whatever the page shows at submit time.
 interface PendingSelection {
   anchor: TextRangeAnchor;
   clientRects: SerializableRect[];
+  versionId: string;
 }
 
 interface PendingPick {
   anchor: ElementPathAnchor;
   clientRect: SerializableRect;
+  versionId: string;
 }
 
 /** Everything the NotebookLM modal needs, captured when it opens so the
@@ -128,6 +161,12 @@ function DocumentPageInner() {
   const { docId, versionNumber: versionNumberParam } = useParams();
   const navigate = useNavigate();
   const docQuery = useDocument(docId ?? '');
+  // This visit's baseline: the previous visit as the server reported it on this
+  // page's own fetch, not the cached copy of an earlier one.
+  const [visit, setVisit] = useState<{ docId: string; lastView: CatchUpSince | null } | null>(null);
+  useEffect(() => {
+    if (docId && docQuery.data && !docQuery.isFetching && visit?.docId !== docId) setVisit({ docId, lastView: docQuery.data.lastView ?? null });
+  }, [docId, docQuery.data, docQuery.isFetching, visit?.docId]);
   const versionsQuery = useVersionsQuery(docId ?? '');
   const queryClient = useQueryClient();
   const versions = versionsQuery.data?.versions ?? [];
@@ -152,7 +191,11 @@ function DocumentPageInner() {
     currentVersion === undefined ||
     latestNumber === undefined ||
     currentVersion.versionNumber === latestNumber;
-  const readMostly = !isViewingLatest;
+  // A live document is edited at /d/:docId; its checkpoints (/v/:n) are
+  // read-only renders, like the versions of a legacy document.
+  const isLive = (docQuery.data?.document.format ?? null) !== null;
+  const liveView = isLive && requestedNumber === undefined;
+  const readMostly = isLive ? requestedNumber !== undefined : !isViewingLatest;
   // True when this navigation started on the latest version and a newer one
   // was published since (vs. deliberately opening an older /v/:n).
   const newerPublishedWhileOpen = requestedNumber === undefined && readMostly;
@@ -163,7 +206,7 @@ function DocumentPageInner() {
 
   const threadsQuery = useThreadsQuery(currentVersionId);
   const threads = threadsQuery.data?.data.threads ?? [];
-  const createThread = useCreateThread(currentVersionId);
+  const createThread = useCreateThread();
 
   const editDoc = useEditDocument(docId ?? '');
   const deleteDoc = useDeleteDocument(docId ?? '');
@@ -210,14 +253,56 @@ function DocumentPageInner() {
 
   // Tombstoned threads keep their anchor registered so the "Comment deleted"
   // card in the sidebar can still highlight the passage it referred to.
+  // Threads whose text isn't on this version ("context changed") have no
+  // anchor here.
   const anchorsForCompanion = useMemo(
-    () => threads.filter(hasAnyComments).map((t) => ({ id: t.id, data: t.anchor })),
+    () =>
+      threads
+        .filter((t) => hasAnyComments(t) && !t.contextChanged)
+        .flatMap((t) => (isVersionAnchor(t.anchor) ? [{ id: t.id, data: t.anchor }] : [])),
     [threads]
   );
 
   const send = useCallback((msg: OutboundProtocolMessage) => {
     senderRef.current?.(msg);
   }, []);
+
+  // Reply and edit inputs in the sidebar that hold unsent text (lib/drafts.ts).
+  const [drafts] = useState(createDraftTracker);
+
+  // What the page shows, for the new-version follower (lib/versionFollow.ts),
+  // which reads it after its refresh rather than when the event arrived.
+  const followStateRef = useRef<() => FollowState>(() => {
+    throw new Error('unreachable: assigned during render');
+  });
+  followStateRef.current = () => ({
+    docId,
+    path: window.location.pathname + window.location.search,
+    locationKey: location.key,
+    requestedNumber,
+    viewedVersionId: currentVersionId,
+    viewedVersionNumber: currentVersion?.versionNumber,
+    latestVersionNumber: queryClient.getQueryData<VersionsListResponse>(['versions', docId])?.versions[0]
+      ?.versionNumber,
+    hasUnsentDraft: composerDirtyRef.current || drafts.any(),
+  });
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  // What the page does with Primer's own lifecycle events from the
+  // document's stream (comments, threads): they replace
+  // polling. Kept in a ref so the long-lived feed always runs the latest
+  // closure. version.published goes to the follower (see the feed effect).
+  const onDocChangeRef = useRef<(row: EventRowDTO) => void>(() => {});
+  onDocChangeRef.current = (row: EventRowDTO) => {
+    // comment.created, thread.resolved, thread.updated
+    void queryClient.invalidateQueries({ queryKey: ['threads'] });
+  };
+  const onResyncRef = useRef<() => void>(() => {});
+  onResyncRef.current = () => {
+    void queryClient.invalidateQueries({ queryKey: ['threads'] });
+    void queryClient.invalidateQueries({ queryKey: ['versions', docId] });
+  };
 
   const onComposerDirtyChange = useCallback((dirty: boolean) => {
     composerDirtyRef.current = dirty;
@@ -285,11 +370,24 @@ function DocumentPageInner() {
   useEffect(() => {
     if (!docId) return;
     relayedEventsRef.current = [];
+    const follower = createVersionFollower({
+      refreshVersions: () => queryClient.refetchQueries({ queryKey: ['versions', docId], exact: true }),
+      readState: () => followStateRef.current(),
+      // A new navigation re-latches the newest version (lib/viewedVersion.ts).
+      navigateToLatest: (id) => navigateRef.current(`/d/${id}`, { replace: true }),
+    });
     const feed = createEventsFeed({
       documentId: docId,
       onBatch: (rows) => {
         relayedEventsRef.current = relayedEventsRef.current.concat(rows);
         senderRef.current?.({ type: 'events', events: rows });
+      },
+      onDocChange: (row) =>
+        row.type === 'version.published' ? follower.onVersionPublished() : onDocChangeRef.current(row),
+      // A version.published that landed before the stream was up never came through it.
+      onResync: () => {
+        onResyncRef.current();
+        follower.onVersionPublished();
       },
       fetchImpl: (url) => api(url),
       eventSourceFactory: browserEventSourceFactory,
@@ -302,8 +400,9 @@ function DocumentPageInner() {
     return () => {
       window.document.removeEventListener('visibilitychange', onVisibility);
       feed.stop();
+      follower.dispose();
     };
-  }, [docId]);
+  }, [docId, queryClient]);
 
   useEffect(() => {
     setPositionsByAnchorId(new Map());
@@ -327,7 +426,7 @@ function DocumentPageInner() {
       switch (msg.type) {
         case 'selection_captured':
           if (!readMostly) {
-            setPendingSelection({ anchor: msg.anchor, clientRects: msg.clientRects });
+            setPendingSelection({ anchor: msg.anchor, clientRects: msg.clientRects, versionId: currentVersionId });
             setPendingPick(null);
           }
           break;
@@ -338,7 +437,7 @@ function DocumentPageInner() {
           break;
         case 'element_picked':
           if (!readMostly) {
-            setPendingPick({ anchor: msg.anchor, clientRect: msg.clientRect });
+            setPendingPick({ anchor: msg.anchor, clientRect: msg.clientRect, versionId: currentVersionId });
             setPendingSelection(null);
             setPickMode(false);
           }
@@ -479,7 +578,7 @@ function DocumentPageInner() {
       URL.revokeObjectURL(url);
       return null;
     } catch {
-      return { kind: 'error', message: 'Download failed. Try again.' };
+      return { kind: 'error', message: t('document.downloadFailed') };
     }
   }
 
@@ -539,7 +638,7 @@ function DocumentPageInner() {
   }
 
   async function copyComments(): Promise<ActionFeedback> {
-    if (!docQuery.data) return { kind: 'error', message: 'Comments not loaded yet.' };
+    if (!docQuery.data) return { kind: 'error', message: t('document.commentsNotLoaded') };
     const md = formatThreadsAsMarkdown(
       { title: docQuery.data.document.title },
       { versionNumber: currentVersionNumber },
@@ -547,8 +646,8 @@ function DocumentPageInner() {
     );
     const result = await copyText(md);
     return result === 'failed'
-      ? { kind: 'error', message: 'Copy failed. Try Download instead.' }
-      : { kind: 'success', message: 'Copied' };
+      ? { kind: 'error', message: t('document.copyFailed') }
+      : { kind: 'success', message: t('document.copied') };
   }
 
   const togglePickMode = () => {
@@ -601,13 +700,25 @@ function DocumentPageInner() {
   }, [threadsQuery.isSuccess, threads, onHighlight]);
 
   const submitPending = async (body: string, mentions: string[]) => {
-    const anchor: AnchorData | null = pendingSelection
-      ? pendingSelection.anchor
-      : pendingPick
-      ? pendingPick.anchor
-      : null;
-    if (!anchor) return;
-    await createThread.mutateAsync({ anchor, body, mentions });
+    const pending = pendingSelection ?? pendingPick;
+    if (!pending) return;
+    // Posts to the version the anchor was captured on; if that is no longer
+    // the latest the server refuses (not_latest_version) and the composer
+    // offers to switch.
+    try {
+      await createThread.mutateAsync({ versionId: pending.versionId, anchor: pending.anchor, body, mentions });
+    } catch (err) {
+      // The server's 404 carries no message: the version was deleted, or
+      // commenting access went away.
+      if (err instanceof ApiError && err.status === 404) {
+        throw new ApiError(
+          404,
+          t('document.commentCannotBePosted'),
+          err.code,
+        );
+      }
+      throw err;
+    }
     setPendingSelection(null);
     setPendingPick(null);
   };
@@ -626,8 +737,8 @@ function DocumentPageInner() {
   };
 
   const composerPending = useMemo(
-    () => composerPendingFrom<AnchorData>({ pendingSelection, pendingPick }),
-    [pendingSelection, pendingPick],
+    () => composerPendingFrom<AnchorData>({ pendingSelection, pendingPick, viewedVersionId: currentVersionId }),
+    [pendingSelection, pendingPick, currentVersionId],
   );
 
   // The composer is no longer hidden when the viewed version stops being
@@ -684,11 +795,11 @@ function DocumentPageInner() {
     return () => window.removeEventListener('resize', compute);
   }, [readMostly, isMobile, pendingSelection]);
 
-  if (docQuery.isLoading) return <div className="text-neutral-500">Loading…</div>;
+  if (docQuery.isLoading) return <div className="text-neutral-500">{t('document.loading')}</div>;
   if (docQuery.error) {
     return (
       <div className="text-red-600 dark:text-red-400">
-        Could not load document: {(docQuery.error as Error).message}
+        {t('document.loadFailed', { message: (docQuery.error as Error).message })}
       </div>
     );
   }
@@ -697,16 +808,16 @@ function DocumentPageInner() {
   if (versionNotFound) {
     return (
       <div className="space-y-3">
-        <h1 className="text-xl font-semibold">Version not found</h1>
+        <h1 className="text-xl font-semibold">{t('document.versionNotFound')}</h1>
         <p className="text-sm text-neutral-600 dark:text-neutral-400">
-          Version {requestedNumber} doesn't exist for this document.
+          {t('document.versionMissing', { number: requestedNumber })}
         </p>
         <button
           type="button"
           onClick={() => navigate(`/d/${docId}`)}
           className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
         >
-          Back to latest
+          {t('document.backToLatest')}
         </button>
       </div>
     );
@@ -714,12 +825,49 @@ function DocumentPageInner() {
 
   const { document } = docQuery.data;
 
+  async function saveCheckpoint(): Promise<ActionFeedback> {
+    const res = await api(`/api/documents/${docId}/checkpoints`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) return { kind: 'error', message: t('document.saveCheckpointFailed') };
+    const checkpoint = (await res.json()) as CheckpointResponse;
+    await queryClient.invalidateQueries({ queryKey: ['versions', docId] });
+    const link = { label: t('document.viewCheckpoint'), to: `/d/${docId}/v/${checkpoint.versionNumber}` };
+    return checkpoint.unchangedSince !== undefined
+      ? { kind: 'success', message: t('document.checkpointUnchanged', { number: checkpoint.versionNumber, previous: checkpoint.unchangedSince }), link }
+      : { kind: 'success', message: t('document.checkpointSaved', { number: checkpoint.versionNumber }), link };
+  }
+
+  function exportAs(format: 'markdown' | 'html' | 'print') {
+    if (format === 'print') {
+      const version = requestedNumber !== undefined ? `?version=${requestedNumber}` : '';
+      window.open(`/d/${docId}/print${version}`, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const params = new URLSearchParams({ format: format === 'html' ? 'html' : document.format === 'text' ? 'text' : 'markdown' });
+    if (requestedNumber !== undefined) params.set('version', String(requestedNumber));
+    const a = window.document.createElement('a');
+    a.href = `/api/documents/${docId}/export?${params}`;
+    a.download = '';
+    a.style.display = 'none';
+    window.document.body.appendChild(a);
+    a.click();
+    window.document.body.removeChild(a);
+  }
+
   const headerActionsProps = {
     docId: docId!,
     versions,
-    currentVersionNumber,
-    isViewingLatest,
-    onAddVersion: canEdit && !readMostly ? () => setShowAddVersion(true) : undefined,
+    currentVersionNumber: liveView ? (latestNumber ?? 1) : currentVersionNumber,
+    isViewingLatest: liveView || (!isLive && isViewingLatest),
+    // Live documents are edited in place, not republished.
+    onAddVersion: canEdit && !readMostly && !isLive ? () => setShowAddVersion(true) : undefined,
+    onSaveCheckpoint: liveView && canEdit ? saveCheckpoint : undefined,
+    // A version from before the document went live has no bundle to export or print.
+    onExport: isLive && (liveView || currentVersion?.bundled !== false) ? exportAs : undefined,
+    page: docQuery.data?.document.format === 'html',
     isUploader,
     onShare: () => setShowShare(true),
     onOpenFullScreen: openFullScreen,
@@ -734,6 +882,7 @@ function DocumentPageInner() {
   };
 
   return (
+    <DraftReporterContext.Provider value={drafts.report}>
     <div className="flex flex-col h-[calc(100vh-60px)]">
       <header className="border-b border-neutral-200 px-3 pb-2 pt-1 dark:border-neutral-800 sm:px-4 md:flex md:items-baseline md:justify-between md:gap-3">
         {/* Mobile top row: breadcrumb (or spacer) + compact actions. */}
@@ -766,35 +915,35 @@ function DocumentPageInner() {
             )}
             <EditableField
               value={document.title}
-              placeholder="Add a title"
+              placeholder={t('document.addTitle')}
               canEdit={canEdit}
               displayClassName="text-lg md:text-xl font-semibold line-clamp-2 md:line-clamp-none"
               maxLength={200}
-              ariaLabel="Document title"
+              ariaLabel={t('document.titleLabel')}
               onSave={async (next) => {
                 if (next === null || next.trim().length === 0) {
-                  throw new Error('Title cannot be empty');
+                  throw new Error(t('document.titleEmpty'));
                 }
                 await editDoc.mutateAsync({ title: next });
               }}
             />
             {docQuery.data?.document.externallyShared && (
               <span
-                title="This document has an active external share"
+                title={t('document.externalShareTooltip')}
                 className="ml-2 inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 text-[11px] font-medium align-middle"
               >
-                Shared externally
+                {t('document.sharedExternally')}
               </span>
             )}
           </div>
           <EditableField
             value={document.description}
-            placeholder="Add a description"
+            placeholder={t('document.addDescription')}
             canEdit={canEdit}
             multiline
             displayClassName="max-w-[60ch] break-words text-sm text-neutral-600 dark:text-neutral-400 line-clamp-2 md:line-clamp-none"
             maxLength={2000}
-            ariaLabel="Document description"
+            ariaLabel={t('document.descriptionLabel')}
             onSave={async (next) => {
               await editDoc.mutateAsync({ description: next });
             }}
@@ -812,7 +961,7 @@ function DocumentPageInner() {
             )}
             <HeaderActions variant="desktop" {...headerActionsProps} />
           </div>
-          {!readMostly && (
+          {!readMostly && !isLive && (
             <button
               type="button"
               onClick={togglePickMode}
@@ -822,7 +971,7 @@ function DocumentPageInner() {
                   : 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200'
               }`}
             >
-              {pickMode ? 'Cancel' : '+ Add Comment'}
+              {pickMode ? t('document.cancel') : t('document.addComment')}
             </button>
           )}
           <div className="hidden items-center gap-3 md:flex">
@@ -845,15 +994,17 @@ function DocumentPageInner() {
       {readMostly && (
         <div className="flex items-center justify-between border-b border-yellow-200 bg-yellow-50 px-4 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
           <span>
-            {newerPublishedWhileOpen ? (
+            {isLive ? (
               <>
-                A newer version (v{latestNumber}) of "{document.title}" was published. You're
-                still viewing v{currentVersionNumber}; switch to the latest to add new comments.
+                {t('document.viewingCheckpoint', { number: currentVersionNumber, title: document.title })}
+              </>
+            ) : newerPublishedWhileOpen ? (
+              <>
+                {t('document.newerPublished', { latest: latestNumber, title: document.title, number: currentVersionNumber })}
               </>
             ) : (
               <>
-                You're viewing v{currentVersionNumber} of "{document.title}". This version is
-                read-only. Switch to v{latestNumber} (latest) to add new comments.
+                {t('document.viewingVersion', { number: currentVersionNumber, title: document.title, latest: latestNumber })}
               </>
             )}
           </span>
@@ -862,7 +1013,7 @@ function DocumentPageInner() {
             onClick={() => void switchToLatest()}
             className="rounded border border-amber-700 px-2 py-0.5 text-amber-900 hover:bg-amber-100 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/30"
           >
-            Switch to latest
+            {isLive ? t('document.openLive') : t('document.switchToLatest')}
           </button>
         </div>
       )}
@@ -872,18 +1023,36 @@ function DocumentPageInner() {
           {/* Mount only once the version id has resolved: an empty id would
               build src="/api/versions//content" and 404 on first render
               while the versions query is still in flight. */}
-          {currentVersionId && (
-            <ArtifactIframe
-              src={`/api/versions/${currentVersionId}/content`}
-              anchors={anchorsForCompanion}
-              theme={theme}
-              fitToWidth={isMobile}
-              onMessage={onMessage}
-              registerSender={registerSender}
-            />
-          )}
+          <DocumentSurface
+            live={liveView}
+            documentId={docId!}
+            readOnly={!canEdit}
+            canVote={canSubmitEventsDoc(docQuery.data?.myRole)}
+            theme={theme}
+            userName={me.data?.displayName ?? t('document.someone')}
+            userId={me.data?.id ?? ''}
+            role={docQuery.data?.myRole ?? 'stranger'}
+            canComment={docQuery.data?.canComment ?? false}
+            onOpenLegacyVersion={(n) => navigate(`/d/${docId}/v/${n}`)}
+            lastView={visit && visit.docId === docId ? visit.lastView : undefined}
+            onArtifactMessage={onMessage}
+            registerArtifactSender={registerSender}
+            frame={() =>
+              currentVersionId && (
+                <ArtifactIframe
+                  src={`/api/versions/${currentVersionId}/content`}
+                  anchors={anchorsForCompanion}
+                  theme={theme}
+                  fitToWidth={isMobile}
+                  onMessage={onMessage}
+                  registerSender={registerSender}
+                />
+              )
+            }
+          />
         </div>
-        {!isMobile && (
+        {/* Comments on live documents arrive with BlockNote's comments UI. */}
+        {!isMobile && !liveView && (
           <CommentSidebar
             versionId={currentVersionId}
             currentUserId={me.data?.id ?? ''}
@@ -904,7 +1073,7 @@ function DocumentPageInner() {
         )}
       </div>
 
-      {isMobile && (
+      {isMobile && !liveView && (
         <BottomSheet
           snap={sheetSnap}
           onSnapChange={(next) => {
@@ -921,8 +1090,8 @@ function DocumentPageInner() {
           showBackdrop
           handleLabel={
             pickMode
-              ? 'Picking element… (tap to cancel)'
-              : `💬 ${threads.filter(hasLiveComments).length} comments`
+              ? t('document.pickingElement')
+              : t('document.commentCount', { count: threads.filter(hasLiveComments).length })
           }
         >
           <CommentSidebar
@@ -958,7 +1127,7 @@ function DocumentPageInner() {
           }}
           className="flex items-center gap-2 rounded-md bg-neutral-900 px-3 py-1.5 text-xs text-white shadow-lg"
         >
-          <span>Add comment in sidebar →</span>
+          <span>{t('document.addCommentInSidebar')}</span>
           <button
             type="button"
             onClick={() => setPendingSelection(null)}
@@ -1008,5 +1177,12 @@ function DocumentPageInner() {
       )}
       {notebookLm && <NotebookLmModal {...notebookLm} onClose={() => setNotebookLm(null)} />}
     </div>
+    </DraftReporterContext.Provider>
   );
+}
+
+/** Anchors the companion places in a version's HTML (live anchors are marks
+ *  in the live document instead). */
+function isVersionAnchor(anchor: ThreadAnchor): anchor is AnchorData {
+  return anchor.type === 'text-range' || anchor.type === 'element-path';
 }

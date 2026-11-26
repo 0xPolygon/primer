@@ -6,11 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { logger as appLogger } from './logger.ts';
 import { authMiddleware } from './middleware/auth.ts';
 import { csrfMiddleware } from './auth/csrf.ts';
+import { proxyUnauthorizedPage } from './auth/proxy.ts';
 import { scopeMiddleware } from './auth/scopes.ts';
 import { mockResolver, type UserResolver } from './auth/resolver.ts';
 import { registerUploadRoute } from './routes/upload.ts';
+import { registerConvertRoute } from './routes/convert.ts';
 import { registerDocumentRoutes } from './routes/documents.ts';
 import { registerVersionContentRoute } from './routes/versionContent.ts';
+import { registerPageRoutes } from './routes/pages.ts';
 import { registerExternalShareRoutes } from './routes/externalShare.ts';
 import { registerCompanionRoute } from './routes/companion.ts';
 import { registerMermaidAssetRoute } from './routes/mermaidAsset.ts';
@@ -19,14 +22,27 @@ import { registerMockAuthRoutes } from './routes/mockAuth.ts';
 import { registerThreadRoutes } from './routes/threads.ts';
 import { registerCommentRoutes } from './routes/comments.ts';
 import { registerEventRoutes } from './routes/events.ts';
+import { registerRecordRoutes } from './routes/records.ts';
+import { registerEmbedRoutes } from './routes/embeds.ts';
+import { registerChoiceRoutes } from './routes/choices.ts';
+import { registerTaskRoutes } from './routes/tasks.ts';
+import { registerCatchUpRoutes } from './routes/catchup.ts';
+import { registerCitationRoutes } from './routes/citations.ts';
+import { registerPromoteRoutes } from './routes/promote.ts';
+import { registerMentionNotifications } from './live/mentions.ts';
+import { registerAutoCheckpoints } from './live/autoCheckpoint.ts';
 import { registerAdminRoute } from './routes/admin.ts';
 import { registerVersionRoutes } from './routes/versions.ts';
+import { registerWidgetRoutes } from './routes/widgets.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerMeRoute } from './routes/me.ts';
 import { registerUserRoutes } from './routes/users.ts';
 import { registerDeviceRoutes } from './routes/device.ts';
 import { registerTokenRoutes } from './routes/tokens.ts';
-import { registerServiceTokenRoutes } from './routes/serviceTokens.ts';
+import { registerAgentRoutes } from './routes/agents.ts';
+import { registerLiveRoutes } from './routes/live.ts';
+import { registerRunRoutes } from './routes/runs.ts';
+import { registerSuggestionRoutes } from './routes/suggestions.ts';
 import { parseAdminEmails } from './auth/admin.ts';
 import { registerCollaboratorRoutes } from './routes/collaborators.ts';
 import { registerExternalShareAdminRoutes } from './routes/externalShareAdmin.ts';
@@ -41,8 +57,21 @@ import type { Notifier } from './notifications/notifier.ts';
 import type { OktaAdapter } from './auth/okta.ts';
 import type { ApiTokenScope } from '@polygonlabs/primer-api-types';
 
+/** Who is making a request. An agent acts via a person (`viaUserId`); see
+ *  lib/permissions.ts for how its role is derived. */
+export type AuthUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  kind: 'person' | 'agent';
+  viaUserId: string | null;
+  /** Set by the MCP tool layer on every caller, whoever the credential is:
+   *  what comes back goes into an agent's context. Fencing only, never authz. */
+  viaMcp?: true;
+};
+
 export type AppVariables = {
-  user: { id: string; email: string; displayName: string };
+  user: AuthUser;
   authMethod?: 'bearer' | 'cookie' | 'mock';
   /** Set only for scoped API tokens; absent = unrestricted. See auth/scopes.ts. */
   tokenScopes?: readonly ApiTokenScope[];
@@ -53,6 +82,7 @@ export interface AppDeps {
   notifier: Notifier;
   userResolver?: UserResolver;     // defaults to mockResolver (tests + dev)
   oktaAdapter?: OktaAdapter;            // NEW
+  proxyAuth?: boolean;                  // AUTH_MODE=proxy: no login flow, 401 page instead
   authCookieName?: string;              // NEW; defaults to 'primer_sid'
   authStateCookieName?: string;         // NEW; defaults to 'primer_auth_state'
   authBaseUrl?: string;                 // NEW; base URL used in device verification links
@@ -71,7 +101,13 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   ).replace(/\/$/, '');
 
   const resolver = deps.userResolver ?? mockResolver;
-  app.use('*', authMiddleware(resolver, issuer.length > 0 ? { issuer } : undefined));
+  app.use(
+    '*',
+    authMiddleware(resolver, {
+      ...(issuer.length > 0 ? { issuer } : {}),
+      ...(deps.proxyAuth ? { unauthenticatedPage: proxyUnauthorizedPage } : {}),
+    }),
+  );
   app.use('*', scopeMiddleware);
   app.use('*', csrfMiddleware);
 
@@ -93,28 +129,43 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   registerHealthRoutes(app, { checkDatabase: deps.checkDatabase });
   registerUploadRoute(app, deps);
+  registerConvertRoute(app);
   registerDocumentRoutes(app, deps);
   registerCollaboratorRoutes(app, deps);
   registerExternalShareAdminRoutes(app, deps);
   registerVersionContentRoute(app, deps);
+  registerPageRoutes(app, deps);
   registerExternalShareRoutes(app, deps);
   registerCompanionRoute(app);
   registerMermaidAssetRoute(app);
   registerThreadRoutes(app, deps);
+  registerLiveRoutes(app, deps);
+  registerRunRoutes(app);
+  registerSuggestionRoutes(app);
   registerCommentRoutes(app, deps);
-  registerEventRoutes(app);
+  registerEventRoutes(app, { resolver });
+  registerRecordRoutes(app);
+  registerChoiceRoutes(app);
+  registerEmbedRoutes(app);
+  registerTaskRoutes(app);
+  registerCatchUpRoutes(app, deps);
+  registerCitationRoutes(app);
+  registerPromoteRoutes(app, deps);
+  registerMentionNotifications(deps.notifier);
+  registerAutoCheckpoints(deps.storage);
   registerFolderRoutes(app);
   registerDocumentFolderRoutes(app);
   registerLibraryRoute(app);
   registerAdminRoute(app);
   registerVersionRoutes(app);
+  registerWidgetRoutes(app);
   registerAuthRoutes(app, deps);
   const adminEmails = deps.adminEmails ?? parseAdminEmails(process.env.ADMIN_EMAILS);
   registerMeRoute(app, { adminEmails });
   registerUserRoutes(app);
   registerDeviceRoutes(app, { baseUrl: deps.authBaseUrl ?? process.env.AUTH_BASE_URL ?? '' });
   registerTokenRoutes(app);
-  registerServiceTokenRoutes(app, { adminEmails });
+  registerAgentRoutes(app);
 
   if (issuer.length > 0) {
     registerOAuthRoutes(app, {

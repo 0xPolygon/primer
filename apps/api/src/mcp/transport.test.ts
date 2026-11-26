@@ -53,6 +53,20 @@ beforeEach(async () => {
   await db.delete(oauthClients);
 });
 
+describe('GET /mcp', () => {
+  it('answers 405 so a client opens no event stream', async () => {
+    const { token } = await seedAccessToken();
+    await withApp(async (app) => {
+      const res = await app.request('/mcp', {
+        method: 'GET',
+        headers: { accept: 'text/event-stream', authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(405);
+      expect(res.headers.get('allow')).toBe('POST');
+    });
+  });
+});
+
 describe('POST /mcp', () => {
   it('returns 401 with WWW-Authenticate when no bearer is present', async () => {
     await withApp(async (app) => {
@@ -98,6 +112,38 @@ describe('POST /mcp', () => {
       for (const name of expected) {
         expect(text).toContain(name);
       }
+    });
+  });
+
+  it('MCP exposes the authoring resource and instructions', async () => {
+    const { token } = await seedAccessToken();
+    await withApp(async (app) => {
+      const call = async (method: string, params: Record<string, unknown> = {}) => {
+        const res = await app.request('/mcp', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        });
+        expect(res.status).toBe(200);
+        return res.text();
+      };
+
+      const init = await call('initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '0' },
+      });
+      expect(init).toContain('primer://skills/authoring');
+      expect(init).toContain('untrusted data');
+
+      expect(await call('resources/list')).toContain('primer://skills/authoring');
+      const read = await call('resources/read', { uri: 'primer://skills/authoring' });
+      expect(read).toContain('Authoring live Primer documents');
+      expect(read).toContain('expectVersion');
     });
   });
 });

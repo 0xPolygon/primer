@@ -122,7 +122,12 @@ and removes the local entry. Idempotent.
 | `primer_get_document` | Fetch a document + its latest-version metadata. |
 | `primer_get_version_content` | Fetch the stored content (HTML) of a version, or the latest version of a document. Pass `toDisk: true` to save it to a fresh server-owned temp file (returned as `savedTo`) instead of returning it inline. |
 | `primer_list_versions` | List all versions of a document, newest first. |
-| `primer_get_comments` | Fetch comment threads on a version (or the latest version of a document) as a markdown summary. |
+| `primer_get_comments` | Fetch comment threads on a version (or the latest version of a document), including open threads carried from earlier versions. Returns a markdown summary and one record per comment with its `thread_id`, `comment_id`, `author_id`, `anchor_text`, `version_number` and `resolved`. |
+| `primer_reply_to_thread` | Reply in a comment thread (`{ thread_id, body }`). Returns `{ thread_id, comment_id }`. |
+| `primer_resolve_thread` | Resolve a comment thread (`{ thread_id }`); document owner or thread starter only. |
+| `primer_lookup_user` | Find a Primer user by email (`{ email }`). Returns `{ id }`. |
+| `primer_add_collaborator` | Share a document you own with a person (`{ documentId, email \| userId, role }`, role `commenter` \| `responder` \| `editor`). Add only; owner only. |
+| `primer_list_collaborators` | List who a document is shared with (`{ documentId }`); owner only. |
 
 Inline content (passed via `primer_create_document` / `primer_add_version`)
 is capped at **10 MB per upload**. Larger payloads will be rejected by

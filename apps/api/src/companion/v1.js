@@ -9,6 +9,10 @@
   /** @type {{ id: string, data: any }[]} */
   let knownAnchors = [];
 
+  /** Bridge features the host granted at init (see protocol.ts BridgeFeature).
+   *  null until init. @type {string[] | null} */
+  let features = null;
+
   /** @type {Set<string>} */
   const driftedIds = new Set();
 
@@ -417,6 +421,10 @@
       readyTimer = null;
     }
 
+    features = Array.isArray(incoming.features) ? incoming.features.filter((f) => typeof f === 'string') : [];
+    flushRecordCalls();
+    startPage();
+
     if (Array.isArray(incoming.anchors)) {
       knownAnchors = incoming.anchors;
       log.info('init received, anchors:', knownAnchors.length);
@@ -510,6 +518,30 @@
           }
         }
         break;
+      case 'records_result':
+        settleRecordCall(msg);
+        break;
+      case 'set_page_texts':
+        if (hasFeature('page-text') && msg.texts && typeof msg.texts === 'object') setPageTexts(msg.texts);
+        break;
+      case 'set_embeds':
+        if (hasFeature('embeds') && msg.embeds && typeof msg.embeds === 'object') setEmbeds(msg.embeds);
+        break;
+      case 'records_changed':
+        // Others changed shared records. Untrusted data like any record:
+        // the page re-reads what it shows (or catches up with changesSince).
+        if (Array.isArray(msg.collections) && typeof msg.toChangeId === 'number') {
+          try {
+            window.dispatchEvent(
+              new CustomEvent('primer:records-changed', {
+                detail: { collections: msg.collections, toChangeId: msg.toChangeId },
+              })
+            );
+          } catch (e) {
+            log.warn('primer:records-changed dispatch failed:', e && e.message ? e.message : e);
+          }
+        }
+        break;
       case 'submit_result':
         // Write acknowledgment for a prior `primer:submit-events` — `rows`
         // carries the created rows (with server-assigned ids and audiences)
@@ -537,12 +569,334 @@
   // We intercept the two common paths and forward to the parent for opening.
 
   function postOpenExternal(url) {
+    // Record-reading pages never reach outside Primer (the host drops these
+    // too; this only saves the round trip).
+    if (features && features.indexOf('records') !== -1) {
+      log.warn('open_external is off for pages that read records; dropping', url);
+      return;
+    }
     if (!port) {
       log.warn('open_external attempted before init; dropping', url);
       return;
     }
     port.postMessage({ type: 'open_external', url });
   }
+
+  // ── Page text and Primer blocks (features `page-text`, `embeds`) ───
+  // A live page's text lives in Primer's document, not in the page: people
+  // edit it in an editor Primer draws over the element, in its own window,
+  // so no keystroke reaches the page's scripts. The bridge only reports each
+  // stamped element (`data-pid`) with its DOM text and rect, reports clicks,
+  // and sets text the host sends, as text: `\n` becomes <br>, nothing else
+  // is ever parsed. `<primer-*>` blocks (`data-embed-id`) show the static HTML
+  // the host renders from the document's block state.
+  const EMBED_SELECTOR = 'primer-table,primer-code,primer-mermaid,primer-math';
+
+  function hasFeature(name) {
+    return features !== null && features.indexOf(name) !== -1;
+  }
+
+  /** The stamped elements, outside embeds. */
+  function pidElements() {
+    return Array.prototype.filter.call(document.querySelectorAll('[data-pid]'), (el) => !el.closest(EMBED_SELECTOR));
+  }
+
+  function embedElements() {
+    return Array.prototype.filter.call(document.querySelectorAll(EMBED_SELECTOR), (el) => el.hasAttribute('data-embed-id'));
+  }
+
+  /** An element's text by the server's rule (page/stamp.ts pageText): <br>
+   *  is a newline; outside <pre> every whitespace run (newlines in the source
+   *  too) collapses to one space and each line is trimmed. */
+  function pidText(el) {
+    const pre = !!el.closest('pre');
+    // Source whitespace (a hard-wrapped paragraph's newlines too) is a space
+    // outside <pre>; only <br> is a newline.
+    const flow = (text) => (pre ? text : text.replace(/[ \t\n\r\f]+/g, ' '));
+    let raw = '';
+    el.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) raw += flow(node.nodeValue);
+      else if (node.nodeName === 'BR') raw += '\n';
+      else if (node.nodeType === Node.ELEMENT_NODE) raw += flow(node.textContent || '');
+    });
+    if (pre) return raw;
+    return raw
+      .split('\n')
+      .map((line) => line.trim())
+      .join('\n');
+  }
+
+  function rectOf(el) {
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, width: r.width, height: r.height };
+  }
+
+  let pageStarted = false;
+  let rectsQueued = false;
+
+  function startPage() {
+    if (pageStarted || !(hasFeature('page-text') || hasFeature('embeds'))) return;
+    pageStarted = true;
+    // After the page's own load handlers ran, so text a script draws on load
+    // is reported as drawn.
+    const report = () =>
+      setTimeout(() => {
+        if (!port) return;
+        port.postMessage({
+          type: 'page_elements',
+          elements: hasFeature('page-text')
+            ? pidElements().map((el) => ({ pid: el.getAttribute('data-pid'), text: pidText(el), rect: rectOf(el) }))
+            : [],
+          embeds: hasFeature('embeds')
+            ? embedElements().map((el) => ({ embedId: el.getAttribute('data-embed-id'), rect: rectOf(el) }))
+            : [],
+        });
+        window.addEventListener('scroll', queuePageRects, true);
+        window.addEventListener('resize', queuePageRects);
+        document.addEventListener('click', onPageClick, true);
+      }, 0);
+    if (document.readyState === 'complete') report();
+    else window.addEventListener('load', report, { once: true });
+  }
+
+  function queuePageRects() {
+    if (rectsQueued) return;
+    rectsQueued = true;
+    requestAnimationFrame(() => {
+      rectsQueued = false;
+      if (!port) return;
+      const rects = {};
+      if (hasFeature('page-text')) pidElements().forEach((el) => { rects[el.getAttribute('data-pid')] = rectOf(el); });
+      const embedRects = {};
+      if (hasFeature('embeds')) embedElements().forEach((el) => { embedRects[el.getAttribute('data-embed-id')] = rectOf(el); });
+      port.postMessage({ type: 'page_rects', rects, embedRects });
+    });
+  }
+
+  function onPageClick(event) {
+    if (!port || !(event.target instanceof Element)) return;
+    const embed = hasFeature('embeds') ? event.target.closest(EMBED_SELECTOR) : null;
+    if (embed && embed.hasAttribute('data-embed-id')) {
+      port.postMessage({ type: 'embed_clicked', embedId: embed.getAttribute('data-embed-id') });
+      return;
+    }
+    const el = hasFeature('page-text') ? event.target.closest('[data-pid]') : null;
+    if (el) port.postMessage({ type: 'pid_clicked', pid: el.getAttribute('data-pid') });
+  }
+
+  function setPageTexts(texts) {
+    Object.keys(texts).forEach((pid) => {
+      const text = texts[pid];
+      if (typeof text !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(pid)) return;
+      document.querySelectorAll('[data-pid="' + pid + '"]').forEach((el) => {
+        if (el.closest(EMBED_SELECTOR) || pidText(el) === text) return;
+        el.textContent = '';
+        text.split('\n').forEach((line, i) => {
+          if (i > 0) el.appendChild(document.createElement('br'));
+          if (line) el.appendChild(document.createTextNode(line));
+        });
+      });
+    });
+    queuePageRects();
+  }
+
+  function setEmbeds(embeds) {
+    Object.keys(embeds).forEach((id) => {
+      const html = embeds[id];
+      if (typeof html !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(id)) return;
+      embedElements().forEach((el) => {
+        if (el.getAttribute('data-embed-id') === id) el.innerHTML = html;
+      });
+    });
+    renderAllMermaidBlocks().catch((e) => log.warn('mermaid embed render error:', e && e.message ? e.message : e));
+    queuePageRects();
+  }
+
+  // ── Shared records (feature `records`) ────────────────────────────
+  // A page that opts in with <meta name="primer-records" content="read">
+  // gets window.primer.records.<verb>(args, { signal }) → Promise, for verbs
+  // get, list, query, set, update, delete, batch, plus changesSince(changeId).
+  // The host does the work as the viewer, bound to this page's document, and
+  // enforces every limit (8 in flight, 5 s, 256 KB); `args` names only the
+  // collection, scope, record, data, filters and paging. Calls made before
+  // init wait for it. Results and records are untrusted data.
+
+  const RECORD_VERBS = ['get', 'list', 'query', 'set', 'update', 'delete', 'batch'];
+  /** @type {Map<string, { resolve: (v: any) => void, reject: (e: any) => void }>} */
+  const recordCalls = new Map();
+  /** @type {{ callId: string, verb: string, args: object }[]} */
+  const queuedRecordCalls = [];
+  let recordCallSeq = 0;
+
+  function recordsError(refusal) {
+    const r = refusal && typeof refusal === 'object' ? refusal : {};
+    const err = new Error(typeof r.message === 'string' ? r.message : 'record call refused');
+    err.name = 'PrimerRecordsError';
+    err.code = typeof r.code === 'string' ? r.code : 'records_unavailable';
+    err.fix = typeof r.fix === 'string' ? r.fix : undefined;
+    return err;
+  }
+
+  function sendRecordCall(call) {
+    if (features === null) {
+      queuedRecordCalls.push(call);
+      return;
+    }
+    if (features.indexOf('records') === -1 || !port) {
+      settleRecordCall({
+        callId: call.callId,
+        ok: false,
+        refusal: {
+          code: 'records_unavailable',
+          message: 'This page has no record access.',
+          fix: 'Add <meta name="primer-records" content="read"> to the page head.',
+        },
+      });
+      return;
+    }
+    port.postMessage({ type: 'records_call', callId: call.callId, verb: call.verb, args: call.args });
+  }
+
+  function flushRecordCalls() {
+    while (queuedRecordCalls.length > 0) sendRecordCall(queuedRecordCalls.shift());
+  }
+
+  function settleRecordCall(msg) {
+    const pending = recordCalls.get(msg.callId);
+    if (!pending) return;
+    recordCalls.delete(msg.callId);
+    if (msg.ok === true) pending.resolve(msg.value);
+    else pending.reject(recordsError(msg.refusal));
+  }
+
+  // A checkpoint (an external share, a checkpoint view) is served with the
+  // shared records frozen when it was published, in an inert JSON script
+  // (#primer-records-frozen, placed by the server). Reads are answered from
+  // it, here in the page, and writes are refused: the data is as published,
+  // never live. Personal records are never frozen.
+  let frozenRecords; // undefined until first read; null when there are none
+  function readFrozenRecords() {
+    if (frozenRecords !== undefined) return frozenRecords;
+    frozenRecords = null;
+    const el = document.getElementById('primer-records-frozen');
+    if (!el || el.getAttribute('type') !== 'application/json') return null;
+    try {
+      const snap = JSON.parse(el.textContent || '');
+      if (snap && typeof snap === 'object' && snap.collections && typeof snap.collections === 'object') frozenRecords = snap;
+    } catch (e) {
+      log.warn('frozen records unreadable:', e && e.message ? e.message : e);
+    }
+    return frozenRecords;
+  }
+
+  function frozenRefusal(code, message, fix) {
+    return { ok: false, refusal: { code, message, fix } };
+  }
+
+  /** One record call answered from the frozen snapshot. */
+  function frozenRecordCall(snap, verb, args) {
+    if (verb === 'changesSince') return { ok: true, value: { changes: [], toChangeId: snap.toChangeId || 0, hasMore: false } };
+    if (verb !== 'get' && verb !== 'list' && verb !== 'query') {
+      return frozenRefusal('forbidden', 'This is a published checkpoint: its records are frozen.', 'Open the live document to change records.');
+    }
+    const collection = typeof args.collection === 'string' ? args.collection : '';
+    const scope = args.scope;
+    if (scope !== 'shared' && scope !== 'personal') return frozenRefusal('bad_request', 'scope must be "shared" or "personal"', 'Call again with valid arguments.');
+    const list = scope === 'shared' && Object.prototype.hasOwnProperty.call(snap.collections, collection) && Array.isArray(snap.collections[collection])
+      ? snap.collections[collection]
+      : [];
+    const dto = (r) => ({
+      collection,
+      recordId: r.recordId,
+      scope: 'shared',
+      data: JSON.parse(JSON.stringify(r.data)),
+      version: r.version,
+      updatedAt: r.updatedAt,
+      updatedBy: '',
+      writtenBy: r.writtenBy,
+    });
+    if (verb === 'get') {
+      const found = list.find((r) => r.recordId === args.recordId);
+      return { ok: true, value: { record: found ? dto(found) : null } };
+    }
+    const limit = args.limit === undefined ? 50 : args.limit;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) return frozenRefusal('bad_request', 'limit must be an integer from 1 to 200', 'Call again with valid arguments.');
+    const offset = args.cursor === undefined ? 0 : /^f:\d{1,6}$/.test(String(args.cursor)) ? Number(String(args.cursor).slice(2)) : -1;
+    if (offset < 0) return frozenRefusal('bad_request', 'cursor is not a cursor from a previous page', 'Call again with valid arguments.');
+    let rows = list.slice();
+    if (verb === 'query') {
+      const where = args.where && typeof args.where === 'object' ? args.where : {};
+      rows = rows.filter((r) => Object.keys(where).every((k) => r.data && r.data[k] === where[k]));
+      const o = args.orderBy;
+      if (o && typeof o.key === 'string' && (o.dir === 'asc' || o.dir === 'desc')) {
+        const sign = o.dir === 'asc' ? 1 : -1;
+        rows.sort((a, b) => {
+          const x = a.data ? a.data[o.key] : undefined;
+          const y = b.data ? b.data[o.key] : undefined;
+          // As the live query orders: a missing key last, then by JSON type
+          // (null < string < number < boolean < array < object), JSON null a value.
+          if (x === undefined && y === undefined) return a.recordId < b.recordId ? -1 : 1;
+          if (x === undefined) return 1;
+          if (y === undefined) return -1;
+          const rx = jsonRank(x);
+          const ry = jsonRank(y);
+          if (rx !== ry) return (rx < ry ? -1 : 1) * sign;
+          const kx = rx >= 4 ? JSON.stringify(x) : x;
+          const ky = rx >= 4 ? JSON.stringify(y) : y;
+          if (kx === ky) return a.recordId < b.recordId ? -1 : 1;
+          return (kx < ky ? -1 : 1) * sign;
+        });
+      }
+    }
+    const page = rows.slice(offset, offset + limit).map(dto);
+    return { ok: true, value: { records: page, nextCursor: rows.length > offset + limit ? 'f:' + (offset + limit) : null } };
+  }
+
+  function jsonRank(v) {
+    return v === null ? 0 : typeof v === 'string' ? 1 : typeof v === 'number' ? 2 : typeof v === 'boolean' ? 3 : Array.isArray(v) ? 4 : 5;
+  }
+
+  function callRecords(verb, args, opts) {
+    const snap = readFrozenRecords();
+    if (snap) {
+      const out = frozenRecordCall(snap, verb, args && typeof args === 'object' ? args : {});
+      return out.ok ? Promise.resolve(out.value) : Promise.reject(recordsError(out.refusal));
+    }
+    return new Promise((resolve, reject) => {
+      const signal = opts && opts.signal;
+      if (signal && signal.aborted) {
+        reject(new DOMException('aborted', 'AbortError'));
+        return;
+      }
+      recordCallSeq += 1;
+      const callId = 'r' + recordCallSeq;
+      recordCalls.set(callId, { resolve, reject });
+      if (signal) {
+        signal.addEventListener(
+          'abort',
+          () => {
+            if (!recordCalls.has(callId)) return;
+            recordCalls.delete(callId);
+            const queued = queuedRecordCalls.findIndex((c) => c.callId === callId);
+            if (queued !== -1) queuedRecordCalls.splice(queued, 1);
+            else if (port) port.postMessage({ type: 'records_cancel', callId });
+            reject(new DOMException('aborted', 'AbortError'));
+          },
+          { once: true }
+        );
+      }
+      sendRecordCall({ callId, verb, args: args && typeof args === 'object' ? args : {} });
+    });
+  }
+
+  const recordsApi = {};
+  for (const verb of RECORD_VERBS) {
+    recordsApi[verb] = (args, opts) => callRecords(verb, args, opts);
+  }
+  recordsApi.changesSince = (changeId, opts) =>
+    callRecords('changesSince', { changeId, limit: opts && opts.limit }, opts);
+  window.primer = window.primer || {};
+  window.primer.records = Object.freeze(recordsApi);
 
   // ── Document events: consent-gated submit relay (issue #78) ──────
   // Artifact JS hands structured event batches to the parent by dispatching

@@ -13,6 +13,8 @@ export const MOCK_USER: ResolvedUser = {
   id: 'mock-user-1',
   email: 'mock@polygon.technology',
   displayName: 'Mock User',
+  kind: 'person',
+  viaUserId: null,
 };
 
 /** The dev personas available under AUTH_MODE=mock. Each must have a seeded
@@ -26,6 +28,8 @@ export const MOCK_USERS: ResolvedUser[] = [
     id: 'mock-user-2',
     email: 'mock-reviewer@polygon.technology',
     displayName: 'Mock Reviewer',
+    kind: 'person',
+    viaUserId: null,
   },
 ];
 
@@ -58,7 +62,7 @@ export const mockMultiResolver: UserResolver = async (c) => {
   // The middleware needs the FULL user (email + displayName). For tests we
   // don't read these from the DB — they're synthesized from the id.
   if (id === MOCK_USER.id) return MOCK_USER;
-  return { id, email: `${id}@polygon.technology`, displayName: id };
+  return { id, email: `${id}@polygon.technology`, displayName: id, kind: 'person', viaUserId: null };
 };
 
 export interface OktaResolverOptions {
@@ -72,7 +76,8 @@ export function makeOktaResolver(opts: OktaResolverOptions): UserResolver {
     const found = await lookupSession(sid);
     if (!found) return null;
     // Sliding refresh — fire and forget; refresh failures don't break the request.
-    void refreshSessionIfStale(sid).catch(() => undefined);
+    // Not for a recheck of an open connection (auth/revocation.ts): that only validates.
+    if (!(c.get as (key: string) => unknown)('validateOnly')) void refreshSessionIfStale(sid).catch(() => undefined);
     c.set('authMethod', 'cookie');
     return found.user;
   };
